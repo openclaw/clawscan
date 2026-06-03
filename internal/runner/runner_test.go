@@ -185,6 +185,73 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	}
 }
 
+func TestRenderJudgePromptInterpolatesScannerJSON(t *testing.T) {
+	artifact := Artifact{
+		Scanners: map[string]ScannerResult{
+			"skillspector": {Raw: json.RawMessage(`{"status":"clean","findings":[]}`)},
+		},
+	}
+	prompt, err := RenderJudgePrompt("Evidence:\n{{ scanners.skillspector }}", artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, `"status": "clean"`) {
+		t.Fatalf("prompt = %s", prompt)
+	}
+}
+
+func TestRenderJudgePromptErrorsForUnrequestedScanner(t *testing.T) {
+	_, err := RenderJudgePrompt("{{ scanners.virustotal }}", Artifact{Scanners: map[string]ScannerResult{
+		"skillspector": {},
+	}})
+	if err == nil || err.Error() != "judge prompt references scanner virustotal, but it was not requested" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunExecutesJudgeAfterScanners(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	promptPath := filepath.Join(dir, "prompt.md")
+	schemaPath := filepath.Join(dir, "schema.json")
+	if err := os.WriteFile(promptPath, []byte("Evidence:\n{{ scanners.skillspector }}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge-prompt", promptPath,
+		"--judge-schema", schemaPath,
+		"--judge-model", "openai/gpt-5.5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	judge := &recordingJudgeRunner{result: map[string]any{"verdict": "benign"}}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		JudgeRunner: judge,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	if !strings.Contains(judge.prompt, `"status": "clean"`) {
+		t.Fatalf("prompt = %s", judge.prompt)
+	}
+}
+
 type skippedScannerRunner struct{}
 
 func (skippedScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
@@ -193,6 +260,33 @@ func (skippedScannerRunner) RunScanner(name string, target string, startedAt str
 		StartedAt:   startedAt,
 		CompletedAt: startedAt,
 		Error:       "Scanner adapter not implemented in foundation slice.",
+	}, nil
+}
+
+type staticScannerRunner struct {
+	results map[string]ScannerResult
+}
+
+func (runner staticScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
+	result := runner.results[name]
+	result.StartedAt = startedAt
+	result.CompletedAt = startedAt
+	return result, nil
+}
+
+type recordingJudgeRunner struct {
+	prompt string
+	result any
+}
+
+func (runner *recordingJudgeRunner) RunJudge(opts JudgeOptions, artifact Artifact, prompt string, schema json.RawMessage) (*JudgeResult, error) {
+	runner.prompt = prompt
+	return &JudgeResult{
+		Status:     "completed",
+		Model:      opts.Model,
+		PromptPath: opts.PromptPath,
+		SchemaPath: opts.SchemaPath,
+		Result:     runner.result,
 	}, nil
 }
 

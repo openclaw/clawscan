@@ -3,13 +3,17 @@ package runner
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -34,6 +38,7 @@ type RunContext struct {
 	Now                 func() time.Time
 	CommandRunner       CommandRunner
 	ScannerRunner       ScannerRunner
+	JudgeRunner         JudgeRunner
 	SkillSpectorCommand []string
 }
 
@@ -48,6 +53,10 @@ type CommandRunner interface {
 type CommandOutput struct {
 	Stdout string
 	Stderr string
+}
+
+type JudgeRunner interface {
+	RunJudge(opts JudgeOptions, artifact Artifact, prompt string, schema json.RawMessage) (*JudgeResult, error)
 }
 
 type Artifact struct {
@@ -81,6 +90,7 @@ type JudgeResult struct {
 	Reasoning  string      `json:"reasoning"`
 	PromptPath string      `json:"promptPath"`
 	SchemaPath string      `json:"schemaPath"`
+	PromptSHA  string      `json:"promptSha256,omitempty"`
 	Error      string      `json:"error"`
 	Result     interface{} `json:"result"`
 }
@@ -235,6 +245,32 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 		artifact.Scanners[scanner] = result
 	}
+	if opts.Judge != nil {
+		promptTemplate, err := os.ReadFile(opts.Judge.PromptPath)
+		if err != nil {
+			return Artifact{}, err
+		}
+		prompt, err := RenderJudgePrompt(string(promptTemplate), artifact)
+		if err != nil {
+			return Artifact{}, err
+		}
+		schema, err := os.ReadFile(opts.Judge.SchemaPath)
+		if err != nil {
+			return Artifact{}, err
+		}
+		judgeRunner := ctx.JudgeRunner
+		if judgeRunner == nil {
+			judgeRunner = OpenAIJudgeRunner{Env: env, HTTPClient: http.DefaultClient}
+		}
+		judge, err := judgeRunner.RunJudge(*opts.Judge, artifact, prompt, json.RawMessage(schema))
+		if err != nil {
+			return Artifact{}, err
+		}
+		if judge != nil {
+			judge.PromptSHA = sha256Hex(prompt)
+		}
+		artifact.Judge = judge
+	}
 	artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
 		if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
@@ -252,10 +288,174 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	return artifact, nil
 }
 
+var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9_-]+)\s*\}\}`)
+
+func RenderJudgePrompt(template string, artifact Artifact) (string, error) {
+	var renderErr error
+	rendered := scannerPlaceholderPattern.ReplaceAllStringFunc(template, func(match string) string {
+		if renderErr != nil {
+			return match
+		}
+		parts := scannerPlaceholderPattern.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		scanner := parts[1]
+		result, ok := artifact.Scanners[scanner]
+		if !ok {
+			renderErr = fmt.Errorf("judge prompt references scanner %s, but it was not requested", scanner)
+			return match
+		}
+		if len(result.Raw) == 0 {
+			return "null"
+		}
+		var buffer bytes.Buffer
+		if err := json.Indent(&buffer, result.Raw, "", "  "); err != nil {
+			renderErr = fmt.Errorf("format scanner %s JSON: %w", scanner, err)
+			return match
+		}
+		return buffer.String()
+	})
+	if renderErr != nil {
+		return "", renderErr
+	}
+	return rendered, nil
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
 type ExternalScannerRunner struct {
 	CommandRunner       CommandRunner
 	SkillSpectorCommand []string
 	Timeout             time.Duration
+}
+
+type OpenAIJudgeRunner struct {
+	Env        map[string]string
+	HTTPClient *http.Client
+	BaseURL    string
+}
+
+func (runner OpenAIJudgeRunner) RunJudge(opts JudgeOptions, artifact Artifact, prompt string, schema json.RawMessage) (*JudgeResult, error) {
+	if !strings.HasPrefix(opts.Model, "openai/") {
+		return &JudgeResult{
+			Status:     "skipped",
+			Model:      opts.Model,
+			Reasoning:  opts.Reasoning,
+			PromptPath: opts.PromptPath,
+			SchemaPath: opts.SchemaPath,
+			Error:      "Judge provider not implemented.",
+			Result:     nil,
+		}, nil
+	}
+	apiKey := strings.TrimSpace(runner.Env["OPENAI_API_KEY"])
+	if apiKey == "" {
+		return nil, errors.New("OPENAI_API_KEY is required by judge model " + opts.Model)
+	}
+	var schemaValue any
+	if err := json.Unmarshal(schema, &schemaValue); err != nil {
+		return nil, fmt.Errorf("parse judge schema: %w", err)
+	}
+	model := strings.TrimPrefix(opts.Model, "openai/")
+	requestBody := map[string]any{
+		"model": model,
+		"input": prompt,
+		"text": map[string]any{
+			"format": map[string]any{
+				"type":   "json_schema",
+				"name":   "clawscan_judge",
+				"schema": schemaValue,
+				"strict": true,
+			},
+		},
+	}
+	if opts.Reasoning != "" {
+		requestBody["reasoning"] = map[string]any{"effort": opts.Reasoning}
+	}
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, err
+	}
+	baseURL := runner.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	client := runner.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/responses", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &JudgeResult{
+			Status:     "failed",
+			Model:      opts.Model,
+			Reasoning:  opts.Reasoning,
+			PromptPath: opts.PromptPath,
+			SchemaPath: opts.SchemaPath,
+			Error:      fmt.Sprintf("OpenAI Responses API returned %s: %s", resp.Status, strings.TrimSpace(string(respBody))),
+			Result:     nil,
+		}, nil
+	}
+	outputText, err := responseOutputText(respBody)
+	if err != nil {
+		return nil, err
+	}
+	var result any
+	if err := json.Unmarshal([]byte(outputText), &result); err != nil {
+		return nil, fmt.Errorf("parse judge JSON output: %w", err)
+	}
+	return &JudgeResult{
+		Status:     "completed",
+		Model:      opts.Model,
+		Reasoning:  opts.Reasoning,
+		PromptPath: opts.PromptPath,
+		SchemaPath: opts.SchemaPath,
+		Error:      "",
+		Result:     result,
+	}, nil
+}
+
+func responseOutputText(body []byte) (string, error) {
+	var payload struct {
+		OutputText string `json:"output_text"`
+		Output     []struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", err
+	}
+	if payload.OutputText != "" {
+		return payload.OutputText, nil
+	}
+	for _, item := range payload.Output {
+		for _, content := range item.Content {
+			if content.Type == "output_text" && content.Text != "" {
+				return content.Text, nil
+			}
+		}
+	}
+	return "", errors.New("OpenAI response did not include output text")
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
