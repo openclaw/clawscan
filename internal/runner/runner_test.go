@@ -227,6 +227,20 @@ func TestSkillSpectorRequiresOpenAIKeyWhenLLMOptedIn(t *testing.T) {
 	}
 }
 
+func TestSkillSpectorLLMUsesAnthropicProviderRequirement(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ValidateRequirements(opts, map[string]string{
+		"CLAWSCAN_SKILLSPECTOR_LLM": "1",
+		"SKILLSPECTOR_PROVIDER":     "anthropic",
+	})
+	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY required by scanner skillspector llm") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestSkillSpectorReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -318,6 +332,27 @@ func TestRenderJudgePromptUsesFenceLongerThanTargetContent(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "````markdown") {
 		t.Fatalf("prompt did not use longer fence: %s", prompt)
+	}
+}
+
+func TestRenderJudgePromptMarksOmittedTargetFiles(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(filepath.Join(target, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "node_modules", "pkg", "payload.js"), []byte("danger()"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := RenderJudgePrompt("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "payload.js\n[omitted: skipped path]") {
+		t.Fatalf("prompt did not mark omitted file: %s", prompt)
 	}
 }
 

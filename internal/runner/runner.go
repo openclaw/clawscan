@@ -375,13 +375,19 @@ func renderTargetFiles(target string) (string, error) {
 	totalBytes := 0
 	for _, path := range paths {
 		if shouldSkipTargetPath(target, path) {
+			blocks = append(blocks, omittedTargetFileBlock(target, path, "skipped path"))
 			continue
 		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return "", err
 		}
-		if info.Size() > maxTargetFileBytes || totalBytes+int(info.Size()) > maxTargetFilesBytes {
+		if info.Size() > maxTargetFileBytes {
+			blocks = append(blocks, omittedTargetFileBlock(target, path, "file exceeds size limit"))
+			continue
+		}
+		if totalBytes+int(info.Size()) > maxTargetFilesBytes {
+			blocks = append(blocks, omittedTargetFileBlock(target, path, "total file budget exceeded"))
 			continue
 		}
 		content, err := os.ReadFile(path)
@@ -389,6 +395,7 @@ func renderTargetFiles(target string) (string, error) {
 			return "", err
 		}
 		if bytes.IndexByte(content, 0) >= 0 {
+			blocks = append(blocks, omittedTargetFileBlock(target, path, "binary file"))
 			continue
 		}
 		totalBytes += len(content)
@@ -405,6 +412,14 @@ func renderTargetFiles(target string) (string, error) {
 		blocks = append(blocks, fmt.Sprintf("### %s\n%s%s\n%s\n%s", filepath.ToSlash(label), fence, languageForPath(path), text, fence))
 	}
 	return strings.Join(blocks, "\n\n"), nil
+}
+
+func omittedTargetFileBlock(root string, path string, reason string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		rel = path
+	}
+	return fmt.Sprintf("### %s\n[omitted: %s]", filepath.ToSlash(rel), reason)
 }
 
 func shouldSkipTargetPath(root string, path string) bool {
@@ -749,7 +764,9 @@ func requirements(opts Options, env map[string]string) []requirement {
 		case "skillspector":
 			if skillSpectorLLMEnabled(env) {
 				reqs = append(reqs, requirement{"CLAWSCAN_SKILLSPECTOR_LLM", "scanner skillspector llm opt-in"})
-				reqs = append(reqs, requirement{"OPENAI_API_KEY", "scanner skillspector llm"})
+				if envVar := skillSpectorProviderKeyEnv(env); envVar != "" {
+					reqs = append(reqs, requirement{envVar, "scanner skillspector llm"})
+				}
 			}
 		case "virustotal":
 			reqs = append(reqs, requirement{"VIRUSTOTAL_API_KEY", "scanner virustotal"})
@@ -783,6 +800,19 @@ func envPresence(opts Options, env map[string]string) map[string]string {
 func skillSpectorLLMEnabled(env map[string]string) bool {
 	value := strings.TrimSpace(strings.ToLower(env["CLAWSCAN_SKILLSPECTOR_LLM"]))
 	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
+func skillSpectorProviderKeyEnv(env map[string]string) string {
+	switch strings.TrimSpace(strings.ToLower(env["SKILLSPECTOR_PROVIDER"])) {
+	case "", "openai":
+		return "OPENAI_API_KEY"
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "nvidia":
+		return "NVIDIA_API_KEY"
+	default:
+		return ""
+	}
 }
 
 func dedupe(reqs []requirement) []requirement {
