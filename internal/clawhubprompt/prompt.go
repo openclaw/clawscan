@@ -121,9 +121,15 @@ func prettyJSON(value any) (string, error) {
 		return "null", nil
 	}
 	if raw, ok := value.(RawJSON); ok {
+		if len(raw) == 0 {
+			return "null", nil
+		}
 		return prettyRawJSON([]byte(raw))
 	}
 	if raw, ok := value.(json.RawMessage); ok {
+		if len(raw) == 0 {
+			return "null", nil
+		}
 		return prettyRawJSON([]byte(raw))
 	}
 	var buffer bytes.Buffer

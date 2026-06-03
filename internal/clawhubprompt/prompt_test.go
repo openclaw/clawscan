@@ -76,6 +76,18 @@ func TestBuildPreservesRawJSONEvidenceOrder(t *testing.T) {
 	}
 }
 
+func TestBuildFormatsEmptyRawJSONAsNull(t *testing.T) {
+	job := fixtureJob()
+	job.Target.Version.VTAnalysis = RawJSON(nil)
+	prompt, err := Build("SYSTEM", job, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "VirusTotal telemetry supplied to Codex:\n```json\nnull\n```") {
+		t.Fatalf("prompt did not render empty raw JSON as null:\n%s", prompt)
+	}
+}
+
 func fixtureJob() Job {
 	return Job{
 		Job: JobMetadata{
