@@ -29,6 +29,8 @@ type Version struct {
 	SkillSpectorAnalysis any `json:"skillSpectorAnalysis,omitempty"`
 }
 
+type RawJSON []byte
+
 func Build(systemPrompt string, job Job, injectionSignals []string, skillSpectorAnalysis any) (string, error) {
 	vt, err := prettyJSON(firstNonNil(versionValue(job.Target.Version, "vt"), versionValue(job.Target.Release, "vt")))
 	if err != nil {
@@ -118,6 +120,12 @@ func prettyJSON(value any) (string, error) {
 	if value == nil {
 		return "null", nil
 	}
+	if raw, ok := value.(RawJSON); ok {
+		return prettyRawJSON([]byte(raw))
+	}
+	if raw, ok := value.(json.RawMessage); ok {
+		return prettyRawJSON([]byte(raw))
+	}
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
 	encoder.SetIndent("", "  ")
@@ -126,4 +134,12 @@ func prettyJSON(value any) (string, error) {
 		return "", err
 	}
 	return strings.TrimSuffix(buffer.String(), "\n"), nil
+}
+
+func prettyRawJSON(raw []byte) (string, error) {
+	var buffer bytes.Buffer
+	if err := json.Indent(&buffer, raw, "", "  "); err != nil {
+		return "", err
+	}
+	return buffer.String(), nil
 }

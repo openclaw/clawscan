@@ -27,6 +27,55 @@ func TestBuildPlacesScannerEvidenceInClawHubSlots(t *testing.T) {
 	}
 }
 
+func TestBuildUsesExplicitSkillSpectorAnalysis(t *testing.T) {
+	job := fixtureJob()
+	job.Target.Version.SkillSpectorAnalysis = skillSpectorAnalysis{
+		Status:         "stale-target-analysis",
+		Score:          1,
+		Recommendation: "INSTALL",
+		IssueCount:     0,
+		CheckedAt:      1,
+	}
+	prompt, err := Build("SYSTEM", job, nil, skillSpectorAnalysis{
+		Status:         "fresh-runtime-analysis",
+		Score:          88,
+		Recommendation: "DO_NOT_INSTALL",
+		IssueCount:     1,
+		CheckedAt:      456,
+		Issues: []skillSpectorIssue{{
+			IssueID:     "RUNTIME-SDI",
+			Severity:    "CRITICAL",
+			Explanation: "Fresh analyzer result",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "fresh-runtime-analysis") || !strings.Contains(prompt, "RUNTIME-SDI") {
+		t.Fatalf("prompt did not include explicit SkillSpector analysis:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "stale-target-analysis") {
+		t.Fatalf("prompt used target SkillSpector analysis instead of explicit runtime analysis:\n%s", prompt)
+	}
+}
+
+func TestBuildPreservesRawJSONEvidenceOrder(t *testing.T) {
+	job := fixtureJob()
+	job.Target.Version.VTAnalysis = RawJSON(`{"z":1,"a":2}`)
+	prompt, err := Build("SYSTEM", job, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zIndex := strings.Index(prompt, `"z": 1`)
+	aIndex := strings.Index(prompt, `"a": 2`)
+	if zIndex < 0 || aIndex < 0 {
+		t.Fatalf("prompt missing raw JSON fields:\n%s", prompt)
+	}
+	if zIndex > aIndex {
+		t.Fatalf("raw JSON key order was not preserved:\n%s", prompt)
+	}
+}
+
 func fixtureJob() Job {
 	return Job{
 		Job: JobMetadata{

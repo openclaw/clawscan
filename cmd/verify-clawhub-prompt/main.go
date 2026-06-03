@@ -32,7 +32,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	actual, err := clawhubprompt.Build(systemPrompt, proofJob(), []string{"html-comment-injection"}, nil)
+	actual, err := clawhubprompt.Build(systemPrompt, proofJob(), []string{"html-comment-injection"}, proofSkillSpectorAnalysis())
 	if err != nil {
 		return err
 	}
@@ -44,6 +44,7 @@ func run() error {
 		"clawhubDir":                filepath.Clean(*clawhubDir),
 		"promptSha256":              sha(actual),
 		"promptLength":              len(actual),
+		"explicitSkillSpectorInput": true,
 		"skillSpectorMarkerPresent": bytes.Contains([]byte(actual), []byte("SkillSpector findings supplied to Codex")),
 		"skillSpectorIssuePresent":  bytes.Contains([]byte(actual), []byte("SDI-1")),
 	}
@@ -68,6 +69,14 @@ func renderClawHubPrompt(clawhubDir string) (string, string, error) {
 const clawhubDir = process.argv[1];
 const worker = await import(clawhubDir + "/scripts/security/run-codex-scan-worker.ts");
 const securityPrompt = await import(clawhubDir + "/convex/lib/securityPrompt.ts");
+const skillSpectorAnalysis = {
+  status: "suspicious",
+  score: 55,
+  recommendation: "DO_NOT_INSTALL",
+  issueCount: 1,
+  checkedAt: 123,
+  issues: [{ issueId: "SDI-1", severity: "HIGH", explanation: "Mismatch" }],
+};
 const job = {
   job: {
     _id: "job123",
@@ -85,20 +94,12 @@ const job = {
         source: "engines",
         metadata: { stats: { malicious: 1, suspicious: 0, harmless: 12 } },
       },
-      skillSpectorAnalysis: {
-        status: "suspicious",
-        score: 55,
-        recommendation: "DO_NOT_INSTALL",
-        issueCount: 1,
-        checkedAt: 123,
-        issues: [{ issueId: "SDI-1", severity: "HIGH", explanation: "Mismatch" }],
-      },
     },
   },
 };
 console.log(JSON.stringify({
   systemPrompt: securityPrompt.SKILL_SECURITY_EVALUATOR_SYSTEM_PROMPT,
-  prompt: worker.buildPrompt(job, ["html-comment-injection"]),
+  prompt: worker.buildPrompt(job, ["html-comment-injection"], skillSpectorAnalysis),
 }));
 `
 	cmd := exec.Command("bun", "-e", script, "--", clawhubDir)
@@ -135,20 +136,23 @@ func proofJob() clawhubprompt.Job {
 						Stats: vtStats{Malicious: 1, Suspicious: 0, Harmless: 12},
 					},
 				},
-				SkillSpectorAnalysis: skillSpectorAnalysis{
-					Status:         "suspicious",
-					Score:          55,
-					Recommendation: "DO_NOT_INSTALL",
-					IssueCount:     1,
-					CheckedAt:      123,
-					Issues: []skillSpectorIssue{{
-						IssueID:     "SDI-1",
-						Severity:    "HIGH",
-						Explanation: "Mismatch",
-					}},
-				},
 			},
 		},
+	}
+}
+
+func proofSkillSpectorAnalysis() skillSpectorAnalysis {
+	return skillSpectorAnalysis{
+		Status:         "suspicious",
+		Score:          55,
+		Recommendation: "DO_NOT_INSTALL",
+		IssueCount:     1,
+		CheckedAt:      123,
+		Issues: []skillSpectorIssue{{
+			IssueID:     "SDI-1",
+			Severity:    "HIGH",
+			Explanation: "Mismatch",
+		}},
 	}
 }
 
