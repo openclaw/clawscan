@@ -17,14 +17,17 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/openclaw/clawscan/internal/clawhubprompt"
 )
 
 type Options struct {
-	Target     string
-	Scanners   []string
-	OutputPath string
-	JSON       bool
-	Judge      *JudgeOptions
+	Target             string
+	Scanners           []string
+	ScannerResultPaths map[string]string
+	OutputPath         string
+	JSON               bool
+	Judge              *JudgeOptions
 }
 
 type JudgeOptions struct {
@@ -32,6 +35,14 @@ type JudgeOptions struct {
 	SchemaPath string
 	Model      string
 	Reasoning  string
+	DryRun     bool
+	ClawHub    *ClawHubPromptOptions
+}
+
+type ClawHubPromptOptions struct {
+	SystemPromptPath string
+	JobPath          string
+	InjectionSignals []string
 }
 
 type RunContext struct {
@@ -114,8 +125,11 @@ func ParseArgs(args []string) (Options, error) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "--") {
 		return Options{}, errors.New("Missing scan target")
 	}
-	opts := Options{Target: args[0]}
+	opts := Options{Target: args[0], ScannerResultPaths: map[string]string{}}
 	var judgePrompt, judgeSchema, judgeModel, judgeReasoning string
+	var judgeDryRun bool
+	var clawHubSystemPrompt, clawHubJob string
+	var clawHubInjectionSignals []string
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
@@ -128,6 +142,20 @@ func ParseArgs(args []string) (Options, error) {
 				return Options{}, fmt.Errorf("Unknown scanner: %s", value)
 			}
 			opts.Scanners = append(opts.Scanners, value)
+			i = next
+		case "--scanner-result":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			scanner, path, ok := strings.Cut(value, "=")
+			if !ok || scanner == "" || path == "" {
+				return Options{}, errors.New("Expected --scanner-result value as scanner=path")
+			}
+			if !scannerSet[scanner] {
+				return Options{}, fmt.Errorf("Unknown scanner: %s", scanner)
+			}
+			opts.ScannerResultPaths[scanner] = path
 			i = next
 		case "--output":
 			value, next, err := readValue(args, i, arg)
@@ -166,6 +194,29 @@ func ParseArgs(args []string) (Options, error) {
 			}
 			judgeReasoning = value
 			i = next
+		case "--judge-dry-run":
+			judgeDryRun = true
+		case "--clawhub-system-prompt":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			clawHubSystemPrompt = value
+			i = next
+		case "--clawhub-job":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			clawHubJob = value
+			i = next
+		case "--clawhub-injection-signal":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			clawHubInjectionSignals = append(clawHubInjectionSignals, value)
+			i = next
 		default:
 			return Options{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
@@ -173,11 +224,32 @@ func ParseArgs(args []string) (Options, error) {
 	if len(opts.Scanners) == 0 {
 		return Options{}, errors.New("At least one --scanner is required")
 	}
-	if judgePrompt != "" || judgeSchema != "" || judgeModel != "" || judgeReasoning != "" {
-		if judgePrompt == "" {
-			return Options{}, errors.New("Missing required --judge-prompt")
+	requestedScanners := map[string]bool{}
+	for _, scanner := range opts.Scanners {
+		requestedScanners[scanner] = true
+	}
+	for scanner := range opts.ScannerResultPaths {
+		if !requestedScanners[scanner] {
+			return Options{}, fmt.Errorf("Scanner result provided for unrequested scanner: %s", scanner)
 		}
-		if judgeSchema == "" {
+	}
+	clawHubConfigured := clawHubSystemPrompt != "" || clawHubJob != "" || len(clawHubInjectionSignals) > 0
+	if judgePrompt != "" || judgeSchema != "" || judgeModel != "" || judgeReasoning != "" || judgeDryRun || clawHubConfigured {
+		if judgePrompt != "" && clawHubConfigured {
+			return Options{}, errors.New("Use either --judge-prompt or --clawhub-system-prompt/--clawhub-job, not both")
+		}
+		if clawHubConfigured && !judgeDryRun {
+			return Options{}, errors.New("ClawHub compatibility mode currently requires --judge-dry-run")
+		}
+		if judgePrompt == "" {
+			if clawHubSystemPrompt == "" {
+				return Options{}, errors.New("Missing required --clawhub-system-prompt")
+			}
+			if clawHubJob == "" {
+				return Options{}, errors.New("Missing required --clawhub-job")
+			}
+		}
+		if judgeSchema == "" && !judgeDryRun {
 			return Options{}, errors.New("Missing required --judge-schema")
 		}
 		if judgeModel == "" {
@@ -186,7 +258,14 @@ func ParseArgs(args []string) (Options, error) {
 		if !supportedJudgeModel(judgeModel) {
 			return Options{}, fmt.Errorf("Unsupported judge model provider: %s", judgeModel)
 		}
-		opts.Judge = &JudgeOptions{PromptPath: judgePrompt, SchemaPath: judgeSchema, Model: judgeModel, Reasoning: judgeReasoning}
+		opts.Judge = &JudgeOptions{PromptPath: judgePrompt, SchemaPath: judgeSchema, Model: judgeModel, Reasoning: judgeReasoning, DryRun: judgeDryRun}
+		if clawHubConfigured {
+			opts.Judge.ClawHub = &ClawHubPromptOptions{
+				SystemPromptPath: clawHubSystemPrompt,
+				JobPath:          clawHubJob,
+				InjectionSignals: clawHubInjectionSignals,
+			}
+		}
 	}
 	return opts, nil
 }
@@ -241,32 +320,41 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	artifact := NewArtifact(opts, resolved, startedAt, startedAt, env)
 	for _, scanner := range opts.Scanners {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
-		result, err := scannerRunner.RunScanner(scanner, resolved, scannerStartedAt)
+		result, err := scannerResult(opts, scanner, resolved, scannerStartedAt, scannerRunner)
 		if err != nil {
 			return Artifact{}, err
 		}
 		artifact.Scanners[scanner] = result
 	}
 	if opts.Judge != nil {
-		promptTemplate, err := os.ReadFile(opts.Judge.PromptPath)
+		prompt, err := RenderPrompt(*opts.Judge, artifact)
 		if err != nil {
 			return Artifact{}, err
 		}
-		prompt, err := RenderJudgePrompt(string(promptTemplate), artifact)
-		if err != nil {
-			return Artifact{}, err
-		}
-		schema, err := os.ReadFile(opts.Judge.SchemaPath)
-		if err != nil {
-			return Artifact{}, err
-		}
-		judgeRunner := ctx.JudgeRunner
-		if judgeRunner == nil {
-			judgeRunner = OpenAIJudgeRunner{Env: env}
-		}
-		judge, err := judgeRunner.RunJudge(*opts.Judge, artifact, prompt, json.RawMessage(schema))
-		if err != nil {
-			return Artifact{}, err
+		var judge *JudgeResult
+		if opts.Judge.DryRun {
+			judge = &JudgeResult{
+				Status:     "dry_run",
+				Model:      opts.Judge.Model,
+				Reasoning:  opts.Judge.Reasoning,
+				PromptPath: opts.Judge.PromptPath,
+				SchemaPath: opts.Judge.SchemaPath,
+				Error:      "",
+				Result:     nil,
+			}
+		} else {
+			schema, err := os.ReadFile(opts.Judge.SchemaPath)
+			if err != nil {
+				return Artifact{}, err
+			}
+			judgeRunner := ctx.JudgeRunner
+			if judgeRunner == nil {
+				judgeRunner = OpenAIJudgeRunner{Env: env}
+			}
+			judge, err = judgeRunner.RunJudge(*opts.Judge, artifact, prompt, json.RawMessage(schema))
+			if err != nil {
+				return Artifact{}, err
+			}
 		}
 		if judge != nil {
 			judge.PromptSHA = sha256Hex(prompt)
@@ -288,6 +376,123 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 	}
 	return artifact, nil
+}
+
+func scannerResult(opts Options, scanner string, target string, startedAt string, scannerRunner ScannerRunner) (ScannerResult, error) {
+	if path := opts.ScannerResultPaths[scanner]; path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return ScannerResult{}, err
+		}
+		if !json.Valid(raw) {
+			return ScannerResult{}, fmt.Errorf("scanner result %s is not valid JSON: %s", scanner, path)
+		}
+		return ScannerResult{
+			Status:      "completed",
+			StartedAt:   startedAt,
+			CompletedAt: startedAt,
+			Command:     []string{"scanner-result", scanner + "=" + path},
+			Error:       "",
+			Raw:         json.RawMessage(raw),
+		}, nil
+	}
+	return scannerRunner.RunScanner(scanner, target, startedAt)
+}
+
+func RenderPrompt(opts JudgeOptions, artifact Artifact) (string, error) {
+	if opts.ClawHub != nil {
+		return RenderClawHubPrompt(*opts.ClawHub, artifact)
+	}
+	promptTemplate, err := os.ReadFile(opts.PromptPath)
+	if err != nil {
+		return "", err
+	}
+	return RenderJudgePrompt(string(promptTemplate), artifact)
+}
+
+func RenderClawHubPrompt(opts ClawHubPromptOptions, artifact Artifact) (string, error) {
+	systemPrompt, err := os.ReadFile(opts.SystemPromptPath)
+	if err != nil {
+		return "", err
+	}
+	job, err := loadClawHubJob(opts.JobPath)
+	if err != nil {
+		return "", err
+	}
+	applyScannerEvidenceToClawHubJob(&job, artifact)
+	var skillSpector any
+	if result, ok := artifact.Scanners["skillspector"]; ok && len(result.Raw) > 0 {
+		skillSpector = clawhubprompt.RawJSON(result.Raw)
+	}
+	return clawhubprompt.Build(string(systemPrompt), job, opts.InjectionSignals, skillSpector)
+}
+
+type rawClawHubJob struct {
+	Job    clawhubprompt.JobMetadata `json:"job"`
+	Target rawClawHubTarget          `json:"target"`
+}
+
+type rawClawHubTarget struct {
+	TrustedOpenClawPlugin bool               `json:"trustedOpenClawPlugin"`
+	Version               *rawClawHubVersion `json:"version"`
+	Release               *rawClawHubVersion `json:"release"`
+}
+
+type rawClawHubVersion struct {
+	VTAnalysis           json.RawMessage `json:"vtAnalysis"`
+	SkillSpectorAnalysis json.RawMessage `json:"skillSpectorAnalysis"`
+}
+
+func loadClawHubJob(path string) (clawhubprompt.Job, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return clawhubprompt.Job{}, err
+	}
+	var parsed rawClawHubJob
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return clawhubprompt.Job{}, err
+	}
+	return clawhubprompt.Job{
+		Job: parsed.Job,
+		Target: clawhubprompt.Target{
+			TrustedOpenClawPlugin: parsed.Target.TrustedOpenClawPlugin,
+			Version:               convertClawHubVersion(parsed.Target.Version),
+			Release:               convertClawHubVersion(parsed.Target.Release),
+		},
+	}, nil
+}
+
+func convertClawHubVersion(version *rawClawHubVersion) *clawhubprompt.Version {
+	if version == nil {
+		return nil
+	}
+	return &clawhubprompt.Version{
+		VTAnalysis:           rawJSONValue(version.VTAnalysis),
+		SkillSpectorAnalysis: rawJSONValue(version.SkillSpectorAnalysis),
+	}
+}
+
+func rawJSONValue(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	copied := append([]byte(nil), raw...)
+	return clawhubprompt.RawJSON(copied)
+}
+
+func applyScannerEvidenceToClawHubJob(job *clawhubprompt.Job, artifact Artifact) {
+	result, ok := artifact.Scanners["virustotal"]
+	if !ok || len(result.Raw) == 0 {
+		return
+	}
+	if job.Target.Version == nil && job.Target.Release == nil {
+		job.Target.Version = &clawhubprompt.Version{}
+	}
+	if job.Target.Version != nil {
+		job.Target.Version.VTAnalysis = clawhubprompt.RawJSON(result.Raw)
+		return
+	}
+	job.Target.Release.VTAnalysis = clawhubprompt.RawJSON(result.Raw)
 }
 
 var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9_-]+)\s*\}\}`)
@@ -774,6 +979,9 @@ func EnvMap(environ []string) map[string]string {
 func requirements(opts Options, env map[string]string) []requirement {
 	var reqs []requirement
 	for _, scanner := range opts.Scanners {
+		if opts.ScannerResultPaths[scanner] != "" {
+			continue
+		}
 		switch scanner {
 		case "skillspector":
 			if skillSpectorLLMEnabled(env) {
@@ -788,7 +996,7 @@ func requirements(opts Options, env map[string]string) []requirement {
 			reqs = append(reqs, requirement{"SNYK_TOKEN", "scanner snyk"})
 		}
 	}
-	if opts.Judge != nil {
+	if opts.Judge != nil && !opts.Judge.DryRun {
 		switch {
 		case strings.HasPrefix(opts.Judge.Model, "openai/"):
 			reqs = append(reqs, requirement{"OPENAI_API_KEY", "judge model " + opts.Judge.Model})

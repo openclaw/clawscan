@@ -38,6 +38,8 @@ This repository currently contains the Go CLI foundation:
 - real SkillSpector execution
 - OpenAI judge execution with structured JSON output
 - prompt interpolation for scanner JSON and target files
+- deterministic scanner-result fixtures for reproducible prompt checks
+- ClawHub-compatible prompt rendering through the main `clawscan` CLI
 - ClawHub prompt parity proof tooling
 
 Scanner adapters are being filled in incrementally. SkillSpector executes today.
@@ -124,15 +126,27 @@ clawscan <target> --scanner <scanner-id> [flags]
 | Flag | Required | Repeatable | Description |
 | --- | --- | --- | --- |
 | `--scanner <id>` | Yes | Yes | Scanner to run. Accepted IDs are listed above. |
+| `--scanner-result <id=path>` | No | Yes | Use a JSON fixture as the scanner result instead of running that scanner. The scanner must also be listed with `--scanner`. |
 | `--output <path>` | No | No | Write the run artifact JSON to a file. |
 | `--json` | No | No | Print the run artifact JSON to stdout. |
 | `--judge-prompt <path>` | With judge | No | Markdown prompt file for the judge model. |
-| `--judge-schema <path>` | With judge | No | JSON Schema file the judge output must satisfy. |
+| `--judge-schema <path>` | With judge call | No | JSON Schema file the judge output must satisfy. Required unless `--judge-dry-run` is used. |
 | `--judge-model <provider/model>` | With judge | No | Judge model, using `openai/...` or `anthropic/...`. |
 | `--judge-reasoning <level>` | No | No | Reasoning effort hint for providers that support it. |
+| `--judge-dry-run` | No | No | Render the judge prompt and record its SHA-256 without calling a model. |
+| `--clawhub-system-prompt <path>` | ClawHub mode | No | ClawHub system prompt text used to render the ClawHub-compatible prompt. |
+| `--clawhub-job <path>` | ClawHub mode | No | JSON object with the ClawHub job/target context used by the ClawHub worker prompt. |
+| `--clawhub-injection-signal <signal>` | No | Yes | Pre-scan prompt-injection signal to include in the ClawHub-compatible worker context. |
 
-Judge flags are all-or-nothing: if any judge flag is present, `--judge-prompt`,
-`--judge-schema`, and `--judge-model` are required.
+Generic judge prompts use `--judge-prompt`. ClawHub compatibility mode uses
+`--clawhub-system-prompt` and `--clawhub-job` instead. Use one prompt mode per
+run. A real judge call requires `--judge-schema`; `--judge-dry-run` only renders
+and hashes the prompt.
+
+ClawHub compatibility mode is currently proof-only and requires
+`--judge-dry-run`. The ClawHub worker prompt assumes a workspace-capable Codex
+runner that can inspect extracted artifact files; the current model judge path
+only sends a prompt string to the provider API.
 
 Current model providers:
 
@@ -196,6 +210,27 @@ go run ./cmd/verify-clawhub-prompt \
 The parity proof compares the Go-rendered prompt against the current ClawHub
 TypeScript worker output char-for-char and records the prompt length, SHA-256,
 and whether SkillSpector evidence was supplied through the runtime input path.
+
+Run the same ClawHub-compatible prompt path through the main CLI without calling
+a judge model:
+
+```bash
+clawscan ./my-skill \
+  --scanner skillspector \
+  --scanner-result skillspector=/tmp/skillspector.json \
+  --judge-model openai/gpt-5.5 \
+  --judge-dry-run \
+  --clawhub-system-prompt /tmp/clawhub-system-prompt.txt \
+  --clawhub-job /tmp/clawhub-job.json \
+  --clawhub-injection-signal html-comment-injection \
+  --output /tmp/clawscan-clawhub-prompt-proof.json
+```
+
+This records `judge.status: "dry_run"` and `judge.promptSha256` in the artifact.
+Use it when comparing the standalone CLI against ClawHub's exact prompt without
+spending a model call. `--scanner-result` is intentionally explicit so parity
+checks can use stable scanner evidence instead of live scanner output that may
+change over time.
 
 ## Artifact Shape
 

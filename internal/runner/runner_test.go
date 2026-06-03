@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openclaw/clawscan/internal/clawhubprompt"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -40,6 +42,64 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
+func TestParseArgsSupportsClawHubPromptMode(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"./my-skill",
+		"--scanner", "skillspector",
+		"--scanner-result", "skillspector=./skillspector.json",
+		"--judge-model", "openai/gpt-5.5",
+		"--judge-reasoning", "high",
+		"--judge-dry-run",
+		"--clawhub-system-prompt", "./system.md",
+		"--clawhub-job", "./job.json",
+		"--clawhub-injection-signal", "html-comment-injection",
+		"--output", "./run.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.ScannerResultPaths["skillspector"] != "./skillspector.json" {
+		t.Fatalf("scanner result paths = %#v", opts.ScannerResultPaths)
+	}
+	if opts.Judge == nil || !opts.Judge.DryRun {
+		t.Fatalf("judge = %#v", opts.Judge)
+	}
+	if opts.Judge.ClawHub == nil {
+		t.Fatalf("missing clawhub prompt opts: %#v", opts.Judge)
+	}
+	if opts.Judge.ClawHub.SystemPromptPath != "./system.md" || opts.Judge.ClawHub.JobPath != "./job.json" {
+		t.Fatalf("clawhub = %#v", opts.Judge.ClawHub)
+	}
+	if got := strings.Join(opts.Judge.ClawHub.InjectionSignals, ","); got != "html-comment-injection" {
+		t.Fatalf("injection signals = %q", got)
+	}
+}
+
+func TestParseArgsRejectsScannerResultForUnrequestedScanner(t *testing.T) {
+	_, err := ParseArgs([]string{
+		"./my-skill",
+		"--scanner", "skillspector",
+		"--scanner-result", "virustotal=./vt.json",
+	})
+	if err == nil || err.Error() != "Scanner result provided for unrequested scanner: virustotal" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseArgsRequiresDryRunForClawHubPromptMode(t *testing.T) {
+	_, err := ParseArgs([]string{
+		"./my-skill",
+		"--scanner", "skillspector",
+		"--judge-model", "openai/gpt-5.5",
+		"--judge-schema", "./schema.json",
+		"--clawhub-system-prompt", "./system.md",
+		"--clawhub-job", "./job.json",
+	})
+	if err == nil || err.Error() != "ClawHub compatibility mode currently requires --judge-dry-run" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestValidateRequirements(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
@@ -64,6 +124,20 @@ func TestValidateRequirements(t *testing.T) {
 	}, "\n")
 	if err.Error() != want {
 		t.Fatalf("error:\n%s", err)
+	}
+}
+
+func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"./my-skill",
+		"--scanner", "virustotal",
+		"--scanner-result", "virustotal=./vt.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRequirements(opts, map[string]string{}); err != nil {
+		t.Fatalf("expected fixture-backed scanner to avoid live credentials, got %v", err)
 	}
 }
 
@@ -423,6 +497,86 @@ func TestRunExecutesJudgeAfterScanners(t *testing.T) {
 	}
 }
 
+func TestRunDryRunsClawHubPromptWithScannerResultFixture(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	systemPromptPath := filepath.Join(dir, "system.md")
+	jobPath := filepath.Join(dir, "job.json")
+	skillSpectorPath := filepath.Join(dir, "skillspector.json")
+	if err := os.WriteFile(systemPromptPath, []byte("SYSTEM"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jobJSON := `{"job":{"targetKind":"skillVersion","source":"publish","hasMaliciousSignal":true},"target":{"trustedOpenClawPlugin":true,"version":{"vtAnalysis":{"status":"suspicious","source":"engines","metadata":{"stats":{"malicious":1,"suspicious":0,"harmless":12}}}}}}`
+	if err := os.WriteFile(jobPath, []byte(jobJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skillSpectorJSON := `{"status":"suspicious","score":55,"recommendation":"DO_NOT_INSTALL","issueCount":1,"checkedAt":123,"issues":[{"issueId":"SDI-1","severity":"HIGH","explanation":"Mismatch"}]}`
+	if err := os.WriteFile(skillSpectorPath, []byte(skillSpectorJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--scanner-result", "skillspector=" + skillSpectorPath,
+		"--judge-model", "openai/gpt-5.5",
+		"--judge-dry-run",
+		"--clawhub-system-prompt", systemPromptPath,
+		"--clawhub-job", jobPath,
+		"--clawhub-injection-signal", "html-comment-injection",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedPrompt, err := clawhubprompt.Build(
+		"SYSTEM",
+		clawhubprompt.Job{
+			Job: clawhubprompt.JobMetadata{
+				TargetKind:         "skillVersion",
+				Source:             "publish",
+				HasMaliciousSignal: true,
+			},
+			Target: clawhubprompt.Target{
+				TrustedOpenClawPlugin: true,
+				Version: &clawhubprompt.Version{
+					VTAnalysis: clawhubprompt.RawJSON(`{"status":"suspicious","source":"engines","metadata":{"stats":{"malicious":1,"suspicious":0,"harmless":12}}}`),
+				},
+			},
+		},
+		[]string{"html-comment-injection"},
+		clawhubprompt.RawJSON(skillSpectorJSON),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	judge := &recordingJudgeRunner{result: map[string]any{"verdict": "benign"}}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{},
+		ScannerRunner: errorScannerRunner{},
+		JudgeRunner:   judge,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Scanners["skillspector"].Status != "completed" {
+		t.Fatalf("scanner = %#v", artifact.Scanners["skillspector"])
+	}
+	if !bytes.Equal(artifact.Scanners["skillspector"].Raw, []byte(skillSpectorJSON)) {
+		t.Fatalf("raw = %s", artifact.Scanners["skillspector"].Raw)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "dry_run" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	if artifact.Judge.PromptSHA != sha256Hex(expectedPrompt) {
+		t.Fatalf("prompt sha = %q, want %q", artifact.Judge.PromptSHA, sha256Hex(expectedPrompt))
+	}
+	if judge.prompt != "" {
+		t.Fatalf("dry run called judge with prompt: %s", judge.prompt)
+	}
+}
+
 type skippedScannerRunner struct{}
 
 func (skippedScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
@@ -443,6 +597,12 @@ func (runner staticScannerRunner) RunScanner(name string, target string, started
 	result.StartedAt = startedAt
 	result.CompletedAt = startedAt
 	return result, nil
+}
+
+type errorScannerRunner struct{}
+
+func (errorScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
+	return ScannerResult{}, fmt.Errorf("unexpected live scanner call for %s", name)
 }
 
 type recordingJudgeRunner struct {
