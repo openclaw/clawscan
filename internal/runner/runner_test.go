@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -109,7 +110,7 @@ func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := Run(opts, RunContext{Env: map[string]string{}})
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}, ScannerRunner: skippedScannerRunner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,4 +137,96 @@ func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 	if written.SchemaVersion != artifact.SchemaVersion {
 		t.Fatalf("written schema = %q", written.SchemaVersion)
 	}
+}
+
+func TestRunExecutesSkillSpectorScanner(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{
+		writeOutput: `{"status":"clean","findings":[]}`,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                 map[string]string{},
+		CommandRunner:       runner,
+		SkillSpectorCommand: []string{"skillspector"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["skillspector"]
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if !bytes.Equal(result.Raw, []byte(`{"status":"clean","findings":[]}`)) {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls = %#v", runner.calls)
+	}
+	call := runner.calls[0]
+	if call.command != "skillspector" {
+		t.Fatalf("command = %q", call.command)
+	}
+	if got := strings.Join(call.args[:3], " "); got != "scan "+target+" --format" {
+		t.Fatalf("args = %#v", call.args)
+	}
+	if call.args[3] != "json" {
+		t.Fatalf("args = %#v", call.args)
+	}
+	if !containsArg(call.args, "--output") {
+		t.Fatalf("missing output arg: %#v", call.args)
+	}
+}
+
+type skippedScannerRunner struct{}
+
+func (skippedScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
+	return ScannerResult{
+		Status:      "skipped",
+		StartedAt:   startedAt,
+		CompletedAt: startedAt,
+		Error:       "Scanner adapter not implemented in foundation slice.",
+	}, nil
+}
+
+type recordingCommandRunner struct {
+	calls       []commandCall
+	writeOutput string
+}
+
+type commandCall struct {
+	command string
+	args    []string
+	cwd     string
+}
+
+func (r *recordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	r.calls = append(r.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
+	outputIndex := indexOfArg(args, "--output")
+	if outputIndex >= 0 && outputIndex+1 < len(args) {
+		if err := os.WriteFile(args[outputIndex+1], []byte(r.writeOutput), 0o644); err != nil {
+			return CommandOutput{}, err
+		}
+	}
+	return CommandOutput{Stdout: "ok"}, nil
+}
+
+func containsArg(args []string, value string) bool {
+	return indexOfArg(args, value) >= 0
+}
+
+func indexOfArg(args []string, value string) int {
+	for index, arg := range args {
+		if arg == value {
+			return index
+		}
+	}
+	return -1
 }

@@ -1,11 +1,14 @@
 package runner
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,8 +30,24 @@ type JudgeOptions struct {
 }
 
 type RunContext struct {
-	Env map[string]string
-	Now func() time.Time
+	Env                 map[string]string
+	Now                 func() time.Time
+	CommandRunner       CommandRunner
+	ScannerRunner       ScannerRunner
+	SkillSpectorCommand []string
+}
+
+type ScannerRunner interface {
+	RunScanner(name string, target string, startedAt string) (ScannerResult, error)
+}
+
+type CommandRunner interface {
+	Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error)
+}
+
+type CommandOutput struct {
+	Stdout string
+	Stderr string
 }
 
 type Artifact struct {
@@ -195,8 +214,28 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	completedAt := now().UTC().Format(time.RFC3339Nano)
-	artifact := NewArtifact(opts, resolved, startedAt, completedAt, env)
+	scannerRunner := ctx.ScannerRunner
+	if scannerRunner == nil {
+		commandRunner := ctx.CommandRunner
+		if commandRunner == nil {
+			commandRunner = defaultCommandRunner{}
+		}
+		scannerRunner = ExternalScannerRunner{
+			CommandRunner:       commandRunner,
+			SkillSpectorCommand: ctx.SkillSpectorCommand,
+			Timeout:             20 * time.Minute,
+		}
+	}
+	artifact := NewArtifact(opts, resolved, startedAt, startedAt, env)
+	for _, scanner := range opts.Scanners {
+		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
+		result, err := scannerRunner.RunScanner(scanner, resolved, scannerStartedAt)
+		if err != nil {
+			return Artifact{}, err
+		}
+		artifact.Scanners[scanner] = result
+	}
+	artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
 		if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
 			return Artifact{}, err
@@ -211,6 +250,112 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 	}
 	return artifact, nil
+}
+
+type ExternalScannerRunner struct {
+	CommandRunner       CommandRunner
+	SkillSpectorCommand []string
+	Timeout             time.Duration
+}
+
+func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
+	switch name {
+	case "skillspector":
+		return runner.runSkillSpector(target, startedAt)
+	default:
+		return ScannerResult{
+			Status:      "skipped",
+			StartedAt:   startedAt,
+			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Command:     nil,
+			Error:       "Scanner adapter not implemented in foundation slice.",
+			Raw:         nil,
+		}, nil
+	}
+}
+
+func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt string) (ScannerResult, error) {
+	commandParts := runner.SkillSpectorCommand
+	if len(commandParts) == 0 {
+		commandParts = discoverSkillSpectorCommand()
+	}
+	command := commandParts[0]
+	args := append([]string{}, commandParts[1:]...)
+	resultDir, err := os.MkdirTemp("", "clawscan-skillspector-*")
+	if err != nil {
+		return ScannerResult{}, err
+	}
+	defer os.RemoveAll(resultDir)
+	resultPath := filepath.Join(resultDir, "skillspector-report.json")
+	args = append(args, "scan", target, "--format", "json", "--output", resultPath)
+	fullCommand := append([]string{command}, args...)
+	timeout := runner.Timeout
+	if timeout == 0 {
+		timeout = 20 * time.Minute
+	}
+	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	raw, readErr := os.ReadFile(resultPath)
+	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if runErr != nil {
+		message := runErr.Error()
+		if strings.TrimSpace(output.Stderr) != "" {
+			message += ": " + strings.TrimSpace(output.Stderr)
+		}
+		if readErr == nil {
+			return ScannerResult{
+				Status:      "failed",
+				StartedAt:   startedAt,
+				CompletedAt: completedAt,
+				Command:     fullCommand,
+				Error:       message,
+				Raw:         json.RawMessage(raw),
+			}, nil
+		}
+		return ScannerResult{
+			Status:      "failed",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			Command:     fullCommand,
+			Error:       message,
+			Raw:         nil,
+		}, nil
+	}
+	if readErr != nil {
+		return ScannerResult{}, readErr
+	}
+	return ScannerResult{
+		Status:      "completed",
+		StartedAt:   startedAt,
+		CompletedAt: completedAt,
+		Command:     fullCommand,
+		Error:       "",
+		Raw:         json.RawMessage(raw),
+	}, nil
+}
+
+func discoverSkillSpectorCommand() []string {
+	if _, err := exec.LookPath("skillspector"); err == nil {
+		return []string{"skillspector"}
+	}
+	return []string{"uvx", "--from", "git+https://github.com/NVIDIA/skillspector", "skillspector"}
+}
+
+type defaultCommandRunner struct{}
+
+func (defaultCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir = cwd
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		err = fmt.Errorf("command timed out after %s", timeout)
+	}
+	return CommandOutput{Stdout: stdout.String(), Stderr: stderr.String()}, err
 }
 
 func NewArtifact(opts Options, resolvedPath string, startedAt string, completedAt string, env map[string]string) Artifact {
