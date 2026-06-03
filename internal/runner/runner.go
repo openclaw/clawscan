@@ -193,7 +193,7 @@ func ParseArgs(args []string) (Options, error) {
 
 func ValidateRequirements(opts Options, env map[string]string) error {
 	var missing []requirement
-	for _, req := range requirements(opts) {
+	for _, req := range requirements(opts, env) {
 		if strings.TrimSpace(env[req.envVar]) == "" {
 			missing = append(missing, req)
 		}
@@ -233,6 +233,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 		scannerRunner = ExternalScannerRunner{
 			CommandRunner:       commandRunner,
+			Env:                 env,
 			SkillSpectorCommand: ctx.SkillSpectorCommand,
 			Timeout:             20 * time.Minute,
 		}
@@ -261,7 +262,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 		judgeRunner := ctx.JudgeRunner
 		if judgeRunner == nil {
-			judgeRunner = OpenAIJudgeRunner{Env: env, HTTPClient: http.DefaultClient}
+			judgeRunner = OpenAIJudgeRunner{Env: env}
 		}
 		judge, err := judgeRunner.RunJudge(*opts.Judge, artifact, prompt, json.RawMessage(schema))
 		if err != nil {
@@ -290,6 +291,9 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 }
 
 var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9_-]+)\s*\}\}`)
+
+const maxTargetFileBytes = 64 * 1024
+const maxTargetFilesBytes = 256 * 1024
 
 func RenderJudgePrompt(template string, artifact Artifact) (string, error) {
 	rendered, err := renderTargetFilesPlaceholder(template, artifact)
@@ -340,11 +344,11 @@ func renderTargetFilesPlaceholder(template string, artifact Artifact) (string, e
 
 func renderTargetFiles(target string) (string, error) {
 	var paths []string
-	info, err := os.Stat(target)
+	targetInfo, err := os.Stat(target)
 	if err != nil {
 		return "", err
 	}
-	if !info.IsDir() {
+	if !targetInfo.IsDir() {
 		paths = append(paths, target)
 	} else {
 		if err := filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
@@ -368,22 +372,61 @@ func renderTargetFiles(target string) (string, error) {
 	}
 	sort.Strings(paths)
 	var blocks []string
+	totalBytes := 0
 	for _, path := range paths {
+		if shouldSkipTargetPath(target, path) {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", err
+		}
+		if info.Size() > maxTargetFileBytes || totalBytes+int(info.Size()) > maxTargetFilesBytes {
+			continue
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return "", err
 		}
+		if bytes.IndexByte(content, 0) >= 0 {
+			continue
+		}
+		totalBytes += len(content)
 		label := path
-		if info.IsDir() {
+		if targetInfo.IsDir() {
 			rel, err := filepath.Rel(target, path)
 			if err != nil {
 				return "", err
 			}
 			label = rel
 		}
-		blocks = append(blocks, fmt.Sprintf("### %s\n```%s\n%s\n```", filepath.ToSlash(label), languageForPath(path), strings.TrimRight(string(content), "\n")))
+		text := strings.TrimRight(string(content), "\n")
+		fence := fenceForContent(text)
+		blocks = append(blocks, fmt.Sprintf("### %s\n%s%s\n%s\n%s", filepath.ToSlash(label), fence, languageForPath(path), text, fence))
 	}
 	return strings.Join(blocks, "\n\n"), nil
+}
+
+func shouldSkipTargetPath(root string, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return true
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		switch part {
+		case ".git", "node_modules", "vendor", ".venv", "__pycache__":
+			return true
+		}
+	}
+	return false
+}
+
+func fenceForContent(content string) string {
+	fence := "```"
+	for strings.Contains(content, fence) {
+		fence += "`"
+	}
+	return fence
 }
 
 func languageForPath(path string) string {
@@ -410,6 +453,7 @@ func sha256Hex(value string) string {
 
 type ExternalScannerRunner struct {
 	CommandRunner       CommandRunner
+	Env                 map[string]string
 	SkillSpectorCommand []string
 	Timeout             time.Duration
 }
@@ -466,7 +510,7 @@ func (runner OpenAIJudgeRunner) RunJudge(opts JudgeOptions, artifact Artifact, p
 	}
 	client := runner.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 5 * time.Minute}
 	}
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/responses", bytes.NewReader(body))
 	if err != nil {
@@ -569,6 +613,9 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	defer os.RemoveAll(resultDir)
 	resultPath := filepath.Join(resultDir, "skillspector-report.json")
 	args = append(args, "scan", target, "--format", "json", "--output", resultPath)
+	if !skillSpectorLLMEnabled(runner.Env) {
+		args = append(args, "--no-llm")
+	}
 	fullCommand := append([]string{command}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
@@ -584,7 +631,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		}
 		if readErr == nil {
 			return ScannerResult{
-				Status:      "failed",
+				Status:      "completed",
 				StartedAt:   startedAt,
 				CompletedAt: completedAt,
 				Command:     fullCommand,
@@ -695,10 +742,15 @@ func EnvMap(environ []string) map[string]string {
 	return env
 }
 
-func requirements(opts Options) []requirement {
+func requirements(opts Options, env map[string]string) []requirement {
 	var reqs []requirement
 	for _, scanner := range opts.Scanners {
 		switch scanner {
+		case "skillspector":
+			if skillSpectorLLMEnabled(env) {
+				reqs = append(reqs, requirement{"CLAWSCAN_SKILLSPECTOR_LLM", "scanner skillspector llm opt-in"})
+				reqs = append(reqs, requirement{"OPENAI_API_KEY", "scanner skillspector llm"})
+			}
 		case "virustotal":
 			reqs = append(reqs, requirement{"VIRUSTOTAL_API_KEY", "scanner virustotal"})
 		case "snyk":
@@ -718,7 +770,7 @@ func requirements(opts Options) []requirement {
 
 func envPresence(opts Options, env map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, req := range requirements(opts) {
+	for _, req := range requirements(opts, env) {
 		if strings.TrimSpace(env[req.envVar]) == "" {
 			out[req.envVar] = "missing"
 		} else {
@@ -726,6 +778,11 @@ func envPresence(opts Options, env map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+func skillSpectorLLMEnabled(env map[string]string) bool {
+	value := strings.TrimSpace(strings.ToLower(env["CLAWSCAN_SKILLSPECTOR_LLM"]))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func dedupe(reqs []requirement) []requirement {
