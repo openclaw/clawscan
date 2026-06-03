@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -291,8 +292,12 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9_-]+)\s*\}\}`)
 
 func RenderJudgePrompt(template string, artifact Artifact) (string, error) {
+	rendered, err := renderTargetFilesPlaceholder(template, artifact)
+	if err != nil {
+		return "", err
+	}
 	var renderErr error
-	rendered := scannerPlaceholderPattern.ReplaceAllStringFunc(template, func(match string) string {
+	rendered = scannerPlaceholderPattern.ReplaceAllStringFunc(rendered, func(match string) string {
 		if renderErr != nil {
 			return match
 		}
@@ -320,6 +325,82 @@ func RenderJudgePrompt(template string, artifact Artifact) (string, error) {
 		return "", renderErr
 	}
 	return rendered, nil
+}
+
+func renderTargetFilesPlaceholder(template string, artifact Artifact) (string, error) {
+	if !strings.Contains(template, "{{ target.files }}") {
+		return template, nil
+	}
+	files, err := renderTargetFiles(artifact.Target.ResolvedPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(template, "{{ target.files }}", files), nil
+}
+
+func renderTargetFiles(target string) (string, error) {
+	var paths []string
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		paths = append(paths, target)
+	} else {
+		if err := filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if info.Mode().IsRegular() {
+				paths = append(paths, path)
+			}
+			return nil
+		}); err != nil {
+			return "", err
+		}
+	}
+	sort.Strings(paths)
+	var blocks []string
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		label := path
+		if info.IsDir() {
+			rel, err := filepath.Rel(target, path)
+			if err != nil {
+				return "", err
+			}
+			label = rel
+		}
+		blocks = append(blocks, fmt.Sprintf("### %s\n```%s\n%s\n```", filepath.ToSlash(label), languageForPath(path), strings.TrimRight(string(content), "\n")))
+	}
+	return strings.Join(blocks, "\n\n"), nil
+}
+
+func languageForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".markdown":
+		return "markdown"
+	case ".json":
+		return "json"
+	case ".js", ".mjs", ".cjs":
+		return "javascript"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".sh", ".bash", ".zsh":
+		return "bash"
+	default:
+		return "text"
+	}
 }
 
 func sha256Hex(value string) string {

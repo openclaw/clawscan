@@ -209,6 +209,27 @@ func TestRenderJudgePromptErrorsForUnrequestedScanner(t *testing.T) {
 	}
 }
 
+func TestRenderJudgePromptInterpolatesTargetFiles(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo\nUse safely."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := RenderJudgePrompt("Files:\n{{ target.files }}", Artifact{
+		Target:   Target{ResolvedPath: target},
+		Scanners: map[string]ScannerResult{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "### SKILL.md\n```markdown\n# Demo\nUse safely.\n```") {
+		t.Fatalf("prompt = %s", prompt)
+	}
+}
+
 func TestRunExecutesJudgeAfterScanners(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
