@@ -294,6 +294,7 @@ var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9
 
 const maxTargetFileBytes = 64 * 1024
 const maxTargetFilesBytes = 256 * 1024
+const maxOmittedTargetFileMarkers = 25
 
 func RenderJudgePrompt(template string, artifact Artifact) (string, error) {
 	rendered, err := renderTargetFilesPlaceholder(template, artifact)
@@ -373,9 +374,19 @@ func renderTargetFiles(target string) (string, error) {
 	sort.Strings(paths)
 	var blocks []string
 	totalBytes := 0
+	omittedMarkers := 0
+	suppressedOmissions := 0
+	addOmission := func(path string, reason string) {
+		if omittedMarkers < maxOmittedTargetFileMarkers {
+			blocks = append(blocks, omittedTargetFileBlock(target, path, reason))
+			omittedMarkers++
+			return
+		}
+		suppressedOmissions++
+	}
 	for _, path := range paths {
 		if shouldSkipTargetPath(target, path) {
-			blocks = append(blocks, omittedTargetFileBlock(target, path, "skipped path"))
+			addOmission(path, "skipped path")
 			continue
 		}
 		info, err := os.Stat(path)
@@ -383,11 +394,11 @@ func renderTargetFiles(target string) (string, error) {
 			return "", err
 		}
 		if info.Size() > maxTargetFileBytes {
-			blocks = append(blocks, omittedTargetFileBlock(target, path, "file exceeds size limit"))
+			addOmission(path, "file exceeds size limit")
 			continue
 		}
 		if totalBytes+int(info.Size()) > maxTargetFilesBytes {
-			blocks = append(blocks, omittedTargetFileBlock(target, path, "total file budget exceeded"))
+			addOmission(path, "total file budget exceeded")
 			continue
 		}
 		content, err := os.ReadFile(path)
@@ -395,7 +406,7 @@ func renderTargetFiles(target string) (string, error) {
 			return "", err
 		}
 		if bytes.IndexByte(content, 0) >= 0 {
-			blocks = append(blocks, omittedTargetFileBlock(target, path, "binary file"))
+			addOmission(path, "binary file")
 			continue
 		}
 		totalBytes += len(content)
@@ -410,6 +421,9 @@ func renderTargetFiles(target string) (string, error) {
 		text := strings.TrimRight(string(content), "\n")
 		fence := fenceForContent(text)
 		blocks = append(blocks, fmt.Sprintf("### %s\n%s%s\n%s\n%s", filepath.ToSlash(label), fence, languageForPath(path), text, fence))
+	}
+	if suppressedOmissions > 0 {
+		blocks = append(blocks, fmt.Sprintf("### Additional omitted files\n[omitted: %d additional files]", suppressedOmissions))
 	}
 	return strings.Join(blocks, "\n\n"), nil
 }

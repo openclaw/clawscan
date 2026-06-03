@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -353,6 +354,29 @@ func TestRenderJudgePromptMarksOmittedTargetFiles(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "payload.js\n[omitted: skipped path]") {
 		t.Fatalf("prompt did not mark omitted file: %s", prompt)
+	}
+}
+
+func TestRenderJudgePromptCapsOmittedTargetFileMarkers(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(filepath.Join(target, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		if err := os.WriteFile(filepath.Join(target, "node_modules", fmt.Sprintf("payload-%02d.js", i)), []byte("danger()"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prompt, err := RenderJudgePrompt("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(prompt, "[omitted: skipped path]") != maxOmittedTargetFileMarkers {
+		t.Fatalf("prompt did not cap omitted markers: %s", prompt)
+	}
+	if !strings.Contains(prompt, "[omitted: 15 additional files]") {
+		t.Fatalf("prompt missing omitted summary: %s", prompt)
 	}
 }
 
