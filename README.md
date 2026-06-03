@@ -35,11 +35,14 @@ This repository currently contains the Go CLI foundation:
 - scanner ID validation
 - environment-variable validation
 - secret-safe run artifacts
+- real SkillSpector execution
+- OpenAI judge execution with structured JSON output
+- prompt interpolation for scanner JSON and target files
 - ClawHub prompt parity proof tooling
 
-Scanner adapters and judge execution are being filled in incrementally. Until an
-adapter is implemented, its scanner result is recorded as `skipped` with a clear
-error in the run artifact.
+Scanner adapters are being filled in incrementally. SkillSpector executes today.
+Other accepted scanner IDs currently record `skipped` with a clear error until
+their adapters are implemented.
 
 ## Supported Scanners
 
@@ -47,7 +50,7 @@ These scanner IDs are accepted by the CLI today:
 
 | Scanner ID | Source | Notes |
 | --- | --- | --- |
-| `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Security scanner for AI agent skills. Intended to be the main ClawHub parity scanner. |
+| `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Security scanner for AI agent skills. Runs locally by default with `--no-llm`; set `CLAWSCAN_SKILLSPECTOR_LLM=1` to opt into provider-backed SkillSpector analysis. |
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. |
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Supports local and optional provider-backed modes upstream. |
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. |
@@ -80,6 +83,7 @@ export VIRUSTOTAL_API_KEY=...
 export SNYK_TOKEN=...
 export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
+export CLAWSCAN_SKILLSPECTOR_LLM=1
 ```
 
 ClawScan validates required variables before starting a run. Missing variables
@@ -102,6 +106,10 @@ Run artifacts record only whether a variable was present:
 ```
 
 Actual secret values are never written to the artifact.
+
+`CLAWSCAN_SKILLSPECTOR_LLM=1` is not a secret. It is an explicit opt-in for
+SkillSpector's provider-backed LLM analysis. When enabled with the default
+OpenAI-compatible provider, `OPENAI_API_KEY` is required.
 
 ## Usage
 
@@ -231,7 +239,7 @@ The intended judge flow is:
 2. Wait for all scanner results.
 3. Interpolate raw scanner JSON into the judge prompt.
 4. Call the configured judge model.
-5. Validate the judge response against `--judge-schema`.
+5. Ask the provider for structured JSON matching `--judge-schema`.
 6. Store the judge result alongside scanner evidence.
 
 Prompt authors should place scanner evidence explicitly:
@@ -248,6 +256,14 @@ VirusTotal evidence:
 ```json
 {{ scanners.virustotal }}
 ```
+````
+
+Target files can also be included:
+
+````md
+Skill files:
+
+{{ target.files }}
 ````
 
 If a prompt references a scanner that was not requested, ClawScan should fail
