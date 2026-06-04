@@ -52,6 +52,7 @@ These scanner IDs are accepted by the CLI today:
 
 | Scanner ID | Source | Notes |
 | --- | --- | --- |
+| `agentverus` | [AgentVerus](https://agentverus.ai/) | Agent skill scanner with CLI JSON output. Runs through `npx --yes agentverus-scanner scan <target> --json`; no env var is required for the local scanner path. |
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Security scanner for AI agent skills. Runs locally by default with `--no-llm`; set `CLAWSCAN_SKILLSPECTOR_LLM=1` to opt into provider-backed SkillSpector analysis. |
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. |
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Supports local and optional provider-backed modes upstream. |
@@ -159,7 +160,7 @@ Run one scanner and print JSON:
 
 ```bash
 clawscan ./my-skill \
-  --scanner skillspector \
+  --scanner agentverus \
   --json
 ```
 
@@ -167,6 +168,7 @@ Run several scanners and save the artifact:
 
 ```bash
 clawscan ./my-skill \
+  --scanner agentverus \
   --scanner skillspector \
   --scanner cisco \
   --scanner snyk \

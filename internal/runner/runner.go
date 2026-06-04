@@ -113,6 +113,7 @@ type requirement struct {
 }
 
 var scannerSet = map[string]bool{
+	"agentverus":     true,
 	"skillspector":   true,
 	"snyk":           true,
 	"cisco":          true,
@@ -819,6 +820,8 @@ func responseOutputText(body []byte) (string, error) {
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
 	switch name {
+	case "agentverus":
+		return runner.runAgentVerus(target, startedAt)
 	case "skillspector":
 		return runner.runSkillSpector(target, startedAt)
 	default:
@@ -831,6 +834,64 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 			Raw:         nil,
 		}, nil
 	}
+}
+
+func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt string) (ScannerResult, error) {
+	command := "npx"
+	args := []string{"--yes", "agentverus-scanner", "scan", target, "--json"}
+	fullCommand := append([]string{command}, args...)
+	timeout := runner.Timeout
+	if timeout == 0 {
+		timeout = 20 * time.Minute
+	}
+	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	raw := strings.TrimSpace(output.Stdout)
+	if runErr != nil {
+		message := runErr.Error()
+		if strings.TrimSpace(output.Stderr) != "" {
+			message += ": " + strings.TrimSpace(output.Stderr)
+		}
+		if json.Valid([]byte(raw)) {
+			return ScannerResult{
+				Status:      "completed",
+				StartedAt:   startedAt,
+				CompletedAt: completedAt,
+				Command:     fullCommand,
+				Error:       message,
+				Raw:         json.RawMessage(raw),
+			}, nil
+		}
+		return ScannerResult{
+			Status:      "failed",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			Command:     fullCommand,
+			Error:       message,
+			Raw:         nil,
+		}, nil
+	}
+	if raw == "" {
+		return ScannerResult{
+			Status:      "failed",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			Command:     fullCommand,
+			Error:       "AgentVerus scanner did not return JSON on stdout.",
+			Raw:         nil,
+		}, nil
+	}
+	if !json.Valid([]byte(raw)) {
+		return ScannerResult{}, fmt.Errorf("AgentVerus scanner returned invalid JSON")
+	}
+	return ScannerResult{
+		Status:      "completed",
+		StartedAt:   startedAt,
+		CompletedAt: completedAt,
+		Command:     fullCommand,
+		Error:       "",
+		Raw:         json.RawMessage(raw),
+	}, nil
 }
 
 func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt string) (ScannerResult, error) {

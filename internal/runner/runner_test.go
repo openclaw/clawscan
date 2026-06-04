@@ -42,6 +42,16 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
+func TestParseArgsAcceptsAgentVerusScanner(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "agentverus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
+		t.Fatalf("scanners = %q", got)
+	}
+}
+
 func TestParseArgsSupportsClawHubPromptMode(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
@@ -288,6 +298,79 @@ func TestRunAllowsExplicitSkillSpectorLLM(t *testing.T) {
 	}
 	if containsArg(runner.calls[0].args, "--no-llm") {
 		t.Fatalf("unexpected --no-llm with explicit opt-in: %#v", runner.calls[0].args)
+	}
+}
+
+func TestRunExecutesAgentVerusScanner(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{
+		stdout: `{"overall":91,"badge":"certified","findings":[]}`,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "agentverus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{},
+		CommandRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["agentverus"]
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if !bytes.Equal(result.Raw, []byte(`{"overall":91,"badge":"certified","findings":[]}`)) {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls = %#v", runner.calls)
+	}
+	call := runner.calls[0]
+	if call.command != "npx" {
+		t.Fatalf("command = %q", call.command)
+	}
+	wantArgs := "--yes agentverus-scanner scan " + target + " --json"
+	if got := strings.Join(call.args, " "); got != wantArgs {
+		t.Fatalf("args = %q, want %q", got, wantArgs)
+	}
+}
+
+func TestAgentVerusReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{
+		stdout: `{"overall":42,"badge":"warning","findings":[{"id":"ASST-09"}]}`,
+		err:    errCommandFailed,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "agentverus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{},
+		CommandRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["agentverus"]
+	if result.Status != "completed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !bytes.Contains(result.Raw, []byte(`"ASST-09"`)) {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+	if result.Error == "" {
+		t.Fatal("expected non-zero exit message to be preserved")
 	}
 }
 
@@ -624,6 +707,7 @@ func (runner *recordingJudgeRunner) RunJudge(opts JudgeOptions, artifact Artifac
 type recordingCommandRunner struct {
 	calls       []commandCall
 	writeOutput string
+	stdout      string
 	err         error
 }
 
@@ -641,7 +725,11 @@ func (r *recordingCommandRunner) Run(command string, args []string, cwd string, 
 			return CommandOutput{}, err
 		}
 	}
-	return CommandOutput{Stdout: "ok"}, r.err
+	stdout := r.stdout
+	if stdout == "" {
+		stdout = "ok"
+	}
+	return CommandOutput{Stdout: stdout}, r.err
 }
 
 var errCommandFailed = errors.New("exit status 1")
