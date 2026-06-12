@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -28,6 +29,16 @@ func (runner ExternalScannerRunner) runGenDigital(target string, startedAt strin
 			CompletedAt: completedAt(),
 			Command:     command,
 			Error:       "Gen Digital v1 requires a ClawHub skill URL target; local path targets are unsupported.",
+			Raw:         nil,
+		}, nil
+	}
+	if !isGenDigitalClawHubURL(target) {
+		return ScannerResult{
+			Status:      "skipped",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt(),
+			Command:     command,
+			Error:       "Gen Digital v1 requires a ClawHub skill URL target; non-ClawHub URL targets are unsupported.",
 			Raw:         nil,
 		}, nil
 	}
@@ -105,4 +116,17 @@ func (runner ExternalScannerRunner) runGenDigital(target string, startedAt strin
 		Error:       errorMessage,
 		Raw:         raw,
 	}, nil
+}
+
+func isGenDigitalClawHubURL(input string) bool {
+	parsed, err := url.Parse(input)
+	if err != nil {
+		return false
+	}
+	switch parsed.Hostname() {
+	case "clawhub.ai", "www.clawhub.ai", "clawhub.com", "www.clawhub.com":
+		return parsed.Scheme == "http" || parsed.Scheme == "https"
+	default:
+		return false
+	}
 }

@@ -133,6 +133,32 @@ func TestGenDigitalScannerSkipsLocalPathTargets(t *testing.T) {
 	}
 }
 
+func TestGenDigitalScannerSkipsNonClawHubURLTargets(t *testing.T) {
+	target := "https://example.invalid/private-skill"
+	client := &genDigitalRecordingHTTPClient{err: errUnexpectedHTTPRequest}
+	opts, err := ParseArgs([]string{target, "--scanner", "gendigital"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                  map[string]string{},
+		GenDigitalHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["gendigital"]
+	if result.Status != "skipped" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "non-ClawHub URL targets are unsupported") {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("unexpected HTTP requests: %#v", client.requests)
+	}
+}
+
 func TestGenDigitalScannerFailsSuccessWithInvalidJSON(t *testing.T) {
 	target := "https://clawhub.ai/author/skill"
 	client := &genDigitalRecordingHTTPClient{
