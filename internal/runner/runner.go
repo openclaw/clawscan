@@ -936,6 +936,8 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 		return runner.runSkillSpector(target, startedAt)
 	case "static":
 		return runner.runStatic(target, startedAt)
+	case "snyk":
+		return runner.runSnyk(target, startedAt)
 	case "virustotal":
 		return runner.runVirusTotal(target, startedAt)
 	default:

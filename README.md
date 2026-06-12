@@ -43,9 +43,9 @@ This repository currently contains the Go CLI foundation:
 - ClawHub prompt parity proof tooling
 
 Scanner adapters are being filled in incrementally. SkillSpector, AgentVerus,
-VirusTotal, and the built-in static scanner execute today. Snyk, Cisco, and
-Gen Digital currently record `skipped` with a clear error until their adapters
-are implemented.
+Snyk, VirusTotal, and the built-in static scanner execute today. Cisco and Gen
+Digital currently record `skipped` with a clear error until their adapters are
+implemented.
 
 ## Supported Scanners
 
@@ -55,7 +55,7 @@ These scanner IDs are accepted by the CLI today:
 | --- | --- | --- |
 | `agentverus` | [AgentVerus](https://agentverus.ai/) | Agent skill scanner with CLI JSON output. Runs through `npx --yes agentverus-scanner scan <target> --json`; no env var is required for the local scanner path. |
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Security scanner for AI agent skills. Runs locally by default with `--no-llm`; set `CLAWSCAN_SKILLSPECTOR_LLM=1` to opt into provider-backed SkillSpector analysis. |
-| `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. |
+| `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. Runs through `uvx snyk-agent-scan@latest --json --no-bootstrap --skills <target>` so ClawScan scans the requested skill file or directory instead of full-machine auto-discovery. |
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Supports local and optional provider-backed modes upstream. |
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. V1 hashes single-file targets with SHA-256 and queries the VirusTotal v3 file report endpoint by hash; directory targets return a scanner-specific `skipped` result. |
 | `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | Public lookup-style scanner for ClawHub skill URLs. |
@@ -64,6 +64,10 @@ These scanner IDs are accepted by the CLI today:
 The built-in `static` scanner stores deterministic raw JSON with scanner
 metadata, `files.scanned`, `files.omitted`, and `findings`. It records evidence
 only; it does not emit a final policy verdict.
+
+The `snyk` scanner stores JSON stdout from Snyk Agent Scan as
+`scanners.snyk.raw`. `SNYK_TOKEN` is read from the environment by Snyk's CLI and
+is never passed as a ClawScan CLI flag or recorded in run artifacts.
 
 The `virustotal` scanner stores the raw VirusTotal JSON response as
 `scanners.virustotal.raw` when the API returns JSON. It never uploads target
