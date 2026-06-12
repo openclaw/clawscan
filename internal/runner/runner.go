@@ -32,11 +32,12 @@ type JudgeOptions struct {
 }
 
 type RunContext struct {
-	Env                 map[string]string
-	Now                 func() time.Time
-	CommandRunner       CommandRunner
-	ScannerRunner       ScannerRunner
-	SkillSpectorCommand []string
+	Env                  map[string]string
+	Now                  func() time.Time
+	CommandRunner        CommandRunner
+	ScannerRunner        ScannerRunner
+	SkillSpectorCommand  []string
+	VirusTotalHTTPClient VirusTotalHTTPClient
 }
 
 type ScannerRunner interface {
@@ -236,10 +237,11 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
 		scannerRunner = ExternalScannerRunner{
-			CommandRunner:       commandRunner,
-			Env:                 env,
-			SkillSpectorCommand: ctx.SkillSpectorCommand,
-			Timeout:             20 * time.Minute,
+			CommandRunner:        commandRunner,
+			Env:                  env,
+			SkillSpectorCommand:  ctx.SkillSpectorCommand,
+			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
+			Timeout:              20 * time.Minute,
 		}
 	}
 	artifact := NewArtifact(opts, resolved, startedAt, startedAt, env)
@@ -858,10 +860,11 @@ func copyFile(source string, dest string) error {
 }
 
 type ExternalScannerRunner struct {
-	CommandRunner       CommandRunner
-	Env                 map[string]string
-	SkillSpectorCommand []string
-	Timeout             time.Duration
+	CommandRunner        CommandRunner
+	Env                  map[string]string
+	SkillSpectorCommand  []string
+	VirusTotalHTTPClient VirusTotalHTTPClient
+	Timeout              time.Duration
 }
 
 type OpenAIRequestOptions struct {
@@ -933,6 +936,8 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 		return runner.runSkillSpector(target, startedAt)
 	case "static":
 		return runner.runStatic(target, startedAt)
+	case "virustotal":
+		return runner.runVirusTotal(target, startedAt)
 	default:
 		return ScannerResult{
 			Status:      "skipped",

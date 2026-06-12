@@ -57,13 +57,20 @@ These scanner IDs are accepted by the CLI today:
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Security scanner for AI agent skills. Runs locally by default with `--no-llm`; set `CLAWSCAN_SKILLSPECTOR_LLM=1` to opt into provider-backed SkillSpector analysis. |
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. |
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Supports local and optional provider-backed modes upstream. |
-| `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. |
+| `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. V1 hashes single-file targets with SHA-256 and queries the VirusTotal v3 file report endpoint by hash; directory targets return a scanner-specific `skipped` result. |
 | `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | Public lookup-style scanner for ClawHub skill URLs. |
 | `static` | Built in | Lightweight local static scanner for skill artifacts. |
 
 The built-in `static` scanner stores deterministic raw JSON with scanner
 metadata, `files.scanned`, `files.omitted`, and `findings`. It records evidence
 only; it does not emit a final policy verdict.
+
+The `virustotal` scanner stores the raw VirusTotal JSON response as
+`scanners.virustotal.raw` when the API returns JSON. It never uploads target
+bytes in v1; it reads a single regular file locally, hashes the bytes with
+SHA-256, and performs a file report lookup by hash. Directories are intentionally
+unsupported until ClawScan has a deterministic archive format for that target
+shape.
 
 Planned scanners should not be added to this table until the CLI accepts their
 scanner ID.
