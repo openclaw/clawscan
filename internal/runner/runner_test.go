@@ -235,6 +235,39 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	}
 }
 
+func TestRunMarksInvalidSkillSpectorJSONAsFailed(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{
+		writeOutput: `{"status":`,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                 map[string]string{},
+		CommandRunner:       runner,
+		SkillSpectorCommand: []string{"skillspector"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["skillspector"]
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if result.Raw != nil {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+	if !strings.Contains(result.Error, "invalid JSON") {
+		t.Fatalf("error = %q", result.Error)
+	}
+}
+
 func TestRunAllowsExplicitSkillSpectorLLM(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -727,6 +760,31 @@ func TestRenderPromptTemplateInterpolatesTargetFiles(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "### SKILL.md\n```markdown\n# Demo\nUse safely.\n```") {
 		t.Fatalf("prompt = %s", prompt)
+	}
+}
+
+func TestRenderPromptTemplatePrioritizesSkillFileWithinBudget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filler := bytes.Repeat([]byte("x"), maxTargetFileBytes)
+	for index := 0; index < 5; index++ {
+		path := filepath.Join(target, fmt.Sprintf("000-%02d.txt", index))
+		if err := os.WriteFile(path, filler, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Primary skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := RenderPromptTemplate("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "### SKILL.md\n```markdown\n# Primary skill\n```") {
+		t.Fatalf("prompt omitted SKILL.md under budget pressure: %s", prompt)
 	}
 }
 

@@ -417,7 +417,14 @@ func renderTargetFiles(target string) (string, error) {
 			return "", err
 		}
 	}
-	sort.Strings(paths)
+	sort.SliceStable(paths, func(i int, j int) bool {
+		leftPriority := targetFilePriority(target, paths[i])
+		rightPriority := targetFilePriority(target, paths[j])
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		return paths[i] < paths[j]
+	})
 	var blocks []string
 	totalBytes := 0
 	omittedMarkers := 0
@@ -472,6 +479,17 @@ func renderTargetFiles(target string) (string, error) {
 		blocks = append(blocks, fmt.Sprintf("### Additional omitted files\n[omitted: %d additional files]", suppressedOmissions))
 	}
 	return strings.Join(blocks, "\n\n"), nil
+}
+
+func targetFilePriority(root string, path string) int {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		rel = path
+	}
+	if strings.EqualFold(filepath.ToSlash(rel), "SKILL.md") {
+		return 0
+	}
+	return 1
 }
 
 func omittedTargetFileBlock(root string, path string, reason string) string {
@@ -1084,6 +1102,16 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 			message += ": " + strings.TrimSpace(output.Stderr)
 		}
 		if readErr == nil {
+			if !json.Valid(raw) {
+				return ScannerResult{
+					Status:      "failed",
+					StartedAt:   startedAt,
+					CompletedAt: completedAt,
+					Command:     fullCommand,
+					Error:       message + ": SkillSpector scanner returned invalid JSON",
+					Raw:         nil,
+				}, nil
+			}
 			return ScannerResult{
 				Status:      "completed",
 				StartedAt:   startedAt,
@@ -1104,6 +1132,16 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	}
 	if readErr != nil {
 		return ScannerResult{}, readErr
+	}
+	if !json.Valid(raw) {
+		return ScannerResult{
+			Status:      "failed",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			Command:     fullCommand,
+			Error:       "SkillSpector scanner returned invalid JSON",
+			Raw:         nil,
+		}, nil
 	}
 	return ScannerResult{
 		Status:      "completed",
