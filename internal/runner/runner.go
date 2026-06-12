@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ type RunContext struct {
 	ScannerRunner        ScannerRunner
 	SkillSpectorCommand  []string
 	VirusTotalHTTPClient VirusTotalHTTPClient
+	GenDigitalHTTPClient GenDigitalHTTPClient
 }
 
 type ScannerRunner interface {
@@ -67,6 +69,12 @@ type Target struct {
 	Kind         string `json:"kind"`
 	Input        string `json:"input"`
 	ResolvedPath string `json:"resolvedPath"`
+}
+
+type resolvedTarget struct {
+	kind         string
+	input        string
+	resolvedPath string
 }
 
 type ScannerResult struct {
@@ -226,7 +234,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		now = time.Now
 	}
 	startedAt := now().UTC().Format(time.RFC3339Nano)
-	resolved, err := filepath.Abs(opts.Target)
+	target, err := resolveTarget(opts.Target)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -241,13 +249,15 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			Env:                  env,
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
+			GenDigitalHTTPClient: ctx.GenDigitalHTTPClient,
 			Timeout:              20 * time.Minute,
 		}
 	}
-	artifact := NewArtifact(opts, resolved, startedAt, startedAt, env)
+	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
+	artifact.Target.Kind = target.kind
 	for _, scanner := range opts.Scanners {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
-		result, err := scannerResult(opts, scanner, resolved, scannerStartedAt, scannerRunner)
+		result, err := scannerResult(opts, scanner, target.resolvedPath, scannerStartedAt, scannerRunner)
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -296,6 +306,22 @@ func scannerResult(opts Options, scanner string, target string, startedAt string
 		}, nil
 	}
 	return scannerRunner.RunScanner(scanner, target, startedAt)
+}
+
+func resolveTarget(input string) (resolvedTarget, error) {
+	if isURLTarget(input) {
+		return resolvedTarget{kind: "url", input: input, resolvedPath: input}, nil
+	}
+	resolved, err := filepath.Abs(input)
+	if err != nil {
+		return resolvedTarget{}, err
+	}
+	return resolvedTarget{kind: "skill", input: input, resolvedPath: resolved}, nil
+}
+
+func isURLTarget(input string) bool {
+	parsed, err := url.Parse(input)
+	return err == nil && parsed.Scheme != "" && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
 var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9_-]+)\s*\}\}`)
@@ -704,6 +730,9 @@ func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, 
 }
 
 func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
+	if artifact.Target.Kind == "url" {
+		return fmt.Errorf("judge workspace copying is unsupported for URL targets: %s", artifact.Target.Input)
+	}
 	manifest, err := copyTargetToWorkspace(artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
 	if err != nil {
 		return err
@@ -864,6 +893,7 @@ type ExternalScannerRunner struct {
 	Env                  map[string]string
 	SkillSpectorCommand  []string
 	VirusTotalHTTPClient VirusTotalHTTPClient
+	GenDigitalHTTPClient GenDigitalHTTPClient
 	Timeout              time.Duration
 }
 
@@ -942,6 +972,8 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 		return runner.runCisco(target, startedAt)
 	case "virustotal":
 		return runner.runVirusTotal(target, startedAt)
+	case "gendigital":
+		return runner.runGenDigital(target, startedAt)
 	default:
 		return ScannerResult{
 			Status:      "skipped",

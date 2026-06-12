@@ -43,9 +43,8 @@ This repository currently contains the Go CLI foundation:
 - ClawHub prompt parity proof tooling
 
 Scanner adapters are being filled in incrementally. SkillSpector, AgentVerus,
-Cisco, Snyk, VirusTotal, and the built-in static scanner execute today. Gen
-Digital currently records `skipped` with a clear error until its adapter is
-implemented.
+Cisco, Snyk, VirusTotal, Gen Digital URL lookups, and the built-in static
+scanner execute today.
 
 ## Supported Scanners
 
@@ -58,7 +57,7 @@ These scanner IDs are accepted by the CLI today:
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. Runs through `uvx snyk-agent-scan@latest --json --no-bootstrap --skills <target>` so ClawScan scans the requested skill file or directory instead of full-machine auto-discovery. |
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Runs the local default analyzer path through `skill-scanner scan <target> --format json --output <tempfile>`. No env var is required for this v1 path; upstream LLM, AI Defense, and VirusTotal modes are not enabled by ClawScan. |
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. V1 hashes single-file targets with SHA-256 and queries the VirusTotal v3 file report endpoint by hash; directory targets return a scanner-specific `skipped` result. |
-| `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | Public lookup-style scanner for ClawHub skill URLs. |
+| `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | Public lookup-style scanner for ClawHub skill URLs. V1 supports URL targets only; local paths return a scanner-specific `skipped` result. |
 | `static` | Built in | Lightweight local static scanner for skill artifacts. |
 
 The built-in `static` scanner stores deterministic raw JSON with scanner
@@ -80,6 +79,13 @@ bytes in v1; it reads a single regular file locally, hashes the bytes with
 SHA-256, and performs a file report lookup by hash. Directories are intentionally
 unsupported until ClawScan has a deterministic archive format for that target
 shape.
+
+The `gendigital` scanner stores the raw Gen Digital lookup JSON response as
+`scanners.gendigital.raw` when the API returns JSON. It posts URL targets to
+Gen Digital's public lookup endpoint with a JSON `skillUrl` body and does not
+require an API key. Local path targets are not uploaded or fetched in v1; they
+return a scanner-specific `skipped` result explaining that Gen Digital requires
+a ClawHub skill URL target.
 
 Planned scanners should not be added to this table until the CLI accepts their
 scanner ID.
@@ -143,7 +149,19 @@ ClawScan does not add model-provider API keys to its own CLI flags or artifacts.
 clawscan <target> --scanner <scanner-id> [flags]
 ```
 
-`<target>` is the path to the skill directory or skill file to scan.
+`<target>` is usually the path to the skill directory or skill file to scan.
+Some scanners can support URL targets when their upstream scanner is a public
+lookup service. In v1, `gendigital` uses this shape for ClawHub skill URLs:
+
+```bash
+clawscan https://clawhub.ai/author/skill-name \
+  --scanner gendigital \
+  --json
+```
+
+URL targets are recorded as `"target.kind": "url"` in the run artifact. Local
+file copying for judge workspaces and `{{ target.files }}` remains path-based
+and may fail clearly for URL targets.
 
 ### Flags
 
