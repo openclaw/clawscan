@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/openclaw/clawscan/internal/clawhubprompt"
+	"github.com/openclaw/clawscan/internal/runner"
 )
 
 func main() {
@@ -24,6 +26,14 @@ func main() {
 func run() error {
 	clawhubDir := flag.String("clawhub-dir", "", "Path to a ClawHub checkout")
 	out := flag.String("out", "", "Optional JSON proof output path")
+	outSystemPrompt := flag.String("out-system-prompt", "", "Optional exported system prompt path")
+	outPrompt := flag.String("out-prompt", "", "Optional exported full judge prompt template path")
+	outOutputSchema := flag.String("out-output-schema", "", "Optional exported output schema path")
+	outRequest := flag.String("out-request", "", "Optional exported canonical request JSON path")
+	outSkillSpectorResult := flag.String("out-skillspector-result", "", "Optional exported SkillSpector fixture JSON path")
+	outVirusTotalResult := flag.String("out-virustotal-result", "", "Optional exported VirusTotal fixture JSON path")
+	model := flag.String("model", "openai/gpt-5.5", "Model id for canonical request hashing")
+	reasoning := flag.String("reasoning", "high", "Reasoning effort for canonical request hashing")
 	flag.Parse()
 	if *clawhubDir == "" {
 		return fmt.Errorf("missing required --clawhub-dir")
@@ -32,18 +42,55 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	actual, err := clawhubprompt.Build(systemPrompt, proofJob(), []string{"html-comment-injection"}, proofSkillSpectorAnalysis())
+	job := proofJob()
+	skillSpectorAnalysis := proofSkillSpectorAnalysis()
+	actual, err := clawhubprompt.Build(systemPrompt, job, []string{"html-comment-injection"}, skillSpectorAnalysis)
 	if err != nil {
 		return err
 	}
 	if actual != expected {
 		return fmt.Errorf("ClawHub prompt parity check failed")
 	}
+	prompt, err := splitPrompt(systemPrompt, actual)
+	if err != nil {
+		return err
+	}
+	vtFixture, err := prettyJSON(job.Target.Version.VTAnalysis)
+	if err != nil {
+		return err
+	}
+	skillSpectorFixture, err := prettyJSON(skillSpectorAnalysis)
+	if err != nil {
+		return err
+	}
+	promptTemplate := strings.Replace(actual, vtFixture, "{{ scanners.virustotal }}", 1)
+	promptTemplate = strings.Replace(promptTemplate, skillSpectorFixture, "{{ scanners.skillspector }}", 1)
+	if !strings.Contains(promptTemplate, "{{ scanners.virustotal }}") || !strings.Contains(promptTemplate, "{{ scanners.skillspector }}") {
+		return fmt.Errorf("failed to build exported prompt template with scanner placeholders")
+	}
+	schema, err := os.ReadFile(filepath.Join(*clawhubDir, "scripts/security/codex-scan-output.schema.json"))
+	if err != nil {
+		return err
+	}
+	requestBody, err := runner.OpenAIRequestBody(runner.OpenAIRequestOptions{Model: *model, Reasoning: *reasoning}, systemPrompt, prompt, schema)
+	if err != nil {
+		return err
+	}
 	proof := map[string]any{
 		"ok":                        true,
 		"clawhubDir":                filepath.Clean(*clawhubDir),
-		"promptSha256":              sha(actual),
-		"promptLength":              len(actual),
+		"combinedPromptSha256":      sha(actual),
+		"combinedPromptLength":      len(actual),
+		"systemPromptSha256":        sha(systemPrompt),
+		"systemPromptLength":        len(systemPrompt),
+		"promptSha256":              sha(prompt),
+		"promptLength":              len(prompt),
+		"promptTemplateSha256":      sha(promptTemplate),
+		"promptTemplateLength":      len(promptTemplate),
+		"outputSchemaSha256":        sha(string(schema)),
+		"requestSha256":             sha(string(requestBody)),
+		"model":                     *model,
+		"reasoning":                 *reasoning,
 		"explicitSkillSpectorInput": true,
 		"skillSpectorMarkerPresent": bytes.Contains([]byte(actual), []byte("SkillSpector findings supplied to Codex")),
 		"skillSpectorIssuePresent":  bytes.Contains([]byte(actual), []byte("SDI-1")),
@@ -60,8 +107,52 @@ func run() error {
 			return err
 		}
 	}
+	if err := writeOptionalFile(*outSystemPrompt, []byte(systemPrompt)); err != nil {
+		return err
+	}
+	if err := writeOptionalFile(*outPrompt, []byte(promptTemplate)); err != nil {
+		return err
+	}
+	if err := writeOptionalFile(*outSkillSpectorResult, []byte(skillSpectorFixture)); err != nil {
+		return err
+	}
+	if err := writeOptionalFile(*outVirusTotalResult, []byte(vtFixture)); err != nil {
+		return err
+	}
+	if err := writeOptionalFile(*outOutputSchema, schema); err != nil {
+		return err
+	}
+	if err := writeOptionalFile(*outRequest, append(requestBody, '\n')); err != nil {
+		return err
+	}
 	fmt.Println(string(encoded))
 	return nil
+}
+
+func splitPrompt(systemPrompt string, fullPrompt string) (string, error) {
+	prefix := systemPrompt + "\n\n"
+	if !strings.HasPrefix(fullPrompt, prefix) {
+		return "", fmt.Errorf("ClawHub prompt does not start with system prompt plus blank line")
+	}
+	return strings.TrimPrefix(fullPrompt, prefix), nil
+}
+
+func writeOptionalFile(path string, content []byte) error {
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o644)
+}
+
+func prettyJSON(value any) (string, error) {
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func renderClawHubPrompt(clawhubDir string) (string, string, error) {

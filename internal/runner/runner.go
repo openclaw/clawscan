@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,8 +16,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/openclaw/clawscan/internal/clawhubprompt"
 )
 
 type Options struct {
@@ -31,18 +28,7 @@ type Options struct {
 }
 
 type JudgeOptions struct {
-	PromptPath string
-	SchemaPath string
-	Model      string
-	Reasoning  string
-	DryRun     bool
-	ClawHub    *ClawHubPromptOptions
-}
-
-type ClawHubPromptOptions struct {
-	SystemPromptPath string
-	JobPath          string
-	InjectionSignals []string
+	Command string
 }
 
 type RunContext struct {
@@ -50,7 +36,6 @@ type RunContext struct {
 	Now                 func() time.Time
 	CommandRunner       CommandRunner
 	ScannerRunner       ScannerRunner
-	JudgeRunner         JudgeRunner
 	SkillSpectorCommand []string
 }
 
@@ -65,10 +50,6 @@ type CommandRunner interface {
 type CommandOutput struct {
 	Stdout string
 	Stderr string
-}
-
-type JudgeRunner interface {
-	RunJudge(opts JudgeOptions, artifact Artifact, prompt string, schema json.RawMessage) (*JudgeResult, error)
 }
 
 type Artifact struct {
@@ -96,15 +77,36 @@ type ScannerResult struct {
 	Raw         json.RawMessage `json:"raw"`
 }
 
+type TargetWorkspaceManifest struct {
+	Copied            []TargetWorkspaceFile     `json:"copied"`
+	Omitted           []TargetWorkspaceOmission `json:"omitted"`
+	TotalCopiedBytes  int64                     `json:"totalCopiedBytes"`
+	SuppressedCopied  int                       `json:"suppressedCopied"`
+	SuppressedOmitted int                       `json:"suppressedOmitted"`
+	TotalOmittedBytes int64                     `json:"totalOmittedBytes"`
+}
+
+type TargetWorkspaceFile struct {
+	Path  string `json:"path"`
+	Bytes int64  `json:"bytes"`
+}
+
+type TargetWorkspaceOmission struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Bytes  int64  `json:"bytes,omitempty"`
+}
+
 type JudgeResult struct {
-	Status     string      `json:"status"`
-	Model      string      `json:"model"`
-	Reasoning  string      `json:"reasoning"`
-	PromptPath string      `json:"promptPath"`
-	SchemaPath string      `json:"schemaPath"`
-	PromptSHA  string      `json:"promptSha256,omitempty"`
-	Error      string      `json:"error"`
-	Result     interface{} `json:"result"`
+	Status           string      `json:"status"`
+	Command          string      `json:"command,omitempty"`
+	PromptPath       string      `json:"promptPath,omitempty"`
+	OutputSchemaPath string      `json:"outputSchemaPath,omitempty"`
+	OutputPath       string      `json:"outputPath,omitempty"`
+	PromptSHA        string      `json:"promptSha256,omitempty"`
+	OutputSchemaSHA  string      `json:"outputSchemaSha256,omitempty"`
+	Error            string      `json:"error"`
+	Result           interface{} `json:"result"`
 }
 
 type requirement struct {
@@ -113,13 +115,13 @@ type requirement struct {
 }
 
 var scannerSet = map[string]bool{
-	"agentverus":     true,
-	"skillspector":   true,
-	"snyk":           true,
-	"cisco":          true,
-	"virustotal":     true,
-	"gendigital":     true,
-	"clawhub-static": true,
+	"agentverus":   true,
+	"skillspector": true,
+	"snyk":         true,
+	"cisco":        true,
+	"virustotal":   true,
+	"gendigital":   true,
+	"static":       true,
 }
 
 func ParseArgs(args []string) (Options, error) {
@@ -127,10 +129,7 @@ func ParseArgs(args []string) (Options, error) {
 		return Options{}, errors.New("Missing scan target")
 	}
 	opts := Options{Target: args[0], ScannerResultPaths: map[string]string{}}
-	var judgePrompt, judgeSchema, judgeModel, judgeReasoning string
-	var judgeDryRun bool
-	var clawHubSystemPrompt, clawHubJob string
-	var clawHubInjectionSignals []string
+	var judge string
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
@@ -167,56 +166,12 @@ func ParseArgs(args []string) (Options, error) {
 			i = next
 		case "--json":
 			opts.JSON = true
-		case "--judge-prompt":
+		case "--judge":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
 				return Options{}, err
 			}
-			judgePrompt = value
-			i = next
-		case "--judge-schema":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			judgeSchema = value
-			i = next
-		case "--judge-model":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			judgeModel = value
-			i = next
-		case "--judge-reasoning":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			judgeReasoning = value
-			i = next
-		case "--judge-dry-run":
-			judgeDryRun = true
-		case "--clawhub-system-prompt":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			clawHubSystemPrompt = value
-			i = next
-		case "--clawhub-job":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			clawHubJob = value
-			i = next
-		case "--clawhub-injection-signal":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			clawHubInjectionSignals = append(clawHubInjectionSignals, value)
+			judge = value
 			i = next
 		default:
 			return Options{}, fmt.Errorf("Unknown argument: %s", arg)
@@ -234,39 +189,8 @@ func ParseArgs(args []string) (Options, error) {
 			return Options{}, fmt.Errorf("Scanner result provided for unrequested scanner: %s", scanner)
 		}
 	}
-	clawHubConfigured := clawHubSystemPrompt != "" || clawHubJob != "" || len(clawHubInjectionSignals) > 0
-	if judgePrompt != "" || judgeSchema != "" || judgeModel != "" || judgeReasoning != "" || judgeDryRun || clawHubConfigured {
-		if judgePrompt != "" && clawHubConfigured {
-			return Options{}, errors.New("Use either --judge-prompt or --clawhub-system-prompt/--clawhub-job, not both")
-		}
-		if clawHubConfigured && !judgeDryRun {
-			return Options{}, errors.New("ClawHub compatibility mode currently requires --judge-dry-run")
-		}
-		if judgePrompt == "" {
-			if clawHubSystemPrompt == "" {
-				return Options{}, errors.New("Missing required --clawhub-system-prompt")
-			}
-			if clawHubJob == "" {
-				return Options{}, errors.New("Missing required --clawhub-job")
-			}
-		}
-		if judgeSchema == "" && !judgeDryRun {
-			return Options{}, errors.New("Missing required --judge-schema")
-		}
-		if judgeModel == "" {
-			return Options{}, errors.New("Missing required --judge-model")
-		}
-		if !supportedJudgeModel(judgeModel) {
-			return Options{}, fmt.Errorf("Unsupported judge model provider: %s", judgeModel)
-		}
-		opts.Judge = &JudgeOptions{PromptPath: judgePrompt, SchemaPath: judgeSchema, Model: judgeModel, Reasoning: judgeReasoning, DryRun: judgeDryRun}
-		if clawHubConfigured {
-			opts.Judge.ClawHub = &ClawHubPromptOptions{
-				SystemPromptPath: clawHubSystemPrompt,
-				JobPath:          clawHubJob,
-				InjectionSignals: clawHubInjectionSignals,
-			}
-		}
+	if judge != "" {
+		opts.Judge = &JudgeOptions{Command: judge}
 	}
 	return opts, nil
 }
@@ -305,12 +229,12 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
+	commandRunner := ctx.CommandRunner
+	if commandRunner == nil {
+		commandRunner = defaultCommandRunner{}
+	}
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
-		commandRunner := ctx.CommandRunner
-		if commandRunner == nil {
-			commandRunner = defaultCommandRunner{}
-		}
 		scannerRunner = ExternalScannerRunner{
 			CommandRunner:       commandRunner,
 			Env:                 env,
@@ -328,39 +252,11 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		artifact.Scanners[scanner] = result
 	}
 	if opts.Judge != nil {
-		prompt, err := RenderPrompt(*opts.Judge, artifact)
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute)
 		if err != nil {
 			return Artifact{}, err
 		}
-		var judge *JudgeResult
-		if opts.Judge.DryRun {
-			judge = &JudgeResult{
-				Status:     "dry_run",
-				Model:      opts.Judge.Model,
-				Reasoning:  opts.Judge.Reasoning,
-				PromptPath: opts.Judge.PromptPath,
-				SchemaPath: opts.Judge.SchemaPath,
-				Error:      "",
-				Result:     nil,
-			}
-		} else {
-			schema, err := os.ReadFile(opts.Judge.SchemaPath)
-			if err != nil {
-				return Artifact{}, err
-			}
-			judgeRunner := ctx.JudgeRunner
-			if judgeRunner == nil {
-				judgeRunner = OpenAIJudgeRunner{Env: env}
-			}
-			judge, err = judgeRunner.RunJudge(*opts.Judge, artifact, prompt, json.RawMessage(schema))
-			if err != nil {
-				return Artifact{}, err
-			}
-		}
-		if judge != nil {
-			judge.PromptSHA = sha256Hex(prompt)
-		}
-		artifact.Judge = judge
+		artifact.Judge = result
 	}
 	artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
@@ -400,109 +296,16 @@ func scannerResult(opts Options, scanner string, target string, startedAt string
 	return scannerRunner.RunScanner(scanner, target, startedAt)
 }
 
-func RenderPrompt(opts JudgeOptions, artifact Artifact) (string, error) {
-	if opts.ClawHub != nil {
-		return RenderClawHubPrompt(*opts.ClawHub, artifact)
-	}
-	promptTemplate, err := os.ReadFile(opts.PromptPath)
-	if err != nil {
-		return "", err
-	}
-	return RenderJudgePrompt(string(promptTemplate), artifact)
-}
-
-func RenderClawHubPrompt(opts ClawHubPromptOptions, artifact Artifact) (string, error) {
-	systemPrompt, err := os.ReadFile(opts.SystemPromptPath)
-	if err != nil {
-		return "", err
-	}
-	job, err := loadClawHubJob(opts.JobPath)
-	if err != nil {
-		return "", err
-	}
-	applyScannerEvidenceToClawHubJob(&job, artifact)
-	var skillSpector any
-	if result, ok := artifact.Scanners["skillspector"]; ok && len(result.Raw) > 0 {
-		skillSpector = clawhubprompt.RawJSON(result.Raw)
-	}
-	return clawhubprompt.Build(string(systemPrompt), job, opts.InjectionSignals, skillSpector)
-}
-
-type rawClawHubJob struct {
-	Job    clawhubprompt.JobMetadata `json:"job"`
-	Target rawClawHubTarget          `json:"target"`
-}
-
-type rawClawHubTarget struct {
-	TrustedOpenClawPlugin bool               `json:"trustedOpenClawPlugin"`
-	Version               *rawClawHubVersion `json:"version"`
-	Release               *rawClawHubVersion `json:"release"`
-}
-
-type rawClawHubVersion struct {
-	VTAnalysis           json.RawMessage `json:"vtAnalysis"`
-	SkillSpectorAnalysis json.RawMessage `json:"skillSpectorAnalysis"`
-}
-
-func loadClawHubJob(path string) (clawhubprompt.Job, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return clawhubprompt.Job{}, err
-	}
-	var parsed rawClawHubJob
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return clawhubprompt.Job{}, err
-	}
-	return clawhubprompt.Job{
-		Job: parsed.Job,
-		Target: clawhubprompt.Target{
-			TrustedOpenClawPlugin: parsed.Target.TrustedOpenClawPlugin,
-			Version:               convertClawHubVersion(parsed.Target.Version),
-			Release:               convertClawHubVersion(parsed.Target.Release),
-		},
-	}, nil
-}
-
-func convertClawHubVersion(version *rawClawHubVersion) *clawhubprompt.Version {
-	if version == nil {
-		return nil
-	}
-	return &clawhubprompt.Version{
-		VTAnalysis:           rawJSONValue(version.VTAnalysis),
-		SkillSpectorAnalysis: rawJSONValue(version.SkillSpectorAnalysis),
-	}
-}
-
-func rawJSONValue(raw json.RawMessage) any {
-	if len(raw) == 0 {
-		return nil
-	}
-	copied := append([]byte(nil), raw...)
-	return clawhubprompt.RawJSON(copied)
-}
-
-func applyScannerEvidenceToClawHubJob(job *clawhubprompt.Job, artifact Artifact) {
-	result, ok := artifact.Scanners["virustotal"]
-	if !ok || len(result.Raw) == 0 {
-		return
-	}
-	if job.Target.Version == nil && job.Target.Release == nil {
-		job.Target.Version = &clawhubprompt.Version{}
-	}
-	if job.Target.Version != nil {
-		job.Target.Version.VTAnalysis = clawhubprompt.RawJSON(result.Raw)
-		return
-	}
-	job.Target.Release.VTAnalysis = clawhubprompt.RawJSON(result.Raw)
-}
-
 var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9_-]+)\s*\}\}`)
+var judgePlaceholderPattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]+))?\s*\}\}`)
 
 const maxTargetFileBytes = 64 * 1024
 const maxTargetFilesBytes = 256 * 1024
 const maxOmittedTargetFileMarkers = 25
+const defaultJudgePromptPath = "./prompt.md"
+const defaultJudgeOutputSchemaPath = "./schema.json"
 
-func RenderJudgePrompt(template string, artifact Artifact) (string, error) {
+func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
 	rendered, err := renderTargetFilesPlaceholder(template, artifact)
 	if err != nil {
 		return "", err
@@ -519,7 +322,7 @@ func RenderJudgePrompt(template string, artifact Artifact) (string, error) {
 		scanner := parts[1]
 		result, ok := artifact.Scanners[scanner]
 		if !ok {
-			renderErr = fmt.Errorf("judge prompt references scanner %s, but it was not requested", scanner)
+			renderErr = fmt.Errorf("prompt references scanner %s, but it was not requested", scanner)
 			return match
 		}
 		if len(result.Raw) == 0 {
@@ -686,6 +489,374 @@ func sha256Hex(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+type judgeCommandState struct {
+	workspace        string
+	outputPath       string
+	outputUsed       bool
+	promptSource     string
+	promptPath       string
+	promptSHA        string
+	outputSchemaPath string
+	outputSchemaSHA  string
+	schemaSource     string
+}
+
+func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration) (*JudgeResult, error) {
+	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(workspace)
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		return nil, err
+	}
+	if timeout == 0 {
+		timeout = 20 * time.Minute
+	}
+	state := &judgeCommandState{
+		workspace:  workspace,
+		outputPath: filepath.Join(workspace, "judge-output.json"),
+	}
+	command, err := renderJudgeCommand(opts.Command, artifact, state)
+	if err != nil {
+		return nil, err
+	}
+	output, runErr := commandRunner.Run("/bin/sh", []string{"-c", command}, workspace, timeout)
+	raw := strings.TrimSpace(output.Stdout)
+	if state.outputUsed {
+		outputBytes, readErr := os.ReadFile(state.outputPath)
+		if readErr == nil {
+			raw = strings.TrimSpace(string(outputBytes))
+		} else if runErr == nil {
+			runErr = readErr
+		}
+	}
+	result := &JudgeResult{
+		Status:           "completed",
+		PromptPath:       state.promptSource,
+		OutputSchemaPath: state.schemaSource,
+		OutputPath:       state.outputPath,
+		PromptSHA:        state.promptSHA,
+		OutputSchemaSHA:  state.outputSchemaSHA,
+		Error:            "",
+		Result:           nil,
+	}
+	if runErr != nil {
+		result.Status = "failed"
+		result.Error = runErr.Error()
+		if strings.TrimSpace(output.Stderr) != "" {
+			result.Error += ": " + strings.TrimSpace(output.Stderr)
+		}
+	}
+	if raw == "" {
+		if result.Status == "failed" {
+			return result, nil
+		}
+		result.Status = "failed"
+		result.Error = "Judge command did not produce JSON output."
+		return result, nil
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		if result.Status == "failed" {
+			result.Result = raw
+			return result, nil
+		}
+		return nil, fmt.Errorf("parse judge JSON output: %w", err)
+	}
+	if _, ok := parsed.(map[string]any); !ok {
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("Judge command produced %s; expected JSON object.", judgeJSONType(parsed))
+		result.Result = parsed
+		return result, nil
+	}
+	result.Result = parsed
+	return result, nil
+}
+
+func judgeJSONType(value any) string {
+	switch value.(type) {
+	case nil:
+		return "null"
+	case []any:
+		return "JSON array"
+	case string:
+		return "JSON string"
+	case float64:
+		return "JSON number"
+	case bool:
+		return "JSON boolean"
+	default:
+		return "JSON value"
+	}
+}
+
+func renderJudgeCommand(command string, artifact Artifact, state *judgeCommandState) (string, error) {
+	var renderErr error
+	rendered := judgePlaceholderPattern.ReplaceAllStringFunc(command, func(match string) string {
+		if renderErr != nil {
+			return match
+		}
+		parts := judgePlaceholderPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		name := parts[1]
+		value := strings.TrimSpace(parts[2])
+		switch name {
+		case "workspace":
+			if value != "" {
+				renderErr = fmt.Errorf("{{ workspace }} does not accept a path")
+				return match
+			}
+			return shellQuote(state.workspace)
+		case "output":
+			if value != "" {
+				renderErr = fmt.Errorf("{{ output }} does not accept a path")
+				return match
+			}
+			state.outputUsed = true
+			return shellQuote(state.outputPath)
+		case "prompt":
+			path, err := prepareJudgePrompt(value, artifact, state)
+			if err != nil {
+				renderErr = err
+				return match
+			}
+			return shellQuote(path)
+		case "output_schema":
+			path, err := prepareJudgeOutputSchema(value, state)
+			if err != nil {
+				renderErr = err
+				return match
+			}
+			return shellQuote(path)
+		default:
+			renderErr = fmt.Errorf("unknown judge placeholder: %s", name)
+			return match
+		}
+	})
+	if renderErr != nil {
+		return "", renderErr
+	}
+	return rendered, nil
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandState) (string, error) {
+	if source == "" {
+		source = defaultJudgePromptPath
+	}
+	if state.promptSource != "" {
+		if state.promptSource != source {
+			return "", errors.New("multiple judge prompt paths are not supported")
+		}
+		return state.promptPath, nil
+	}
+	promptTemplate, err := os.ReadFile(source)
+	if err != nil {
+		return "", err
+	}
+	prompt, err := RenderPromptTemplate(string(promptTemplate), artifact)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(state.workspace, "prompt.md")
+	if err := os.WriteFile(path, []byte(prompt), 0o644); err != nil {
+		return "", err
+	}
+	state.promptSource = source
+	state.promptPath = path
+	state.promptSHA = sha256Hex(prompt)
+	return path, nil
+}
+
+func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, error) {
+	if source == "" {
+		source = defaultJudgeOutputSchemaPath
+	}
+	if state.schemaSource != "" {
+		if state.schemaSource != source {
+			return "", errors.New("multiple judge output schema paths are not supported")
+		}
+		return state.outputSchemaPath, nil
+	}
+	schema, err := os.ReadFile(source)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(state.workspace, "schema.json")
+	if err := os.WriteFile(path, schema, 0o644); err != nil {
+		return "", err
+	}
+	state.schemaSource = source
+	state.outputSchemaPath = path
+	state.outputSchemaSHA = sha256Hex(string(schema))
+	return path, nil
+}
+
+func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
+	manifest, err := copyTargetToWorkspace(artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
+	if err != nil {
+		return err
+	}
+	scannersDir := filepath.Join(workspace, "scanners")
+	if err := os.MkdirAll(scannersDir, 0o755); err != nil {
+		return err
+	}
+	for name, result := range artifact.Scanners {
+		raw := result.Raw
+		if len(raw) == 0 {
+			raw = json.RawMessage("null")
+		}
+		if err := os.WriteFile(filepath.Join(scannersDir, name+".json"), raw, 0o644); err != nil {
+			return err
+		}
+	}
+	metadata := map[string]any{
+		"schemaVersion": artifact.SchemaVersion,
+		"target":        artifact.Target,
+		"scanners":      artifact.Scanners,
+		"workspace": map[string]any{
+			"artifact": manifest,
+		},
+	}
+	rawMetadata, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(workspace, "metadata.json"), append(rawMetadata, '\n'), 0o644)
+}
+
+func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManifest, error) {
+	manifest := TargetWorkspaceManifest{}
+	info, err := os.Stat(source)
+	if err != nil {
+		return manifest, err
+	}
+	if !info.IsDir() {
+		if err := os.MkdirAll(destRoot, 0o755); err != nil {
+			return manifest, err
+		}
+		if !info.Mode().IsRegular() {
+			manifest.addOmitted(filepath.Base(source), "not regular file", 0)
+			return manifest, nil
+		}
+		if info.Size() > maxTargetFileBytes {
+			manifest.addOmitted(filepath.Base(source), "file exceeds size limit", info.Size())
+			return manifest, nil
+		}
+		if err := copyFile(source, filepath.Join(destRoot, filepath.Base(source))); err != nil {
+			return manifest, err
+		}
+		manifest.addCopied(filepath.Base(source), info.Size())
+		return manifest, nil
+	}
+	var totalBytes int64
+	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if shouldSkipTargetPath(source, path) {
+			rel := relativeManifestPath(source, path)
+			if entry.IsDir() {
+				manifest.addOmitted(rel, "skipped path", 0)
+				return filepath.SkipDir
+			}
+			manifest.addOmitted(rel, "skipped path", 0)
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if info.Size() > maxTargetFileBytes {
+			manifest.addOmitted(rel, "file exceeds size limit", info.Size())
+			return nil
+		}
+		if totalBytes+info.Size() > maxTargetFilesBytes {
+			manifest.addOmitted(rel, "total file budget exceeded", info.Size())
+			return nil
+		}
+		if err := copyFile(path, filepath.Join(destRoot, rel)); err != nil {
+			return err
+		}
+		totalBytes += info.Size()
+		manifest.addCopied(rel, info.Size())
+		return nil
+	})
+	return manifest, err
+}
+
+func (manifest *TargetWorkspaceManifest) addCopied(path string, bytes int64) {
+	manifest.TotalCopiedBytes += bytes
+	if len(manifest.Copied) >= maxOmittedTargetFileMarkers {
+		manifest.SuppressedCopied++
+		return
+	}
+	manifest.Copied = append(manifest.Copied, TargetWorkspaceFile{
+		Path:  filepath.ToSlash(path),
+		Bytes: bytes,
+	})
+}
+
+func (manifest *TargetWorkspaceManifest) addOmitted(path string, reason string, bytes int64) {
+	manifest.TotalOmittedBytes += bytes
+	if len(manifest.Omitted) >= maxOmittedTargetFileMarkers {
+		manifest.SuppressedOmitted++
+		return
+	}
+	manifest.Omitted = append(manifest.Omitted, TargetWorkspaceOmission{
+		Path:   filepath.ToSlash(path),
+		Reason: reason,
+		Bytes:  bytes,
+	})
+}
+
+func relativeManifestPath(root string, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return rel
+}
+
+func copyFile(source string, dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
 type ExternalScannerRunner struct {
 	CommandRunner       CommandRunner
 	Env                 map[string]string
@@ -693,129 +864,65 @@ type ExternalScannerRunner struct {
 	Timeout             time.Duration
 }
 
-type OpenAIJudgeRunner struct {
-	Env        map[string]string
-	HTTPClient *http.Client
-	BaseURL    string
+type OpenAIRequestOptions struct {
+	Model     string
+	Reasoning string
 }
 
-func (runner OpenAIJudgeRunner) RunJudge(opts JudgeOptions, artifact Artifact, prompt string, schema json.RawMessage) (*JudgeResult, error) {
+type openAIRequest struct {
+	Model     string                 `json:"model"`
+	Input     []openAIRequestMessage `json:"input"`
+	Text      openAIRequestText      `json:"text"`
+	Reasoning *openAIReasoning       `json:"reasoning,omitempty"`
+}
+
+type openAIRequestMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type openAIRequestText struct {
+	Format openAIResponseFormat `json:"format"`
+}
+
+type openAIResponseFormat struct {
+	Type   string `json:"type"`
+	Name   string `json:"name"`
+	Schema any    `json:"schema"`
+	Strict bool   `json:"strict"`
+}
+
+type openAIReasoning struct {
+	Effort string `json:"effort"`
+}
+
+func OpenAIRequestBody(opts OpenAIRequestOptions, systemPrompt string, prompt string, schema json.RawMessage) ([]byte, error) {
 	if !strings.HasPrefix(opts.Model, "openai/") {
-		return &JudgeResult{
-			Status:     "skipped",
-			Model:      opts.Model,
-			Reasoning:  opts.Reasoning,
-			PromptPath: opts.PromptPath,
-			SchemaPath: opts.SchemaPath,
-			Error:      "Judge provider not implemented.",
-			Result:     nil,
-		}, nil
-	}
-	apiKey := strings.TrimSpace(runner.Env["OPENAI_API_KEY"])
-	if apiKey == "" {
-		return nil, errors.New("OPENAI_API_KEY is required by judge model " + opts.Model)
+		return nil, fmt.Errorf("unsupported OpenAI request model provider: %s", opts.Model)
 	}
 	var schemaValue any
 	if err := json.Unmarshal(schema, &schemaValue); err != nil {
-		return nil, fmt.Errorf("parse judge schema: %w", err)
+		return nil, fmt.Errorf("parse output schema: %w", err)
 	}
-	model := strings.TrimPrefix(opts.Model, "openai/")
-	requestBody := map[string]any{
-		"model": model,
-		"input": prompt,
-		"text": map[string]any{
-			"format": map[string]any{
-				"type":   "json_schema",
-				"name":   "clawscan_judge",
-				"schema": schemaValue,
-				"strict": true,
-			},
-		},
+	input := []openAIRequestMessage{}
+	if systemPrompt != "" {
+		input = append(input, openAIRequestMessage{Role: "system", Content: systemPrompt})
+	}
+	input = append(input, openAIRequestMessage{Role: "user", Content: prompt})
+	requestBody := openAIRequest{
+		Model: strings.TrimPrefix(opts.Model, "openai/"),
+		Input: input,
+		Text: openAIRequestText{Format: openAIResponseFormat{
+			Type:   "json_schema",
+			Name:   "clawscan_output",
+			Schema: schemaValue,
+			Strict: true,
+		}},
 	}
 	if opts.Reasoning != "" {
-		requestBody["reasoning"] = map[string]any{"effort": opts.Reasoning}
+		requestBody.Reasoning = &openAIReasoning{Effort: opts.Reasoning}
 	}
-	body, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, err
-	}
-	baseURL := runner.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-	client := runner.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Minute}
-	}
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/responses", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &JudgeResult{
-			Status:     "failed",
-			Model:      opts.Model,
-			Reasoning:  opts.Reasoning,
-			PromptPath: opts.PromptPath,
-			SchemaPath: opts.SchemaPath,
-			Error:      fmt.Sprintf("OpenAI Responses API returned %s: %s", resp.Status, strings.TrimSpace(string(respBody))),
-			Result:     nil,
-		}, nil
-	}
-	outputText, err := responseOutputText(respBody)
-	if err != nil {
-		return nil, err
-	}
-	var result any
-	if err := json.Unmarshal([]byte(outputText), &result); err != nil {
-		return nil, fmt.Errorf("parse judge JSON output: %w", err)
-	}
-	return &JudgeResult{
-		Status:     "completed",
-		Model:      opts.Model,
-		Reasoning:  opts.Reasoning,
-		PromptPath: opts.PromptPath,
-		SchemaPath: opts.SchemaPath,
-		Error:      "",
-		Result:     result,
-	}, nil
-}
-
-func responseOutputText(body []byte) (string, error) {
-	var payload struct {
-		OutputText string `json:"output_text"`
-		Output     []struct {
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"output"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", err
-	}
-	if payload.OutputText != "" {
-		return payload.OutputText, nil
-	}
-	for _, item := range payload.Output {
-		for _, content := range item.Content {
-			if content.Type == "output_text" && content.Text != "" {
-				return content.Text, nil
-			}
-		}
-	}
-	return "", errors.New("OpenAI response did not include output text")
+	return json.Marshal(requestBody)
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
@@ -993,18 +1100,6 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 			Raw:         nil,
 		}
 	}
-	var judge *JudgeResult
-	if opts.Judge != nil {
-		judge = &JudgeResult{
-			Status:     "skipped",
-			Model:      opts.Judge.Model,
-			Reasoning:  opts.Judge.Reasoning,
-			PromptPath: opts.Judge.PromptPath,
-			SchemaPath: opts.Judge.SchemaPath,
-			Error:      "Judge execution not implemented in foundation slice.",
-			Result:     nil,
-		}
-	}
 	return Artifact{
 		SchemaVersion: "clawscan-run-v1",
 		Target: Target{
@@ -1016,7 +1111,7 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 		CompletedAt: completedAt,
 		Env:         envPresence(opts, env),
 		Scanners:    scanners,
-		Judge:       judge,
+		Judge:       nil,
 	}
 }
 
@@ -1055,14 +1150,6 @@ func requirements(opts Options, env map[string]string) []requirement {
 			reqs = append(reqs, requirement{"VIRUSTOTAL_API_KEY", "scanner virustotal"})
 		case "snyk":
 			reqs = append(reqs, requirement{"SNYK_TOKEN", "scanner snyk"})
-		}
-	}
-	if opts.Judge != nil && !opts.Judge.DryRun {
-		switch {
-		case strings.HasPrefix(opts.Judge.Model, "openai/"):
-			reqs = append(reqs, requirement{"OPENAI_API_KEY", "judge model " + opts.Judge.Model})
-		case strings.HasPrefix(opts.Judge.Model, "anthropic/"):
-			reqs = append(reqs, requirement{"ANTHROPIC_API_KEY", "judge model " + opts.Judge.Model})
 		}
 	}
 	return dedupe(reqs)
@@ -1109,10 +1196,6 @@ func dedupe(reqs []requirement) []requirement {
 		}
 	}
 	return out
-}
-
-func supportedJudgeModel(model string) bool {
-	return strings.HasPrefix(model, "openai/") || strings.HasPrefix(model, "anthropic/")
 }
 
 func readValue(args []string, index int, flag string) (string, int, error) {

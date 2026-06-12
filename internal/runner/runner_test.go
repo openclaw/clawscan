@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/openclaw/clawscan/internal/clawhubprompt"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -19,10 +17,7 @@ func TestParseArgs(t *testing.T) {
 		"./my-skill",
 		"--scanner", "skillspector",
 		"--scanner", "virustotal",
-		"--judge-prompt", "./prompt.md",
-		"--judge-schema", "./schema.json",
-		"--judge-model", "openai/gpt-5.5",
-		"--judge-reasoning", "high",
+		"--judge", "codex exec --cd {{ workspace }} --output-schema {{ output_schema }} --output-last-message {{ output }} - < {{ prompt }}",
 		"--output", "./run.json",
 	})
 	if err != nil {
@@ -37,7 +32,7 @@ func TestParseArgs(t *testing.T) {
 	if opts.OutputPath != "./run.json" {
 		t.Fatalf("output = %q", opts.OutputPath)
 	}
-	if opts.Judge == nil || opts.Judge.Model != "openai/gpt-5.5" || opts.Judge.Reasoning != "high" {
+	if opts.Judge == nil || !strings.Contains(opts.Judge.Command, "codex exec") {
 		t.Fatalf("judge = %#v", opts.Judge)
 	}
 }
@@ -52,17 +47,22 @@ func TestParseArgsAcceptsAgentVerusScanner(t *testing.T) {
 	}
 }
 
-func TestParseArgsSupportsClawHubPromptMode(t *testing.T) {
+func TestParseArgsAcceptsStaticScanner(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "static" {
+		t.Fatalf("scanners = %q", got)
+	}
+}
+
+func TestParseArgsSupportsJudgeCommand(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
 		"--scanner", "skillspector",
 		"--scanner-result", "skillspector=./skillspector.json",
-		"--judge-model", "openai/gpt-5.5",
-		"--judge-reasoning", "high",
-		"--judge-dry-run",
-		"--clawhub-system-prompt", "./system.md",
-		"--clawhub-job", "./job.json",
-		"--clawhub-injection-signal", "html-comment-injection",
+		"--judge", "judge --prompt {{ prompt:./custom-prompt.md }} --schema {{ output_schema:./custom.schema.json }} --output {{ output }}",
 		"--output", "./run.json",
 	})
 	if err != nil {
@@ -71,17 +71,8 @@ func TestParseArgsSupportsClawHubPromptMode(t *testing.T) {
 	if opts.ScannerResultPaths["skillspector"] != "./skillspector.json" {
 		t.Fatalf("scanner result paths = %#v", opts.ScannerResultPaths)
 	}
-	if opts.Judge == nil || !opts.Judge.DryRun {
+	if opts.Judge == nil || !strings.Contains(opts.Judge.Command, "{{ prompt:./custom-prompt.md }}") {
 		t.Fatalf("judge = %#v", opts.Judge)
-	}
-	if opts.Judge.ClawHub == nil {
-		t.Fatalf("missing clawhub prompt opts: %#v", opts.Judge)
-	}
-	if opts.Judge.ClawHub.SystemPromptPath != "./system.md" || opts.Judge.ClawHub.JobPath != "./job.json" {
-		t.Fatalf("clawhub = %#v", opts.Judge.ClawHub)
-	}
-	if got := strings.Join(opts.Judge.ClawHub.InjectionSignals, ","); got != "html-comment-injection" {
-		t.Fatalf("injection signals = %q", got)
 	}
 }
 
@@ -96,28 +87,12 @@ func TestParseArgsRejectsScannerResultForUnrequestedScanner(t *testing.T) {
 	}
 }
 
-func TestParseArgsRequiresDryRunForClawHubPromptMode(t *testing.T) {
-	_, err := ParseArgs([]string{
-		"./my-skill",
-		"--scanner", "skillspector",
-		"--judge-model", "openai/gpt-5.5",
-		"--judge-schema", "./schema.json",
-		"--clawhub-system-prompt", "./system.md",
-		"--clawhub-job", "./job.json",
-	})
-	if err == nil || err.Error() != "ClawHub compatibility mode currently requires --judge-dry-run" {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestValidateRequirements(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
 		"--scanner", "virustotal",
 		"--scanner", "snyk",
-		"--judge-prompt", "./prompt.md",
-		"--judge-schema", "./schema.json",
-		"--judge-model", "openai/gpt-5.5",
+		"--judge", "codex exec --cd {{ workspace }} --output-schema {{ output_schema }} --output-last-message {{ output }} - < {{ prompt }}",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +105,6 @@ func TestValidateRequirements(t *testing.T) {
 		"Missing required environment variables:",
 		"",
 		"- VIRUSTOTAL_API_KEY required by scanner virustotal",
-		"- OPENAI_API_KEY required by judge model openai/gpt-5.5",
 	}, "\n")
 	if err.Error() != want {
 		t.Fatalf("error:\n%s", err)
@@ -148,19 +122,6 @@ func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
 	}
 	if err := ValidateRequirements(opts, map[string]string{}); err != nil {
 		t.Fatalf("expected fixture-backed scanner to avoid live credentials, got %v", err)
-	}
-}
-
-func TestRejectUnsupportedJudgeProvider(t *testing.T) {
-	_, err := ParseArgs([]string{
-		"./my-skill",
-		"--scanner", "skillspector",
-		"--judge-prompt", "./prompt.md",
-		"--judge-schema", "./schema.json",
-		"--judge-model", "google/gemini",
-	})
-	if err == nil || err.Error() != "Unsupported judge model provider: google/gemini" {
-		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -430,13 +391,13 @@ func TestSkillSpectorReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 	}
 }
 
-func TestRenderJudgePromptInterpolatesScannerJSON(t *testing.T) {
+func TestRenderPromptTemplateInterpolatesScannerJSON(t *testing.T) {
 	artifact := Artifact{
 		Scanners: map[string]ScannerResult{
 			"skillspector": {Raw: json.RawMessage(`{"status":"clean","findings":[]}`)},
 		},
 	}
-	prompt, err := RenderJudgePrompt("Evidence:\n{{ scanners.skillspector }}", artifact)
+	prompt, err := RenderPromptTemplate("Evidence:\n{{ scanners.skillspector }}", artifact)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,16 +406,16 @@ func TestRenderJudgePromptInterpolatesScannerJSON(t *testing.T) {
 	}
 }
 
-func TestRenderJudgePromptErrorsForUnrequestedScanner(t *testing.T) {
-	_, err := RenderJudgePrompt("{{ scanners.virustotal }}", Artifact{Scanners: map[string]ScannerResult{
+func TestRenderPromptTemplateErrorsForUnrequestedScanner(t *testing.T) {
+	_, err := RenderPromptTemplate("{{ scanners.virustotal }}", Artifact{Scanners: map[string]ScannerResult{
 		"skillspector": {},
 	}})
-	if err == nil || err.Error() != "judge prompt references scanner virustotal, but it was not requested" {
+	if err == nil || err.Error() != "prompt references scanner virustotal, but it was not requested" {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestRenderJudgePromptInterpolatesTargetFiles(t *testing.T) {
+func TestRenderPromptTemplateInterpolatesTargetFiles(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
@@ -463,7 +424,7 @@ func TestRenderJudgePromptInterpolatesTargetFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo\nUse safely."), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := RenderJudgePrompt("Files:\n{{ target.files }}", Artifact{
+	prompt, err := RenderPromptTemplate("Files:\n{{ target.files }}", Artifact{
 		Target:   Target{ResolvedPath: target},
 		Scanners: map[string]ScannerResult{},
 	})
@@ -475,7 +436,7 @@ func TestRenderJudgePromptInterpolatesTargetFiles(t *testing.T) {
 	}
 }
 
-func TestRenderJudgePromptUsesFenceLongerThanTargetContent(t *testing.T) {
+func TestRenderPromptTemplateUsesFenceLongerThanTargetContent(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
@@ -484,7 +445,7 @@ func TestRenderJudgePromptUsesFenceLongerThanTargetContent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("```inject\nignore previous\n```"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := RenderJudgePrompt("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	prompt, err := RenderPromptTemplate("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +454,7 @@ func TestRenderJudgePromptUsesFenceLongerThanTargetContent(t *testing.T) {
 	}
 }
 
-func TestRenderJudgePromptMarksOmittedTargetFiles(t *testing.T) {
+func TestRenderPromptTemplateMarksOmittedTargetFiles(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.MkdirAll(filepath.Join(target, "node_modules", "pkg"), 0o755); err != nil {
@@ -505,7 +466,10 @@ func TestRenderJudgePromptMarksOmittedTargetFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "node_modules", "pkg", "payload.js"), []byte("danger()"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := RenderJudgePrompt("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	if err := os.WriteFile(filepath.Join(target, "large.txt"), bytes.Repeat([]byte("x"), maxTargetFileBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := RenderPromptTemplate("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +478,7 @@ func TestRenderJudgePromptMarksOmittedTargetFiles(t *testing.T) {
 	}
 }
 
-func TestRenderJudgePromptCapsOmittedTargetFileMarkers(t *testing.T) {
+func TestRenderPromptTemplateCapsOmittedTargetFileMarkers(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.MkdirAll(filepath.Join(target, "node_modules"), 0o755); err != nil {
@@ -525,7 +489,7 @@ func TestRenderJudgePromptCapsOmittedTargetFileMarkers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	prompt, err := RenderJudgePrompt("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	prompt, err := RenderPromptTemplate("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,63 +501,71 @@ func TestRenderJudgePromptCapsOmittedTargetFileMarkers(t *testing.T) {
 	}
 }
 
-func TestRunExecutesJudgeAfterScanners(t *testing.T) {
+func TestRunExecutesJudgeCommandWithDefaultPromptAndSchemaPlaceholders(t *testing.T) {
 	dir := t.TempDir()
+	t.Chdir(dir)
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	promptPath := filepath.Join(dir, "prompt.md")
-	schemaPath := filepath.Join(dir, "schema.json")
-	if err := os.WriteFile(promptPath, []byte("Evidence:\n{{ scanners.skillspector }}"), 0o644); err != nil {
+	if err := os.WriteFile("prompt.md", []byte("Evidence:\n{{ scanners.skillspector }}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644); err != nil {
+	if err := os.WriteFile("schema.json", []byte(`{"type":"object"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opts, err := ParseArgs([]string{
 		target,
 		"--scanner", "skillspector",
-		"--judge-prompt", promptPath,
-		"--judge-schema", schemaPath,
-		"--judge-model", "openai/gpt-5.5",
+		"--judge", "judge --workspace {{ workspace }} --prompt {{ prompt }} --schema {{ output_schema }} --output {{ output }}",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	judge := &recordingJudgeRunner{result: map[string]any{"verdict": "benign"}}
+	judgeRunner := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{"OPENAI_API_KEY": "present"},
+		Env: map[string]string{},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
-		JudgeRunner: judge,
+		CommandRunner: judgeRunner,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
-		t.Fatalf("judge = %#v", artifact.Judge)
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(judge.prompt, `"status": "clean"`) {
-		t.Fatalf("prompt = %s", judge.prompt)
+	if !bytes.Contains(raw, []byte(`"judge"`)) || !bytes.Contains(raw, []byte(`"verdict":"benign"`)) {
+		t.Fatalf("artifact = %s", raw)
+	}
+	if len(judgeRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", judgeRunner.calls)
+	}
+	renderedCommand := strings.Join(append([]string{judgeRunner.calls[0].command}, judgeRunner.calls[0].args...), " ")
+	if strings.Contains(renderedCommand, "{{") {
+		t.Fatalf("unrendered placeholder in command: %s", renderedCommand)
+	}
+	if !strings.Contains(renderedCommand, "--workspace ") || !strings.Contains(renderedCommand, "--prompt ") || !strings.Contains(renderedCommand, "--schema ") || !strings.Contains(renderedCommand, "--output ") {
+		t.Fatalf("rendered command missing expected paths: %s", renderedCommand)
 	}
 }
 
-func TestRunDryRunsClawHubPromptWithScannerResultFixture(t *testing.T) {
+func TestRunExecutesJudgeCommandWithExplicitPromptAndSchemaPlaceholders(t *testing.T) {
 	dir := t.TempDir()
+	t.Chdir(dir)
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	systemPromptPath := filepath.Join(dir, "system.md")
-	jobPath := filepath.Join(dir, "job.json")
+	promptPath := filepath.Join(dir, "review.md")
+	schemaPath := filepath.Join(dir, "verdict.schema.json")
 	skillSpectorPath := filepath.Join(dir, "skillspector.json")
-	if err := os.WriteFile(systemPromptPath, []byte("SYSTEM"), 0o644); err != nil {
+	if err := os.WriteFile(promptPath, []byte("Evidence:\n{{ scanners.skillspector }}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	jobJSON := `{"job":{"targetKind":"skillVersion","source":"publish","hasMaliciousSignal":true},"target":{"trustedOpenClawPlugin":true,"version":{"vtAnalysis":{"status":"suspicious","source":"engines","metadata":{"stats":{"malicious":1,"suspicious":0,"harmless":12}}}}}}`
-	if err := os.WriteFile(jobPath, []byte(jobJSON), 0o644); err != nil {
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	skillSpectorJSON := `{"status":"suspicious","score":55,"recommendation":"DO_NOT_INSTALL","issueCount":1,"checkedAt":123,"issues":[{"issueId":"SDI-1","severity":"HIGH","explanation":"Mismatch"}]}`
@@ -604,41 +576,24 @@ func TestRunDryRunsClawHubPromptWithScannerResultFixture(t *testing.T) {
 		target,
 		"--scanner", "skillspector",
 		"--scanner-result", "skillspector=" + skillSpectorPath,
-		"--judge-model", "openai/gpt-5.5",
-		"--judge-dry-run",
-		"--clawhub-system-prompt", systemPromptPath,
-		"--clawhub-job", jobPath,
-		"--clawhub-injection-signal", "html-comment-injection",
+		"--judge", "judge --prompt {{ prompt:" + promptPath + " }} --schema {{ output_schema:" + schemaPath + " }} --output {{ output }}",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedPrompt, err := clawhubprompt.Build(
-		"SYSTEM",
-		clawhubprompt.Job{
-			Job: clawhubprompt.JobMetadata{
-				TargetKind:         "skillVersion",
-				Source:             "publish",
-				HasMaliciousSignal: true,
-			},
-			Target: clawhubprompt.Target{
-				TrustedOpenClawPlugin: true,
-				Version: &clawhubprompt.Version{
-					VTAnalysis: clawhubprompt.RawJSON(`{"status":"suspicious","source":"engines","metadata":{"stats":{"malicious":1,"suspicious":0,"harmless":12}}}`),
-				},
-			},
+	expectedPrompt, err := RenderPromptTemplate("Evidence:\n{{ scanners.skillspector }}", Artifact{
+		Scanners: map[string]ScannerResult{
+			"skillspector": {Raw: json.RawMessage(skillSpectorJSON)},
 		},
-		[]string{"html-comment-injection"},
-		clawhubprompt.RawJSON(skillSpectorJSON),
-	)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	judge := &recordingJudgeRunner{result: map[string]any{"verdict": "benign"}}
+	judgeRunner := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
 	artifact, err := Run(opts, RunContext{
 		Env:           map[string]string{},
 		ScannerRunner: errorScannerRunner{},
-		JudgeRunner:   judge,
+		CommandRunner: judgeRunner,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -649,14 +604,207 @@ func TestRunDryRunsClawHubPromptWithScannerResultFixture(t *testing.T) {
 	if !bytes.Equal(artifact.Scanners["skillspector"].Raw, []byte(skillSpectorJSON)) {
 		t.Fatalf("raw = %s", artifact.Scanners["skillspector"].Raw)
 	}
-	if artifact.Judge == nil || artifact.Judge.Status != "dry_run" {
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(sha256Hex(expectedPrompt))) {
+		t.Fatalf("artifact missing rendered prompt hash: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte(sha256Hex(`{"type":"object"}`))) {
+		t.Fatalf("artifact missing schema hash: %s", raw)
+	}
+}
+
+func TestRunJudgeWorkspaceSkipsIgnoredAndLargeTargetFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(filepath.Join(target, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "node_modules", "pkg", "payload.js"), []byte("danger()"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("prompt.md", []byte("Evidence only"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("schema.json", []byte(`{"type":"object"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "test ! -e {{ workspace }}/artifact/node_modules/pkg/payload.js && test ! -e {{ workspace }}/artifact/large.txt && printf '{\"ok\":true}\\n' > {{ output }} # {{ prompt }} {{ output_schema }}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
 		t.Fatalf("judge = %#v", artifact.Judge)
 	}
-	if artifact.Judge.PromptSHA != sha256Hex(expectedPrompt) {
-		t.Fatalf("prompt sha = %q, want %q", artifact.Judge.PromptSHA, sha256Hex(expectedPrompt))
+}
+
+func TestPrepareJudgeWorkspaceRecordsOmittedTargetFiles(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(filepath.Join(target, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if judge.prompt != "" {
-		t.Fatalf("dry run called judge with prompt: %s", judge.prompt)
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "node_modules", "pkg", "payload.js"), []byte("danger()"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "large.txt"), bytes.Repeat([]byte("x"), maxTargetFileBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "artifact", "node_modules", "pkg", "payload.js")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("node_modules payload copied, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "artifact", "large.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("large file copied, err=%v", err)
+	}
+	metadata, err := os.ReadFile(filepath.Join(workspace, "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"node_modules", "skipped path", "large.txt", "file exceeds size limit"} {
+		if !bytes.Contains(metadata, []byte(expected)) {
+			t.Fatalf("metadata missing %q: %s", expected, metadata)
+		}
+	}
+}
+
+func TestRunJudgeRejectsNonObjectJSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "printf '[true]\\n'",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil {
+		t.Fatal("missing judge result")
+	}
+	if artifact.Judge.Status != "failed" {
+		t.Fatalf("judge status = %q", artifact.Judge.Status)
+	}
+	if !strings.Contains(artifact.Judge.Error, "expected JSON object") {
+		t.Fatalf("judge error = %q", artifact.Judge.Error)
+	}
+}
+
+func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "SECRET_TOKEN=supersecret printf '{\"ok\":true}\\n' > {{ output }}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("supersecret")) {
+		t.Fatalf("artifact leaked rendered judge command: %s", raw)
+	}
+	if artifact.Judge == nil || artifact.Judge.Command != "" {
+		t.Fatalf("judge command persisted: %#v", artifact.Judge)
+	}
+}
+
+func TestRunJudgeQuotesGeneratedPlaceholderPaths(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	tempRoot := filepath.Join(dir, "tmp with spaces")
+	if err := os.MkdirAll(tempRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tempRoot)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "test -d {{ workspace }} && printf '{\"ok\":true}\\n' > {{ output }}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
 	}
 }
 
@@ -688,22 +836,6 @@ func (errorScannerRunner) RunScanner(name string, target string, startedAt strin
 	return ScannerResult{}, fmt.Errorf("unexpected live scanner call for %s", name)
 }
 
-type recordingJudgeRunner struct {
-	prompt string
-	result any
-}
-
-func (runner *recordingJudgeRunner) RunJudge(opts JudgeOptions, artifact Artifact, prompt string, schema json.RawMessage) (*JudgeResult, error) {
-	runner.prompt = prompt
-	return &JudgeResult{
-		Status:     "completed",
-		Model:      opts.Model,
-		PromptPath: opts.PromptPath,
-		SchemaPath: opts.SchemaPath,
-		Result:     runner.result,
-	}, nil
-}
-
 type recordingCommandRunner struct {
 	calls       []commandCall
 	writeOutput string
@@ -719,9 +851,17 @@ type commandCall struct {
 
 func (r *recordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	r.calls = append(r.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
-	outputIndex := indexOfArg(args, "--output")
-	if outputIndex >= 0 && outputIndex+1 < len(args) {
-		if err := os.WriteFile(args[outputIndex+1], []byte(r.writeOutput), 0o644); err != nil {
+	outputArgs := args
+	if command == "/bin/sh" && len(args) == 2 && args[0] == "-c" {
+		outputArgs = strings.Fields(args[1])
+	}
+	outputIndex := indexOfArg(outputArgs, "--output")
+	if outputIndex < 0 {
+		outputIndex = indexOfArg(outputArgs, "--output-last-message")
+	}
+	if outputIndex >= 0 && outputIndex+1 < len(outputArgs) {
+		outputPath := strings.Trim(outputArgs[outputIndex+1], "'")
+		if err := os.WriteFile(outputPath, []byte(r.writeOutput), 0o644); err != nil {
 			return CommandOutput{}, err
 		}
 	}

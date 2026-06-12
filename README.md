@@ -2,11 +2,11 @@
 
 ClawScan is a standalone security runner for OpenClaw skills. It gives us one
 small command for running multiple skill scanners, collecting their raw evidence,
-and optionally passing that evidence into a judge prompt.
+and optionally passing that evidence into an external judge harness.
 
 The first goal is reproducibility: the open source tool should be able to run the
 same ClawHub ClawScan setup we run internally, while making it easier for others
-to compare scanners and iterate on their own judge prompts.
+to compare scanners and iterate on their own judge prompts and harnesses.
 
 ## Motivation
 
@@ -20,7 +20,8 @@ ClawScan exists to make that messy comparison work boring:
 - Preserve each scanner's raw JSON evidence instead of forcing one normalized
   verdict too early.
 - Compare scanner output side by side.
-- Iterate on a judge prompt and output schema without rewriting scanner glue.
+- Iterate on a judge prompt, output schema, and harness command without
+  rewriting scanner glue.
 - Reproduce ClawHub's current ClawScan prompt path char-for-char when needed.
 - Keep secrets out of CLI flags, shell history, process lists, and run artifacts.
 
@@ -36,10 +37,9 @@ This repository currently contains the Go CLI foundation:
 - environment-variable validation
 - secret-safe run artifacts
 - real SkillSpector execution
-- OpenAI judge execution with structured JSON output
+- external judge harness execution
 - prompt interpolation for scanner JSON and target files
 - deterministic scanner-result fixtures for reproducible prompt checks
-- ClawHub-compatible prompt rendering through the main `clawscan` CLI
 - ClawHub prompt parity proof tooling
 
 Scanner adapters are being filled in incrementally. SkillSpector executes today.
@@ -58,7 +58,7 @@ These scanner IDs are accepted by the CLI today:
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Supports local and optional provider-backed modes upstream. |
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. |
 | `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | Public lookup-style scanner for ClawHub skill URLs. |
-| `clawhub-static` | Built in | Lightweight local static scanner for ClawHub/OpenClaw skill artifacts. |
+| `static` | Built in | Lightweight local static scanner for skill artifacts. |
 
 Planned scanners should not be added to this table until the CLI accepts their
 scanner ID.
@@ -96,7 +96,6 @@ are grouped into one error:
 Missing required environment variables:
 
 - VIRUSTOTAL_API_KEY required by scanner virustotal
-- OPENAI_API_KEY required by judge model openai/gpt-5.5
 ```
 
 Run artifacts record only whether a variable was present:
@@ -114,6 +113,9 @@ Actual secret values are never written to the artifact.
 SkillSpector's provider-backed LLM analysis. When enabled with the default
 OpenAI-compatible provider, `OPENAI_API_KEY` is required.
 
+Judge harness credentials are owned by the command you pass to `--judge`.
+ClawScan does not add model-provider API keys to its own CLI flags or artifacts.
+
 ## Usage
 
 ```bash
@@ -130,29 +132,28 @@ clawscan <target> --scanner <scanner-id> [flags]
 | `--scanner-result <id=path>` | No | Yes | Use a JSON fixture as the scanner result instead of running that scanner. The scanner must also be listed with `--scanner`. |
 | `--output <path>` | No | No | Write the run artifact JSON to a file. |
 | `--json` | No | No | Print the run artifact JSON to stdout. |
-| `--judge-prompt <path>` | With judge | No | Markdown prompt file for the judge model. |
-| `--judge-schema <path>` | With judge call | No | JSON Schema file the judge output must satisfy. Required unless `--judge-dry-run` is used. |
-| `--judge-model <provider/model>` | With judge | No | Judge model, using `openai/...` or `anthropic/...`. |
-| `--judge-reasoning <level>` | No | No | Reasoning effort hint for providers that support it. |
-| `--judge-dry-run` | No | No | Render the judge prompt and record its SHA-256 without calling a model. |
-| `--clawhub-system-prompt <path>` | ClawHub mode | No | ClawHub system prompt text used to render the ClawHub-compatible prompt. |
-| `--clawhub-job <path>` | ClawHub mode | No | JSON object with the ClawHub job/target context used by the ClawHub worker prompt. |
-| `--clawhub-injection-signal <signal>` | No | Yes | Pre-scan prompt-injection signal to include in the ClawHub-compatible worker context. |
+| `--judge <cmd>` | No | No | External judge harness command. ClawScan interpolates placeholders, runs it through `/bin/sh -c`, and records its JSON output. |
 
-Generic judge prompts use `--judge-prompt`. ClawHub compatibility mode uses
-`--clawhub-system-prompt` and `--clawhub-job` instead. Use one prompt mode per
-run. A real judge call requires `--judge-schema`; `--judge-dry-run` only renders
-and hashes the prompt.
+If `--judge` is omitted, ClawScan only runs scanners and writes their raw
+results. If `--judge` is present, the command must produce a JSON object either
+at `{{ output }}` or on stdout.
 
-ClawHub compatibility mode is currently proof-only and requires
-`--judge-dry-run`. The ClawHub worker prompt assumes a workspace-capable Codex
-runner that can inspect extracted artifact files; the current model judge path
-only sends a prompt string to the provider API.
+### Judge Placeholders
 
-Current model providers:
+`--judge` supports these placeholders:
 
-- `openai/<model>` requires `OPENAI_API_KEY`
-- `anthropic/<model>` requires `ANTHROPIC_API_KEY`
+| Placeholder | Meaning |
+| --- | --- |
+| `{{ workspace }}` | Temporary judge workspace. It contains `artifact/` with copied target files, `scanners/<id>.json` with raw scanner results, and `metadata.json` with target/scanner metadata plus copied/omitted target-file records. |
+| `{{ prompt }}` | Render `./prompt.md`, write it to the workspace, and interpolate the rendered prompt path. |
+| `{{ prompt:<path> }}` | Render a specific prompt template path instead of `./prompt.md`. |
+| `{{ output_schema }}` | Copy `./schema.json` into the workspace and interpolate that copied schema path. |
+| `{{ output_schema:<path> }}` | Copy a specific schema path instead of `./schema.json`. |
+| `{{ output }}` | Path where the judge command should write its final JSON result. |
+
+Prompt templates can use scanner placeholders such as
+`{{ scanners.skillspector }}` and `{{ scanners.virustotal }}`. ClawScan renders
+those before the judge command runs.
 
 ## Sample Commands
 
@@ -176,29 +177,26 @@ clawscan ./my-skill \
   --output ./clawscan-run.json
 ```
 
-Run scanner comparison with a judge prompt and schema:
+Run scanner comparison with a Codex judge harness:
 
 ```bash
 clawscan ./my-skill \
   --scanner skillspector \
   --scanner virustotal \
-  --scanner clawhub-static \
-  --judge-model openai/gpt-5.5 \
-  --judge-reasoning high \
-  --judge-prompt ./prompts/security-judge.md \
-  --judge-schema ./schemas/security-verdict.schema.json \
+  --scanner static \
+  --judge 'codex exec --cd {{ workspace }} \
+    --model gpt-5.5 \
+    --sandbox read-only \
+    --skip-git-repo-check \
+    --ignore-user-config \
+    -c approval_policy=never \
+    -c model_reasoning_effort=high \
+    --output-schema {{ output_schema:./schemas/security-verdict.schema.json }} \
+    --output-last-message {{ output }} \
+    --ephemeral \
+    --json \
+    - < {{ prompt:./prompts/security-review.md }}' \
   --output ./clawscan-judged.json
-```
-
-Use Anthropic as the judge provider:
-
-```bash
-clawscan ./my-skill \
-  --scanner skillspector \
-  --judge-model anthropic/claude-sonnet-4.5 \
-  --judge-prompt ./judge.md \
-  --judge-schema ./schema.json \
-  --json
 ```
 
 Run the ClawHub prompt parity proof against a local ClawHub checkout:
@@ -206,33 +204,40 @@ Run the ClawHub prompt parity proof against a local ClawHub checkout:
 ```bash
 go run ./cmd/verify-clawhub-prompt \
   --clawhub-dir /path/to/clawhub \
-  --out /tmp/clawhub-prompt-parity-proof-go.json
+  --out /tmp/clawhub-prompt-parity-proof-go.json \
+  --out-system-prompt /tmp/clawhub-system.md \
+  --out-prompt /tmp/clawhub-prompt.md \
+  --out-output-schema /tmp/clawhub-output.schema.json \
+  --out-request /tmp/clawhub-request.json \
+  --out-skillspector-result /tmp/clawhub-skillspector.json \
+  --out-virustotal-result /tmp/clawhub-virustotal.json
 ```
 
 The parity proof compares the Go-rendered prompt against the current ClawHub
 TypeScript worker output char-for-char and records the prompt length, SHA-256,
 and whether SkillSpector evidence was supplied through the runtime input path.
+It also exports the full Codex stdin prompt, output schema, and scanner-result
+fixture files for the main CLI. The exported prompt is a normal ClawScan prompt
+template with `{{ scanners.skillspector }}` and `{{ scanners.virustotal }}`
+placeholders.
 
-Run the same ClawHub-compatible prompt path through the main CLI without calling
-a judge model:
+Run the exported prompt files through the main CLI with a no-op judge command:
 
 ```bash
 clawscan ./my-skill \
   --scanner skillspector \
-  --scanner-result skillspector=/tmp/skillspector.json \
-  --judge-model openai/gpt-5.5 \
-  --judge-dry-run \
-  --clawhub-system-prompt /tmp/clawhub-system-prompt.txt \
-  --clawhub-job /tmp/clawhub-job.json \
-  --clawhub-injection-signal html-comment-injection \
+  --scanner-result skillspector=/tmp/clawhub-skillspector.json \
+  --scanner virustotal \
+  --scanner-result virustotal=/tmp/clawhub-virustotal.json \
+  --judge 'printf "{\"ok\":true}\n" > {{ output }} # {{ prompt:/tmp/clawhub-prompt.md }} {{ output_schema:/tmp/clawhub-output.schema.json }}' \
   --output /tmp/clawscan-clawhub-prompt-proof.json
 ```
 
-This records `judge.status: "dry_run"` and `judge.promptSha256` in the artifact.
-Use it when comparing the standalone CLI against ClawHub's exact prompt without
-spending a model call. `--scanner-result` is intentionally explicit so parity
-checks can use stable scanner evidence instead of live scanner output that may
-change over time.
+This records `judge.status`, `judge.promptSha256`, and
+`judge.outputSchemaSha256` without spending a model call. For ClawHub parity,
+`judge.promptSha256` should match the verifier's `combinedPromptSha256`.
+`--scanner-result` is intentionally explicit so parity checks can use stable
+scanner evidence instead of live scanner output that may change over time.
 
 ## Artifact Shape
 
@@ -266,18 +271,20 @@ A run writes a `clawscan-run-v1` JSON artifact:
 ```
 
 The important design choice is that scanner output remains raw evidence. The
-judge prompt decides how to interpret it.
+judge harness decides how to interpret it.
 
-## Judge Prompt Model
+## Judge Harness
 
 The intended judge flow is:
 
 1. Run requested scanners.
 2. Wait for all scanner results.
-3. Interpolate raw scanner JSON into the judge prompt.
-4. Call the configured judge model.
-5. Ask the provider for structured JSON matching `--judge-schema`.
-6. Store the judge result alongside scanner evidence.
+3. Prepare a temporary judge workspace.
+4. Render any prompt referenced by `{{ prompt }}` or `{{ prompt:<path> }}`.
+5. Copy any schema referenced by `{{ output_schema }}` or
+   `{{ output_schema:<path> }}`.
+6. Interpolate placeholders into `--judge`.
+7. Run the judge command and store its JSON result alongside scanner evidence.
 
 Prompt authors should place scanner evidence explicitly:
 
