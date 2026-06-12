@@ -2,11 +2,69 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRunCommandPrintsHelp(t *testing.T) {
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"--help"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{
+		"Usage:",
+		"clawscan <target> --scanner <scanner-id> [flags]",
+		"--scanner <id>",
+		"Accepted scanner IDs:",
+		"agentverus, cisco, gendigital, skillspector, snyk, static, virustotal",
+		"Required environment variables:",
+		"SNYK_TOKEN",
+		"VIRUSTOTAL_API_KEY",
+		"CLAWSCAN_SKILLSPECTOR_LLM=1 requires OPENAI_API_KEY",
+		"Gen Digital supports URL targets only in v1",
+		"--judge <cmd>",
+		"{{ workspace }}",
+		"{{ prompt[:path] }}",
+		"{{ output_schema[:path] }}",
+		"{{ output }}",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunCommandShortHelpMatchesLongHelp(t *testing.T) {
+	longHelp := captureStdout(t, func() {
+		if err := run([]string{"--help"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	shortHelp := captureStdout(t, func() {
+		if err := run([]string{"-h"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if shortHelp != longHelp {
+		t.Fatalf("-h help did not match --help:\n--- -h ---\n%s\n--- --help ---\n%s", shortHelp, longHelp)
+	}
+}
+
+func TestRunCommandPreservesMissingTargetError(t *testing.T) {
+	err := run([]string{}, []string{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "Missing scan target" {
+		t.Fatalf("err = %q", err.Error())
+	}
+}
 
 func TestRunCommandWritesArtifact(t *testing.T) {
 	dir := t.TempDir()
@@ -66,4 +124,33 @@ func TestRunCommandDoesNotLeakPresentSecrets(t *testing.T) {
 	if strings.Contains(err.Error(), "secret-snyk") {
 		t.Fatalf("error leaked secret: %s", err)
 	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	original := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = write
+	t.Cleanup(func() {
+		os.Stdout = original
+	})
+
+	fn()
+
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = original
+	return string(out)
 }

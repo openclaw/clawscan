@@ -133,6 +133,15 @@ var scannerSet = map[string]bool{
 	"static":       true,
 }
 
+func ScannerIDs() []string {
+	ids := make([]string, 0, len(scannerSet))
+	for id := range scannerSet {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 func ParseArgs(args []string) (Options, error) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "--") {
 		return Options{}, errors.New("Missing scan target")
