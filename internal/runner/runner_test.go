@@ -662,6 +662,36 @@ func TestAgentVerusReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 	}
 }
 
+func TestAgentVerusInvalidJSONIsFailedScannerResult(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{stdout: "not json"}
+	opts, err := ParseArgs([]string{target, "--scanner", "agentverus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{},
+		CommandRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["agentverus"]
+	if result.Status != "failed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "invalid JSON") {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if result.Raw != nil {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+}
+
 func TestSkillSpectorRequiresOpenAIKeyWhenLLMOptedIn(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
 	if err != nil {
@@ -825,19 +855,23 @@ func TestRenderPromptTemplateMarksOmittedTargetFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, "payload.js\n[omitted: skipped path]") {
+	if !strings.Contains(prompt, "node_modules\n[omitted: skipped path]") {
 		t.Fatalf("prompt did not mark omitted file: %s", prompt)
+	}
+	if strings.Contains(prompt, "payload.js") {
+		t.Fatalf("prompt walked skipped directory: %s", prompt)
 	}
 }
 
 func TestRenderPromptTemplateCapsOmittedTargetFileMarkers(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
-	if err := os.MkdirAll(filepath.Join(target, "node_modules"), 0o755); err != nil {
+	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 40; i++ {
-		if err := os.WriteFile(filepath.Join(target, "node_modules", fmt.Sprintf("payload-%02d.js", i)), []byte("danger()"), 0o644); err != nil {
+		path := filepath.Join(target, fmt.Sprintf("large-%02d.txt", i))
+		if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxTargetFileBytes+1), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -845,7 +879,7 @@ func TestRenderPromptTemplateCapsOmittedTargetFileMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(prompt, "[omitted: skipped path]") != maxOmittedTargetFileMarkers {
+	if strings.Count(prompt, "[omitted: file exceeds size limit]") != maxOmittedTargetFileMarkers {
 		t.Fatalf("prompt did not cap omitted markers: %s", prompt)
 	}
 	if !strings.Contains(prompt, "[omitted: 15 additional files]") {
@@ -901,6 +935,43 @@ func TestRunExecutesJudgeCommandWithDefaultPromptAndSchemaPlaceholders(t *testin
 	}
 	if !strings.Contains(renderedCommand, "--workspace ") || !strings.Contains(renderedCommand, "--prompt ") || !strings.Contains(renderedCommand, "--schema ") || !strings.Contains(renderedCommand, "--output ") {
 		t.Fatalf("rendered command missing expected paths: %s", renderedCommand)
+	}
+}
+
+func TestRunRecordsInvalidJudgeJSONAsFailedResult(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "judge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	judgeRunner := &recordingCommandRunner{stdout: "not json"}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		CommandRunner: judgeRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "failed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	if !strings.Contains(artifact.Judge.Error, "invalid JSON") {
+		t.Fatalf("judge error = %q", artifact.Judge.Error)
+	}
+	if artifact.Judge.Result != "not json" {
+		t.Fatalf("judge result = %#v", artifact.Judge.Result)
 	}
 }
 

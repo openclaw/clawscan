@@ -398,11 +398,16 @@ func renderTargetFiles(target string) (string, error) {
 	if !targetInfo.IsDir() {
 		paths = append(paths, target)
 	} else {
+		var skippedDirs []string
 		if err := filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 			if entry.IsDir() {
+				if shouldSkipTargetPath(target, path) {
+					skippedDirs = append(skippedDirs, path)
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			info, err := entry.Info()
@@ -416,6 +421,7 @@ func renderTargetFiles(target string) (string, error) {
 		}); err != nil {
 			return "", err
 		}
+		paths = append(paths, skippedDirs...)
 	}
 	sort.SliceStable(paths, func(i int, j int) bool {
 		leftPriority := targetFilePriority(target, paths[i])
@@ -617,7 +623,10 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 			result.Result = raw
 			return result, nil
 		}
-		return nil, fmt.Errorf("parse judge JSON output: %w", err)
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("Judge command produced invalid JSON: %v", err)
+		result.Result = raw
+		return result, nil
 	}
 	if _, ok := parsed.(map[string]any); !ok {
 		result.Status = "failed"
@@ -1059,7 +1068,14 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 		}, nil
 	}
 	if !json.Valid([]byte(raw)) {
-		return ScannerResult{}, fmt.Errorf("AgentVerus scanner returned invalid JSON")
+		return ScannerResult{
+			Status:      "failed",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			Command:     fullCommand,
+			Error:       "AgentVerus scanner returned invalid JSON",
+			Raw:         nil,
+		}, nil
 	}
 	return ScannerResult{
 		Status:      "completed",
