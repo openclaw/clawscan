@@ -931,6 +931,8 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 		return runner.runAgentVerus(target, startedAt)
 	case "skillspector":
 		return runner.runSkillSpector(target, startedAt)
+	case "static":
+		return runner.runStatic(target, startedAt)
 	default:
 		return ScannerResult{
 			Status:      "skipped",

@@ -42,9 +42,10 @@ This repository currently contains the Go CLI foundation:
 - deterministic scanner-result fixtures for reproducible prompt checks
 - ClawHub prompt parity proof tooling
 
-Scanner adapters are being filled in incrementally. SkillSpector executes today.
-Other accepted scanner IDs currently record `skipped` with a clear error until
-their adapters are implemented.
+Scanner adapters are being filled in incrementally. SkillSpector, AgentVerus,
+and the built-in static scanner execute today. Other accepted scanner IDs
+currently record `skipped` with a clear error until their adapters are
+implemented.
 
 ## Supported Scanners
 
@@ -59,6 +60,10 @@ These scanner IDs are accepted by the CLI today:
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. |
 | `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | Public lookup-style scanner for ClawHub skill URLs. |
 | `static` | Built in | Lightweight local static scanner for skill artifacts. |
+
+The built-in `static` scanner stores deterministic raw JSON with scanner
+metadata, `files.scanned`, `files.omitted`, and `findings`. It records evidence
+only; it does not emit a final policy verdict.
 
 Planned scanners should not be added to this table until the CLI accepts their
 scanner ID.
