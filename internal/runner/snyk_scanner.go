@@ -52,7 +52,14 @@ func (runner ExternalScannerRunner) runSnyk(target string, startedAt string) (Sc
 		}, nil
 	}
 	if !json.Valid([]byte(raw)) {
-		return ScannerResult{}, errInvalidSnykJSON
+		return ScannerResult{
+			Status:      "failed",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			Command:     fullCommand,
+			Error:       errInvalidSnykJSON.Error(),
+			Raw:         nil,
+		}, nil
 	}
 	return ScannerResult{
 		Status:      "completed",

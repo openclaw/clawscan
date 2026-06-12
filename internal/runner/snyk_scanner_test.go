@@ -156,6 +156,36 @@ func TestSnykScannerFailsSuccessWithoutJSONStdout(t *testing.T) {
 	}
 }
 
+func TestSnykScannerFailsSuccessWithInvalidJSONStdout(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(target, []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &snykRecordingCommandRunner{stdout: "not json"}
+	opts, err := ParseArgs([]string{target, "--scanner", "snyk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{"SNYK_TOKEN": "test-snyk-secret"},
+		CommandRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["snyk"]
+	if result.Status != "failed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, errInvalidSnykJSON.Error()) {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if result.Raw != nil {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+}
+
 func TestSnykScannerResultFixtureSkipsTokenRequirement(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "SKILL.md")
