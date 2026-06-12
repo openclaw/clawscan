@@ -38,6 +38,23 @@ func TestRunCommandWritesArtifact(t *testing.T) {
 	}
 }
 
+func TestVersionStringIncludesBuildMetadata(t *testing.T) {
+	version = "v1.2.3"
+	commit = "abc1234"
+	date = "2026-06-12T00:00:00Z"
+	t.Cleanup(func() {
+		version = "dev"
+		commit = "unknown"
+		date = "unknown"
+	})
+
+	got := versionString()
+	want := "clawscan v1.2.3 (commit abc1234, built 2026-06-12T00:00:00Z)"
+	if got != want {
+		t.Fatalf("version = %q, want %q", got, want)
+	}
+}
+
 func TestRunCommandDoesNotLeakPresentSecrets(t *testing.T) {
 	err := run([]string{"./README.md", "--scanner", "virustotal", "--scanner", "snyk"}, []string{"SNYK_TOKEN=secret-snyk"})
 	if err == nil {

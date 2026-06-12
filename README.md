@@ -92,7 +92,13 @@ scanner ID.
 
 ## Install
 
-From the repository root:
+Once ClawScan is published from the `github.com/openclaw/clawscan` module:
+
+```bash
+go install github.com/openclaw/clawscan/cmd/clawscan@latest
+```
+
+For local development from the repository root:
 
 ```bash
 go install ./cmd/clawscan
@@ -102,6 +108,40 @@ For local development, run without installing:
 
 ```bash
 go run ./cmd/clawscan ./my-skill --scanner skillspector --json
+```
+
+Print build metadata:
+
+```bash
+clawscan --version
+```
+
+Local development builds report `dev`, `unknown` commit, and `unknown` build
+date unless those fields are set with Go linker flags.
+
+## Release Packaging
+
+Release artifacts are built with Go only. No package manager, secrets, or remote
+repository access is required.
+
+```bash
+make release VERSION=v0.1.0
+```
+
+The release target writes archives to `dist/`:
+
+- `clawscan_<version>_darwin_amd64.tar.gz`
+- `clawscan_<version>_darwin_arm64.tar.gz`
+- `clawscan_<version>_linux_amd64.tar.gz`
+- `clawscan_<version>_linux_arm64.tar.gz`
+- `clawscan_<version>_windows_amd64.zip`
+- `checksums.txt` with SHA-256 checksums from `shasum -a 256`
+
+Each archive contains the `clawscan` binary and this README. The release build
+sets `--version` metadata with:
+
+```bash
+-ldflags "-X main.version=<version> -X main.commit=<git-sha> -X main.date=<utc-build-time>"
 ```
 
 ## Secrets
