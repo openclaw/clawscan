@@ -38,7 +38,11 @@ func run() error {
 	if *clawhubDir == "" {
 		return fmt.Errorf("missing required --clawhub-dir")
 	}
-	systemPrompt, expected, err := renderClawHubPrompt(*clawhubDir)
+	resolvedClawHubDir, err := resolveClawHubDir(*clawhubDir)
+	if err != nil {
+		return err
+	}
+	systemPrompt, expected, err := renderClawHubPrompt(resolvedClawHubDir)
 	if err != nil {
 		return err
 	}
@@ -68,7 +72,7 @@ func run() error {
 	if !strings.Contains(promptTemplate, "{{ scanners.virustotal }}") || !strings.Contains(promptTemplate, "{{ scanners.skillspector }}") {
 		return fmt.Errorf("failed to build exported prompt template with scanner placeholders")
 	}
-	schema, err := os.ReadFile(filepath.Join(*clawhubDir, "scripts/security/codex-scan-output.schema.json"))
+	schema, err := os.ReadFile(filepath.Join(resolvedClawHubDir, "scripts/security/codex-scan-output.schema.json"))
 	if err != nil {
 		return err
 	}
@@ -78,7 +82,7 @@ func run() error {
 	}
 	proof := map[string]any{
 		"ok":                        true,
-		"clawhubDir":                filepath.Clean(*clawhubDir),
+		"clawhubDir":                filepath.Clean(resolvedClawHubDir),
 		"combinedPromptSha256":      sha(actual),
 		"combinedPromptLength":      len(actual),
 		"systemPromptSha256":        sha(systemPrompt),
@@ -153,6 +157,10 @@ func prettyJSON(value any) (string, error) {
 		return "", err
 	}
 	return string(raw), nil
+}
+
+func resolveClawHubDir(path string) (string, error) {
+	return filepath.Abs(path)
 }
 
 func renderClawHubPrompt(clawhubDir string) (string, string, error) {
