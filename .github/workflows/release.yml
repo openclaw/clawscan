@@ -21,30 +21,8 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    name: Build release artifacts
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            ext: ''
-          - goos: linux
-            goarch: arm64
-            ext: ''
-          - goos: darwin
-            goarch: amd64
-            ext: ''
-          - goos: darwin
-            goarch: arm64
-            ext: ''
-          - goos: windows
-            goarch: amd64
-            ext: '.exe'
-          - goos: windows
-            goarch: arm64
-            ext: '.exe'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,7 +33,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Resolve artifact version
+      - name: Resolve release version
         id: version
         run: |
           version="${GITHUB_REF_NAME}"
@@ -67,22 +45,17 @@ jobs:
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Build
-        env:
-          CGO_ENABLED: '0'
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          mkdir -p dist
-          binary="dist/clawscan-${{ steps.version.outputs.value }}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          go build -trimpath -ldflags "-s -w" -o "$binary" ./cmd/clawscan
-          sha256sum "$binary" > "$binary.sha256"
+      - name: Build release artifacts
+        run: make release VERSION="${{ steps.version.outputs.value }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: clawscan-${{ steps.version.outputs.value }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
+          name: clawscan-${{ steps.version.outputs.value }}-release
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
           if-no-files-found: error
 
   publish:
