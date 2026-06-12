@@ -43,9 +43,9 @@ This repository currently contains the Go CLI foundation:
 - ClawHub prompt parity proof tooling
 
 Scanner adapters are being filled in incrementally. SkillSpector, AgentVerus,
-and the built-in static scanner execute today. Other accepted scanner IDs
-currently record `skipped` with a clear error until their adapters are
-implemented.
+VirusTotal, and the built-in static scanner execute today. Snyk, Cisco, and
+Gen Digital currently record `skipped` with a clear error until their adapters
+are implemented.
 
 ## Supported Scanners
 
@@ -273,8 +273,11 @@ A run writes a `clawscan-run-v1` JSON artifact:
       "status": "skipped",
       "startedAt": "2026-06-03T00:00:00Z",
       "completedAt": "2026-06-03T00:00:01Z",
-      "command": null,
-      "error": "Scanner adapter not implemented in foundation slice.",
+      "command": [
+        "virustotal",
+        "file-report"
+      ],
+      "error": "VirusTotal scanner supports single-file targets in v1; directory targets are unsupported.",
       "raw": null
     }
   },
