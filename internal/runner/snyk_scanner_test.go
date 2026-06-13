@@ -103,7 +103,7 @@ func TestSnykScannerFailsNonZeroExitWithoutJSONStdout(t *testing.T) {
 	}
 	runner := &snykRecordingCommandRunner{
 		stdout: "not json",
-		stderr: "authentication failed",
+		stderr: "authentication failed for test-snyk-secret",
 		err:    errors.New("exit status 2"),
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "snyk"})
@@ -123,6 +123,9 @@ func TestSnykScannerFailsNonZeroExitWithoutJSONStdout(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "exit status 2") || !strings.Contains(result.Error, "authentication failed") {
 		t.Fatalf("error = %q", result.Error)
+	}
+	if strings.Contains(result.Error, "test-snyk-secret") {
+		t.Fatalf("error leaked SNYK_TOKEN: %q", result.Error)
 	}
 	if result.Raw != nil {
 		t.Fatalf("raw = %s", result.Raw)

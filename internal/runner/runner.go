@@ -273,7 +273,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		artifact.Scanners[scanner] = result
 	}
 	if opts.Judge != nil {
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute)
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env)
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -563,7 +563,7 @@ type judgeCommandState struct {
 	schemaSource     string
 }
 
-func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration) (*JudgeResult, error) {
+func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string) (*JudgeResult, error) {
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
 		return nil, err
@@ -605,10 +605,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 	}
 	if runErr != nil {
 		result.Status = "failed"
-		result.Error = runErr.Error()
-		if strings.TrimSpace(output.Stderr) != "" {
-			result.Error += ": " + strings.TrimSpace(output.Stderr)
-		}
+		result.Error = commandError(runErr, output.Stderr, env)
 	}
 	if raw == "" {
 		if result.Status == "failed" {
@@ -838,7 +835,7 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 	var candidates []workspaceFileCandidate
 	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return manifest.recordWalkError(source, path, entry)
 		}
 		if shouldSkipTargetPath(source, path) {
 			rel := relativeManifestPath(source, path)
@@ -928,6 +925,15 @@ func (manifest *TargetWorkspaceManifest) addOmitted(path string, reason string, 
 		Reason: reason,
 		Bytes:  bytes,
 	})
+}
+
+func (manifest *TargetWorkspaceManifest) recordWalkError(root string, path string, entry os.DirEntry) error {
+	rel := relativeManifestPath(root, path)
+	manifest.addOmitted(rel, "read failed", 0)
+	if entry != nil && entry.IsDir() {
+		return filepath.SkipDir
+	}
+	return nil
 }
 
 func relativeManifestPath(root string, path string) string {
@@ -1076,10 +1082,7 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
-		message := runErr.Error()
-		if strings.TrimSpace(output.Stderr) != "" {
-			message += ": " + strings.TrimSpace(output.Stderr)
-		}
+		message := commandError(runErr, output.Stderr, runner.Env)
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status:      "completed",
@@ -1155,10 +1158,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	raw, readErr := os.ReadFile(resultPath)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if runErr != nil {
-		message := runErr.Error()
-		if strings.TrimSpace(output.Stderr) != "" {
-			message += ": " + strings.TrimSpace(output.Stderr)
-		}
+		message := commandError(runErr, output.Stderr, runner.Env)
 		if readErr == nil {
 			if !json.Valid(raw) {
 				return ScannerResult{
@@ -1303,6 +1303,44 @@ func envMapToEnviron(env map[string]string) []string {
 		environ = append(environ, key+"="+env[key])
 	}
 	return environ
+}
+
+func commandError(runErr error, stderr string, env map[string]string) string {
+	message := redactEnvValues(runErr.Error(), env)
+	if strings.TrimSpace(stderr) != "" {
+		message += ": " + redactEnvValues(strings.TrimSpace(stderr), env)
+	}
+	return message
+}
+
+func redactEnvValues(value string, env map[string]string) string {
+	if value == "" || len(env) == 0 {
+		return value
+	}
+	secrets := make([]string, 0)
+	for key, secret := range env {
+		if strings.TrimSpace(secret) == "" || !isSecretEnvKey(key) {
+			continue
+		}
+		secrets = append(secrets, secret)
+	}
+	sort.Slice(secrets, func(i int, j int) bool {
+		return len(secrets[i]) > len(secrets[j])
+	})
+	redacted := value
+	for _, secret := range secrets {
+		redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
+	}
+	return redacted
+}
+
+func isSecretEnvKey(key string) bool {
+	upper := strings.ToUpper(key)
+	return strings.Contains(upper, "TOKEN") ||
+		strings.Contains(upper, "SECRET") ||
+		strings.Contains(upper, "PASSWORD") ||
+		strings.HasSuffix(upper, "_KEY") ||
+		strings.Contains(upper, "API_KEY")
 }
 
 func requirements(opts Options, env map[string]string) []requirement {

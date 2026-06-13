@@ -1379,6 +1379,42 @@ func TestPrepareJudgeWorkspaceRecordsUnreadableFilesAsOmitted(t *testing.T) {
 	}
 }
 
+func TestPrepareJudgeWorkspaceRecordsUnreadableDirectoriesAsOmitted(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(filepath.Join(target, "private"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	privateDir := filepath.Join(target, "private")
+	if err := os.Chmod(privateDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(privateDir, 0o755)
+	})
+
+	workspace := filepath.Join(dir, "workspace")
+	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
+		t.Fatalf("SKILL.md was not copied into judge workspace: %v", err)
+	}
+	metadata, err := os.ReadFile(filepath.Join(workspace, "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"private", "read failed"} {
+		if !bytes.Contains(metadata, []byte(expected)) {
+			t.Fatalf("metadata missing %q: %s", expected, metadata)
+		}
+	}
+}
+
 func TestPrepareJudgeWorkspaceCreatesArtifactDirForEmptyTarget(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -1474,6 +1510,49 @@ func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
 	}
 	if artifact.Judge == nil || artifact.Judge.Command != "" {
 		t.Fatalf("judge command persisted: %#v", artifact.Judge)
+	}
+}
+
+func TestRunJudgeRedactsSecretEnvValuesFromFailedStderr(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "judge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{"SNYK_TOKEN": "secret-token"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		CommandRunner: &recordingCommandRunner{err: errCommandFailed, stderr: "failed with secret-token"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "failed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("secret-token")) {
+		t.Fatalf("artifact leaked judge stderr secret: %s", raw)
+	}
+	if !strings.Contains(artifact.Judge.Error, "[redacted]") {
+		t.Fatalf("judge error was not redacted: %q", artifact.Judge.Error)
 	}
 }
 
@@ -1625,6 +1704,7 @@ type recordingCommandRunner struct {
 	calls       []commandCall
 	writeOutput string
 	stdout      string
+	stderr      string
 	err         error
 }
 
@@ -1660,7 +1740,7 @@ func (r *recordingCommandRunner) Run(command string, args []string, cwd string, 
 	if stdout == "" {
 		stdout = "ok"
 	}
-	return CommandOutput{Stdout: stdout}, r.err
+	return CommandOutput{Stdout: stdout, Stderr: r.stderr}, r.err
 }
 
 var errCommandFailed = errors.New("exit status 1")

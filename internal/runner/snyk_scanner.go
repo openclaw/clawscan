@@ -21,7 +21,7 @@ func (runner ExternalScannerRunner) runSnyk(target string, startedAt string) (Sc
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
-		message := scannerCommandError(runErr, output.Stderr)
+		message := scannerCommandError(runErr, output.Stderr, runner.Env)
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status:      "completed",
@@ -71,10 +71,6 @@ func (runner ExternalScannerRunner) runSnyk(target string, startedAt string) (Sc
 	}, nil
 }
 
-func scannerCommandError(runErr error, stderr string) string {
-	message := runErr.Error()
-	if strings.TrimSpace(stderr) != "" {
-		message += ": " + strings.TrimSpace(stderr)
-	}
-	return message
+func scannerCommandError(runErr error, stderr string, env map[string]string) string {
+	return commandError(runErr, stderr, env)
 }
