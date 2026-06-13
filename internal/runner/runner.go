@@ -1389,8 +1389,8 @@ func skillSpectorProviderKeyEnv(env map[string]string) string {
 		return "OPENAI_API_KEY"
 	case "anthropic":
 		return "ANTHROPIC_API_KEY"
-	case "nvidia":
-		return "NVIDIA_API_KEY"
+	case "nv_inference", "nv_build", "nvidia":
+		return "NVIDIA_INFERENCE_KEY"
 	default:
 		return ""
 	}

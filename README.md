@@ -153,6 +153,7 @@ export VIRUSTOTAL_API_KEY=...
 export SNYK_TOKEN=...
 export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
+export NVIDIA_INFERENCE_KEY=...
 export CLAWSCAN_SKILLSPECTOR_LLM=1
 ```
 
@@ -178,7 +179,10 @@ Actual secret values are never written to the artifact.
 
 `CLAWSCAN_SKILLSPECTOR_LLM=1` is not a secret. It is an explicit opt-in for
 SkillSpector's provider-backed LLM analysis. When enabled with the default
-OpenAI-compatible provider, `OPENAI_API_KEY` is required.
+OpenAI-compatible provider, `OPENAI_API_KEY` is required. For SkillSpector's
+documented provider modes, use `SKILLSPECTOR_PROVIDER=anthropic` with
+`ANTHROPIC_API_KEY`, or `SKILLSPECTOR_PROVIDER=nv_inference` / `nv_build` with
+`NVIDIA_INFERENCE_KEY`.
 
 Judge harness credentials are owned by the command you pass to `--judge`.
 ClawScan does not add model-provider API keys to its own CLI flags or artifacts.

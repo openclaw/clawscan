@@ -76,7 +76,7 @@ Accepted scanner IDs:
 Required environment variables:
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
-  skillspector: CLAWSCAN_SKILLSPECTOR_LLM=1 requires OPENAI_API_KEY by default.
+  skillspector: CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key.
   judge: provider credentials belong to the command passed to --judge.
 
 Target notes:

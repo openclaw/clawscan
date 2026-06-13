@@ -25,7 +25,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"Required environment variables:",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
-		"CLAWSCAN_SKILLSPECTOR_LLM=1 requires OPENAI_API_KEY",
+		"CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key",
 		"Gen Digital supports URL targets only in v1",
 		"--judge <cmd>",
 		"{{ workspace }}",

@@ -809,6 +809,27 @@ func TestSkillSpectorLLMUsesAnthropicProviderRequirement(t *testing.T) {
 	}
 }
 
+func TestSkillSpectorLLMUsesNVIDIAProviderRequirement(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ValidateRequirements(opts, map[string]string{
+		"CLAWSCAN_SKILLSPECTOR_LLM": "1",
+		"SKILLSPECTOR_PROVIDER":     "nv_inference",
+	})
+	if err == nil || !strings.Contains(err.Error(), "NVIDIA_INFERENCE_KEY required by scanner skillspector llm") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := ValidateRequirements(opts, map[string]string{
+		"CLAWSCAN_SKILLSPECTOR_LLM": "1",
+		"SKILLSPECTOR_PROVIDER":     "nv_build",
+		"NVIDIA_INFERENCE_KEY":      "present",
+	}); err != nil {
+		t.Fatalf("expected NVIDIA provider key to satisfy SkillSpector LLM requirement, got %v", err)
+	}
+}
+
 func TestSkillSpectorReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
