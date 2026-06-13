@@ -618,14 +618,15 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 	var parsed any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		if result.Status == "failed" {
-			result.Result = raw
+			result.Result = redactEnvValues(raw, env)
 			return result, nil
 		}
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced invalid JSON: %v", err)
-		result.Result = raw
+		result.Result = redactEnvValues(raw, env)
 		return result, nil
 	}
+	parsed = redactJudgeResult(parsed, env)
 	if _, ok := parsed.(map[string]any); !ok {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced %s; expected JSON object.", judgeJSONType(parsed))
@@ -1332,6 +1333,27 @@ func redactEnvValues(value string, env map[string]string) string {
 		redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
 	}
 	return redacted
+}
+
+func redactJudgeResult(value any, env map[string]string) any {
+	switch typed := value.(type) {
+	case string:
+		return redactEnvValues(typed, env)
+	case []any:
+		redacted := make([]any, len(typed))
+		for index, item := range typed {
+			redacted[index] = redactJudgeResult(item, env)
+		}
+		return redacted
+	case map[string]any:
+		redacted := make(map[string]any, len(typed))
+		for key, item := range typed {
+			redacted[key] = redactJudgeResult(item, env)
+		}
+		return redacted
+	default:
+		return value
+	}
 }
 
 func isSecretEnvKey(key string) bool {

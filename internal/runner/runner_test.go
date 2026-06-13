@@ -475,6 +475,31 @@ func TestRunExecutesStaticScannerForCleanTarget(t *testing.T) {
 	}
 }
 
+func TestRunStaticScannerSkipsURLTargets(t *testing.T) {
+	target := "https://clawhub.ai/author/skill"
+	opts, err := ParseArgs([]string{target, "--scanner", "static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Target.Kind != "url" {
+		t.Fatalf("target = %#v", artifact.Target)
+	}
+	result := artifact.Scanners["static"]
+	if result.Status != "skipped" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "URL targets are unsupported") {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if result.Raw != nil {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+}
+
 func TestStaticScannerFindsSuspiciousEvidence(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -1574,6 +1599,49 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStderr(t *testing.T) {
 	}
 	if !strings.Contains(artifact.Judge.Error, "[redacted]") {
 		t.Fatalf("judge error was not redacted: %q", artifact.Judge.Error)
+	}
+}
+
+func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "judge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{"SNYK_TOKEN": "secret-token"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		CommandRunner: &recordingCommandRunner{err: errCommandFailed, stdout: "secret-token"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "failed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("secret-token")) {
+		t.Fatalf("artifact leaked judge stdout secret: %s", raw)
+	}
+	if artifact.Judge.Result != "[redacted]" {
+		t.Fatalf("judge result was not redacted: %#v", artifact.Judge.Result)
 	}
 }
 

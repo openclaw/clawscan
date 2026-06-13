@@ -107,6 +107,17 @@ type staticFileCandidate struct {
 }
 
 func (runner ExternalScannerRunner) runStatic(target string, startedAt string) (ScannerResult, error) {
+	command := []string{"static", target}
+	if isURLTarget(target) {
+		return ScannerResult{
+			Status:      "skipped",
+			StartedAt:   startedAt,
+			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Command:     command,
+			Error:       "Static scanner supports local file or directory targets in v1; URL targets are unsupported.",
+			Raw:         nil,
+		}, nil
+	}
 	report, err := buildStaticScannerReport(target)
 	if err != nil {
 		return ScannerResult{}, err
@@ -119,7 +130,7 @@ func (runner ExternalScannerRunner) runStatic(target string, startedAt string) (
 		Status:      "completed",
 		StartedAt:   startedAt,
 		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Command:     []string{"static", target},
+		Command:     command,
 		Error:       "",
 		Raw:         json.RawMessage(raw),
 	}, nil
