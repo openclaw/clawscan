@@ -235,6 +235,67 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	}
 }
 
+func TestRunPassesResolvedEnvToDefaultCommandRunner(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "skillspector-env-probe.sh")
+	probePath := filepath.Join(dir, "probe.txt")
+	leakPath := filepath.Join(dir, "leak.txt")
+	scriptContent := `#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift
+done
+printf '{"status":"clean","findings":[]}' > "$out"
+printf '%s' "$CLAWSCAN_ENV_PROBE" > "$CLAWSCAN_ENV_PROBE_FILE"
+printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
+`
+	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAWSCAN_ENV_PROBE", "process")
+	t.Setenv("CLAWSCAN_UNRELATED_SECRET", "process-secret")
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{
+			"CLAWSCAN_ENV_PROBE":      "context",
+			"CLAWSCAN_ENV_PROBE_FILE": probePath,
+			"CLAWSCAN_LEAK_FILE":      leakPath,
+		},
+		SkillSpectorCommand: []string{script},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Scanners["skillspector"].Status != "completed" {
+		t.Fatalf("scanner = %#v", artifact.Scanners["skillspector"])
+	}
+	probe, err := os.ReadFile(probePath)
+	if err != nil {
+		t.Fatalf("read env probe: %v", err)
+	}
+	if string(probe) != "context" {
+		t.Fatalf("env probe = %q", probe)
+	}
+	leak, err := os.ReadFile(leakPath)
+	if err != nil {
+		t.Fatalf("read leak probe: %v", err)
+	}
+	if string(leak) != "" {
+		t.Fatalf("process env leaked into scanner: %q", leak)
+	}
+}
+
 func TestRunMarksInvalidSkillSpectorJSONAsFailed(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -891,6 +952,41 @@ func TestRenderPromptTemplateUsesBasenameForSingleFileTarget(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "### SKILL.md\n```markdown\n# Demo\nUse safely.\n```") {
 		t.Fatalf("prompt = %s", prompt)
+	}
+}
+
+func TestRenderPromptTemplateRecordsUnreadableTargetFilesAsOmitted(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := filepath.Join(target, "private.txt")
+	if err := os.WriteFile(unreadable, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(unreadable, 0o644)
+	})
+
+	prompt, err := RenderPromptTemplate("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "### SKILL.md\n```markdown\n# Demo\n```") {
+		t.Fatalf("prompt omitted readable skill file: %s", prompt)
+	}
+	if !strings.Contains(prompt, "### private.txt\n[omitted: read failed]") {
+		t.Fatalf("prompt did not mark unreadable file omitted: %s", prompt)
+	}
+	if strings.Contains(prompt, "secret") {
+		t.Fatalf("prompt leaked unreadable file content: %s", prompt)
 	}
 }
 

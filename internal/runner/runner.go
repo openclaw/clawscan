@@ -249,7 +249,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	commandRunner := ctx.CommandRunner
 	if commandRunner == nil {
-		commandRunner = defaultCommandRunner{}
+		commandRunner = defaultCommandRunner{Env: env}
 	}
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
@@ -456,6 +456,10 @@ func renderTargetFiles(target string) (string, error) {
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
+			if isSourceReadError(err, path) {
+				addOmission(path, "read failed")
+				continue
+			}
 			return "", err
 		}
 		if bytes.IndexByte(content, 0) >= 0 {
@@ -1221,13 +1225,18 @@ func discoverSkillSpectorCommand() []string {
 	return []string{"uvx", "--from", "git+https://github.com/NVIDIA/skillspector", "skillspector"}
 }
 
-type defaultCommandRunner struct{}
+type defaultCommandRunner struct {
+	Env map[string]string
+}
 
-func (defaultCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+func (runner defaultCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = cwd
+	if runner.Env != nil {
+		cmd.Env = envMapToEnviron(runner.Env)
+	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -1281,6 +1290,19 @@ func EnvMap(environ []string) map[string]string {
 		}
 	}
 	return env
+}
+
+func envMapToEnviron(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	environ := make([]string, 0, len(keys))
+	for _, key := range keys {
+		environ = append(environ, key+"="+env[key])
+	}
+	return environ
 }
 
 func requirements(opts Options, env map[string]string) []requirement {
