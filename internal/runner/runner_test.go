@@ -500,6 +500,48 @@ func TestRunStaticScannerSkipsURLTargets(t *testing.T) {
 	}
 }
 
+func TestRunResolvesSymlinkedDirectoryTargets(t *testing.T) {
+	dir := t.TempDir()
+	realTarget := filepath.Join(dir, "real-skill")
+	if err := os.Mkdir(realTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realTarget, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkTarget := filepath.Join(dir, "linked-skill")
+	if err := os.Symlink(realTarget, linkTarget); err != nil {
+		t.Fatal(err)
+	}
+	expectedTarget, err := filepath.EvalSymlinks(realTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		linkTarget,
+		"--scanner", "static",
+		"--judge", "if test -f artifact/SKILL.md; then printf '{\"copied\":true}\\n'; else printf '{\"copied\":false}\\n'; fi",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Target.ResolvedPath != expectedTarget {
+		t.Fatalf("resolved path = %q, want %q", artifact.Target.ResolvedPath, expectedTarget)
+	}
+	report := decodeStaticReport(t, artifact.Scanners["static"].Raw)
+	if len(report.Files.Scanned) != 1 || report.Files.Scanned[0].Path != "SKILL.md" {
+		t.Fatalf("scanned files = %#v", report.Files.Scanned)
+	}
+	result, ok := artifact.Judge.Result.(map[string]any)
+	if !ok || result["copied"] != true {
+		t.Fatalf("judge result = %#v", artifact.Judge.Result)
+	}
+}
+
 func TestStaticScannerFindsSuspiciousEvidence(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")

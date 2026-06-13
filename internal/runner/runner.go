@@ -325,6 +325,12 @@ func resolveTarget(input string) (resolvedTarget, error) {
 	if err != nil {
 		return resolvedTarget{}, err
 	}
+	if info, err := os.Lstat(resolved); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return resolvedTarget{kind: "skill", input: input, resolvedPath: resolved}, nil
+	}
+	if evaluated, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = evaluated
+	}
 	return resolvedTarget{kind: "skill", input: input, resolvedPath: resolved}, nil
 }
 
