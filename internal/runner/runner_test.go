@@ -268,6 +268,37 @@ func TestRunMarksInvalidSkillSpectorJSONAsFailed(t *testing.T) {
 	}
 }
 
+func TestRunMarksMissingSkillSpectorOutputAsFailed(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &noOutputCommandRunner{}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                 map[string]string{},
+		CommandRunner:       runner,
+		SkillSpectorCommand: []string{"skillspector"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["skillspector"]
+	if result.Status != "failed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "did not write JSON output") {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if result.Raw != nil {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+}
+
 func TestRunAllowsExplicitSkillSpectorLLM(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -1252,6 +1283,27 @@ func TestPrepareJudgeWorkspaceRecordsUnreadableFilesAsOmitted(t *testing.T) {
 	}
 }
 
+func TestPrepareJudgeWorkspaceCreatesArtifactDirForEmptyTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := filepath.Join(dir, "workspace")
+	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(workspace, "artifact"))
+	if err != nil {
+		t.Fatalf("artifact directory missing: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("artifact path is not a directory: %v", info.Mode())
+	}
+}
+
 func TestRunJudgeRejectsNonObjectJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -1484,6 +1536,12 @@ type commandCall struct {
 	command string
 	args    []string
 	cwd     string
+}
+
+type noOutputCommandRunner struct{}
+
+func (noOutputCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	return CommandOutput{Stdout: "ok"}, nil
 }
 
 func (r *recordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {

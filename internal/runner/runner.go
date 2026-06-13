@@ -822,6 +822,9 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 		manifest.addCopied(filepath.Base(source), info.Size())
 		return manifest, nil
 	}
+	if err := os.MkdirAll(destRoot, 0o755); err != nil {
+		return manifest, err
+	}
 	var totalBytes int64
 	type workspaceFileCandidate struct {
 		path string
@@ -1182,7 +1185,14 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		}, nil
 	}
 	if readErr != nil {
-		return ScannerResult{}, readErr
+		return ScannerResult{
+			Status:      "failed",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			Command:     fullCommand,
+			Error:       "SkillSpector scanner did not write JSON output.",
+			Raw:         nil,
+		}, nil
 	}
 	if !json.Valid(raw) {
 		return ScannerResult{
