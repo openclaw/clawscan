@@ -44,7 +44,7 @@ func TestRunExecutesSnykScannerWithPreciseSkillTarget(t *testing.T) {
 	if call.command != "uvx" {
 		t.Fatalf("command = %q", call.command)
 	}
-	wantArgs := "snyk-agent-scan@latest --json --no-bootstrap --skills " + target
+	wantArgs := "snyk-agent-scan@latest scan --json --no-bootstrap --skills " + target
 	if got := strings.Join(call.args, " "); got != wantArgs {
 		t.Fatalf("args = %q, want %q", got, wantArgs)
 	}

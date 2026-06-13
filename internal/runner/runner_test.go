@@ -1716,6 +1716,53 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
 	}
 }
 
+func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "judge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{"SNYK_TOKEN": "secret-token"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		CommandRunner: &recordingCommandRunner{stdout: `{"secret-token":"secret-token"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("secret-token")) {
+		t.Fatalf("artifact leaked judge JSON key secret: %s", raw)
+	}
+	result, ok := artifact.Judge.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("judge result = %#v", artifact.Judge.Result)
+	}
+	if result["[redacted]"] != "[redacted]" {
+		t.Fatalf("judge result was not redacted: %#v", result)
+	}
+}
+
 func TestRunJudgeQuotesGeneratedPlaceholderPaths(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

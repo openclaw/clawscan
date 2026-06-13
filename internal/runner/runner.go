@@ -1372,7 +1372,7 @@ func redactJudgeResult(value any, env map[string]string) any {
 	case map[string]any:
 		redacted := make(map[string]any, len(typed))
 		for key, item := range typed {
-			redacted[key] = redactJudgeResult(item, env)
+			redacted[redactEnvValues(key, env)] = redactJudgeResult(item, env)
 		}
 		return redacted
 	default:
