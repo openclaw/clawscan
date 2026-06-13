@@ -55,7 +55,7 @@ These scanner IDs are accepted by the CLI today:
 | `agentverus` | [AgentVerus](https://agentverus.ai/) | Agent skill scanner with CLI JSON output. Runs through `npx --yes agentverus-scanner scan <target> --json`; no env var is required for the local scanner path. |
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Security scanner for AI agent skills. Runs locally by default with `--no-llm`; set `CLAWSCAN_SKILLSPECTOR_LLM=1` to opt into provider-backed SkillSpector analysis. |
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. Runs through `uvx snyk-agent-scan@latest scan --json --no-bootstrap --skills <target>` so ClawScan scans the requested skill file or directory instead of full-machine auto-discovery. |
-| `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Runs the local default analyzer path through `skill-scanner scan <target> --format json --output <tempfile>`. No env var is required for this v1 path; upstream LLM, AI Defense, and VirusTotal modes are not enabled by ClawScan. |
+| `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Runs through `skill-scanner scan --path <target> --format json --output <tempfile>`. No env var is required by ClawScan itself for this v1 path; upstream analyzer configuration is handled by Cisco's CLI. |
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | File reputation and malware telemetry. Requires `VIRUSTOTAL_API_KEY`. V1 hashes single-file targets with SHA-256 and queries the VirusTotal v3 file report endpoint by hash; directory targets return a scanner-specific `skipped` result. |
 | `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | Public lookup-style scanner for ClawHub skill URLs. V1 supports URL targets only; local paths return a scanner-specific `skipped` result. |
 | `static` | Built in | Lightweight local static scanner for skill artifacts. |
@@ -69,9 +69,9 @@ The `snyk` scanner stores JSON stdout from Snyk Agent Scan as
 is never passed as a ClawScan CLI flag or recorded in run artifacts.
 
 The `cisco` scanner stores the raw Cisco AI Defense skill-scanner JSON output
-file as `scanners.cisco.raw`. ClawScan uses Cisco's default local scan mode only
-in v1 and does not require or pass `SKILL_SCANNER_LLM_API_KEY`,
-`AI_DEFENSE_API_KEY`, or `VIRUSTOTAL_API_KEY` for this adapter.
+file as `scanners.cisco.raw`. ClawScan does not pass Cisco analyzer credentials
+as CLI flags; configure Cisco's CLI through its own environment variables when
+using analyzer-backed modes.
 
 The `virustotal` scanner stores the raw VirusTotal JSON response as
 `scanners.virustotal.raw` when the API returns JSON. It never uploads target
