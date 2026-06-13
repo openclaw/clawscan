@@ -23,27 +23,38 @@ jobs:
   build:
     name: Build release artifacts
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
+      - name: Resolve release version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME}"
+          checkout_ref="${GITHUB_REF}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${{ inputs.tag }}"
+            if [ -n "$version" ]; then
+              checkout_ref="$version"
+            elif [ "${{ inputs.publish }}" = "true" ]; then
+              echo "Manual publishing requires the tag input."
+              exit 1
+            else
+              version="manual-${GITHUB_RUN_NUMBER}"
+            fi
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.checkout_ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Resolve release version
-        id: version
-        run: |
-          version="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            version="${{ inputs.tag }}"
-            if [ -z "$version" ]; then
-              version="manual-${GITHUB_RUN_NUMBER}"
-            fi
-          fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
 
       - name: Build release artifacts
         run: make release VERSION="${{ steps.version.outputs.value }}"
@@ -64,19 +75,6 @@ jobs:
     needs: build
     if: github.event_name == 'push' || inputs.publish
     steps:
-      - name: Resolve release tag
-        id: release
-        run: |
-          tag="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-            if [ -z "$tag" ]; then
-              echo "Manual publishing requires the tag input."
-              exit 1
-            fi
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -86,7 +84,7 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TAG: ${{ needs.build.outputs.version }}
         run: |
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
