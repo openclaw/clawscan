@@ -463,7 +463,7 @@ func renderTargetFiles(target string) (string, error) {
 			continue
 		}
 		totalBytes += len(content)
-		label := path
+		label := filepath.Base(path)
 		if targetInfo.IsDir() {
 			rel, err := filepath.Rel(target, path)
 			if err != nil {
@@ -496,6 +496,9 @@ func omittedTargetFileBlock(root string, path string, reason string) string {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		rel = path
+	}
+	if rel == "." {
+		rel = filepath.Base(path)
 	}
 	return fmt.Sprintf("### %s\n[omitted: %s]", filepath.ToSlash(rel), reason)
 }
@@ -883,6 +886,10 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 			continue
 		}
 		if err := copyFile(candidate.path, filepath.Join(destRoot, rel)); err != nil {
+			if isSourceReadError(err, candidate.path) {
+				manifest.addOmitted(rel, "read failed", info.Size())
+				continue
+			}
 			return manifest, err
 		}
 		totalBytes += info.Size()
@@ -942,6 +949,14 @@ func copyFile(source string, dest string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func isSourceReadError(err error, source string) bool {
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		return false
+	}
+	return filepath.Clean(pathErr.Path) == filepath.Clean(source) && (pathErr.Op == "open" || pathErr.Op == "read")
 }
 
 type ExternalScannerRunner struct {

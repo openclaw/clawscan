@@ -842,6 +842,27 @@ func TestRenderPromptTemplateInterpolatesTargetFiles(t *testing.T) {
 	}
 }
 
+func TestRenderPromptTemplateUsesBasenameForSingleFileTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(target, []byte("# Demo\nUse safely."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := RenderPromptTemplate("Files:\n{{ target.files }}", Artifact{
+		Target:   Target{ResolvedPath: target},
+		Scanners: map[string]ScannerResult{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(prompt, dir) {
+		t.Fatalf("prompt leaked absolute directory path: %s", prompt)
+	}
+	if !strings.Contains(prompt, "### SKILL.md\n```markdown\n# Demo\nUse safely.\n```") {
+		t.Fatalf("prompt = %s", prompt)
+	}
+}
+
 func TestRenderPromptTemplatePrioritizesSkillFileWithinBudget(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -1189,6 +1210,45 @@ func TestPrepareJudgeWorkspacePrioritizesSkillFileWithinBudget(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
 		t.Fatalf("SKILL.md was not copied into judge workspace: %v", err)
+	}
+}
+
+func TestPrepareJudgeWorkspaceRecordsUnreadableFilesAsOmitted(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := filepath.Join(target, "private.txt")
+	if err := os.WriteFile(unreadable, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(unreadable, 0o644)
+	})
+
+	workspace := filepath.Join(dir, "workspace")
+	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "artifact", "private.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unreadable file copied, err=%v", err)
+	}
+	metadata, err := os.ReadFile(filepath.Join(workspace, "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"private.txt", "read failed"} {
+		if !bytes.Contains(metadata, []byte(expected)) {
+			t.Fatalf("metadata missing %q: %s", expected, metadata)
+		}
 	}
 }
 
