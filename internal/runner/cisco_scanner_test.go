@@ -43,7 +43,7 @@ func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
 	if call.command != "skill-scanner" {
 		t.Fatalf("command = %q", call.command)
 	}
-	if got := strings.Join(call.args[:5], " "); got != "scan --path "+target+" --format json" {
+	if got := strings.Join(call.args[:4], " "); got != "scan "+target+" --format json" {
 		t.Fatalf("args = %#v", call.args)
 	}
 	outputPath := argValue(call.args, "--output")

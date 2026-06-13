@@ -19,7 +19,7 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 
 	command := "skill-scanner"
 	resultPath := filepath.Join(resultDir, "cisco-skill-scanner.json")
-	args := []string{"scan", "--path", target, "--format", "json", "--output", resultPath}
+	args := []string{"scan", target, "--format", "json", "--output", resultPath}
 	fullCommand := append([]string{command}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
