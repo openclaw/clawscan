@@ -333,7 +333,7 @@ func isURLTarget(input string) bool {
 	return err == nil && parsed.Scheme != "" && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
-var scannerPlaceholderPattern = regexp.MustCompile(`\{\{\s*scanners\.([a-zA-Z0-9_-]+)\s*\}\}`)
+var promptPlaceholderPattern = regexp.MustCompile(`\{\{\s*(scanners\.([a-zA-Z0-9_-]+)|target\.files)\s*\}\}`)
 var judgePlaceholderPattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]+))?\s*\}\}`)
 
 const maxTargetFileBytes = 64 * 1024
@@ -343,20 +343,25 @@ const defaultJudgePromptPath = "./prompt.md"
 const defaultJudgeOutputSchemaPath = "./schema.json"
 
 func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
-	rendered, err := renderTargetFilesPlaceholder(template, artifact)
-	if err != nil {
-		return "", err
-	}
 	var renderErr error
-	rendered = scannerPlaceholderPattern.ReplaceAllStringFunc(rendered, func(match string) string {
+	var targetFiles string
+	targetFilesRendered := false
+	rendered := promptPlaceholderPattern.ReplaceAllStringFunc(template, func(match string) string {
 		if renderErr != nil {
 			return match
 		}
-		parts := scannerPlaceholderPattern.FindStringSubmatch(match)
-		if len(parts) != 2 {
+		parts := promptPlaceholderPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
 			return match
 		}
-		scanner := parts[1]
+		if parts[1] == "target.files" {
+			if !targetFilesRendered {
+				targetFiles, renderErr = renderTargetFiles(artifact.Target.ResolvedPath)
+				targetFilesRendered = true
+			}
+			return targetFiles
+		}
+		scanner := parts[2]
 		result, ok := artifact.Scanners[scanner]
 		if !ok {
 			renderErr = fmt.Errorf("prompt references scanner %s, but it was not requested", scanner)
@@ -376,17 +381,6 @@ func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
 		return "", renderErr
 	}
 	return rendered, nil
-}
-
-func renderTargetFilesPlaceholder(template string, artifact Artifact) (string, error) {
-	if !strings.Contains(template, "{{ target.files }}") {
-		return template, nil
-	}
-	files, err := renderTargetFiles(artifact.Target.ResolvedPath)
-	if err != nil {
-		return "", err
-	}
-	return strings.ReplaceAll(template, "{{ target.files }}", files), nil
 }
 
 func renderTargetFiles(target string) (string, error) {

@@ -763,6 +763,55 @@ func TestRenderPromptTemplateInterpolatesScannerJSON(t *testing.T) {
 	}
 }
 
+func TestRenderPromptTemplateDoesNotReprocessTargetFilePlaceholders(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("literal {{ scanners.virustotal }} text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := RenderPromptTemplate("{{ scanners.skillspector }}\n\n{{ target.files }}", Artifact{
+		Target: Target{ResolvedPath: target},
+		Scanners: map[string]ScannerResult{
+			"skillspector": {Raw: json.RawMessage(`{"status":"clean"}`)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "literal {{ scanners.virustotal }} text") {
+		t.Fatalf("target placeholder was reprocessed: %s", prompt)
+	}
+}
+
+func TestRenderPromptTemplateDoesNotReprocessScannerJSONPlaceholders(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := RenderPromptTemplate("{{ scanners.skillspector }}", Artifact{
+		Target: Target{ResolvedPath: target},
+		Scanners: map[string]ScannerResult{
+			"skillspector": {Raw: json.RawMessage(`{"note":"literal {{ target.files }} text"}`)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(prompt, "### SKILL.md") {
+		t.Fatalf("scanner JSON placeholder was reprocessed: %s", prompt)
+	}
+	if !strings.Contains(prompt, "literal {{ target.files }} text") {
+		t.Fatalf("scanner JSON placeholder missing: %s", prompt)
+	}
+}
+
 func TestRenderPromptTemplateErrorsForUnrequestedScanner(t *testing.T) {
 	_, err := RenderPromptTemplate("{{ scanners.virustotal }}", Artifact{Scanners: map[string]ScannerResult{
 		"skillspector": {},
