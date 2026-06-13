@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -490,7 +491,7 @@ func renderTargetFiles(target string) (string, error) {
 		}
 		text := strings.TrimRight(string(content), "\n")
 		fence := fenceForContent(text)
-		blocks = append(blocks, fmt.Sprintf("### %s\n%s%s\n%s\n%s", filepath.ToSlash(label), fence, languageForPath(path), text, fence))
+		blocks = append(blocks, fmt.Sprintf("### %s\n%s%s\n%s\n%s", markdownPathLabel(label), fence, languageForPath(path), text, fence))
 	}
 	sort.SliceStable(precomputedOmissions, func(i int, j int) bool {
 		leftPriority := targetFilePriority(target, precomputedOmissions[i].path)
@@ -528,7 +529,12 @@ func omittedTargetFileBlock(root string, path string, reason string) string {
 	if rel == "." {
 		rel = filepath.Base(path)
 	}
-	return fmt.Sprintf("### %s\n[omitted: %s]", filepath.ToSlash(rel), reason)
+	return fmt.Sprintf("### %s\n[omitted: %s]", markdownPathLabel(rel), reason)
+}
+
+func markdownPathLabel(label string) string {
+	quoted := strconv.Quote(filepath.ToSlash(label))
+	return quoted[1 : len(quoted)-1]
 }
 
 func shouldSkipTargetPath(root string, path string) bool {
