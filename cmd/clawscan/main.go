@@ -85,7 +85,7 @@ Target notes:
 
 Judge summary:
   If --judge is omitted, ClawScan only records scanner evidence.
-  If --judge is present, ClawScan runs it through /bin/sh -c and expects a JSON object on stdout or at {{ output }}.
+  If --judge is present, ClawScan runs it through the platform shell and expects a JSON object on stdout or at {{ output }}.
   Placeholders: {{ workspace }}, {{ prompt[:path] }}, {{ output_schema[:path] }}, {{ output }}.
 `, strings.Join(runner.ScannerIDs(), ", "))
 }

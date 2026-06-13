@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -593,6 +594,12 @@ type judgeCommandState struct {
 	schemaSource     string
 }
 
+type judgeShellSpec struct {
+	command string
+	args    []string
+	quote   func(string) string
+}
+
 func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string) (*JudgeResult, error) {
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
@@ -609,11 +616,12 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		workspace:  workspace,
 		outputPath: filepath.Join(workspace, "judge-output.json"),
 	}
-	command, err := renderJudgeCommand(opts.Command, artifact, state)
+	shell := judgeShellForGOOS(runtime.GOOS)
+	command, err := renderJudgeCommand(opts.Command, artifact, state, shell.quote)
 	if err != nil {
 		return nil, err
 	}
-	output, runErr := commandRunner.Run("/bin/sh", []string{"-c", command}, workspace, timeout)
+	output, runErr := commandRunner.Run(shell.command, append(shell.args, command), workspace, timeout)
 	raw := strings.TrimSpace(output.Stdout)
 	if state.outputUsed {
 		outputBytes, readErr := os.ReadFile(state.outputPath)
@@ -684,7 +692,7 @@ func judgeJSONType(value any) string {
 	}
 }
 
-func renderJudgeCommand(command string, artifact Artifact, state *judgeCommandState) (string, error) {
+func renderJudgeCommand(command string, artifact Artifact, state *judgeCommandState, quote func(string) string) (string, error) {
 	var renderErr error
 	rendered := judgePlaceholderPattern.ReplaceAllStringFunc(command, func(match string) string {
 		if renderErr != nil {
@@ -702,28 +710,28 @@ func renderJudgeCommand(command string, artifact Artifact, state *judgeCommandSt
 				renderErr = fmt.Errorf("{{ workspace }} does not accept a path")
 				return match
 			}
-			return shellQuote(state.workspace)
+			return quote(state.workspace)
 		case "output":
 			if value != "" {
 				renderErr = fmt.Errorf("{{ output }} does not accept a path")
 				return match
 			}
 			state.outputUsed = true
-			return shellQuote(state.outputPath)
+			return quote(state.outputPath)
 		case "prompt":
 			path, err := prepareJudgePrompt(value, artifact, state)
 			if err != nil {
 				renderErr = err
 				return match
 			}
-			return shellQuote(path)
+			return quote(path)
 		case "output_schema":
 			path, err := prepareJudgeOutputSchema(value, state)
 			if err != nil {
 				renderErr = err
 				return match
 			}
-			return shellQuote(path)
+			return quote(path)
 		default:
 			renderErr = fmt.Errorf("unknown judge placeholder: %s", name)
 			return match
@@ -735,11 +743,33 @@ func renderJudgeCommand(command string, artifact Artifact, state *judgeCommandSt
 	return rendered, nil
 }
 
-func shellQuote(value string) string {
+func judgeShellForGOOS(goos string) judgeShellSpec {
+	if goos == "windows" {
+		return judgeShellSpec{
+			command: "cmd.exe",
+			args:    []string{"/C"},
+			quote:   windowsCmdQuote,
+		}
+	}
+	return judgeShellSpec{
+		command: "/bin/sh",
+		args:    []string{"-c"},
+		quote:   posixShellQuote,
+	}
+}
+
+func posixShellQuote(value string) string {
 	if value == "" {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func windowsCmdQuote(value string) string {
+	if value == "" {
+		return `""`
+	}
+	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }
 
 func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandState) (string, error) {

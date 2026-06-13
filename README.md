@@ -215,7 +215,7 @@ and may fail clearly for URL targets.
 | `--scanner-result <id=path>` | No | Yes | Use a JSON fixture as the scanner result instead of running that scanner. The scanner must also be listed with `--scanner`. |
 | `--output <path>` | No | No | Write the run artifact JSON to a file. |
 | `--json` | No | No | Print the run artifact JSON to stdout. |
-| `--judge <cmd>` | No | No | External judge harness command. ClawScan interpolates placeholders, runs it through `/bin/sh -c`, and records its JSON output. |
+| `--judge <cmd>` | No | No | External judge harness command. ClawScan interpolates placeholders, runs it through the platform shell (`/bin/sh -c` on Unix, `cmd.exe /C` on Windows), and records its JSON output. |
 
 If `--judge` is omitted, ClawScan only runs scanners and writes their raw
 results. If `--judge` is present, the command must produce a JSON object either
@@ -370,7 +370,9 @@ The intended judge flow is:
 5. Copy any schema referenced by `{{ output_schema }}` or
    `{{ output_schema:<path> }}`.
 6. Interpolate placeholders into `--judge`.
-7. Run the judge command and store its JSON result alongside scanner evidence.
+7. Run the judge command through the platform shell (`/bin/sh -c` on Unix,
+   `cmd.exe /C` on Windows) and store its JSON result alongside scanner
+   evidence.
 
 Prompt authors should place scanner evidence explicitly:
 

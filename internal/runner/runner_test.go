@@ -1850,6 +1850,30 @@ func TestRunJudgeQuotesGeneratedPlaceholderPaths(t *testing.T) {
 	}
 }
 
+func TestJudgeShellForGOOSUsesPlatformShell(t *testing.T) {
+	unix := judgeShellForGOOS("linux")
+	if unix.command != "/bin/sh" {
+		t.Fatalf("unix shell command = %q", unix.command)
+	}
+	if len(unix.args) != 1 || unix.args[0] != "-c" {
+		t.Fatalf("unix shell args = %#v", unix.args)
+	}
+	if unix.quote("/tmp/path with spaces") != "'/tmp/path with spaces'" {
+		t.Fatalf("unix quote = %q", unix.quote("/tmp/path with spaces"))
+	}
+
+	windows := judgeShellForGOOS("windows")
+	if windows.command != "cmd.exe" {
+		t.Fatalf("windows shell command = %q", windows.command)
+	}
+	if len(windows.args) != 1 || windows.args[0] != "/C" {
+		t.Fatalf("windows shell args = %#v", windows.args)
+	}
+	if windows.quote(`C:\tmp\path with spaces`) != `"C:\tmp\path with spaces"` {
+		t.Fatalf("windows quote = %q", windows.quote(`C:\tmp\path with spaces`))
+	}
+}
+
 type skippedScannerRunner struct{}
 
 func (skippedScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
