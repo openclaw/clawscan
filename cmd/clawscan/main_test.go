@@ -73,7 +73,7 @@ func TestRunCommandWritesArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "run.json")
-	err := run([]string{target, "--scanner", "skillspector", "--output", out}, []string{})
+	err := run([]string{target, "--scanner", "static", "--output", out}, []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +91,8 @@ func TestRunCommandWritesArtifact(t *testing.T) {
 	if artifact.SchemaVersion != "clawscan-run-v1" {
 		t.Fatalf("schema = %q", artifact.SchemaVersion)
 	}
-	if _, ok := artifact.Scanners["skillspector"]; !ok {
-		t.Fatalf("missing skillspector scanner: %#v", artifact.Scanners)
+	if _, ok := artifact.Scanners["static"]; !ok {
+		t.Fatalf("missing static scanner: %#v", artifact.Scanners)
 	}
 }
 
