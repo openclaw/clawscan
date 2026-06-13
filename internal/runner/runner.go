@@ -385,6 +385,11 @@ func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
 
 func renderTargetFiles(target string) (string, error) {
 	var paths []string
+	type targetFileOmission struct {
+		path   string
+		reason string
+	}
+	var precomputedOmissions []targetFileOmission
 	targetInfo, err := os.Stat(target)
 	if err != nil {
 		return "", err
@@ -392,14 +397,17 @@ func renderTargetFiles(target string) (string, error) {
 	if !targetInfo.IsDir() {
 		paths = append(paths, target)
 	} else {
-		var skippedDirs []string
 		if err := filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
-				return err
+				precomputedOmissions = append(precomputedOmissions, targetFileOmission{path: path, reason: "read failed"})
+				if entry != nil && entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 			if entry.IsDir() {
 				if shouldSkipTargetPath(target, path) {
-					skippedDirs = append(skippedDirs, path)
+					precomputedOmissions = append(precomputedOmissions, targetFileOmission{path: path, reason: "skipped path"})
 					return filepath.SkipDir
 				}
 				return nil
@@ -415,7 +423,6 @@ func renderTargetFiles(target string) (string, error) {
 		}); err != nil {
 			return "", err
 		}
-		paths = append(paths, skippedDirs...)
 	}
 	sort.SliceStable(paths, func(i int, j int) bool {
 		leftPriority := targetFilePriority(target, paths[i])
@@ -478,6 +485,17 @@ func renderTargetFiles(target string) (string, error) {
 		text := strings.TrimRight(string(content), "\n")
 		fence := fenceForContent(text)
 		blocks = append(blocks, fmt.Sprintf("### %s\n%s%s\n%s\n%s", filepath.ToSlash(label), fence, languageForPath(path), text, fence))
+	}
+	sort.SliceStable(precomputedOmissions, func(i int, j int) bool {
+		leftPriority := targetFilePriority(target, precomputedOmissions[i].path)
+		rightPriority := targetFilePriority(target, precomputedOmissions[j].path)
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		return precomputedOmissions[i].path < precomputedOmissions[j].path
+	})
+	for _, omission := range precomputedOmissions {
+		addOmission(omission.path, omission.reason)
 	}
 	if suppressedOmissions > 0 {
 		blocks = append(blocks, fmt.Sprintf("### Additional omitted files\n[omitted: %d additional files]", suppressedOmissions))

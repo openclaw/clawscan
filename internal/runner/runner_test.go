@@ -1036,6 +1036,35 @@ func TestRenderPromptTemplateRecordsUnreadableTargetFilesAsOmitted(t *testing.T)
 	}
 }
 
+func TestRenderPromptTemplateRecordsUnreadableTargetDirectoriesAsOmitted(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	privateDir := filepath.Join(target, "private")
+	if err := os.MkdirAll(privateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(privateDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(privateDir, 0o755)
+	})
+
+	prompt, err := RenderPromptTemplate("{{ target.files }}", Artifact{Target: Target{ResolvedPath: target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "### SKILL.md\n```markdown\n# Demo\n```") {
+		t.Fatalf("prompt omitted readable skill file: %s", prompt)
+	}
+	if !strings.Contains(prompt, "### private\n[omitted: read failed]") {
+		t.Fatalf("prompt did not mark unreadable directory omitted: %s", prompt)
+	}
+}
+
 func TestRenderPromptTemplatePrioritizesSkillFileWithinBudget(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")

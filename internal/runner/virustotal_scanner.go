@@ -24,6 +24,16 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 		return time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	command := []string{"virustotal", "file-report"}
+	if isURLTarget(target) {
+		return ScannerResult{
+			Status:      "skipped",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt(),
+			Command:     command,
+			Error:       "VirusTotal scanner supports single-file local targets in v1; URL targets are unsupported.",
+			Raw:         nil,
+		}, nil
+	}
 	info, err := os.Stat(target)
 	if err != nil {
 		return ScannerResult{

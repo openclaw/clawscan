@@ -102,6 +102,32 @@ func TestVirusTotalScannerSkipsDirectoryTargets(t *testing.T) {
 	}
 }
 
+func TestVirusTotalScannerSkipsURLTargets(t *testing.T) {
+	target := "https://clawhub.ai/author/skill"
+	client := &recordingHTTPClient{err: errUnexpectedHTTPRequest}
+	opts, err := ParseArgs([]string{target, "--scanner", "virustotal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                  map[string]string{"VIRUSTOTAL_API_KEY": "test-vt-secret"},
+		VirusTotalHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["virustotal"]
+	if result.Status != "skipped" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "URL targets are unsupported") {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("unexpected HTTP requests: %#v", client.requests)
+	}
+}
+
 func TestVirusTotalScannerSkipsMissingReportsAndPreservesJSON(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "SKILL.md")
