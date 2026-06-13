@@ -1166,6 +1166,32 @@ func TestPrepareJudgeWorkspaceRecordsOmittedTargetFiles(t *testing.T) {
 	}
 }
 
+func TestPrepareJudgeWorkspacePrioritizesSkillFileWithinBudget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		path := filepath.Join(target, fmt.Sprintf("00%d-before-skill.txt", i))
+		if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxTargetFileBytes), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := filepath.Join(dir, "workspace")
+	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
+		t.Fatalf("SKILL.md was not copied into judge workspace: %v", err)
+	}
+}
+
 func TestRunJudgeRejectsNonObjectJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

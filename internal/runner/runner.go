@@ -820,6 +820,12 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 		return manifest, nil
 	}
 	var totalBytes int64
+	type workspaceFileCandidate struct {
+		path string
+		rel  string
+		info os.FileInfo
+	}
+	var candidates []workspaceFileCandidate
 	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -847,22 +853,42 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 		if err != nil {
 			return err
 		}
+		candidates = append(candidates, workspaceFileCandidate{
+			path: path,
+			rel:  rel,
+			info: info,
+		})
+		return nil
+	})
+	if err != nil {
+		return manifest, err
+	}
+	sort.SliceStable(candidates, func(i int, j int) bool {
+		leftPriority := targetFilePriority(source, candidates[i].path)
+		rightPriority := targetFilePriority(source, candidates[j].path)
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		return filepath.ToSlash(candidates[i].rel) < filepath.ToSlash(candidates[j].rel)
+	})
+	for _, candidate := range candidates {
+		info := candidate.info
+		rel := candidate.rel
 		if info.Size() > maxTargetFileBytes {
 			manifest.addOmitted(rel, "file exceeds size limit", info.Size())
-			return nil
+			continue
 		}
 		if totalBytes+info.Size() > maxTargetFilesBytes {
 			manifest.addOmitted(rel, "total file budget exceeded", info.Size())
-			return nil
+			continue
 		}
-		if err := copyFile(path, filepath.Join(destRoot, rel)); err != nil {
-			return err
+		if err := copyFile(candidate.path, filepath.Join(destRoot, rel)); err != nil {
+			return manifest, err
 		}
 		totalBytes += info.Size()
 		manifest.addCopied(rel, info.Size())
-		return nil
-	})
-	return manifest, err
+	}
+	return manifest, nil
 }
 
 func (manifest *TargetWorkspaceManifest) addCopied(path string, bytes int64) {
