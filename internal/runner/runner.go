@@ -35,13 +35,14 @@ type JudgeOptions struct {
 }
 
 type RunContext struct {
-	Env                  map[string]string
-	Now                  func() time.Time
-	CommandRunner        CommandRunner
-	ScannerRunner        ScannerRunner
-	SkillSpectorCommand  []string
-	VirusTotalHTTPClient VirusTotalHTTPClient
-	GenDigitalHTTPClient GenDigitalHTTPClient
+	Env                    map[string]string
+	Now                    func() time.Time
+	CommandRunner          CommandRunner
+	ScannerRunner          ScannerRunner
+	SkillSpectorCommand    []string
+	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
+	VirusTotalHTTPClient   VirusTotalHTTPClient
+	GenDigitalHTTPClient   GenDigitalHTTPClient
 }
 
 type ScannerRunner interface {
@@ -126,13 +127,14 @@ type requirement struct {
 }
 
 var scannerSet = map[string]bool{
-	"agentverus":   true,
-	"skillspector": true,
-	"snyk":         true,
-	"cisco":        true,
-	"virustotal":   true,
-	"gendigital":   true,
-	"static":       true,
+	"agentverus":     true,
+	"ai-infra-guard": true,
+	"skillspector":   true,
+	"snyk":           true,
+	"cisco":          true,
+	"virustotal":     true,
+	"gendigital":     true,
+	"static":         true,
 }
 
 func ScannerIDs() []string {
@@ -256,12 +258,13 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
 		scannerRunner = ExternalScannerRunner{
-			CommandRunner:        commandRunner,
-			Env:                  env,
-			SkillSpectorCommand:  ctx.SkillSpectorCommand,
-			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
-			GenDigitalHTTPClient: ctx.GenDigitalHTTPClient,
-			Timeout:              20 * time.Minute,
+			CommandRunner:          commandRunner,
+			Env:                    env,
+			SkillSpectorCommand:    ctx.SkillSpectorCommand,
+			AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
+			VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
+			GenDigitalHTTPClient:   ctx.GenDigitalHTTPClient,
+			Timeout:                20 * time.Minute,
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -1034,12 +1037,13 @@ func isSourceReadError(err error, source string) bool {
 }
 
 type ExternalScannerRunner struct {
-	CommandRunner        CommandRunner
-	Env                  map[string]string
-	SkillSpectorCommand  []string
-	VirusTotalHTTPClient VirusTotalHTTPClient
-	GenDigitalHTTPClient GenDigitalHTTPClient
-	Timeout              time.Duration
+	CommandRunner          CommandRunner
+	Env                    map[string]string
+	SkillSpectorCommand    []string
+	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
+	VirusTotalHTTPClient   VirusTotalHTTPClient
+	GenDigitalHTTPClient   GenDigitalHTTPClient
+	Timeout                time.Duration
 }
 
 type OpenAIRequestOptions struct {
@@ -1107,6 +1111,8 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 	switch name {
 	case "agentverus":
 		return runner.runAgentVerus(target, startedAt)
+	case "ai-infra-guard":
+		return runner.runAIInfraGuard(target, startedAt)
 	case "skillspector":
 		return runner.runSkillSpector(target, startedAt)
 	case "static":
@@ -1439,6 +1445,12 @@ func requirements(opts Options, env map[string]string) []requirement {
 					reqs = append(reqs, requirement{envVar, "scanner skillspector llm"})
 				}
 			}
+		case "ai-infra-guard":
+			reqs = append(reqs,
+				requirement{"AIG_BASE_URL", "scanner ai-infra-guard"},
+				requirement{"AIG_MODEL", "scanner ai-infra-guard"},
+				requirement{"AIG_MODEL_API_KEY", "scanner ai-infra-guard"},
+			)
 		case "virustotal":
 			reqs = append(reqs, requirement{"VIRUSTOTAL_API_KEY", "scanner virustotal"})
 		case "snyk":

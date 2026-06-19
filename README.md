@@ -43,8 +43,8 @@ This repository currently contains the Go CLI foundation:
 - ClawHub prompt parity proof tooling
 
 Scanner adapters are being filled in incrementally. SkillSpector, AgentVerus,
-Cisco, Snyk, VirusTotal, Gen Digital URL lookups, and the built-in static
-scanner execute today.
+Tencent AI-Infra-Guard, Cisco, Snyk, VirusTotal, Gen Digital URL lookups, and
+the built-in static scanner execute today.
 
 ## Supported Scanners
 
@@ -53,6 +53,7 @@ These scanner IDs are accepted by the CLI today:
 | Scanner ID | Source | Notes |
 | --- | --- | --- |
 | `agentverus` | [AgentVerus](https://agentverus.ai/) | Agent skill scanner with CLI JSON output. Runs through `npx --yes agentverus-scanner scan <target> --json`; no env var is required for the local scanner path. |
+| `ai-infra-guard` | [Tencent AI-Infra-Guard](https://github.com/Tencent/AI-Infra-Guard) | Self-hosted A.I.G taskapi integration for MCP Server & Agent Skills scan. Requires `AIG_BASE_URL`, `AIG_MODEL`, and `AIG_MODEL_API_KEY`. Local file/directory targets are zipped, uploaded to `/api/v1/app/taskapi/upload`, submitted as `mcp_scan`, polled through `/api/v1/app/taskapi/status/{id}`, and stored from `/api/v1/app/taskapi/result/{id}`. This project integrates AI-Infra-Guard, open-sourced by Tencent Zhuque Lab. |
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Security scanner for AI agent skills. Runs locally by default with `--no-llm`; set `CLAWSCAN_SKILLSPECTOR_LLM=1` to opt into provider-backed SkillSpector analysis. |
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Snyk's scanner for AI agents, MCP servers, and skills. Requires `SNYK_TOKEN`. Runs through `uvx snyk-agent-scan@latest scan --json --no-bootstrap --skills <target>` so ClawScan scans the requested skill file or directory instead of full-machine auto-discovery. |
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Cisco's agent skill scanner. Runs through `skill-scanner scan <target> --format json --output <tempfile>`. No env var is required by ClawScan itself for this v1 path; upstream analyzer configuration is handled by Cisco's CLI. |
@@ -67,6 +68,17 @@ only; it does not emit a final policy verdict.
 The `snyk` scanner stores JSON stdout from Snyk Agent Scan as
 `scanners.snyk.raw`. `SNYK_TOKEN` is read from the environment by Snyk's CLI and
 is never passed as a ClawScan CLI flag or recorded in run artifacts.
+
+The `ai-infra-guard` scanner stores a raw JSON evidence object with the A.I.G
+upload response, task session, final status, and task result. Configure
+`AIG_BASE_URL` to point at a running self-hosted AI-Infra-Guard service.
+`AIG_MODEL` and `AIG_MODEL_API_KEY` are passed to A.I.G's `mcp_scan` task as the
+analysis model; `AIG_MODEL_BASE_URL` defaults to `https://api.openai.com/v1`.
+`AIG_API_KEY` is optional and sent as the A.I.G taskapi `API-KEY` header when
+present. `AIG_USERNAME` defaults to `openclaw`. Optional non-secret tuning env
+vars are `AIG_SCAN_LANGUAGE`, `AIG_SCAN_PROMPT` for local archive scans,
+`AIG_SCAN_THREAD_COUNT`, `AIG_POLL_INTERVAL_MS`, and
+`AIG_POLL_MAX_ATTEMPTS`.
 
 The `cisco` scanner stores the raw Cisco AI Defense skill-scanner JSON output
 file as `scanners.cisco.raw`. ClawScan does not pass Cisco analyzer credentials
@@ -151,6 +163,9 @@ Secrets must be provided through environment variables, not CLI flags.
 ```bash
 export VIRUSTOTAL_API_KEY=...
 export SNYK_TOKEN=...
+export AIG_BASE_URL=http://127.0.0.1:8088
+export AIG_MODEL=gpt-4.1
+export AIG_MODEL_API_KEY=...
 export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
 export NVIDIA_INFERENCE_KEY=...
@@ -164,6 +179,9 @@ are grouped into one error:
 Missing required environment variables:
 
 - VIRUSTOTAL_API_KEY required by scanner virustotal
+- AIG_BASE_URL required by scanner ai-infra-guard
+- AIG_MODEL required by scanner ai-infra-guard
+- AIG_MODEL_API_KEY required by scanner ai-infra-guard
 ```
 
 Run artifacts record only whether a variable was present:
@@ -200,6 +218,14 @@ lookup service. In v1, `gendigital` uses this shape for ClawHub skill URLs:
 ```bash
 clawscan https://clawhub.ai/author/skill-name \
   --scanner gendigital \
+  --json
+```
+
+`ai-infra-guard` also supports URL targets through A.I.G's `mcp_scan` taskapi:
+
+```bash
+clawscan https://github.com/example/ai-tool \
+  --scanner ai-infra-guard \
   --json
 ```
 
@@ -253,11 +279,24 @@ Run several scanners and save the artifact:
 ```bash
 clawscan ./my-skill \
   --scanner agentverus \
+  --scanner ai-infra-guard \
   --scanner skillspector \
   --scanner cisco \
   --scanner snyk \
   --scanner virustotal \
   --output ./clawscan-run.json
+```
+
+Run Tencent AI-Infra-Guard through a local A.I.G service:
+
+```bash
+export AIG_BASE_URL=http://127.0.0.1:8088
+export AIG_MODEL=gpt-4.1
+export AIG_MODEL_API_KEY=...
+
+clawscan ./my-skill \
+  --scanner ai-infra-guard \
+  --json
 ```
 
 Run scanner comparison with a Codex judge harness:

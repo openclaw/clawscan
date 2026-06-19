@@ -74,6 +74,7 @@ Accepted scanner IDs:
   %s
 
 Required environment variables:
+  ai-infra-guard: AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
   skillspector: CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key.
@@ -81,6 +82,7 @@ Required environment variables:
 
 Target notes:
   Most scanners use a local skill file or directory target.
+  AI-Infra-Guard uses the self-hosted A.I.G taskapi; local targets are uploaded as a temporary zip.
   Gen Digital supports URL targets only in v1; use a ClawHub skill URL such as https://clawhub.ai/owner/skill.
 
 Judge summary:
