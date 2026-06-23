@@ -70,13 +70,28 @@ export AIG_MODEL_API_KEY=...
 
 ## Install
 
-From a published module:
+Homebrew is the recommended install path on macOS and Linux:
+
+```bash
+brew install openclaw/tap/clawscan
+```
+
+You can also download a release archive from GitHub Releases. Pick the archive
+for your OS and CPU, unpack it, and put the `clawscan` binary on your `PATH`.
+
+If you have Go installed, install from the published module:
 
 ```bash
 go install github.com/openclaw/clawscan/cmd/clawscan@latest
 ```
 
-From this repository:
+For source builds from a repository checkout:
+
+```bash
+make release VERSION=dev
+```
+
+Or install a development build directly:
 
 ```bash
 go install ./cmd/clawscan
@@ -98,6 +113,7 @@ The detailed manual lives in [`docs/`](docs/index.md):
 - [Benchmarks](docs/benchmarks.md)
 - [Artifacts](docs/artifacts.md)
 - [Development](docs/development.md)
+- [Releasing](docs/releasing.md)
 
 Build the static docs site locally:
 

@@ -58,6 +58,16 @@ The release target writes archives to `dist/`:
 - `clawscan_<version>_windows_amd64.zip`
 - `checksums.txt`
 
+Tagged `v*` releases publish those artifacts to GitHub Releases. After the
+GitHub Release is published, the release workflow dispatches
+`openclaw/homebrew-tap` to update `Formula/clawscan.rb` from the same release
+archives. The tap update requires a `HOMEBREW_TAP_TOKEN` or
+`HOMEBREW_TAP_GITHUB_TOKEN` secret with workflow and push access to the tap
+repository. If that secret is missing, release artifacts are still published and
+the Homebrew update is skipped with a workflow warning.
+
+Release operation notes live in [Releasing](releasing.md).
+
 ## ClawHub Parity Tooling
 
 ClawScan is general purpose, but OpenClaw also uses it to make ClawHub's

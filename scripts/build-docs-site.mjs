@@ -14,6 +14,7 @@ const pages = [
   ['benchmarks.md', 'Benchmarks'],
   ['artifacts.md', 'Artifacts'],
   ['development.md', 'Development'],
+  ['releasing.md', 'Releasing'],
 ];
 
 const css = `

@@ -21,6 +21,7 @@ that wants repeatable agent-skill security checks.
 | [Benchmarks](benchmarks.md) | Running the supported OpenClaw security-signals dataset. |
 | [Artifacts](artifacts.md) | `clawscan-run-v1` and `clawscan-benchmark-v1` JSON shapes. |
 | [Development](development.md) | Tests, docs site build, releases, and ClawHub parity tooling. |
+| [Releasing](releasing.md) | Release, Homebrew tap, verification, and rollback steps. |
 
 ## Mental Model
 
