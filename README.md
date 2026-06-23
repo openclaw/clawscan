@@ -45,6 +45,7 @@ This repository currently contains the Go CLI foundation:
 - external judge harness execution
 - prompt interpolation for scanner JSON and target files
 - deterministic scanner-result fixtures for reproducible prompt checks
+- benchmark execution for `OpenClaw/clawhub-security-signals`
 - ClawHub prompt parity proof tooling
 
 Scanner adapters are being filled in incrementally. SkillSpector, AgentVerus,
@@ -214,6 +215,7 @@ ClawScan does not add model-provider API keys to its own CLI flags or artifacts.
 
 ```bash
 clawscan <target> --scanner <scanner-id> [flags]
+clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]
 ```
 
 `<target>` is usually the path to the skill directory or skill file to scan.
@@ -238,6 +240,32 @@ URL targets are recorded as `"target.kind": "url"` in the run artifact. Local
 file copying for judge workspaces and `{{ target.files }}` remains path-based
 and may fail clearly for URL targets.
 
+### Benchmarks
+
+ClawScan can also run the same scanner/judge setup over the OpenClaw security
+signals benchmark:
+
+```bash
+clawscan \
+  --benchmark OpenClaw/clawhub-security-signals \
+  --split eval_holdout \
+  --limit 10 \
+  --scanner static \
+  --output ./clawscan-benchmark.json
+```
+
+V1 intentionally supports only `OpenClaw/clawhub-security-signals`. The loader
+maps each Hugging Face row into a temporary skill directory by writing
+`skill_md_content` to `SKILL.md` and restoring files from
+`skill_bundle_content`. It then runs the normal ClawScan path for that row, so
+scanner output, prompt rendering, judge execution, env validation, and secret
+redaction stay consistent with one-off scans.
+
+`--split` selects a reproducible Hugging Face split. The default is
+`eval_holdout`; accepted splits are `train`, `validation`, `test`, and
+`eval_holdout`. Use `--limit` and `--offset` for reproducible chunks while
+iterating locally. A limit of `0` means run the whole split.
+
 ### Flags
 
 | Flag | Required | Repeatable | Description |
@@ -247,6 +275,10 @@ and may fail clearly for URL targets.
 | `--output <path>` | No | No | Write the run artifact JSON to a file. |
 | `--json` | No | No | Print the run artifact JSON to stdout. |
 | `--judge <cmd>` | No | No | External judge harness command. ClawScan interpolates placeholders, runs it through the platform shell (`/bin/sh -c` on Unix, `cmd.exe /C` on Windows), and records its JSON output. |
+| `--benchmark <id>` | No | No | Run a supported benchmark instead of a single target. V1 supports `OpenClaw/clawhub-security-signals`. |
+| `--split <name>` | No | No | Benchmark split. Defaults to `eval_holdout`. |
+| `--limit <n>` | No | No | Maximum benchmark rows to run. `0` means all rows. |
+| `--offset <n>` | No | No | Benchmark row offset. Defaults to `0`. |
 
 If `--judge` is omitted, ClawScan only runs scanners and writes their raw
 results. If `--judge` is present, the command must produce a JSON object either
@@ -403,6 +435,78 @@ A run writes a `clawscan-run-v1` JSON artifact:
 The important design choice is that scanner output remains raw evidence. The
 judge harness decides how to interpret it.
 
+A benchmark run writes a `clawscan-benchmark-v1` JSON artifact:
+
+```json
+{
+  "schemaVersion": "clawscan-benchmark-v1",
+  "benchmark": {
+    "id": "OpenClaw/clawhub-security-signals",
+    "source": "huggingface",
+    "config": "default",
+    "split": "eval_holdout",
+    "offset": 0,
+    "limit": 1,
+    "rows": 1
+  },
+  "startedAt": "2026-06-03T00:00:00Z",
+  "completedAt": "2026-06-03T00:00:01Z",
+  "env": {},
+  "cases": [
+    {
+      "id": "dataset-row-id",
+      "skillSlug": "owner/skill",
+      "skillVersion": "1.0.0",
+      "expected": {
+        "verdict": "suspicious",
+        "confidence": "high",
+        "model": "gpt-5.5",
+        "summary": "Dataset verdict summary."
+      },
+      "run": {
+        "schemaVersion": "clawscan-run-v1",
+        "target": {
+          "kind": "skill",
+          "input": "/tmp/clawscan-benchmark-.../skill",
+          "resolvedPath": "/tmp/clawscan-benchmark-.../skill"
+        },
+        "startedAt": "2026-06-03T00:00:00Z",
+        "completedAt": "2026-06-03T00:00:01Z",
+        "env": {},
+        "scanners": {
+          "static": {
+            "status": "completed",
+            "startedAt": "2026-06-03T00:00:00Z",
+            "completedAt": "2026-06-03T00:00:01Z",
+            "command": [
+              "clawscan",
+              "static"
+            ],
+            "error": "",
+            "raw": {}
+          }
+        },
+        "judge": null
+      }
+    }
+  ],
+  "summary": {
+    "caseCount": 1,
+    "expectedVerdicts": {
+      "suspicious": 1
+    },
+    "scannerStatuses": {
+      "static": {
+        "completed": 1
+      }
+    }
+  }
+}
+```
+
+Each benchmark case embeds the normal one-off `clawscan-run-v1` artifact for
+that row.
+
 ## Judge Harness
 
 The intended judge flow is:
@@ -451,14 +555,22 @@ Run tests:
 
 ```bash
 go test ./...
+go vet ./...
 ```
 
-Run the current CLI smoke test manually:
+Run the current CLI smoke tests manually without scanner credentials:
 
 ```bash
 go run ./cmd/clawscan ./README.md \
-  --scanner skillspector \
+  --scanner static \
   --output /tmp/clawscan-smoke.json
+
+go run ./cmd/clawscan \
+  --benchmark OpenClaw/clawhub-security-signals \
+  --split eval_holdout \
+  --limit 1 \
+  --scanner static \
+  --output /tmp/clawscan-benchmark-smoke.json
 ```
 
 Check the prompt parity proof:

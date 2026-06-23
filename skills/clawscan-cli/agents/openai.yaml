@@ -1,0 +1,4 @@
+interface:
+  display_name: "ClawScan CLI"
+  short_description: "Run ClawScan scans and benchmarks"
+  default_prompt: "Use $clawscan-cli to run a one-off ClawScan scan or benchmark and summarize the artifact."

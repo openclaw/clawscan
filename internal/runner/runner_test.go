@@ -76,6 +76,134 @@ func TestParseArgsSupportsJudgeCommand(t *testing.T) {
 	}
 }
 
+func TestParseArgsSupportsOpenClawBenchmark(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"--benchmark", "OpenClaw/clawhub-security-signals",
+		"--split", "eval_holdout",
+		"--limit", "2",
+		"--offset", "10",
+		"--scanner", "static",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Target != "" {
+		t.Fatalf("target = %q", opts.Target)
+	}
+	if opts.Benchmark == nil {
+		t.Fatal("missing benchmark options")
+	}
+	if opts.Benchmark.ID != "OpenClaw/clawhub-security-signals" {
+		t.Fatalf("benchmark id = %q", opts.Benchmark.ID)
+	}
+	if opts.Benchmark.Split != "eval_holdout" {
+		t.Fatalf("split = %q", opts.Benchmark.Split)
+	}
+	if opts.Benchmark.Limit != 2 || opts.Benchmark.Offset != 10 {
+		t.Fatalf("benchmark bounds = %#v", opts.Benchmark)
+	}
+}
+
+func TestParseArgsRejectsTargetWithBenchmark(t *testing.T) {
+	_, err := ParseArgs([]string{
+		"./my-skill",
+		"--benchmark", "OpenClaw/clawhub-security-signals",
+		"--scanner", "static",
+	})
+	if err == nil || err.Error() != "--benchmark runs do not accept a scan target" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseArgsRejectsUnsupportedBenchmark(t *testing.T) {
+	_, err := ParseArgs([]string{
+		"--benchmark", "skillscan-paper",
+		"--scanner", "static",
+	})
+	if err == nil || err.Error() != "Unsupported benchmark: skillscan-paper" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseArgsRejectsBenchmarkBoundsWithoutBenchmark(t *testing.T) {
+	_, err := ParseArgs([]string{
+		"./my-skill",
+		"--split", "eval_holdout",
+		"--scanner", "static",
+	})
+	if err == nil || err.Error() != "--split requires --benchmark" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"--benchmark", "OpenClaw/clawhub-security-signals",
+		"--split", "eval_holdout",
+		"--scanner", "static",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanners := &recordingScannerRunner{}
+	artifact, err := RunBenchmark(opts, RunContext{
+		Env:           map[string]string{},
+		Now:           fixedClock("2026-06-12T12:00:00Z", "2026-06-12T12:00:01Z", "2026-06-12T12:00:02Z", "2026-06-12T12:00:03Z"),
+		ScannerRunner: scanners,
+		BenchmarkClient: staticBenchmarkClient{
+			rows: []OpenClawBenchmarkRow{
+				{
+					ID:             "row-1",
+					SkillSlug:      "owner/demo",
+					SkillVersion:   "1.2.3",
+					SkillMDContent: "# Demo\n",
+					SkillBundleContent: []OpenClawBundleFile{
+						{Path: "scripts/check.sh", Content: "echo ok\n"},
+					},
+					ClawScanVerdict:    "clean",
+					ClawScanConfidence: "high",
+					ClawScanModel:      "gpt-5.1",
+					ClawScanSummary:    "No malicious behavior found.",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.SchemaVersion != "clawscan-benchmark-v1" {
+		t.Fatalf("schema = %q", artifact.SchemaVersion)
+	}
+	if artifact.Benchmark.ID != "OpenClaw/clawhub-security-signals" || artifact.Benchmark.Split != "eval_holdout" {
+		t.Fatalf("benchmark = %#v", artifact.Benchmark)
+	}
+	if len(artifact.Cases) != 1 {
+		t.Fatalf("cases = %#v", artifact.Cases)
+	}
+	benchmarkCase := artifact.Cases[0]
+	if benchmarkCase.ID != "row-1" || benchmarkCase.SkillSlug != "owner/demo" || benchmarkCase.SkillVersion != "1.2.3" {
+		t.Fatalf("case metadata = %#v", benchmarkCase)
+	}
+	if benchmarkCase.Expected.Verdict != "clean" || benchmarkCase.Expected.Confidence != "high" {
+		t.Fatalf("expected = %#v", benchmarkCase.Expected)
+	}
+	if benchmarkCase.Run.Target.Kind != "skill" {
+		t.Fatalf("target = %#v", benchmarkCase.Run.Target)
+	}
+	if benchmarkCase.Run.Scanners["static"].Status != "completed" {
+		t.Fatalf("scanner result = %#v", benchmarkCase.Run.Scanners["static"])
+	}
+	if len(scanners.targets) != 1 {
+		t.Fatalf("scanner targets = %#v", scanners.targets)
+	}
+	if scanners.skillContent != "# Demo\n" {
+		t.Fatalf("SKILL.md = %q", scanners.skillContent)
+	}
+	if scanners.bundleContent != "echo ok\n" {
+		t.Fatalf("bundle file = %q", scanners.bundleContent)
+	}
+}
+
 func TestParseArgsRejectsScannerResultForUnrequestedScanner(t *testing.T) {
 	_, err := ParseArgs([]string{
 		"./my-skill",
@@ -1894,6 +2022,40 @@ func (runner staticScannerRunner) RunScanner(name string, target string, started
 	result.StartedAt = startedAt
 	result.CompletedAt = startedAt
 	return result, nil
+}
+
+type recordingScannerRunner struct {
+	targets       []string
+	skillContent  string
+	bundleContent string
+}
+
+func (runner *recordingScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
+	runner.targets = append(runner.targets, target)
+	skill, err := os.ReadFile(filepath.Join(target, "SKILL.md"))
+	if err != nil {
+		return ScannerResult{}, err
+	}
+	runner.skillContent = string(skill)
+	bundled, err := os.ReadFile(filepath.Join(target, "scripts", "check.sh"))
+	if err != nil {
+		return ScannerResult{}, err
+	}
+	runner.bundleContent = string(bundled)
+	return ScannerResult{
+		Status:      "completed",
+		StartedAt:   startedAt,
+		CompletedAt: startedAt,
+		Raw:         json.RawMessage(`{"ok":true}`),
+	}, nil
+}
+
+type staticBenchmarkClient struct {
+	rows []OpenClawBenchmarkRow
+}
+
+func (client staticBenchmarkClient) FetchOpenClawRows(dataset string, split string, offset int, limit int) ([]OpenClawBenchmarkRow, error) {
+	return client.rows, nil
 }
 
 type errorScannerRunner struct{}

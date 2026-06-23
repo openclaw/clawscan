@@ -23,11 +23,19 @@ import (
 
 type Options struct {
 	Target             string
+	Benchmark          *BenchmarkOptions
 	Scanners           []string
 	ScannerResultPaths map[string]string
 	OutputPath         string
 	JSON               bool
 	Judge              *JudgeOptions
+}
+
+type BenchmarkOptions struct {
+	ID     string
+	Split  string
+	Limit  int
+	Offset int
 }
 
 type JudgeOptions struct {
@@ -43,6 +51,7 @@ type RunContext struct {
 	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
 	VirusTotalHTTPClient   VirusTotalHTTPClient
 	GenDigitalHTTPClient   GenDigitalHTTPClient
+	BenchmarkClient        BenchmarkClient
 }
 
 type ScannerRunner interface {
@@ -147,14 +156,69 @@ func ScannerIDs() []string {
 }
 
 func ParseArgs(args []string) (Options, error) {
-	if len(args) == 0 || strings.HasPrefix(args[0], "--") {
+	if len(args) == 0 {
 		return Options{}, errors.New("Missing scan target")
 	}
-	opts := Options{Target: args[0], ScannerResultPaths: map[string]string{}}
+	opts := Options{ScannerResultPaths: map[string]string{}}
+	start := 0
+	if !strings.HasPrefix(args[0], "--") {
+		opts.Target = args[0]
+		start = 1
+	}
 	var judge string
-	for i := 1; i < len(args); i++ {
+	var benchmarkID string
+	benchmarkSplit := defaultOpenClawBenchmarkSplit
+	var benchmarkLimit int
+	var benchmarkOffset int
+	var benchmarkOnlyFlag string
+	for i := start; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
+		case "--benchmark":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			benchmarkID = value
+			i = next
+		case "--split":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			benchmarkSplit = value
+			if benchmarkOnlyFlag == "" {
+				benchmarkOnlyFlag = arg
+			}
+			i = next
+		case "--limit":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			parsed, err := strconv.Atoi(value)
+			if err != nil || parsed < 0 {
+				return Options{}, errors.New("Expected --limit value as a non-negative integer")
+			}
+			benchmarkLimit = parsed
+			if benchmarkOnlyFlag == "" {
+				benchmarkOnlyFlag = arg
+			}
+			i = next
+		case "--offset":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			parsed, err := strconv.Atoi(value)
+			if err != nil || parsed < 0 {
+				return Options{}, errors.New("Expected --offset value as a non-negative integer")
+			}
+			benchmarkOffset = parsed
+			if benchmarkOnlyFlag == "" {
+				benchmarkOnlyFlag = arg
+			}
+			i = next
 		case "--scanner":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -198,6 +262,28 @@ func ParseArgs(args []string) (Options, error) {
 		default:
 			return Options{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
+	}
+	if benchmarkID != "" {
+		if opts.Target != "" {
+			return Options{}, errors.New("--benchmark runs do not accept a scan target")
+		}
+		id, err := canonicalBenchmarkID(benchmarkID)
+		if err != nil {
+			return Options{}, err
+		}
+		if err := validateBenchmarkSplit(id, benchmarkSplit); err != nil {
+			return Options{}, err
+		}
+		opts.Benchmark = &BenchmarkOptions{
+			ID:     id,
+			Split:  benchmarkSplit,
+			Limit:  benchmarkLimit,
+			Offset: benchmarkOffset,
+		}
+	} else if opts.Target == "" {
+		return Options{}, errors.New("Missing scan target")
+	} else if benchmarkOnlyFlag != "" {
+		return Options{}, fmt.Errorf("%s requires --benchmark", benchmarkOnlyFlag)
 	}
 	if len(opts.Scanners) == 0 {
 		return Options{}, errors.New("At least one --scanner is required")

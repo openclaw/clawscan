@@ -34,6 +34,21 @@ func run(args []string, environ []string) error {
 	if err != nil {
 		return err
 	}
+	if opts.Benchmark != nil {
+		artifact, err := runner.RunBenchmark(opts, runner.RunContext{Env: runner.EnvMap(environ)})
+		if err != nil {
+			return err
+		}
+		if opts.JSON {
+			return runner.WriteJSON(os.Stdout, artifact)
+		}
+		if opts.OutputPath != "" {
+			fmt.Fprintf(os.Stdout, "Wrote %s\n", opts.OutputPath)
+			return nil
+		}
+		fmt.Fprintf(os.Stdout, "clawscan %s: %d case(s)\n", artifact.SchemaVersion, len(artifact.Cases))
+		return nil
+	}
 	artifact, err := runner.Run(opts, runner.RunContext{Env: runner.EnvMap(environ)})
 	if err != nil {
 		return err
@@ -58,6 +73,7 @@ func helpText() string {
 
 Usage:
   clawscan <target> --scanner <scanner-id> [flags]
+  clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]
   clawscan --version
   clawscan --help
 
@@ -67,8 +83,15 @@ Core flags:
   --output <path>             Write the run artifact JSON to a file.
   --json                      Print the run artifact JSON to stdout.
   --judge <cmd>               Optional external judge harness command.
+  --benchmark <id>            Run a supported benchmark dataset instead of one target.
+  --split <name>              Benchmark split. Defaults to eval_holdout.
+  --limit <n>                 Maximum benchmark rows to run. 0 means all rows.
+  --offset <n>                Benchmark row offset. Defaults to 0.
   --version                   Print build metadata.
   -h, --help                  Print this help.
+
+Supported benchmarks:
+  OpenClaw/clawhub-security-signals
 
 Accepted scanner IDs:
   %s
