@@ -29,9 +29,9 @@ Choose the run mode:
 
 | Need | Shape |
 | --- | --- |
-| Scan one skill path | `clawscan ./my-skill --scanner static --json` |
+| Scan one skill path | `clawscan ./my-skill --scanner clawscan-static --json` |
 | Scan one URL | `clawscan https://clawhub.ai/owner/skill --scanner gendigital --json` |
-| Run the OpenClaw benchmark | `clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 10 --scanner static --output run.json` |
+| Run the OpenClaw benchmark | `clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
 | Add a judge harness | Add `--judge '<command with placeholders>'`. |
 
@@ -40,7 +40,7 @@ Choose the run mode:
 Accepted scanner IDs:
 
 ```text
-agentverus, ai-infra-guard, cisco, gendigital, skillspector, snyk, static, virustotal
+agentverus, ai-infra-guard, cisco, clawscan-static, gendigital, skillspector, snyk, virustotal
 ```
 
 Credential rules:
@@ -70,7 +70,7 @@ clawscan \
   --benchmark OpenClaw/clawhub-security-signals \
   --split eval_holdout \
   --limit 10 \
-  --scanner static \
+  --scanner clawscan-static \
   --output /tmp/clawscan-benchmark.json
 ```
 
@@ -106,8 +106,8 @@ If a prompt references an unrequested scanner, ClawScan should fail clearly.
 Use static scanner smokes for local proof because they do not need secrets:
 
 ```bash
-go run ./cmd/clawscan ./README.md --scanner static --output /tmp/clawscan-smoke.json
-go run ./cmd/clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 1 --scanner static --output /tmp/clawscan-benchmark-smoke.json
+go run ./cmd/clawscan ./README.md --scanner clawscan-static --output /tmp/clawscan-smoke.json
+go run ./cmd/clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json
 go test ./...
 go vet ./...
 ```

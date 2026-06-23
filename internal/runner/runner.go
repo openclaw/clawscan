@@ -136,14 +136,14 @@ type requirement struct {
 }
 
 var scannerSet = map[string]bool{
-	"agentverus":     true,
-	"ai-infra-guard": true,
-	"skillspector":   true,
-	"snyk":           true,
-	"cisco":          true,
-	"virustotal":     true,
-	"gendigital":     true,
-	"static":         true,
+	"agentverus":      true,
+	"ai-infra-guard":  true,
+	"skillspector":    true,
+	"snyk":            true,
+	"cisco":           true,
+	"virustotal":      true,
+	"gendigital":      true,
+	"clawscan-static": true,
 }
 
 func ScannerIDs() []string {
@@ -1201,7 +1201,7 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 		return runner.runAIInfraGuard(target, startedAt)
 	case "skillspector":
 		return runner.runSkillSpector(target, startedAt)
-	case "static":
+	case "clawscan-static":
 		return runner.runStatic(target, startedAt)
 	case "snyk":
 		return runner.runSnyk(target, startedAt)

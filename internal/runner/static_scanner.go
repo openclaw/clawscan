@@ -107,14 +107,14 @@ type staticFileCandidate struct {
 }
 
 func (runner ExternalScannerRunner) runStatic(target string, startedAt string) (ScannerResult, error) {
-	command := []string{"static", target}
+	command := []string{"clawscan-static", target}
 	if isURLTarget(target) {
 		return ScannerResult{
 			Status:      "skipped",
 			StartedAt:   startedAt,
 			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Command:     command,
-			Error:       "Static scanner supports local file or directory targets in v1; URL targets are unsupported.",
+			Error:       "ClawScan static scanner supports local file or directory targets in v1; URL targets are unsupported.",
 			Raw:         nil,
 		}, nil
 	}
@@ -144,7 +144,7 @@ func buildStaticScannerReport(target string) (staticScannerReport, error) {
 	return staticScannerReport{
 		SchemaVersion: staticScannerVersion,
 		Scanner: staticScannerMetadata{
-			ID:      "static",
+			ID:      "clawscan-static",
 			Name:    "ClawScan built-in static scanner",
 			Version: staticScannerVersion,
 			Rules:   staticRuleSummaries(),
