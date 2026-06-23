@@ -1,8 +1,9 @@
 ## ClawScan Vision
 
-ClawScan is the small, reproducible security runner for agent skills.
+ClawScan is the open security workbench behind ClawHub skill scanning.
 It runs scanners, preserves their raw evidence, and optionally hands that
-evidence to an external judge harness.
+evidence to an external judge harness so the full scan process can be inspected,
+tested, and improved.
 
 This document explains the current state and direction of the project.
 We are still early, so iteration is fast.
@@ -11,14 +12,25 @@ Project overview and developer docs: [`README.md`](README.md)
 ClawScan started as the extraction of ClawHub's internal skill security scan
 path into a standalone open source tool.
 
-The goal: make skill security scanning boring, comparable, and reproducible
-while keeping the public tool general-purpose.
+The goal is to make ClawHub's skill security process transparent and
+improvable. Security researchers, contributors, and maintainers should be able
+to see exactly how ClawHub scans skills today, try better scanner and judge
+combinations, and submit changes that catch real malicious skills without
+creating broad false positives.
+That gives the community a practical hill-climbing loop for making skill
+security scanning more robust over time.
 
 The current focus is:
 
 Priority:
 
-- Reproduce ClawHub's current ClawScan setup char-for-char where needed
+- Show exactly how ClawHub performs skill security scans, including scanners,
+  raw evidence, prompts, schemas, judge harnesses, and model settings
+- Make it easy to test different combinations of scanners, harnesses, models,
+  prompts, and schemas against the same targets
+- Give security researchers a clear path to report missed malicious skills and
+  submit fixes that prove those skills are caught without regressing known-good
+  cases
 - Run multiple scanners against one target and preserve their raw JSON evidence
 - Keep secrets out of CLI flags, shell history, process lists, and artifacts
 - Keep the CLI small enough that scanner comparison is easy to understand
@@ -26,8 +38,9 @@ Priority:
 Next priorities:
 
 - Fill in real adapters for accepted scanner IDs that are currently stubs
-- Improve scanner fixture workflows for repeatable comparisons
-- Add corpus/eval workflows once one-off scan behavior is solid
+- Improve fixture and corpus workflows for scanner comparison, missed-malicious
+  reports, and false-positive regression checks
+- Add lightweight eval workflows once one-off scan behavior is solid
 - Make artifact comparison easier without inventing a heavy benchmark platform
 
 Contribution rules:
@@ -62,14 +75,16 @@ Different scanners have different threat models, output schemas, confidence
 signals, and false-positive profiles.
 
 The artifact should make those differences visible instead of flattening them
-too early into one canonical verdict.
+too early into one canonical verdict. That visibility is what lets contributors
+compare scanners honestly and understand why a judge prompt did or did not reach
+a useful conclusion.
 
 Built-in scanner support should focus on boring integration work:
 
 - run the scanner
 - validate required environment variables up front
 - capture command status, stderr-derived errors, and raw JSON output
-- support fixture-backed scanner results for reproducible checks
+- support fixture-backed scanner results for comparison and regression checks
 
 ## Judge Harness
 
@@ -90,20 +105,27 @@ The judge result must be a JSON object.
 If a schema is relevant, the harness should enforce it and write the validated
 object to `{{ output }}`.
 
-## ClawHub Parity
+## ClawHub Transparency
 
-ClawHub parity is a required invariant for this extraction.
-The standalone CLI must be able to prove that the prompt handed to a judge
-harness matches the prompt ClawHub would have produced for the same scanner
-evidence.
+ClawHub transparency is a required invariant for this extraction.
+The standalone CLI must make it possible to see the same scan inputs ClawHub is
+using in production: scanner evidence, prompt text, schema, judge harness, model,
+and relevant runtime settings.
 
-That parity should be proven with stable scanner fixtures and byte-level hashes.
-It should not require public ClawHub-specific flags on the main CLI.
+When exact parity matters, it should be provable with stable scanner fixtures
+and byte-level hashes. That proof is not the product's purpose by itself; it is
+the trust mechanism that lets the community know they are improving the same
+process ClawHub actually runs.
 
 ClawHub-specific verification helpers can live under `cmd/verify-clawhub-prompt`
 or similar internal proof commands.
 The public `clawscan` command should stay useful for anyone scanning skills,
 whether or not they use ClawHub.
+
+This matters most when someone finds a malicious skill that ClawHub missed.
+They should be able to create a failing fixture, improve a scanner, prompt, or
+judge harness, and show that the new setup catches the malicious skill without
+turning benign skills into false positives.
 
 ## Setup
 
