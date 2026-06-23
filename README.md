@@ -68,6 +68,7 @@ The results bundle keeps the top-level artifact plus per-scanner JSON reports.
   "scanners": {
     "cisco": {
       "status": "completed",
+      "durationMs": 42,
       "outputPath": "clawscan-csv-summarizer/skills/csv-summarizer/cisco.json",
       "isSafe": true,
       "maxSeverity": "SAFE",
@@ -75,6 +76,7 @@ The results bundle keeps the top-level artifact plus per-scanner JSON reports.
     },
     "skillspector": {
       "status": "completed",
+      "durationMs": 42,
       "outputPath": "clawscan-csv-summarizer/skills/csv-summarizer/skillspector.json",
       "severity": "MEDIUM",
       "score": 31,

@@ -836,6 +836,50 @@ func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 	}
 }
 
+func TestRunIncludesDurationMsForScannerResults(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}, ScannerRunner: skippedScannerRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertScannerDurationJSON(t, artifact, "skillspector")
+}
+
+func TestRunIncludesDurationMsForFixtureScannerResults(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(dir, "skillspector.json")
+	if err := os.WriteFile(fixture, []byte(`{"status":"clean","findings":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--scanner-result", "skillspector=" + fixture,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}, ScannerRunner: errorScannerRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertScannerDurationJSON(t, artifact, "skillspector")
+}
+
 func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -2857,6 +2901,32 @@ type errorScannerRunner struct{}
 
 func (errorScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
 	return ScannerResult{}, fmt.Errorf("unexpected live scanner call for %s", name)
+}
+
+func assertScannerDurationJSON(t *testing.T, artifact Artifact, scanner string) {
+	t.Helper()
+
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Scanners map[string]map[string]interface{} `json:"scanners"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	duration, ok := decoded.Scanners[scanner]["durationMs"]
+	if !ok {
+		t.Fatalf("scanner %s missing durationMs in JSON: %s", scanner, raw)
+	}
+	number, ok := duration.(float64)
+	if !ok {
+		t.Fatalf("scanner %s durationMs is %T, want number", scanner, duration)
+	}
+	if number < 0 || number != float64(int64(number)) {
+		t.Fatalf("scanner %s durationMs = %v, want non-negative integer", scanner, duration)
+	}
 }
 
 type testStaticReport struct {

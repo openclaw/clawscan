@@ -139,6 +139,7 @@ type ScannerResult struct {
 	Status      string          `json:"status"`
 	StartedAt   string          `json:"startedAt"`
 	CompletedAt string          `json:"completedAt"`
+	DurationMs  int64           `json:"durationMs"`
 	Command     []string        `json:"command"`
 	Error       string          `json:"error"`
 	OutputPath  string          `json:"outputPath,omitempty"`
@@ -337,10 +338,12 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	artifact.Target.Kind = target.kind
 	for _, scanner := range opts.Scanners {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
+		scannerTimerStarted := time.Now()
 		result, err := scannerResult(opts, scanner, target.resolvedPath, scannerStartedAt, scannerRunner)
 		if err != nil {
 			return Artifact{}, err
 		}
+		result.DurationMs = time.Since(scannerTimerStarted).Milliseconds()
 		artifact.Scanners[scanner] = result
 	}
 	if opts.Judge != nil {
