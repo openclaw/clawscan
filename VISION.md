@@ -1,6 +1,9 @@
 ## ClawScan Vision
 
-ClawScan is the open security workbench behind ClawHub skill scanning.
+ClawScan lets the community see, test, and improve how ClawHub detects malicious
+skills.
+
+ClawScan is an open, benchmarkable security scanning harness for agent skills.
 It runs scanners, preserves their raw evidence, and optionally hands that
 evidence to an external judge harness so the full scan process can be inspected,
 tested, and improved.

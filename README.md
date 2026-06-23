@@ -1,12 +1,17 @@
 # ClawScan
 
-ClawScan is a standalone security runner for OpenClaw skills. It gives us one
-small command for running multiple skill scanners, collecting their raw evidence,
-and optionally passing that evidence into an external judge harness.
+ClawScan lets the community see, test, and improve how ClawHub detects
+malicious skills.
 
-The first goal is reproducibility: the open source tool should be able to run the
-same ClawHub ClawScan setup we run internally, while making it easier for others
-to compare scanners and iterate on their own judge prompts and harnesses.
+ClawScan is an open, benchmarkable security scanning harness for agent skills.
+It gives researchers, contributors, and maintainers one small command for
+running scanners, preserving their raw evidence, and optionally passing that
+evidence into an external judge harness.
+
+The goal is to make ClawHub's skill security process transparent and improvable:
+anyone should be able to inspect the current scan setup, try different scanner
+and judge combinations, and propose fixes that catch missed malicious skills
+without creating broad false positives.
 
 ## Motivation
 
