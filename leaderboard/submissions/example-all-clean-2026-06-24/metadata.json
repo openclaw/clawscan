@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "clawscan-security-signals-submission-v1",
+  "benchmark": {
+    "dataset": "OpenClaw/clawhub-security-signals",
+    "split": "eval_holdout",
+    "revision": "769d3dbe71d52f3453b9a416cbcea88b4a641fd0"
+  },
+  "system": {
+    "name": "Example all-clean submission",
+    "role": "community-example"
+  },
+  "verificationStatus": "artifact-validated"
+}

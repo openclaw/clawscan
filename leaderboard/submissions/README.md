@@ -49,3 +49,12 @@ CI validates changed submission directories with the same ClawScan validator,
 recomputes loose non-clean metrics, and uploads JSON score previews as workflow
 artifacts. The PR path is artifact-validated: CI verifies structure and score
 math, but it does not rerun expensive scanners or model judges.
+
+## Seed Submissions
+
+- `clawhub-label-reference-2026-06-24` is the initial production-style
+  reference row. It mirrors the current Security Signals labels for the
+  `eval_holdout` split and uses verification status `clawhub-production`.
+- `example-all-clean-2026-06-24` is a community-style artifact-validated
+  example. It predicts `clean` for every case so the leaderboard and publish
+  path exercise non-perfect metrics and false negatives.

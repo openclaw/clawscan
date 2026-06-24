@@ -17,7 +17,9 @@ var (
 )
 
 var validateSubmission = func(path string) (runner.SecuritySignalsSubmissionResult, error) {
-	return runner.ValidateSecuritySignalsSubmission(path, runner.HuggingFaceBenchmarkClient{})
+	return runner.ValidateSecuritySignalsSubmission(path, runner.HuggingFaceBenchmarkClient{
+		Endpoint: os.Getenv("CLAWSCAN_HUGGINGFACE_ROWS_ENDPOINT"),
+	})
 }
 
 func main() {
