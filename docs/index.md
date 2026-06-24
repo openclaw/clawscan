@@ -27,8 +27,9 @@ that wants repeatable agent-skill security checks.
 
 ClawScan has three layers:
 
-1. **Target**: a local skill file, a local skill directory, a scanner-supported
-   URL, or a benchmark row materialized as a temporary skill directory.
+1. **Target**: discovered child skill directories under `./skills`, one
+   explicit local skill file or directory, a scanner-supported URL, or a
+   benchmark row materialized as a temporary skill directory.
 2. **Scanners**: built-in adapters that produce raw JSON evidence.
 3. **Judge**: an optional external command that interprets the evidence.
 

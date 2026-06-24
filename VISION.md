@@ -133,12 +133,15 @@ turning benign skills into false positives.
 ## Setup
 
 ClawScan is CLI-first by design.
-For v1, command flags are the configuration surface.
+For v1, command flags remain the override surface and the easiest path for
+one-off runs. Named profiles add a small repeatability layer for common scanner
+and judge combinations without making YAML mandatory.
 
-YAML configs, plugin APIs, dashboards, and persistent run profiles can come
-later if repeated use proves they are worth the extra surface area.
-Until then, the tool should prefer simple commands that are easy to paste into
-CI, docs, and issue comments.
+Project `.clawscan.yml` files may define profiles and env var names, but secrets
+must still come from environment variables. Plugin APIs, dashboards, and heavier
+configuration systems can come later if repeated use proves they are worth the
+extra surface area. Until then, the tool should prefer simple commands that are
+easy to paste into CI, docs, and issue comments.
 
 ## Why Go?
 

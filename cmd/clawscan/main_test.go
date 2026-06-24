@@ -18,14 +18,18 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 
 	for _, want := range []string{
 		"Usage:",
-		"clawscan <target> --scanner <scanner-id> [flags]",
+		"clawscan [target] [flags]",
+		"clawscan --profile skills-sh [flags]",
 		"clawscan --benchmark --scanner <scanner-id> [flags]",
 		"clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]",
 		"--scanner <id>",
+		"--profile <name>",
+		"--config <path>",
 		"--benchmark [id]",
 		"--split <name>",
 		"--limit <n>",
 		"--offset <n>",
+		"--predictions-output <path>",
 		"Supported benchmarks:",
 		"cuhk-zhuque/SkillTrustBench",
 		"SkillTrustBench",
@@ -41,6 +45,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key",
 		"AI-Infra-Guard uses the self-hosted A.I.G taskapi",
 		"Gen Digital supports URL targets only in v1",
+		"No target scans child skill directories under ./skills",
 		"--judge <cmd>",
 		"{{ workspace }}",
 		"{{ prompt[:path] }}",
@@ -70,13 +75,58 @@ func TestRunCommandShortHelpMatchesLongHelp(t *testing.T) {
 	}
 }
 
-func TestRunCommandPreservesMissingTargetError(t *testing.T) {
+func TestRunCommandReportsMissingDefaultSkillsDirectory(t *testing.T) {
+	t.Chdir(t.TempDir())
 	err := run([]string{}, []string{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if err.Error() != "Missing scan target" {
+	if !strings.Contains(err.Error(), "./skills was not found") {
 		t.Fatalf("err = %q", err.Error())
+	}
+}
+
+func TestRunCommandPrintsBatchJSONForDiscoveredSkills(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, filepath.Join(dir, "skills", "foo"), "# Foo\n")
+	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\n")
+	t.Chdir(dir)
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Profile       string `json:"profile"`
+		Runs          []struct {
+			Target struct {
+				Input string `json:"input"`
+			} `json:"target"`
+			Scanners map[string]interface{} `json:"scanners"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.SchemaVersion != "clawscan-batch-v1" {
+		t.Fatalf("schema = %q", artifact.SchemaVersion)
+	}
+	if artifact.Profile != "clawhub" {
+		t.Fatalf("profile = %q", artifact.Profile)
+	}
+	if len(artifact.Runs) != 2 {
+		t.Fatalf("runs = %#v", artifact.Runs)
+	}
+	if got := artifact.Runs[0].Target.Input + "," + artifact.Runs[1].Target.Input; got != "skills/bar,skills/foo" {
+		t.Fatalf("targets = %q", got)
+	}
+	for _, run := range artifact.Runs {
+		if _, ok := run.Scanners["clawscan-static"]; !ok {
+			t.Fatalf("missing static scanner for %s: %#v", run.Target.Input, run.Scanners)
+		}
 	}
 }
 
@@ -110,6 +160,95 @@ func TestRunCommandWritesArtifact(t *testing.T) {
 	}
 }
 
+func TestRunCommandUsesBuiltInProfile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Profile\n")
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--profile", "clawhub", "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		Profile  string                 `json:"profile"`
+		Scanners map[string]interface{} `json:"scanners"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Profile != "clawhub" {
+		t.Fatalf("profile = %q", artifact.Profile)
+	}
+	if _, ok := artifact.Scanners["clawscan-static"]; !ok {
+		t.Fatalf("missing clawscan-static scanner: %#v", artifact.Scanners)
+	}
+}
+
+func TestRunCommandUsesProjectProfile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Project profile\n")
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
+profiles:
+  local:
+    scanners:
+      - clawscan-static
+    json: true
+`)
+	t.Chdir(dir)
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--profile", "local"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		Profile  string                 `json:"profile"`
+		Scanners map[string]interface{} `json:"scanners"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Profile != "local" {
+		t.Fatalf("profile = %q", artifact.Profile)
+	}
+	if _, ok := artifact.Scanners["clawscan-static"]; !ok {
+		t.Fatalf("missing clawscan-static scanner: %#v", artifact.Scanners)
+	}
+}
+
+func TestRunCommandProfilePlusOverride(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Override\n")
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--profile", "skills-sh", "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		Profile  string                 `json:"profile"`
+		Scanners map[string]interface{} `json:"scanners"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Profile != "skills-sh" {
+		t.Fatalf("profile = %q", artifact.Profile)
+	}
+	if len(artifact.Scanners) != 1 {
+		t.Fatalf("scanners = %#v", artifact.Scanners)
+	}
+	if _, ok := artifact.Scanners["clawscan-static"]; !ok {
+		t.Fatalf("missing clawscan-static scanner: %#v", artifact.Scanners)
+	}
+}
+
 func TestVersionStringIncludesBuildMetadata(t *testing.T) {
 	version = "v1.2.3"
 	commit = "abc1234"
@@ -137,6 +276,26 @@ func TestRunCommandDoesNotLeakPresentSecrets(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-snyk") {
 		t.Fatalf("error leaked secret: %s", err)
+	}
+}
+
+func writeSkill(t *testing.T, dir string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

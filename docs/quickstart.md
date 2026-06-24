@@ -35,7 +35,83 @@ During development, run the CLI directly:
 go run ./cmd/clawscan ./my-skill --scanner clawscan-static --json
 ```
 
-## One-Off Scan
+## Default Scan
+
+From a repository root that stores skills under `./skills/<name>/SKILL.md`, run
+the default built-in `clawhub` profile:
+
+```bash
+clawscan
+```
+
+To use another built-in profile over the same discovered skill targets:
+
+```bash
+clawscan --profile skills-sh
+```
+
+Built-in profiles:
+
+| Profile | Scanners |
+| --- | --- |
+| `clawhub` | `clawscan-static` |
+| `skills-sh` | `skillspector`, `clawscan-static` |
+
+If `./skills` is missing or has no child directories containing `SKILL.md`,
+ClawScan exits with a target-discovery error. Pass an explicit target when you
+want to scan something else.
+
+## Project Profiles
+
+ClawScan ships embedded built-in profiles, and projects can define their own in
+the nearest `.clawscan.yml` or `.clawscan.yaml` discovered from the current
+working directory upward. If both filenames exist in the same directory, the CLI
+fails with an ambiguity error.
+
+```yaml
+version: 1
+
+profiles:
+  clawhub-release:
+    scanners:
+      - clawscan-static
+    json: true
+
+  skills-sh-review:
+    scanners:
+      - skillspector
+      - clawscan-static
+    output: ./clawscan-results/skills-sh-review.json
+    judge:
+      command: judge --out {{ output }}
+      requiredEnv:
+        - OPENAI_API_KEY
+```
+
+Run a project profile:
+
+```bash
+clawscan ./my-skill --profile clawhub-release
+```
+
+Load one specific config file and skip discovery:
+
+```bash
+clawscan ./my-skill --config ./security/clawscan.yml --profile skills-sh-review
+```
+
+Project profile names shadow built-in names as whole-profile replacements. CLI
+flags override the selected profile for one run:
+
+```bash
+clawscan ./my-skill --profile skills-sh --scanner clawscan-static --json
+```
+
+Config files may declare env var names that a judge needs, but they must not
+store secret values. Scanner and judge credentials stay in environment
+variables, such as `OPENAI_API_KEY` for the example judge command.
+
+## Explicit Target Scan
 
 Scan a local skill directory with the built-in static scanner:
 
@@ -90,6 +166,8 @@ Actual secret values are never written to run artifacts.
 
 | Flag | Description |
 | --- | --- |
+| `--profile <name>` | Profile to run. Defaults to `clawhub`. |
+| `--config <path>` | Load one config file instead of discovering `.clawscan.yml` / `.clawscan.yaml`; pair with `--profile` to run a project profile from that file. |
 | `--scanner <id>` | Scanner to run. Repeat for multiple scanners. |
 | `--scanner-result <id=path>` | Use a JSON fixture instead of running that scanner. |
 | `--output <path>` | Write the run artifact JSON to a file. |

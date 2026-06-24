@@ -10,6 +10,7 @@ A one-off scan writes a `clawscan-run-v1` artifact:
 ```json
 {
   "schemaVersion": "clawscan-run-v1",
+  "profile": "clawhub",
   "target": {
     "kind": "skill",
     "input": "./my-skill",
@@ -39,6 +40,53 @@ A one-off scan writes a `clawscan-run-v1` artifact:
 
 Scanner `raw` fields preserve upstream scanner JSON as evidence. Scanner
 `status` and `error` explain ClawScan's adapter-level outcome.
+
+Consumers should branch on the top-level `schemaVersion` field:
+
+| `schemaVersion` | Meaning |
+| --- | --- |
+| `clawscan-run-v1` | One normal scan run for one target and one selected profile. |
+| `clawscan-batch-v1` | One command wrapping multiple normal run artifacts. |
+| `clawscan-benchmark-v1` | One benchmark artifact with cases that embed normal run artifacts. |
+
+## Discovered Target Run
+
+When a command discovers multiple child skills under `./skills`, JSON output and
+`--output` use a `clawscan-batch-v1` wrapper. Each entry in `runs` is a normal
+`clawscan-run-v1` artifact with its own target and raw scanner evidence:
+
+```json
+{
+  "schemaVersion": "clawscan-batch-v1",
+  "profile": "clawhub",
+  "runs": [
+    {
+      "schemaVersion": "clawscan-run-v1",
+      "target": {
+        "kind": "skill",
+        "input": "skills/foo",
+        "resolvedPath": "/absolute/path/to/skills/foo"
+      }
+    },
+    {
+      "schemaVersion": "clawscan-run-v1",
+      "target": {
+        "kind": "skill",
+        "input": "skills/bar",
+        "resolvedPath": "/absolute/path/to/skills/bar"
+      }
+    }
+  ],
+  "summary": {
+    "targetCount": 2,
+    "scannerStatuses": {
+      "clawscan-static": {
+        "completed": 2
+      }
+    }
+  }
+}
+```
 
 ## Benchmark Run
 
@@ -96,6 +144,24 @@ A benchmark run writes a `clawscan-benchmark-v1` artifact:
 ```
 
 Each benchmark case embeds a normal `clawscan-run-v1` artifact under `run`.
+
+OpenClaw security-signals benchmark runs also produce a lightweight
+`predictions.jsonl` submission file when `--output` or `--predictions-output` is
+used:
+
+```json
+{"id":"clean-case","prediction":"clean"}
+{"id":"suspicious-case","prediction":"suspicious"}
+{"id":"malicious-case","prediction":"malicious"}
+```
+
+The benchmark artifact keeps the full scanner and judge evidence. The
+predictions file keeps only the case ID and submitted verdict for leaderboard
+validation and scoring.
+
+Benchmark cases also include benchmark-only evaluation metadata when ClawScan
+can map the expected label and prediction into the canonical verdicts `clean`,
+`suspicious`, and `malicious`.
 
 ## Secret Redaction
 

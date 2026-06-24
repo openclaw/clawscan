@@ -13,10 +13,23 @@ project can use it for agent-skill security scanning.
 
 ## Quick Start
 
-Run a local static scan and print the artifact:
+From a repository root with skills under `./skills/<name>/SKILL.md`, run the
+default built-in `clawhub` profile:
+
+```bash
+clawscan
+```
+
+Run a local static scan against one explicit target and print the artifact:
 
 ```bash
 go run ./cmd/clawscan ./my-skill --scanner clawscan-static --json
+```
+
+Run a built-in profile against one explicit target:
+
+```bash
+clawscan ./my-skill --profile clawhub --json
 ```
 
 Run several scanners and save the result:
@@ -40,16 +53,31 @@ clawscan \
 ```
 
 Use `--benchmark OpenClaw/clawhub-security-signals --split eval_holdout` for
-the OpenClaw security-signals benchmark.
+the OpenClaw security-signals benchmark. When that benchmark is run with
+`--output`, ClawScan also writes a submission-friendly `predictions.jsonl` file
+next to the benchmark artifact.
 
 ## What It Does
 
-- Runs scanner adapters against one skill target or a supported benchmark.
+- Runs scanner adapters against discovered `./skills` targets, one explicit
+  skill target, or a supported benchmark.
 - Keeps scanner output as raw JSON evidence.
 - Records scanner status, errors, commands, and secret-safe env presence.
 - Optionally invokes an external judge command through `--judge`.
 - Lets prompts interpolate scanner JSON with placeholders such as
   `{{ scanners.skillspector }}`.
+
+If no target is passed, ClawScan looks for child skill directories under
+`./skills`. If that directory is missing or contains no child directories with a
+`SKILL.md`, the CLI exits with a clear target-discovery error instead of
+silently scanning `.`.
+
+Profiles can come from the embedded built-ins or from the nearest project-local
+`.clawscan.yml` / `.clawscan.yaml`. Project profiles shadow built-in profile
+names, and CLI flags such as `--scanner`, `--output`, `--json`, and `--judge`
+override the selected profile for one run. Pair `--config <path>` with
+`--profile <name>` to load one profile from a specific config file instead of
+upward discovery.
 
 ## Supported Scanners
 
@@ -125,6 +153,14 @@ open dist/docs-site/index.html
 ```
 
 GitHub Pages publishes the docs site from `docs/` on pushes to `main`.
+
+## Roadmap
+
+- Reusable GitHub Action or workflow for CI. The goal is a copy-pasteable way
+  to install ClawScan, install the dependencies needed by built-in scanners,
+  run a selected profile or config, and upload the JSON artifact. Judge harness
+  CLIs such as `codex` should stay explicit setup steps because `--judge` is an
+  arbitrary command supplied by the workflow author.
 
 ## Development
 

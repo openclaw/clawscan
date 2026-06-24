@@ -35,6 +35,20 @@ clawscan \
   --output ./clawscan-benchmark.json
 ```
 
+For the OpenClaw benchmark, `--output ./clawscan-benchmark.json` also writes a
+submission-friendly `./predictions.jsonl` file. Use `--predictions-output` to
+choose a different path:
+
+```bash
+clawscan \
+  --benchmark OpenClaw/clawhub-security-signals \
+  --split eval_holdout \
+  --limit 10 \
+  --scanner clawscan-static \
+  --output ./clawscan-benchmark.json \
+  --predictions-output ./submission/predictions.jsonl
+```
+
 ## Splits and Bounds
 
 | Flag | Default | Meaning |
@@ -42,6 +56,7 @@ clawscan \
 | `--split <name>` | `benchmark` for SkillTrustBench, `eval_holdout` for OpenClaw | Hugging Face split to run. SkillTrustBench accepts `benchmark`; OpenClaw accepts `train`, `validation`, `test`, and `eval_holdout`. |
 | `--limit <n>` | `0` | Maximum rows to run. `0` means all rows in the selected split. |
 | `--offset <n>` | `0` | Row offset for reproducible chunks. |
+| `--predictions-output <path>` | Next to `--output` for OpenClaw only | Write the lightweight leaderboard submission JSONL file. |
 
 Use `--limit` and `--offset` while iterating locally. Use `--limit 0` only when
 you intend to run the whole split.
@@ -72,3 +87,28 @@ For `OpenClaw/clawhub-security-signals`:
 Each benchmark case then runs the normal one-off ClawScan path. That keeps
 scanner output, prompt rendering, judge execution, env validation, and secret
 redaction consistent between one-off scans and benchmark runs.
+
+## Predictions JSONL
+
+`predictions.jsonl` is the canonical lightweight submission file for the
+OpenClaw security-signals leaderboard workflow. Each line is one JSON object:
+
+```json
+{"id":"case-1","prediction":"clean"}
+{"id":"case-2","prediction":"suspicious"}
+{"id":"case-3","prediction":"malicious"}
+```
+
+`id` is the benchmark row ID. `prediction` must be one of `clean`,
+`suspicious`, or `malicious`.
+
+Prediction extraction prefers a completed judge result with a `prediction`,
+`verdict`, or `status` field. If no judge verdict is present, ClawScan can use a
+single scanner raw `prediction`, `verdict`, or `status` field. For the built-in
+`clawscan-static` baseline, ClawScan derives the prediction from static finding
+severity: no findings is `clean`, medium findings are `suspicious`, and high
+findings are `malicious`.
+
+Benchmark artifacts keep the canonical prediction next to the expected verdict
+and record whether the case was `correct`, `incorrect`, `abstained`,
+`unscorable`, or `error`.

@@ -71,11 +71,12 @@ type BenchmarkMetadata struct {
 }
 
 type BenchmarkCase struct {
-	ID           string            `json:"id"`
-	SkillSlug    string            `json:"skillSlug"`
-	SkillVersion string            `json:"skillVersion"`
-	Expected     BenchmarkExpected `json:"expected"`
-	Run          Artifact          `json:"run"`
+	ID           string               `json:"id"`
+	SkillSlug    string               `json:"skillSlug"`
+	SkillVersion string               `json:"skillVersion"`
+	Expected     BenchmarkExpected    `json:"expected"`
+	Evaluation   *BenchmarkEvaluation `json:"evaluation,omitempty"`
+	Run          Artifact             `json:"run"`
 }
 
 type BenchmarkExpected struct {
@@ -87,10 +88,34 @@ type BenchmarkExpected struct {
 }
 
 type BenchmarkSummary struct {
-	CaseCount        int                       `json:"caseCount"`
-	ExpectedVerdicts map[string]int            `json:"expectedVerdicts"`
-	ScannerStatuses  map[string]map[string]int `json:"scannerStatuses"`
-	JudgeStatuses    map[string]int            `json:"judgeStatuses,omitempty"`
+	CaseCount        int                        `json:"caseCount"`
+	ExpectedVerdicts map[string]int             `json:"expectedVerdicts"`
+	ScannerStatuses  map[string]map[string]int  `json:"scannerStatuses"`
+	JudgeStatuses    map[string]int             `json:"judgeStatuses,omitempty"`
+	Evaluation       BenchmarkEvaluationSummary `json:"evaluation"`
+}
+
+type BenchmarkEvaluation struct {
+	ExpectedVerdict  string `json:"expectedVerdict,omitempty"`
+	PredictedVerdict string `json:"predictedVerdict,omitempty"`
+	Status           string `json:"status"`
+	Source           string `json:"source,omitempty"`
+	Error            string `json:"error,omitempty"`
+}
+
+type BenchmarkEvaluationSummary struct {
+	Scored     int     `json:"scored"`
+	Correct    int     `json:"correct"`
+	Incorrect  int     `json:"incorrect"`
+	Abstained  int     `json:"abstained"`
+	Unscorable int     `json:"unscorable"`
+	Errors     int     `json:"errors"`
+	Accuracy   float64 `json:"accuracy"`
+}
+
+type BenchmarkPrediction struct {
+	ID         string `json:"id"`
+	Prediction string `json:"prediction"`
 }
 
 type OpenClawBenchmarkRow struct {
@@ -154,6 +179,9 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if opts.Benchmark == nil {
 		return BenchmarkArtifact{}, errors.New("missing benchmark options")
 	}
+	if opts.Benchmark.PredictionsOutputPath != "" && opts.Benchmark.ID != openClawBenchmarkID {
+		return BenchmarkArtifact{}, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
+	}
 	env := ctx.Env
 	if env == nil {
 		env = EnvMap(os.Environ())
@@ -201,6 +229,7 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 			if err != nil {
 				return BenchmarkArtifact{}, err
 			}
+			evaluateBenchmarkCase(&benchmarkCase)
 			artifact.Cases = append(artifact.Cases, benchmarkCase)
 			artifact.Summary.addCase(benchmarkCase)
 		}
@@ -215,6 +244,7 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 			if err != nil {
 				return BenchmarkArtifact{}, err
 			}
+			evaluateBenchmarkCase(&benchmarkCase)
 			artifact.Cases = append(artifact.Cases, benchmarkCase)
 			artifact.Summary.addCase(benchmarkCase)
 		}
@@ -235,7 +265,212 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 			return BenchmarkArtifact{}, err
 		}
 	}
+	if predictionsPath := BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
+		if err := WriteBenchmarkPredictionsJSONL(predictionsPath, artifact); err != nil {
+			return BenchmarkArtifact{}, err
+		}
+	}
 	return artifact, nil
+}
+
+func BenchmarkPredictionsOutputPath(opts Options) string {
+	if opts.Benchmark == nil || opts.Benchmark.ID != openClawBenchmarkID {
+		return ""
+	}
+	if opts.Benchmark.PredictionsOutputPath != "" {
+		return opts.Benchmark.PredictionsOutputPath
+	}
+	if opts.OutputPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(opts.OutputPath), "predictions.jsonl")
+}
+
+func WriteBenchmarkPredictionsJSONL(path string, artifact BenchmarkArtifact) error {
+	predictions, err := BenchmarkPredictions(artifact)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	for _, prediction := range predictions {
+		raw, err := json.Marshal(prediction)
+		if err != nil {
+			return err
+		}
+		if _, err := file.Write(append(raw, '\n')); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func BenchmarkPredictions(artifact BenchmarkArtifact) ([]BenchmarkPrediction, error) {
+	if artifact.Benchmark.ID != openClawBenchmarkID {
+		return nil, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
+	}
+	predictions := make([]BenchmarkPrediction, 0, len(artifact.Cases))
+	for _, benchmarkCase := range artifact.Cases {
+		prediction, _, err := benchmarkCasePrediction(benchmarkCase)
+		if err != nil {
+			return nil, err
+		}
+		predictions = append(predictions, BenchmarkPrediction{
+			ID:         benchmarkCase.ID,
+			Prediction: prediction,
+		})
+	}
+	return predictions, nil
+}
+
+func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error) {
+	if benchmarkCase.Run.Judge != nil && benchmarkCase.Run.Judge.Status == "completed" {
+		if prediction, ok := predictionFromObject(benchmarkCase.Run.Judge.Result); ok {
+			return prediction, "judge", nil
+		}
+	}
+	scannerPredictions := map[string][]string{}
+	var staticResult *ScannerResult
+	scanners := make([]string, 0, len(benchmarkCase.Run.Scanners))
+	for scanner := range benchmarkCase.Run.Scanners {
+		scanners = append(scanners, scanner)
+	}
+	sort.Strings(scanners)
+	for _, scanner := range scanners {
+		result := benchmarkCase.Run.Scanners[scanner]
+		if scanner == "clawscan-static" {
+			staticCopy := result
+			staticResult = &staticCopy
+		}
+		if result.Status != "completed" || len(result.Raw) == 0 {
+			continue
+		}
+		if prediction, ok := predictionFromObject(result.Raw); ok {
+			scannerPredictions[prediction] = append(scannerPredictions[prediction], scanner)
+		}
+	}
+	if len(scannerPredictions) == 1 {
+		for prediction := range scannerPredictions {
+			return prediction, "scanner:" + scannerPredictions[prediction][0], nil
+		}
+	}
+	if len(scannerPredictions) > 1 {
+		return "", "", fmt.Errorf("case %s has conflicting scanner predictions", benchmarkCase.ID)
+	}
+	if staticResult != nil && staticResult.Status == "completed" && len(staticResult.Raw) > 0 {
+		if prediction, ok := staticPrediction(staticResult.Raw); ok {
+			return prediction, "scanner:clawscan-static", nil
+		}
+	}
+	return "", "", fmt.Errorf("case %s has no prediction verdict", benchmarkCase.ID)
+}
+
+func predictionFromObject(value interface{}) (string, bool) {
+	switch typed := value.(type) {
+	case json.RawMessage:
+		var decoded map[string]interface{}
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return "", false
+		}
+		return predictionFromObject(decoded)
+	case []byte:
+		var decoded map[string]interface{}
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return "", false
+		}
+		return predictionFromObject(decoded)
+	case map[string]interface{}:
+		for _, key := range []string{"prediction", "verdict", "status"} {
+			if prediction, ok := normalizePredictionLabel(typed[key]); ok {
+				return prediction, true
+			}
+		}
+	case map[string]string:
+		for _, key := range []string{"prediction", "verdict", "status"} {
+			if prediction, ok := normalizePredictionLabel(typed[key]); ok {
+				return prediction, true
+			}
+		}
+	}
+	return "", false
+}
+
+func normalizePredictionLabel(value interface{}) (string, bool) {
+	label, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "clean", "normal":
+		return "clean", true
+	case "suspicious", "malicious":
+		return strings.ToLower(strings.TrimSpace(label)), true
+	default:
+		return "", false
+	}
+}
+
+func staticPrediction(raw json.RawMessage) (string, bool) {
+	var report staticScannerReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		return "", false
+	}
+	if report.SchemaVersion != staticScannerVersion {
+		return "", false
+	}
+	prediction := "clean"
+	for _, finding := range report.Findings {
+		if strings.EqualFold(finding.Severity, "high") {
+			return "malicious", true
+		}
+		prediction = "suspicious"
+	}
+	return prediction, true
+}
+
+func evaluateBenchmarkCase(benchmarkCase *BenchmarkCase) {
+	expected, ok := canonicalVerdict(benchmarkCase.Expected.Verdict)
+	if !ok {
+		benchmarkCase.Evaluation = &BenchmarkEvaluation{
+			ExpectedVerdict: benchmarkCase.Expected.Verdict,
+			Status:          "unscorable",
+			Error:           fmt.Sprintf("unsupported expected verdict: %s", benchmarkCase.Expected.Verdict),
+		}
+		return
+	}
+	predicted, source, err := benchmarkCasePrediction(*benchmarkCase)
+	if err != nil {
+		status := "abstained"
+		if strings.Contains(err.Error(), "conflicting scanner predictions") {
+			status = "error"
+		}
+		benchmarkCase.Evaluation = &BenchmarkEvaluation{
+			ExpectedVerdict: expected,
+			Status:          status,
+			Error:           err.Error(),
+		}
+		return
+	}
+	status := "incorrect"
+	if predicted == expected {
+		status = "correct"
+	}
+	benchmarkCase.Evaluation = &BenchmarkEvaluation{
+		ExpectedVerdict:  expected,
+		PredictedVerdict: predicted,
+		Status:           status,
+		Source:           source,
+	}
+}
+
+func canonicalVerdict(verdict string) (string, bool) {
+	return normalizePredictionLabel(verdict)
 }
 
 func runOpenClawBenchmarkCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, row OpenClawBenchmarkRow) (BenchmarkCase, error) {
@@ -257,7 +492,7 @@ func runOpenClawBenchmarkCase(opts Options, ctx RunContext, env map[string]strin
 		SkillSlug:    row.SkillSlug,
 		SkillVersion: row.SkillVersion,
 		Expected: BenchmarkExpected{
-			Verdict:    row.ClawScanVerdict,
+			Verdict:    canonicalExpectedVerdict(row.ClawScanVerdict),
 			Confidence: row.ClawScanConfidence,
 			Model:      row.ClawScanModel,
 			Summary:    row.ClawScanSummary,
@@ -265,6 +500,13 @@ func runOpenClawBenchmarkCase(opts Options, ctx RunContext, env map[string]strin
 		},
 		Run: run,
 	}, nil
+}
+
+func canonicalExpectedVerdict(verdict string) string {
+	if canonical, ok := canonicalVerdict(verdict); ok {
+		return canonical
+	}
+	return verdict
 }
 
 func runSkillTrustBenchBenchmarkCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient, row SkillTrustBenchRow) (BenchmarkCase, error) {
@@ -366,7 +608,7 @@ func skillTrustBenchExpected(row SkillTrustBenchRow) (BenchmarkExpected, error) 
 		return BenchmarkExpected{}, err
 	}
 	return BenchmarkExpected{
-		Verdict: row.Judgment,
+		Verdict: canonicalExpectedVerdict(row.Judgment),
 		Summary: skillTrustBenchSummary(row),
 		Context: json.RawMessage(context),
 	}, nil
@@ -399,6 +641,25 @@ func (summary *BenchmarkSummary) addCase(benchmarkCase BenchmarkCase) {
 	}
 	if benchmarkCase.Run.Judge != nil {
 		summary.JudgeStatuses[benchmarkCase.Run.Judge.Status]++
+	}
+	if benchmarkCase.Evaluation != nil {
+		switch benchmarkCase.Evaluation.Status {
+		case "correct":
+			summary.Evaluation.Scored++
+			summary.Evaluation.Correct++
+		case "incorrect":
+			summary.Evaluation.Scored++
+			summary.Evaluation.Incorrect++
+		case "abstained":
+			summary.Evaluation.Abstained++
+		case "unscorable":
+			summary.Evaluation.Unscorable++
+		case "error":
+			summary.Evaluation.Errors++
+		}
+		if summary.Evaluation.Scored > 0 {
+			summary.Evaluation.Accuracy = float64(summary.Evaluation.Correct) / float64(summary.Evaluation.Scored)
+		}
 	}
 }
 

@@ -1,0 +1,11 @@
+version: 1
+
+profiles:
+  clawhub:
+    scanners:
+      - clawscan-static
+
+  skills-sh:
+    scanners:
+      - skillspector
+      - clawscan-static

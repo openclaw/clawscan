@@ -22,24 +22,32 @@ import (
 )
 
 type Options struct {
-	Target             string
-	Benchmark          *BenchmarkOptions
-	Scanners           []string
-	ScannerResultPaths map[string]string
-	OutputPath         string
-	JSON               bool
-	Judge              *JudgeOptions
+	Target                string
+	Profile               string
+	Benchmark             *BenchmarkOptions
+	Scanners              []string
+	ScannerResultPaths    map[string]string
+	OutputPath            string
+	JSON                  bool
+	Judge                 *JudgeOptions
+	AdditionalRequiredEnv []EnvRequirement
 }
 
 type BenchmarkOptions struct {
-	ID     string
-	Split  string
-	Limit  int
-	Offset int
+	ID                    string
+	Split                 string
+	Limit                 int
+	Offset                int
+	PredictionsOutputPath string
 }
 
 type JudgeOptions struct {
 	Command string
+}
+
+type EnvRequirement struct {
+	EnvVar string
+	Reason string
 }
 
 type RunContext struct {
@@ -69,12 +77,43 @@ type CommandOutput struct {
 
 type Artifact struct {
 	SchemaVersion string                   `json:"schemaVersion"`
+	Profile       string                   `json:"profile,omitempty"`
 	Target        Target                   `json:"target"`
 	StartedAt     string                   `json:"startedAt"`
 	CompletedAt   string                   `json:"completedAt"`
 	Env           map[string]string        `json:"env"`
 	Scanners      map[string]ScannerResult `json:"scanners"`
 	Judge         *JudgeResult             `json:"judge"`
+}
+
+type RunTargetsResult struct {
+	Single *Artifact
+	Batch  *BatchArtifact
+}
+
+func (result RunTargetsResult) JSONValue() interface{} {
+	if result.Batch != nil {
+		return result.Batch
+	}
+	if result.Single != nil {
+		return result.Single
+	}
+	return nil
+}
+
+type BatchArtifact struct {
+	SchemaVersion string            `json:"schemaVersion"`
+	Profile       string            `json:"profile,omitempty"`
+	StartedAt     string            `json:"startedAt"`
+	CompletedAt   string            `json:"completedAt"`
+	Env           map[string]string `json:"env"`
+	Runs          []Artifact        `json:"runs"`
+	Summary       BatchSummary      `json:"summary"`
+}
+
+type BatchSummary struct {
+	TargetCount     int                       `json:"targetCount"`
+	ScannerStatuses map[string]map[string]int `json:"scannerStatuses"`
 }
 
 type Target struct {
@@ -146,6 +185,13 @@ var scannerSet = map[string]bool{
 	"clawscan-static": true,
 }
 
+const defaultProfileName = "clawhub"
+
+var builtInProfiles = map[string][]string{
+	"clawhub":   {"clawscan-static"},
+	"skills-sh": {"skillspector", "clawscan-static"},
+}
+
 func ScannerIDs() []string {
 	ids := make([]string, 0, len(scannerSet))
 	for id := range scannerSet {
@@ -155,13 +201,19 @@ func ScannerIDs() []string {
 	return ids
 }
 
-func ParseArgs(args []string) (Options, error) {
-	if len(args) == 0 {
-		return Options{}, errors.New("Missing scan target")
+func ProfileIDs() []string {
+	ids := make([]string, 0, len(builtInProfiles))
+	for id := range builtInProfiles {
+		ids = append(ids, id)
 	}
-	opts := Options{ScannerResultPaths: map[string]string{}}
+	sort.Strings(ids)
+	return ids
+}
+
+func ParseArgs(args []string) (Options, error) {
+	opts := Options{Profile: defaultProfileName, ScannerResultPaths: map[string]string{}}
 	start := 0
-	if !strings.HasPrefix(args[0], "--") {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "--") {
 		opts.Target = args[0]
 		start = 1
 	}
@@ -171,6 +223,8 @@ func ParseArgs(args []string) (Options, error) {
 	var benchmarkLimit int
 	var benchmarkOffset int
 	var benchmarkOnlyFlag string
+	var predictionsOutputPath string
+	var predictionsOnlyFlag string
 	for i := start; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
@@ -220,6 +274,14 @@ func ParseArgs(args []string) (Options, error) {
 				benchmarkOnlyFlag = arg
 			}
 			i = next
+		case "--predictions-output":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			predictionsOutputPath = value
+			predictionsOnlyFlag = arg
+			i = next
 		case "--scanner":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -229,6 +291,16 @@ func ParseArgs(args []string) (Options, error) {
 				return Options{}, fmt.Errorf("Unknown scanner: %s", value)
 			}
 			opts.Scanners = append(opts.Scanners, value)
+			i = next
+		case "--profile":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			if _, ok := builtInProfiles[value]; !ok {
+				return Options{}, fmt.Errorf("Unknown profile: %s", value)
+			}
+			opts.Profile = value
 			i = next
 		case "--scanner-result":
 			value, next, err := readValue(args, i, arg)
@@ -279,18 +351,23 @@ func ParseArgs(args []string) (Options, error) {
 			return Options{}, err
 		}
 		opts.Benchmark = &BenchmarkOptions{
-			ID:     id,
-			Split:  benchmarkSplit,
-			Limit:  benchmarkLimit,
-			Offset: benchmarkOffset,
+			ID:                    id,
+			Split:                 benchmarkSplit,
+			Limit:                 benchmarkLimit,
+			Offset:                benchmarkOffset,
+			PredictionsOutputPath: predictionsOutputPath,
 		}
-	} else if opts.Target == "" {
-		return Options{}, errors.New("Missing scan target")
+	} else if predictionsOnlyFlag != "" {
+		return Options{}, fmt.Errorf("%s requires --benchmark", predictionsOnlyFlag)
 	} else if benchmarkOnlyFlag != "" {
 		return Options{}, fmt.Errorf("%s requires --benchmark", benchmarkOnlyFlag)
 	}
 	if len(opts.Scanners) == 0 {
-		return Options{}, errors.New("At least one --scanner is required")
+		scanners, err := builtInProfileScanners(opts.Profile)
+		if err != nil {
+			return Options{}, err
+		}
+		opts.Scanners = scanners
 	}
 	requestedScanners := map[string]bool{}
 	for _, scanner := range opts.Scanners {
@@ -305,6 +382,14 @@ func ParseArgs(args []string) (Options, error) {
 		opts.Judge = &JudgeOptions{Command: judge}
 	}
 	return opts, nil
+}
+
+func builtInProfileScanners(profile string) ([]string, error) {
+	scanners, ok := builtInProfiles[profile]
+	if !ok {
+		return nil, fmt.Errorf("Unknown profile: %s", profile)
+	}
+	return append([]string(nil), scanners...), nil
 }
 
 func ValidateRequirements(opts Options, env map[string]string) error {
@@ -389,6 +474,134 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 	}
 	return artifact, nil
+}
+
+func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, error) {
+	targetInputs, err := ResolveTargetInputs(opts, cwd)
+	if err != nil {
+		return RunTargetsResult{}, err
+	}
+	if len(targetInputs) == 1 {
+		runOpts := opts
+		runOpts.Target = targetInputs[0]
+		outputPath := runOpts.OutputPath
+		runOpts.OutputPath = ""
+		artifact, err := Run(runOpts, ctx)
+		if err != nil {
+			return RunTargetsResult{}, err
+		}
+		if outputPath != "" {
+			if err := writeJSONFile(outputPath, artifact); err != nil {
+				return RunTargetsResult{}, err
+			}
+		}
+		return RunTargetsResult{Single: &artifact}, nil
+	}
+
+	env := ctx.Env
+	if env == nil {
+		env = EnvMap(os.Environ())
+	}
+	now := ctx.Now
+	if now == nil {
+		now = time.Now
+	}
+	startedAt := now().UTC().Format(time.RFC3339Nano)
+	runCtx := ctx
+	runCtx.Env = env
+	runCtx.Now = now
+	batch := BatchArtifact{
+		SchemaVersion: "clawscan-batch-v1",
+		Profile:       opts.Profile,
+		StartedAt:     startedAt,
+		Env:           envPresence(opts, env),
+		Runs:          []Artifact{},
+		Summary: BatchSummary{
+			TargetCount:     len(targetInputs),
+			ScannerStatuses: map[string]map[string]int{},
+		},
+	}
+	for _, targetInput := range targetInputs {
+		runOpts := opts
+		runOpts.Target = targetInput
+		runOpts.OutputPath = ""
+		artifact, err := Run(runOpts, runCtx)
+		if err != nil {
+			return RunTargetsResult{}, err
+		}
+		batch.Runs = append(batch.Runs, artifact)
+		for scanner, result := range artifact.Scanners {
+			if batch.Summary.ScannerStatuses[scanner] == nil {
+				batch.Summary.ScannerStatuses[scanner] = map[string]int{}
+			}
+			batch.Summary.ScannerStatuses[scanner][result.Status]++
+		}
+	}
+	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+	if opts.OutputPath != "" {
+		if err := writeJSONFile(opts.OutputPath, batch); err != nil {
+			return RunTargetsResult{}, err
+		}
+	}
+	return RunTargetsResult{Batch: &batch}, nil
+}
+
+func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
+	if opts.Benchmark != nil {
+		return nil, errors.New("benchmark runs do not use scan target discovery")
+	}
+	if opts.Target != "" {
+		return []string{opts.Target}, nil
+	}
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	}
+	skillsDir := filepath.Join(cwd, "skills")
+	info, err := os.Stat(skillsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errors.New("No scan target provided and ./skills was not found. Pass a target path or run from a repository root with skills/<skill>/SKILL.md.")
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, errors.New("No scan target provided and ./skills is not a directory. Pass a target path or run from a repository root with skills/<skill>/SKILL.md.")
+	}
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return nil, err
+	}
+	var targets []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skillFile := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
+		if info, err := os.Stat(skillFile); err == nil && !info.IsDir() {
+			targets = append(targets, filepath.ToSlash(filepath.Join("skills", entry.Name())))
+		}
+	}
+	sort.Strings(targets)
+	if len(targets) == 0 {
+		return nil, errors.New("No valid skills found under ./skills. Expected child skill directories containing SKILL.md.")
+	}
+	return targets, nil
+}
+
+func writeJSONFile(path string, value interface{}) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return WriteJSON(file, value)
 }
 
 func scannerResult(opts Options, scanner string, target string, startedAt string, scannerRunner ScannerRunner) (ScannerResult, error) {
@@ -1419,6 +1632,7 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 	}
 	return Artifact{
 		SchemaVersion: "clawscan-run-v1",
+		Profile:       opts.Profile,
 		Target: Target{
 			Kind:         "skill",
 			Input:        opts.Target,
@@ -1546,6 +1760,9 @@ func requirements(opts Options, env map[string]string) []requirement {
 		case "snyk":
 			reqs = append(reqs, requirement{"SNYK_TOKEN", "scanner snyk"})
 		}
+	}
+	for _, req := range opts.AdditionalRequiredEnv {
+		reqs = append(reqs, requirement{req.EnvVar, req.Reason})
 	}
 	return dedupe(reqs)
 }
