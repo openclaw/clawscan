@@ -112,10 +112,6 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runStatic,
 		},
 		scannerAdapter{
-			id:  "gendigital",
-			run: ExternalScannerRunner.runGenDigital,
-		},
-		scannerAdapter{
 			id:           "skillspector",
 			requirements: skillSpectorRequirements,
 			run:          ExternalScannerRunner.runSkillSpector,

@@ -23,6 +23,24 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
+	if opts.Judge == nil {
+		t.Fatal("expected embedded clawhub judge")
+	}
+	if !strings.Contains(opts.Judge.Command, "codex exec") {
+		t.Fatalf("judge command = %q", opts.Judge.Command)
+	}
+	if !strings.Contains(opts.Judge.Command, "{{ prompt:clawhub/prompt.md }}") {
+		t.Fatalf("judge command missing embedded prompt placeholder: %q", opts.Judge.Command)
+	}
+	if !strings.Contains(opts.Judge.Command, "{{ output_schema:clawhub/output.schema.json }}") {
+		t.Fatalf("judge command missing embedded schema placeholder: %q", opts.Judge.Command)
+	}
+	if string(opts.Judge.Files["clawhub/prompt.md"]) == "" {
+		t.Fatal("expected embedded clawhub prompt file")
+	}
+	if string(opts.Judge.Files["clawhub/output.schema.json"]) == "" {
+		t.Fatal("expected embedded clawhub output schema file")
+	}
 }
 
 func TestResolveArgsDefaultsToClawHubProfileForExplicitTarget(t *testing.T) {
@@ -35,6 +53,25 @@ func TestResolveArgsDefaultsToClawHubProfileForExplicitTarget(t *testing.T) {
 
 	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
+	}
+	if opts.Judge == nil {
+		t.Fatal("expected default clawhub judge")
+	}
+}
+
+func TestResolveArgsTreatsScannerOnlyCommandAsAdHocWithoutDefaultJudge(t *testing.T) {
+	dir := t.TempDir()
+
+	opts, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+		t.Fatalf("scanners = %q", got)
+	}
+	if opts.Judge != nil {
+		t.Fatalf("judge = %#v", opts.Judge)
 	}
 }
 
@@ -49,7 +86,7 @@ func TestResolveArgsAllowsExplicitProfileWithoutTarget(t *testing.T) {
 	if opts.Target != "" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "gendigital,socket,snyk" {
+	if got := strings.Join(opts.Scanners, ","); got != "socket,snyk" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -72,6 +109,24 @@ func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret") {
 		t.Fatalf("error leaked value: %v", err)
+	}
+}
+
+func TestResolveArgsValidatesClawHubJudgeEnv(t *testing.T) {
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = runner.ValidateRequirements(opts, map[string]string{
+		"VIRUSTOTAL_API_KEY": "present",
+		"OPENAI_API_KEY":     "",
+	})
+	if err == nil {
+		t.Fatal("expected missing env error")
+	}
+	if !strings.Contains(err.Error(), "- OPENAI_API_KEY required by judge clawhub") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

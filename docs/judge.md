@@ -32,6 +32,10 @@ The command must produce a JSON object on stdout or write one to `{{ output }}`.
 If it produces invalid JSON, a JSON array, or no JSON, ClawScan records a failed
 judge result.
 
+The built-in `clawhub` profile uses this same mechanism. It ships the ClawHub
+Codex command, prompt template, and output schema inside ClawScan so running
+`clawscan --profile clawhub` exercises the public ClawHub scan recipe.
+
 ## Placeholders
 
 | Placeholder | Meaning |

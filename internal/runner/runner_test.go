@@ -834,7 +834,6 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 
 	opts, err := ParseArgs([]string{
 		"--profile", "skills-sh",
-		"--scanner", "gendigital",
 		"--scanner", "socket",
 		"--scanner-result", "socket=" + socketFixture,
 		"--scanner", "snyk",
@@ -851,9 +850,6 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 		t.Fatalf("batch = %#v", result.Batch)
 	}
 	for _, run := range result.Batch.Runs {
-		if run.Scanners["gendigital"].Status != "skipped" {
-			t.Fatalf("gendigital result for %s = %#v", run.Target.Input, run.Scanners["gendigital"])
-		}
 		if run.Scanners["snyk"].Status != "completed" {
 			t.Fatalf("snyk result for %s = %#v", run.Target.Input, run.Scanners["snyk"])
 		}
@@ -2141,6 +2137,66 @@ func TestRunExecutesJudgeCommandWithExplicitPromptAndSchemaPlaceholders(t *testi
 	}
 	if !bytes.Contains(raw, []byte(sha256Hex(`{"type":"object"}`))) {
 		t.Fatalf("artifact missing schema hash: %s", raw)
+	}
+}
+
+func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	promptTemplate := "ClawHub judge\n{{ scanners.skillspector }}"
+	schema := `{"type":"object"}`
+	skillSpectorJSON := `{"status":"clean"}`
+	opts := Options{
+		Target:   target,
+		Profile:  "clawhub",
+		Scanners: []string{"skillspector"},
+		Judge: &JudgeOptions{
+			Command: "judge --prompt {{ prompt:clawhub/prompt.md }} --schema {{ output_schema:clawhub/output.schema.json }} --output {{ output }}",
+			Files: map[string][]byte{
+				"clawhub/prompt.md":          []byte(promptTemplate),
+				"clawhub/output.schema.json": []byte(schema),
+			},
+		},
+	}
+	expectedPrompt, err := RenderPromptTemplate(promptTemplate, Artifact{
+		Scanners: map[string]ScannerResult{
+			"skillspector": {Raw: json.RawMessage(skillSpectorJSON)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	judgeRunner := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(skillSpectorJSON)},
+		}},
+		CommandRunner: judgeRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	if artifact.Judge.PromptPath != "clawhub/prompt.md" {
+		t.Fatalf("prompt source = %q", artifact.Judge.PromptPath)
+	}
+	if artifact.Judge.OutputSchemaPath != "clawhub/output.schema.json" {
+		t.Fatalf("schema source = %q", artifact.Judge.OutputSchemaPath)
+	}
+	if artifact.Judge.PromptSHA != sha256Hex(expectedPrompt) {
+		t.Fatalf("prompt hash = %q, want %q", artifact.Judge.PromptSHA, sha256Hex(expectedPrompt))
+	}
+	if artifact.Judge.OutputSchemaSHA != sha256Hex(schema) {
+		t.Fatalf("schema hash = %q, want %q", artifact.Judge.OutputSchemaSHA, sha256Hex(schema))
 	}
 }
 

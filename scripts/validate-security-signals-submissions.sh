@@ -25,7 +25,7 @@ Usage: scripts/validate-security-signals-submissions.sh [--all] [--root <dir>] [
 
 Validates Security Signals leaderboard submissions with:
 
-  clawscan validate-submission <submission-dir>
+  go run ./scripts/validate-security-signals-submission.go <submission-dir>
 
 By default, pull-request runs validate changed submission directories under
 leaderboard/submissions. Outside pull requests, the script validates all
@@ -44,9 +44,9 @@ USAGE
   esac
 done
 
-validator_cmd=(go run ./cmd/clawscan validate-submission)
+validator_cmd=(go run ./scripts/validate-security-signals-submission.go)
 if [ -n "${CLAWSCAN_VALIDATE_SUBMISSION_CMD:-}" ]; then
-  # Test seam for local/script tests. CI uses the real ClawScan command above.
+  # Test seam for local/script tests. CI uses the real repository validator above.
   read -r -a validator_cmd <<<"${CLAWSCAN_VALIDATE_SUBMISSION_CMD}"
 fi
 

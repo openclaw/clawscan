@@ -38,9 +38,12 @@ go run ./cmd/clawscan ./my-skill --scanner clawscan-static --json
 ## Default Scan
 
 From a repository root that stores skills under `./skills/<name>/SKILL.md`, run
-the default built-in `clawhub` profile:
+the default built-in `clawhub` profile. This runs the ClawHub scanner suite and
+the bundled ClawHub Codex judge harness:
 
 ```bash
+export VIRUSTOTAL_API_KEY=...
+export OPENAI_API_KEY=...
 clawscan
 ```
 
@@ -52,14 +55,17 @@ clawscan --profile skills-sh
 
 Built-in profiles:
 
-| Profile | Scanners |
-| --- | --- |
-| `clawhub` | `skillspector`, `virustotal`, `clawscan-static` |
-| `skills-sh` | `gendigital`, `socket`, `snyk` |
+| Profile | Scanners | Judge |
+| --- | --- | --- |
+| `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
+| `skills-sh` | `socket`, `snyk` | none |
 
-The embedded `clawhub` profile ships the generic scanner suite only. ClawHub's
-repo-specific judge prompt and output-schema paths should live in ClawHub's own
-project `.clawscan.yml`.
+Gen Agent Trust Hub runs on skills.sh skills, but is omitted from ClawScan's
+`skills-sh` profile because Gen does not provide a local CLI for ClawScan to
+invoke.
+
+The embedded `clawhub` profile owns ClawHub's prompt and output schema inside
+ClawScan. ClawHub can run the same setup by invoking this profile.
 
 If `./skills` is missing or has no child directories containing `SKILL.md`,
 ClawScan exits with a target-discovery error. Pass an explicit target when you
@@ -117,6 +123,9 @@ flags override the selected profile for one run:
 clawscan ./my-skill --profile skills-sh --scanner clawscan-static --json
 ```
 
+Passing `--scanner` without `--profile` creates an ad hoc scanner-only run, so
+profile judges are not invoked accidentally.
+
 Config files may declare env var names that a judge needs, but they must not
 store secret values. Scanner and judge credentials stay in environment
 variables, such as `OPENAI_API_KEY` for the example judge command.
@@ -142,21 +151,13 @@ clawscan ./my-skill \
   --output ./clawscan-run.json
 ```
 
-Some scanners support URL targets. For example, the Gen Digital adapter is a
-public lookup-style scanner for ClawHub skill URLs:
-
-```bash
-clawscan https://clawhub.ai/owner/skill \
-  --scanner gendigital \
-  --json
-```
-
 ## Environment Variables
 
 Secrets must be set with environment variables, not CLI flags:
 
 ```bash
 export VIRUSTOTAL_API_KEY=...
+export OPENAI_API_KEY=...
 export SNYK_TOKEN=...
 export AIG_BASE_URL=http://127.0.0.1:8088
 export AIG_MODEL=gpt-4.1

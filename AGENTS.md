@@ -87,8 +87,8 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - For scanner adapters, add fixture-backed tests and use live API smoke tests
   only when credentials are already available. Do not print secrets.
 - For leaderboard/submission changes, validate the relevant shell/Python paths
-  and run `clawscan validate-submission` on a representative fixture when
-  possible.
+  and run `scripts/validate-security-signals-submissions.sh` on a representative
+  fixture when possible.
 
 ## Commit And Release Notes
 

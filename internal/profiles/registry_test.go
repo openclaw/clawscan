@@ -34,7 +34,7 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	if !ok {
 		t.Fatal("missing skills-sh profile")
 	}
-	if got := strings.Join(skillsSH.profile.Scanners, ","); got != "gendigital,socket,snyk" {
+	if got := strings.Join(skillsSH.profile.Scanners, ","); got != "socket,snyk" {
 		t.Fatalf("skills-sh scanners = %q", got)
 	}
 }

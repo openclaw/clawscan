@@ -14,9 +14,12 @@ project can use it for agent-skill security scanning.
 ## Quick Start
 
 From a repository root with skills under `./skills/<name>/SKILL.md`, run the
-default built-in `clawhub` profile:
+default built-in `clawhub` profile. This runs the ClawHub scanner suite and the
+bundled ClawHub Codex judge harness:
 
 ```bash
+export VIRUSTOTAL_API_KEY=...
+export OPENAI_API_KEY=...
 clawscan
 ```
 
@@ -30,6 +33,12 @@ Run a built-in profile against one explicit target:
 
 ```bash
 clawscan ./my-skill --profile clawhub --json
+```
+
+If you only want raw scanner evidence with no judge, pass explicit scanners:
+
+```bash
+clawscan ./my-skill --scanner clawscan-static --scanner skillspector --json
 ```
 
 Run several scanners and save the result:
@@ -57,6 +66,81 @@ the OpenClaw security-signals benchmark. The `clawscan-benchmark.json` artifact
 is the primary result to inspect; ClawScan can also derive a lightweight
 `predictions.jsonl` file for leaderboard and CI submission plumbing.
 
+## Example: Malicious Skill Output
+
+[Trail of Bits](https://www.trailofbits.com/) publishes
+[overtly-malicious-skills](https://github.com/trailofbits/overtly-malicious-skills),
+a fixture repository of intentionally malicious agent skills. Do not install or
+run these skills; use them as scanner fixtures only.
+
+Clone the fixture repo and pin the exact revision used for this example:
+
+```bash
+git clone https://github.com/trailofbits/overtly-malicious-skills.git /tmp/overtly-malicious-skills
+cd /tmp/overtly-malicious-skills
+git checkout 4ffbf9461ef0505f9ce76a0d3694a18ec33ea531
+```
+
+Run the default ClawHub profile, which is the scan recipe ClawHub consumes:
+
+```bash
+export VIRUSTOTAL_API_KEY=...
+export OPENAI_API_KEY=...
+
+clawscan ./skills/csv-summarizer --json
+```
+
+Run the skills-sh comparison profile over the same target:
+
+```bash
+export SOCKET_TOKEN=...
+export SNYK_TOKEN=...
+
+clawscan ./skills/csv-summarizer --profile skills-sh --json
+```
+
+For a quick, secretless scanner-evidence example, run SkillSpector by itself:
+
+```bash
+clawscan ./skills/csv-summarizer \
+  --scanner skillspector \
+  --json |
+  jq '.scanners.skillspector.raw | {
+    score: .risk_assessment.score,
+    severity: .risk_assessment.severity,
+    recommendation: .risk_assessment.recommendation,
+    issues: [.issues[] | {id, category, severity, file: .location.file, line: .location.start_line, finding}]
+  }'
+```
+
+Abbreviated real output from that pinned revision:
+
+```json
+{
+  "score": 31,
+  "severity": "MEDIUM",
+  "recommendation": "CAUTION",
+  "issues": [
+    {
+      "id": "LP3",
+      "category": "MCP Least Privilege",
+      "severity": "MEDIUM",
+      "file": "SKILL.md",
+      "line": 1,
+      "finding": null
+    },
+    {
+      "id": "E2",
+      "category": "Data Exfiltration",
+      "severity": "HIGH",
+      "file": "scripts/summarize.py",
+      "line": 100014,
+      "finding": "for key, value in os.environ.items()"
+    }
+  ]
+}
+```
+
 ## What It Does
 
 - Runs scanner adapters against discovered `./skills` targets, one explicit
@@ -78,13 +162,26 @@ names, and CLI flags such as `--scanner`, `--output`, `--json`, and `--judge`
 override profile values for one command. Use `--config <path>` by itself to run
 every profile in that config, or add `--profile <name>` to run just one profile
 from that config.
+Passing `--scanner` without `--profile` creates an ad hoc scanner-only run, so
+profile judges are not invoked accidentally.
+
+Built-in profiles:
+
+| Profile | Scanners | Judge |
+| --- | --- | --- |
+| `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
+| `skills-sh` | `socket`, `snyk` | none |
+
+Gen Agent Trust Hub runs on skills.sh skills, but is omitted from ClawScan's
+`skills-sh` profile because Gen does not provide a local CLI for ClawScan to
+invoke.
 
 ## Supported Scanners
 
 Accepted scanner IDs:
 
 ```text
-agentverus, ai-infra-guard, cisco, clawscan-static, gendigital, skillspector, snyk, socket, virustotal
+agentverus, ai-infra-guard, cisco, clawscan-static, skillspector, snyk, socket, virustotal
 ```
 
 Some scanners require upstream tools or credentials. Secrets must come from
@@ -92,6 +189,7 @@ environment variables, never CLI flags:
 
 ```bash
 export VIRUSTOTAL_API_KEY=...
+export OPENAI_API_KEY=...
 export SOCKET_TOKEN=...
 export SNYK_TOKEN=...
 export AIG_BASE_URL=http://127.0.0.1:8088

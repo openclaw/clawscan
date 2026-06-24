@@ -16,12 +16,6 @@ var (
 	date    = "unknown"
 )
 
-var validateSubmission = func(path string) (runner.SecuritySignalsSubmissionResult, error) {
-	return runner.ValidateSecuritySignalsSubmission(path, runner.HuggingFaceBenchmarkClient{
-		Endpoint: os.Getenv("CLAWSCAN_HUGGINGFACE_ROWS_ENDPOINT"),
-	})
-}
-
 func main() {
 	if err := run(os.Args[1:], os.Environ()); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -37,9 +31,6 @@ func run(args []string, environ []string) error {
 	if len(args) == 1 && args[0] == "--version" {
 		fmt.Fprintln(os.Stdout, versionString())
 		return nil
-	}
-	if len(args) > 0 && args[0] == "validate-submission" {
-		return runValidateSubmission(args[1:])
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -110,47 +101,8 @@ func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd stri
 	return nil
 }
 
-func runValidateSubmission(args []string) error {
-	var submissionDir string
-	jsonOutput := false
-	for _, arg := range args {
-		switch arg {
-		case "--json":
-			jsonOutput = true
-		default:
-			if strings.HasPrefix(arg, "--") {
-				return fmt.Errorf("Unknown argument: %s", arg)
-			}
-			if submissionDir != "" {
-				return fmt.Errorf("Unexpected argument: %s", arg)
-			}
-			submissionDir = arg
-		}
-	}
-	if submissionDir == "" {
-		return fmt.Errorf("validate-submission requires <submission-dir>")
-	}
-	result, err := validateSubmission(submissionDir)
-	if err != nil {
-		return err
-	}
-	if jsonOutput {
-		return runner.WriteJSON(os.Stdout, result)
-	}
-	printSubmissionSummary(os.Stdout, result)
-	return nil
-}
-
 func versionString() string {
 	return fmt.Sprintf("clawscan %s (commit %s, built %s)", version, commit, date)
-}
-
-func printSubmissionSummary(w io.Writer, result runner.SecuritySignalsSubmissionResult) {
-	metrics := result.Metrics
-	fmt.Fprintf(w, "Security Signals submission valid: %d case(s)\n", metrics.CaseCount)
-	fmt.Fprintf(w, "dataset=%s split=%s revision=%s\n", result.Benchmark.Dataset, result.Benchmark.Split, result.Benchmark.Revision)
-	fmt.Fprintf(w, "F1=%.4f precision=%.4f recall=%.4f FPR=%.4f\n", metrics.F1, metrics.Precision, metrics.Recall, metrics.FalsePositiveRate)
-	fmt.Fprintf(w, "TP=%d FP=%d TN=%d FN=%d\n", metrics.TruePositive, metrics.FalsePositive, metrics.TrueNegative, metrics.FalseNegative)
 }
 
 func printRunSummary(w io.Writer, result runner.RunTargetsResult) {
@@ -178,7 +130,6 @@ Usage:
   clawscan --benchmark --scanner <scanner-id> [flags]
   clawscan --benchmark SkillTrustBench --scanner <scanner-id> [flags]
   clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]
-  clawscan validate-submission <submission-dir> [--json]
   clawscan --version
   clawscan --help
 
@@ -198,11 +149,6 @@ Core flags:
   --version                   Print build metadata.
   -h, --help                  Print this help.
 
-Submission validation:
-  validate-submission reads metadata.json and predictions.jsonl from a Security
-  Signals leaderboard submission directory, validates case coverage, and
-  recomputes loose non-clean metrics.
-
 Supported benchmarks:
   cuhk-zhuque/SkillTrustBench (alias: SkillTrustBench, default)
   OpenClaw/clawhub-security-signals
@@ -214,6 +160,7 @@ Built-in profiles:
   %s
 
 Required environment variables:
+  clawhub judge: OPENAI_API_KEY
   ai-infra-guard: AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY
   socket: SOCKET_TOKEN
   snyk: SNYK_TOKEN
@@ -225,12 +172,12 @@ Target notes:
   No target scans child skill directories under ./skills.
   Most scanners use a local skill file or directory target.
   AI-Infra-Guard uses the self-hosted A.I.G taskapi; local targets are uploaded as a temporary zip.
-  Gen Digital supports URL targets only in v1; use a ClawHub skill URL such as https://clawhub.ai/owner/skill.
   Socket runs the public Socket CLI full-scan path over local dependency manifests.
 
 Judge summary:
-  If --judge is omitted, ClawScan only records scanner evidence.
-  If --judge is present, ClawScan runs it through the platform shell and expects a JSON object on stdout or at {{ output }}.
+  A selected profile may configure a judge; --judge overrides that command for one run.
+  If no judge is configured, ClawScan only records scanner evidence.
+  If a judge is configured, ClawScan runs it through the platform shell and expects a JSON object on stdout or at {{ output }}.
   Placeholders: {{ workspace }}, {{ prompt[:path] }}, {{ output_schema[:path] }}, {{ output }}.
 `, strings.Join(runner.ScannerIDs(), ", "), strings.Join(profiles.ProfileIDs(), ", "))
 }

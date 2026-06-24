@@ -82,8 +82,19 @@ go run ./cmd/verify-clawhub-prompt \
   --out /tmp/clawhub-prompt-parity-proof-go.json
 ```
 
+Use the exporter flags when ClawHub's production prompt or output schema changes
+and the baked-in `clawhub` profile assets need to be refreshed:
+
+```bash
+go run ./cmd/verify-clawhub-prompt \
+  --clawhub-dir /path/to/clawhub \
+  --out-prompt internal/profiles/clawhub/prompt.md \
+  --out-output-schema internal/profiles/clawhub/output.schema.json
+```
+
 ClawHub-specific proof helpers live outside the public `clawscan` command so
-the main CLI stays useful for non-ClawHub users.
+the main CLI stays useful for non-ClawHub users, while the built-in `clawhub`
+profile remains the public recipe that ClawHub runs.
 
 For the public ClawHub improvement loop, see
 [Improving ClawHub scans](improving-clawhub-scans.md).

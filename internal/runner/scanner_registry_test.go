@@ -65,7 +65,7 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,ai-infra-guard,cisco,clawscan-static,gendigital,skillspector,snyk,socket,virustotal"
+	want := "agentverus,ai-infra-guard,cisco,clawscan-static,skillspector,snyk,socket,virustotal"
 	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
 	}

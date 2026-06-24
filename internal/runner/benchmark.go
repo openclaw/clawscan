@@ -476,7 +476,6 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 		SkillSpectorCommand:    ctx.SkillSpectorCommand,
 		AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
 		VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
-		GenDigitalHTTPClient:   ctx.GenDigitalHTTPClient,
 	})
 }
 

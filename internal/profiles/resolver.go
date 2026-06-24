@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed builtin.yml
+//go:embed builtin.yml clawhub/prompt.md clawhub/output.schema.json
 var builtinFiles embed.FS
 
 type Config struct {
@@ -40,6 +40,7 @@ type Judge struct {
 type resolvedProfile struct {
 	profile   Profile
 	configDir string
+	files     map[string][]byte
 }
 
 type cliIntent struct {
@@ -115,7 +116,7 @@ func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
 		return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
 	}
 
-	finalArgs, extraEnv, err := buildRunnerArgs(intent, selected, profileName)
+	finalArgs, extraEnv, files, err := buildRunnerArgs(intent, selected, profileName)
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
@@ -125,6 +126,9 @@ func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
 	}
 	opts.Profile = profileName
 	opts.AdditionalRequiredEnv = extraEnv
+	if opts.Judge != nil {
+		opts.Judge.Files = files
+	}
 	return ResolvedRunSet{
 		Options:    []runner.Options{opts},
 		OutputPath: opts.OutputPath,
@@ -189,7 +193,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		if !ok {
 			return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
 		}
-		finalArgs, extraEnv, err := buildRunnerArgs(intent, selected, profileName)
+		finalArgs, extraEnv, files, err := buildRunnerArgs(intent, selected, profileName)
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
@@ -201,6 +205,9 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		opts.OutputPath = ""
 		opts.JSON = false
 		opts.AdditionalRequiredEnv = extraEnv
+		if opts.Judge != nil {
+			opts.Judge.Files = files
+		}
 		resolved.JSON = resolved.JSON || selected.profile.JSON
 		resolved.Options = append(resolved.Options, opts)
 	}
@@ -213,7 +220,7 @@ func loadProjectProfiles(projectPath string) (map[string]resolvedProfile, error)
 		return nil, err
 	}
 	projectProfiles := map[string]resolvedProfile{}
-	mergeProfiles(projectProfiles, projectConfig, filepath.Dir(projectPath))
+	mergeProfiles(projectProfiles, projectConfig, filepath.Dir(projectPath), nil)
 	return projectProfiles, nil
 }
 
@@ -224,9 +231,29 @@ func loadBuiltinProfiles() (map[string]resolvedProfile, error) {
 	if err != nil {
 		return nil, err
 	}
+	files, err := loadBuiltinProfileFiles()
+	if err != nil {
+		return nil, err
+	}
 	profiles := map[string]resolvedProfile{}
-	mergeProfiles(profiles, builtins, "")
+	mergeProfiles(profiles, builtins, "", files)
 	return profiles, nil
+}
+
+func loadBuiltinProfileFiles() (map[string][]byte, error) {
+	paths := []string{
+		"clawhub/prompt.md",
+		"clawhub/output.schema.json",
+	}
+	files := map[string][]byte{}
+	for _, path := range paths {
+		content, err := builtinFiles.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		files[path] = content
+	}
+	return files, nil
 }
 
 func readConfigFile(path string) (Config, error) {
@@ -259,9 +286,9 @@ func readConfigBytes(label string, read func() ([]byte, error)) (Config, error) 
 	return config, nil
 }
 
-func mergeProfiles(out map[string]resolvedProfile, config Config, configDir string) {
+func mergeProfiles(out map[string]resolvedProfile, config Config, configDir string, files map[string][]byte) {
 	for name, profile := range config.Profiles {
-		out[name] = resolvedProfile{profile: profile, configDir: configDir}
+		out[name] = resolvedProfile{profile: profile, configDir: configDir, files: files}
 	}
 }
 
@@ -412,14 +439,14 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 	return intent, nil
 }
 
-func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName string) ([]string, []runner.EnvRequirement, error) {
+func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName string) ([]string, []runner.EnvRequirement, map[string][]byte, error) {
 	profile := selected.profile
 	scanners := append([]string{}, profile.Scanners...)
 	if len(intent.scanners) > 0 {
 		scanners = append([]string{}, intent.scanners...)
 	}
 	if len(scanners) == 0 {
-		return nil, nil, fmt.Errorf("Profile %s must include at least one scanner or use --scanner", profileName)
+		return nil, nil, nil, fmt.Errorf("Profile %s must include at least one scanner or use --scanner", profileName)
 	}
 
 	scannerResults := map[string]string{}
@@ -472,7 +499,7 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 
 	var extraEnv []runner.EnvRequirement
 	judgeCommand := ""
-	if profile.Judge != nil {
+	if profile.Judge != nil && shouldUseProfileJudge(intent) {
 		judgeCommand = resolveJudgePaths(profile.Judge.Command, selected.configDir)
 		for _, envVar := range profile.Judge.RequiredEnv {
 			extraEnv = append(extraEnv, runner.EnvRequirement{EnvVar: envVar, Reason: "judge " + profileName})
@@ -485,7 +512,14 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	if judgeCommand != "" {
 		args = append(args, "--judge", judgeCommand)
 	}
-	return args, extraEnv, nil
+	return args, extraEnv, selected.files, nil
+}
+
+func shouldUseProfileJudge(intent cliIntent) bool {
+	if len(intent.scanners) == 0 {
+		return true
+	}
+	return intent.profileSet || intent.configPath != ""
 }
 
 func resolveConfigPath(path string, configDir string) string {

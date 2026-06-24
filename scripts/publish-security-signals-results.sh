@@ -57,7 +57,7 @@ USAGE
   esac
 done
 
-validator_cmd=(go run ./cmd/clawscan validate-submission)
+validator_cmd=(go run ./scripts/validate-security-signals-submission.go)
 if [ -n "${CLAWSCAN_VALIDATE_SUBMISSION_CMD:-}" ]; then
   read -r -a validator_cmd <<<"${CLAWSCAN_VALIDATE_SUBMISSION_CMD}"
 fi

@@ -27,10 +27,10 @@ clawscan ./my-skill \
   --output ./clawscan-run.json
 ```
 
-The built-in `clawhub` profile runs the generic scanner suite:
-`skillspector`, `virustotal`, and `clawscan-static`. It does not bundle
-ClawHub's production-only judge prompt or deployment settings. Those belong in
-the ClawHub project configuration or maintainer tooling.
+The built-in `clawhub` profile runs ClawHub's scanner suite:
+`skillspector`, `virustotal`, and `clawscan-static`. It also bundles the
+ClawHub Codex judge harness, prompt template, and output schema so contributors
+can inspect and improve the same scan setup ClawHub runs.
 
 ## 2. Run The Security Signals Benchmark
 
@@ -104,7 +104,7 @@ Good ClawHub scan improvements usually fit one of these buckets:
   results
 - built-in profile composition, such as adding or removing a general-purpose
   scanner from a profile
-- judge prompt or schema changes in the project that owns the judge harness
+- ClawHub judge prompt or schema changes in the bundled `clawhub` profile
 - benchmark fixture improvements that make a missed malicious skill or false
   positive reproducible
 
@@ -119,10 +119,11 @@ Accepted changes can reach ClawHub through different paths:
 - general scanner adapter improvements land in this repo and become available
   to any ClawScan user
 - built-in profile changes land here only when they remain general-purpose
-- ClawHub-specific judge prompts, schemas, model settings, or deployment wiring
-  land in the ClawHub repo
+- ClawHub profile prompt, schema, scanner, and judge-harness changes land in
+  ClawScan so ClawHub can consume them by running the baked-in profile
+- ClawHub deployment wiring stays in ClawHub
 - benchmark updates land in the Security Signals dataset/submission workflow
   when they are about evaluation coverage rather than scanner runtime behavior
 
-That split keeps ClawScan open and benchmarkable while still giving ClawHub a
-clear path to adopt better scanning behavior.
+That split keeps ClawScan open and benchmarkable while making ClawHub's
+production scan recipe visible in one place.

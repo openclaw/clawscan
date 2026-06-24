@@ -30,7 +30,6 @@ Choose the run mode:
 | Need | Shape |
 | --- | --- |
 | Scan one skill path | `clawscan ./my-skill --scanner clawscan-static --json` |
-| Scan one URL | `clawscan https://clawhub.ai/owner/skill --scanner gendigital --json` |
 | Run the default benchmark | `clawscan --benchmark --limit 10 --scanner clawscan-static --output run.json` |
 | Run the OpenClaw benchmark | `clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
@@ -41,7 +40,7 @@ Choose the run mode:
 Accepted scanner IDs:
 
 ```text
-agentverus, ai-infra-guard, cisco, clawscan-static, gendigital, skillspector, snyk, socket, virustotal
+agentverus, ai-infra-guard, cisco, clawscan-static, skillspector, snyk, socket, virustotal
 ```
 
 Credential rules:

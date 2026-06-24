@@ -43,6 +43,7 @@ type BenchmarkOptions struct {
 
 type JudgeOptions struct {
 	Command string
+	Files   map[string][]byte
 }
 
 type EnvRequirement struct {
@@ -58,7 +59,6 @@ type RunContext struct {
 	SkillSpectorCommand    []string
 	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
 	VirusTotalHTTPClient   VirusTotalHTTPClient
-	GenDigitalHTTPClient   GenDigitalHTTPClient
 	BenchmarkClient        BenchmarkClient
 }
 
@@ -395,7 +395,6 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			SkillSpectorCommand:    ctx.SkillSpectorCommand,
 			AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
 			VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
-			GenDigitalHTTPClient:   ctx.GenDigitalHTTPClient,
 			Timeout:                20 * time.Minute,
 		}
 	}
@@ -919,6 +918,7 @@ type judgeCommandState struct {
 	outputSchemaPath string
 	outputSchemaSHA  string
 	schemaSource     string
+	files            map[string][]byte
 }
 
 type judgeShellSpec struct {
@@ -942,6 +942,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 	state := &judgeCommandState{
 		workspace:  workspace,
 		outputPath: filepath.Join(workspace, "judge-output.json"),
+		files:      opts.Files,
 	}
 	shell := judgeShellForGOOS(runtime.GOOS)
 	command, err := renderJudgeCommand(opts.Command, artifact, state, shell.quote)
@@ -1109,7 +1110,7 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 		}
 		return state.promptPath, nil
 	}
-	promptTemplate, err := os.ReadFile(source)
+	promptTemplate, err := readJudgeSource(source, state)
 	if err != nil {
 		return "", err
 	}
@@ -1137,7 +1138,7 @@ func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, 
 		}
 		return state.outputSchemaPath, nil
 	}
-	schema, err := os.ReadFile(source)
+	schema, err := readJudgeSource(source, state)
 	if err != nil {
 		return "", err
 	}
@@ -1149,6 +1150,19 @@ func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, 
 	state.outputSchemaPath = path
 	state.outputSchemaSHA = sha256Hex(string(schema))
 	return path, nil
+}
+
+func readJudgeSource(source string, state *judgeCommandState) ([]byte, error) {
+	if state.files != nil {
+		if data, ok := state.files[judgeSourceKey(source)]; ok {
+			return data, nil
+		}
+	}
+	return os.ReadFile(source)
+}
+
+func judgeSourceKey(source string) string {
+	return filepath.ToSlash(filepath.Clean(source))
 }
 
 func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
@@ -1367,7 +1381,6 @@ type ExternalScannerRunner struct {
 	SkillSpectorCommand    []string
 	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
 	VirusTotalHTTPClient   VirusTotalHTTPClient
-	GenDigitalHTTPClient   GenDigitalHTTPClient
 	Timeout                time.Duration
 }
 
