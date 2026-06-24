@@ -189,6 +189,7 @@ Built-in profiles:
 
 Required environment variables:
   ai-infra-guard: AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY
+  socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
   skillspector: CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key.
@@ -199,10 +200,11 @@ Target notes:
   Most scanners use a local skill file or directory target.
   AI-Infra-Guard uses the self-hosted A.I.G taskapi; local targets are uploaded as a temporary zip.
   Gen Digital supports URL targets only in v1; use a ClawHub skill URL such as https://clawhub.ai/owner/skill.
+  Socket runs the public Socket CLI full-scan path over local dependency manifests.
 
 Judge summary:
   If --judge is omitted, ClawScan only records scanner evidence.
   If --judge is present, ClawScan runs it through the platform shell and expects a JSON object on stdout or at {{ output }}.
   Placeholders: {{ workspace }}, {{ prompt[:path] }}, {{ output_schema[:path] }}, {{ output }}.
-`, strings.Join(runner.ScannerIDs(), ", "), strings.Join(runner.ProfileIDs(), ", "))
+`, strings.Join(runner.ScannerIDs(), ", "), strings.Join(profiles.ProfileIDs(), ", "))
 }

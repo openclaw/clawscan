@@ -58,33 +58,24 @@ func TestParseArgsAcceptsClawScanStaticScanner(t *testing.T) {
 	}
 }
 
-func TestParseArgsDefaultsToClawHubProfile(t *testing.T) {
-	opts, err := ParseArgs(nil)
+func TestParseArgsRequiresExplicitScanner(t *testing.T) {
+	_, err := ParseArgs(nil)
+	if err == nil || err.Error() != "At least one --scanner is required" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseArgsDefaultsArtifactProfileLabelToClawHub(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "clawscan-static"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.Profile != "clawhub" {
 		t.Fatalf("profile = %q", opts.Profile)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
-		t.Fatalf("scanners = %q", got)
-	}
 }
 
-func TestParseArgsUsesSelectedBuiltInProfile(t *testing.T) {
-	opts, err := ParseArgs([]string{"--profile", "skills-sh"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opts.Profile != "skills-sh" {
-		t.Fatalf("profile = %q", opts.Profile)
-	}
-	if got := strings.Join(opts.Scanners, ","); got != "gendigital,snyk,clawscan-static" {
-		t.Fatalf("scanners = %q", got)
-	}
-}
-
-func TestParseArgsLetsExplicitScannersOverrideProfile(t *testing.T) {
+func TestParseArgsAcceptsProfileLabelWithExplicitScanners(t *testing.T) {
 	opts, err := ParseArgs([]string{"--profile", "skills-sh", "--scanner", "clawscan-static"})
 	if err != nil {
 		t.Fatal(err)
@@ -97,9 +88,9 @@ func TestParseArgsLetsExplicitScannersOverrideProfile(t *testing.T) {
 	}
 }
 
-func TestParseArgsRejectsUnknownProfile(t *testing.T) {
-	_, err := ParseArgs([]string{"--profile", "missing"})
-	if err == nil || err.Error() != "Unknown profile: missing" {
+func TestParseArgsDoesNotExpandProfileScanners(t *testing.T) {
+	_, err := ParseArgs([]string{"--profile", "skills-sh"})
+	if err == nil || err.Error() != "At least one --scanner is required" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -687,7 +678,7 @@ func TestResolveTargetInputsDiscoversSkillChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opts, err := ParseArgs(nil)
+	opts, err := ParseArgs([]string{"--scanner", "clawscan-static"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +694,7 @@ func TestResolveTargetInputsDiscoversSkillChildren(t *testing.T) {
 
 func TestResolveTargetInputsRejectsMissingSkillsDirectory(t *testing.T) {
 	dir := t.TempDir()
-	opts, err := ParseArgs(nil)
+	opts, err := ParseArgs([]string{"--scanner", "clawscan-static"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -718,7 +709,7 @@ func TestResolveTargetInputsRejectsEmptyOrInvalidSkillsDirectory(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "skills", "not-a-skill"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := ParseArgs(nil)
+	opts, err := ParseArgs([]string{"--scanner", "clawscan-static"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,8 +734,11 @@ func TestRunTargetsScansDiscoveredSkillsWithDefaultProfile(t *testing.T) {
 	t.Chdir(dir)
 
 	opts, err := ParseArgs([]string{
+		"--scanner", "skillspector",
 		"--scanner-result", "skillspector=" + skillSpectorFixture,
+		"--scanner", "virustotal",
 		"--scanner-result", "virustotal=" + virusTotalFixture,
+		"--scanner", "clawscan-static",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -803,8 +797,11 @@ func TestRunTargetsExplicitTargetOverridesDiscovery(t *testing.T) {
 
 	opts, err := ParseArgs([]string{
 		"./skills/foo",
+		"--scanner", "skillspector",
 		"--scanner-result", "skillspector=" + skillSpectorFixture,
+		"--scanner", "virustotal",
 		"--scanner-result", "virustotal=" + virusTotalFixture,
+		"--scanner", "clawscan-static",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -829,9 +826,20 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 	if err := os.WriteFile(snykFixture, []byte(`{"ok":true,"issues":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	socketFixture := filepath.Join(dir, "socket.json")
+	if err := os.WriteFile(socketFixture, []byte(`{"ok":true,"alerts":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(dir)
 
-	opts, err := ParseArgs([]string{"--profile", "skills-sh", "--scanner-result", "snyk=" + snykFixture})
+	opts, err := ParseArgs([]string{
+		"--profile", "skills-sh",
+		"--scanner", "gendigital",
+		"--scanner", "socket",
+		"--scanner-result", "socket=" + socketFixture,
+		"--scanner", "snyk",
+		"--scanner-result", "snyk=" + snykFixture,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -849,8 +857,11 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 		if run.Scanners["snyk"].Status != "completed" {
 			t.Fatalf("snyk result for %s = %#v", run.Target.Input, run.Scanners["snyk"])
 		}
-		if run.Scanners["clawscan-static"].Status != "completed" {
-			t.Fatalf("static result for %s = %#v", run.Target.Input, run.Scanners["clawscan-static"])
+		if run.Scanners["socket"].Status != "completed" {
+			t.Fatalf("socket result for %s = %#v", run.Target.Input, run.Scanners["socket"])
+		}
+		if _, ok := run.Scanners["clawscan-static"]; ok {
+			t.Fatalf("unexpected clawscan-static result for %s = %#v", run.Target.Input, run.Scanners["clawscan-static"])
 		}
 	}
 }

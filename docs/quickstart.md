@@ -55,7 +55,7 @@ Built-in profiles:
 | Profile | Scanners |
 | --- | --- |
 | `clawhub` | `skillspector`, `virustotal`, `clawscan-static` |
-| `skills-sh` | `gendigital`, `snyk`, `clawscan-static` |
+| `skills-sh` | `gendigital`, `socket`, `snyk` |
 
 The embedded `clawhub` profile ships the generic scanner suite only. ClawHub's
 repo-specific judge prompt and output-schema paths should live in ClawHub's own
@@ -114,6 +114,9 @@ clawscan ./my-skill --profile skills-sh --scanner clawscan-static --json
 Config files may declare env var names that a judge needs, but they must not
 store secret values. Scanner and judge credentials stay in environment
 variables, such as `OPENAI_API_KEY` for the example judge command.
+The built-in `skills-sh` profile needs `SOCKET_CLI_API_TOKEN` and `SNYK_TOKEN`
+unless those scanners are supplied through `--scanner-result` fixtures or
+overridden with `--scanner`.
 
 ## Explicit Target Scan
 

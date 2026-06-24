@@ -10,5 +10,5 @@ profiles:
   skills-sh:
     scanners:
       - gendigital
+      - socket
       - snyk
-      - clawscan-static

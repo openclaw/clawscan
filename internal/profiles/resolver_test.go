@@ -49,7 +49,7 @@ func TestResolveArgsAllowsExplicitProfileWithoutTarget(t *testing.T) {
 	if opts.Target != "" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "gendigital,snyk,clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "gendigital,socket,snyk" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -60,9 +60,12 @@ func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runner.ValidateRequirements(opts, map[string]string{"SNYK_TOKEN": ""})
+	err = runner.ValidateRequirements(opts, map[string]string{"SOCKET_CLI_API_TOKEN": "", "SNYK_TOKEN": ""})
 	if err == nil {
 		t.Fatal("expected missing env error")
+	}
+	if !strings.Contains(err.Error(), "- SOCKET_CLI_API_TOKEN required by scanner socket") {
+		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(err.Error(), "- SNYK_TOKEN required by scanner snyk") {
 		t.Fatalf("err = %v", err)

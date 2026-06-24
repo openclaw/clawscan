@@ -13,6 +13,7 @@ by themselves.
 | `gendigital` | [Gen Digital Skill Scanner](https://ai.gendigital.com/skill-scanner) | URL targets only in v1. Local paths return a scanner-specific skipped result. | None. |
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Local file or directory. Runs with `--no-llm` by default. | None by default. Provider keys are required only when `CLAWSCAN_SKILLSPECTOR_LLM=1`. |
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Local skill path through `uvx snyk-agent-scan@latest scan --json --no-bootstrap --skills <target>`. | `SNYK_TOKEN`. |
+| `socket` | [Socket CLI](https://github.com/SocketDev/socket-cli) | Local file or directory through `npx --yes socket scan create --json <target>`. This uses Socket's public full-scan CLI path and does not claim private skills.sh backend parity. | `SOCKET_CLI_API_TOKEN`. |
 | `clawscan-static` | Built in | Local file or directory. URL targets return a skipped result. | None. |
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | Single local file hash lookup in v1. Directories return a skipped result. | `VIRUSTOTAL_API_KEY`. |
 

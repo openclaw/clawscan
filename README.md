@@ -84,7 +84,7 @@ upward discovery.
 Accepted scanner IDs:
 
 ```text
-agentverus, ai-infra-guard, cisco, clawscan-static, gendigital, skillspector, snyk, virustotal
+agentverus, ai-infra-guard, cisco, clawscan-static, gendigital, skillspector, snyk, socket, virustotal
 ```
 
 Some scanners require upstream tools or credentials. Secrets must come from
@@ -92,6 +92,7 @@ environment variables, never CLI flags:
 
 ```bash
 export VIRUSTOTAL_API_KEY=...
+export SOCKET_CLI_API_TOKEN=...
 export SNYK_TOKEN=...
 export AIG_BASE_URL=http://127.0.0.1:8088
 export AIG_MODEL=gpt-4.1

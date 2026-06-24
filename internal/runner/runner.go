@@ -171,22 +171,8 @@ type JudgeResult struct {
 
 const defaultProfileName = "clawhub"
 
-var builtInProfiles = map[string][]string{
-	"clawhub":   {"skillspector", "virustotal", "clawscan-static"},
-	"skills-sh": {"gendigital", "snyk", "clawscan-static"},
-}
-
 func ScannerIDs() []string {
 	return DefaultScannerRegistry().IDs()
-}
-
-func ProfileIDs() []string {
-	ids := make([]string, 0, len(builtInProfiles))
-	for id := range builtInProfiles {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
 }
 
 func ParseArgs(args []string) (Options, error) {
@@ -276,9 +262,6 @@ func ParseArgs(args []string) (Options, error) {
 			if err != nil {
 				return Options{}, err
 			}
-			if _, ok := builtInProfiles[value]; !ok {
-				return Options{}, fmt.Errorf("Unknown profile: %s", value)
-			}
 			opts.Profile = value
 			i = next
 		case "--scanner-result":
@@ -342,11 +325,7 @@ func ParseArgs(args []string) (Options, error) {
 		return Options{}, fmt.Errorf("%s requires --benchmark", benchmarkOnlyFlag)
 	}
 	if len(opts.Scanners) == 0 {
-		scanners, err := builtInProfileScanners(opts.Profile)
-		if err != nil {
-			return Options{}, err
-		}
-		opts.Scanners = scanners
+		return Options{}, errors.New("At least one --scanner is required")
 	}
 	requestedScanners := map[string]bool{}
 	for _, scanner := range opts.Scanners {
@@ -361,14 +340,6 @@ func ParseArgs(args []string) (Options, error) {
 		opts.Judge = &JudgeOptions{Command: judge}
 	}
 	return opts, nil
-}
-
-func builtInProfileScanners(profile string) ([]string, error) {
-	scanners, ok := builtInProfiles[profile]
-	if !ok {
-		return nil, fmt.Errorf("Unknown profile: %s", profile)
-	}
-	return append([]string(nil), scanners...), nil
 }
 
 func ValidateRequirements(opts Options, env map[string]string) error {

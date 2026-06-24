@@ -65,16 +65,9 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,ai-infra-guard,cisco,clawscan-static,gendigital,skillspector,snyk,virustotal"
+	want := "agentverus,ai-infra-guard,cisco,clawscan-static,gendigital,skillspector,snyk,socket,virustotal"
 	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
-	}
-	for profile, scanners := range builtInProfiles {
-		for _, scanner := range scanners {
-			if !DefaultScannerRegistry().Contains(scanner) {
-				t.Fatalf("profile %s references unregistered scanner %s", profile, scanner)
-			}
-		}
 	}
 }
 

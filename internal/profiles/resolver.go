@@ -81,7 +81,7 @@ func ResolveArgs(args []string, cwd string) (runner.Options, error) {
 			return runner.Options{}, err
 		}
 	}
-	configs, err := loadConfigs(cwd, intent.configPath)
+	registry, err := loadConfigs(cwd, intent.configPath)
 	if err != nil {
 		return runner.Options{}, err
 	}
@@ -89,12 +89,9 @@ func ResolveArgs(args []string, cwd string) (runner.Options, error) {
 	if profileName == "" {
 		profileName = defaultProfile
 	}
-	selected, ok := configs[profileName]
+	selected, ok := registry.Profile(profileName)
 	if !ok {
-		return runner.Options{}, unknownProfileError(profileName, configs)
-	}
-	if err := validateProfile(profileName, selected.profile); err != nil {
-		return runner.Options{}, err
+		return runner.Options{}, unknownProfileError(profileName, registry.IDs())
 	}
 
 	finalArgs, extraEnv, err := buildRunnerArgs(intent, selected, profileName)
@@ -110,17 +107,11 @@ func ResolveArgs(args []string, cwd string) (runner.Options, error) {
 	return opts, nil
 }
 
-func loadConfigs(cwd string, explicitConfig string) (map[string]resolvedProfile, error) {
-	builtins, err := readConfigBytes("embedded built-in profiles", func() ([]byte, error) {
-		return builtinFiles.ReadFile("builtin.yml")
-	})
-	if err != nil {
-		return nil, err
-	}
-	profiles := map[string]resolvedProfile{}
-	mergeProfiles(profiles, builtins, "")
+func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
+	registry := DefaultProfileRegistry()
 
 	var projectPath string
+	var err error
 	if explicitConfig != "" {
 		projectPath = explicitConfig
 		if !filepath.IsAbs(projectPath) {
@@ -129,17 +120,30 @@ func loadConfigs(cwd string, explicitConfig string) (map[string]resolvedProfile,
 	} else {
 		projectPath, err = discoverConfig(cwd)
 		if err != nil {
-			return nil, err
+			return ProfileRegistry{}, err
 		}
 	}
 	if projectPath == "" {
-		return profiles, nil
+		return registry, nil
 	}
 	projectConfig, err := readConfigFile(projectPath)
 	if err != nil {
+		return ProfileRegistry{}, err
+	}
+	projectProfiles := map[string]resolvedProfile{}
+	mergeProfiles(projectProfiles, projectConfig, filepath.Dir(projectPath))
+	return registry.Merge(projectProfiles)
+}
+
+func loadBuiltinProfiles() (map[string]resolvedProfile, error) {
+	builtins, err := readConfigBytes("embedded built-in profiles", func() ([]byte, error) {
+		return builtinFiles.ReadFile("builtin.yml")
+	})
+	if err != nil {
 		return nil, err
 	}
-	mergeProfiles(profiles, projectConfig, filepath.Dir(projectPath))
+	profiles := map[string]resolvedProfile{}
+	mergeProfiles(profiles, builtins, "")
 	return profiles, nil
 }
 
@@ -434,17 +438,12 @@ func validateProfile(name string, profile Profile) error {
 	return nil
 }
 
-func unknownProfileError(profile string, profiles map[string]resolvedProfile) error {
-	return fmt.Errorf("Unknown profile: %s (available: %s)", profile, strings.Join(sortedProfileNames(profiles), ", "))
+func unknownProfileError(profile string, available []string) error {
+	return fmt.Errorf("Unknown profile: %s (available: %s)", profile, strings.Join(available, ", "))
 }
 
-func sortedProfileNames(profiles map[string]resolvedProfile) []string {
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+func unknownScannerInProfileError(profile string, scanner string) error {
+	return fmt.Errorf("Profile %s references unknown scanner: %s", profile, scanner)
 }
 
 func sortedKeys(values map[string]string) []string {

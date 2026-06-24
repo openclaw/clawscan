@@ -126,6 +126,11 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run:          ExternalScannerRunner.runSnyk,
 		},
 		scannerAdapter{
+			id:           "socket",
+			requirements: staticEnvRequirements("scanner socket", "SOCKET_CLI_API_TOKEN"),
+			run:          ExternalScannerRunner.runSocket,
+		},
+		scannerAdapter{
 			id:           "virustotal",
 			requirements: staticEnvRequirements("scanner virustotal", "VIRUSTOTAL_API_KEY"),
 			run:          ExternalScannerRunner.runVirusTotal,

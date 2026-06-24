@@ -41,7 +41,7 @@ Choose the run mode:
 Accepted scanner IDs:
 
 ```text
-agentverus, ai-infra-guard, cisco, clawscan-static, gendigital, skillspector, snyk, virustotal
+agentverus, ai-infra-guard, cisco, clawscan-static, gendigital, skillspector, snyk, socket, virustotal
 ```
 
 Credential rules:
@@ -49,6 +49,7 @@ Credential rules:
 | Scanner | Required env vars |
 | --- | --- |
 | `ai-infra-guard` | `AIG_BASE_URL`, `AIG_MODEL`, `AIG_MODEL_API_KEY` |
+| `socket` | `SOCKET_CLI_API_TOKEN` |
 | `snyk` | `SNYK_TOKEN` |
 | `virustotal` | `VIRUSTOTAL_API_KEY` |
 | `skillspector` | none by default; with `CLAWSCAN_SKILLSPECTOR_LLM=1`, set the provider key |
