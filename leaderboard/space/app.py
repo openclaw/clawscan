@@ -12,6 +12,10 @@ DEFAULT_FIXTURE = HERE / "fixtures" / "results.jsonl"
 DEFAULT_EXPECTED = HERE / "fixtures" / "expected_eval_holdout.jsonl"
 RESULTS_FILENAME = "results.jsonl"
 VALID_LABELS = {"clean", "suspicious", "malicious"}
+APP_CSS = """
+.gradio-container { max-width: 1180px !important; }
+.metric-note { color: #48515c; font-size: 0.92rem; }
+"""
 
 
 def load_results(path: str | None = None) -> list[dict[str, Any]]:
@@ -214,12 +218,7 @@ def build_app():
     roles = filter_options(results, "role")
     verifications = filter_options(results, "verification")
 
-    css = """
-    .gradio-container { max-width: 1180px !important; }
-    .metric-note { color: #48515c; font-size: 0.92rem; }
-    """
-
-    with gr.Blocks(title="Security Signals Leaderboard", css=css) as app:
+    with gr.Blocks(title="Security Signals Leaderboard") as app:
         gr.Markdown(
             """
             # Security Signals Leaderboard
@@ -287,4 +286,4 @@ if __name__ == "__main__":
     if args.smoke:
         smoke(args.results or None, args.validate_upload or None)
     else:
-        build_app().launch()
+        build_app().launch(css=APP_CSS)

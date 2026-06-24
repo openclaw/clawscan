@@ -1,3 +1,10 @@
+---
+title: ClawHub Security Signals Leaderboard
+sdk: gradio
+app_file: app.py
+pinned: false
+---
+
 # Security Signals Leaderboard Space
 
 This is the source scaffold for the private Hugging Face Space:
