@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -111,6 +112,45 @@ func TestParseArgsSupportsOpenClawBenchmark(t *testing.T) {
 	}
 }
 
+func TestParseArgsSupportsSkillTrustBenchBenchmark(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"--benchmark", "SkillTrustBench",
+		"--limit", "2",
+		"--scanner", "clawscan-static",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Benchmark == nil {
+		t.Fatal("missing benchmark options")
+	}
+	if opts.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" {
+		t.Fatalf("benchmark id = %q", opts.Benchmark.ID)
+	}
+	if opts.Benchmark.Split != "benchmark" {
+		t.Fatalf("split = %q", opts.Benchmark.Split)
+	}
+	if opts.Benchmark.Limit != 2 {
+		t.Fatalf("limit = %d", opts.Benchmark.Limit)
+	}
+}
+
+func TestParseArgsDefaultsBareBenchmarkToSkillTrustBench(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"--benchmark",
+		"--scanner", "clawscan-static",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Benchmark == nil {
+		t.Fatal("missing benchmark options")
+	}
+	if opts.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" || opts.Benchmark.Split != "benchmark" {
+		t.Fatalf("benchmark = %#v", opts.Benchmark)
+	}
+}
+
 func TestParseArgsRejectsTargetWithBenchmark(t *testing.T) {
 	_, err := ParseArgs([]string{
 		"./my-skill",
@@ -128,6 +168,17 @@ func TestParseArgsRejectsUnsupportedBenchmark(t *testing.T) {
 		"--scanner", "clawscan-static",
 	})
 	if err == nil || err.Error() != "Unsupported benchmark: skillscan-paper" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseArgsRejectsUnsupportedSkillTrustBenchSplit(t *testing.T) {
+	_, err := ParseArgs([]string{
+		"--benchmark", "SkillTrustBench",
+		"--split", "eval_holdout",
+		"--scanner", "clawscan-static",
+	})
+	if err == nil || err.Error() != "Unsupported split for cuhk-zhuque/SkillTrustBench: eval_holdout (valid: benchmark)" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -208,6 +259,114 @@ func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
 	}
 	if scanners.bundleContent != "echo ok\n" {
 		t.Fatalf("bundle file = %q", scanners.bundleContent)
+	}
+}
+
+func TestRunSkillTrustBenchBenchmarkMaterializesArchiveCaseAndRunsScanners(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"--benchmark", "SkillTrustBench",
+		"--scanner", "clawscan-static",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanners := &recordingScannerRunner{}
+	artifact, err := RunBenchmark(opts, RunContext{
+		Env:           map[string]string{},
+		Now:           fixedClock("2026-06-12T12:00:00Z", "2026-06-12T12:00:01Z", "2026-06-12T12:00:02Z", "2026-06-12T12:00:03Z"),
+		ScannerRunner: scanners,
+		BenchmarkClient: staticBenchmarkClient{
+			skillTrustBenchRows: []SkillTrustBenchRow{
+				{
+					ID:             "case_04866",
+					Judgment:       "malicious",
+					RiskLabels:     []string{"T04", "T05"},
+					Source:         "injected",
+					BaseCategory:   "devtool",
+					PrimaryPattern: stringPtr("E2"),
+					AttackPattern:  []string{"E2", "E1", "PE3", "SC1"},
+					SkillPath:      "benchmark_full_v1.0/case_04866",
+				},
+			},
+			materializedSkillTrustBench: map[string]map[string]string{
+				"case_04866": {
+					"SKILL.md":         "# SkillTrustBench Demo\n",
+					"scripts/check.sh": "echo skilltrustbench\n",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" || artifact.Benchmark.Split != "benchmark" {
+		t.Fatalf("benchmark = %#v", artifact.Benchmark)
+	}
+	if len(artifact.Cases) != 1 {
+		t.Fatalf("cases = %#v", artifact.Cases)
+	}
+	benchmarkCase := artifact.Cases[0]
+	if benchmarkCase.ID != "case_04866" || benchmarkCase.SkillSlug != "case_04866" || benchmarkCase.SkillVersion != "v1.0" {
+		t.Fatalf("case metadata = %#v", benchmarkCase)
+	}
+	if benchmarkCase.Expected.Verdict != "malicious" {
+		t.Fatalf("expected = %#v", benchmarkCase.Expected)
+	}
+	if !strings.Contains(string(benchmarkCase.Expected.Context), `"risk_labels":["T04","T05"]`) {
+		t.Fatalf("expected context = %s", benchmarkCase.Expected.Context)
+	}
+	if benchmarkCase.Run.Scanners["clawscan-static"].Status != "completed" {
+		t.Fatalf("scanner result = %#v", benchmarkCase.Run.Scanners["clawscan-static"])
+	}
+	if scanners.skillContent != "# SkillTrustBench Demo\n" {
+		t.Fatalf("SKILL.md = %q", scanners.skillContent)
+	}
+	if scanners.bundleContent != "echo skilltrustbench\n" {
+		t.Fatalf("bundle file = %q", scanners.bundleContent)
+	}
+}
+
+func TestMaterializeSkillTrustBenchArchiveRowExtractsOnlyRequestedCase(t *testing.T) {
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "skilltrustbench.zip")
+	writeZipFixture(t, archivePath, map[string]string{
+		"benchmark_full_v1.0/case_04866/SKILL.md":         "# Requested\n",
+		"benchmark_full_v1.0/case_04866/scripts/check.sh": "echo requested\n",
+		"benchmark_full_v1.0/case_01984/SKILL.md":         "# Other\n",
+	})
+	target, err := materializeSkillTrustBenchArchiveRow(dir, SkillTrustBenchRow{
+		ID:        "case_04866",
+		SkillPath: "benchmark_full_v1.0/case_04866",
+	}, archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err := os.ReadFile(filepath.Join(target, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(skill) != "# Requested\n" {
+		t.Fatalf("SKILL.md = %q", skill)
+	}
+	script, err := os.ReadFile(filepath.Join(target, "scripts", "check.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(script) != "echo requested\n" {
+		t.Fatalf("script = %q", script)
+	}
+	if _, err := os.Stat(filepath.Join(target, "case_01984", "SKILL.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected other case extraction err = %v", err)
+	}
+}
+
+func TestMaterializeSkillTrustBenchArchiveRowRejectsUnsafeSkillPath(t *testing.T) {
+	_, err := materializeSkillTrustBenchArchiveRow(t.TempDir(), SkillTrustBenchRow{
+		ID:        "case_04866",
+		SkillPath: "../case_04866",
+	}, filepath.Join(t.TempDir(), "missing.zip"))
+	if err == nil || !strings.Contains(err.Error(), "unsafe benchmark bundle path") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -2058,11 +2217,62 @@ func (runner *recordingScannerRunner) RunScanner(name string, target string, sta
 }
 
 type staticBenchmarkClient struct {
-	rows []OpenClawBenchmarkRow
+	rows                        []OpenClawBenchmarkRow
+	skillTrustBenchRows         []SkillTrustBenchRow
+	materializedSkillTrustBench map[string]map[string]string
 }
 
 func (client staticBenchmarkClient) FetchOpenClawRows(dataset string, split string, offset int, limit int) ([]OpenClawBenchmarkRow, error) {
 	return client.rows, nil
+}
+
+func (client staticBenchmarkClient) FetchSkillTrustBenchRows(dataset string, split string, offset int, limit int) ([]SkillTrustBenchRow, error) {
+	return client.skillTrustBenchRows, nil
+}
+
+func (client staticBenchmarkClient) MaterializeSkillTrustBenchRow(root string, row SkillTrustBenchRow) (string, error) {
+	target := filepath.Join(root, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return "", err
+	}
+	for rel, content := range client.materializedSkillTrustBench[row.ID] {
+		path := filepath.Join(target, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return target, nil
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func writeZipFixture(t *testing.T, path string, files map[string]string) {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	for name, content := range files {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type errorScannerRunner struct{}

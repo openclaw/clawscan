@@ -48,10 +48,10 @@ A benchmark run writes a `clawscan-benchmark-v1` artifact:
 {
   "schemaVersion": "clawscan-benchmark-v1",
   "benchmark": {
-    "id": "OpenClaw/clawhub-security-signals",
+    "id": "cuhk-zhuque/SkillTrustBench",
     "source": "huggingface",
     "config": "default",
-    "split": "eval_holdout",
+    "split": "benchmark",
     "offset": 0,
     "limit": 1,
     "rows": 1
@@ -61,14 +61,20 @@ A benchmark run writes a `clawscan-benchmark-v1` artifact:
   "env": {},
   "cases": [
     {
-      "id": "dataset-row-id",
-      "skillSlug": "owner/skill",
-      "skillVersion": "1.0.0",
+      "id": "case_04866",
+      "skillSlug": "case_04866",
+      "skillVersion": "v1.0",
       "expected": {
-        "verdict": "suspicious",
-        "confidence": "high",
-        "model": "gpt-5.5",
-        "summary": "Dataset verdict summary."
+        "verdict": "malicious",
+        "summary": "SkillTrustBench judgment: malicious; category: devtool; primary pattern: E2; source: injected",
+        "context": {
+          "risk_labels": ["T04", "T05"],
+          "source": "injected",
+          "base_category": "devtool",
+          "primary_pattern": "E2",
+          "attack_pattern": ["E2", "E1", "PE3", "SC1"],
+          "skill_path": "benchmark_full_v1.0/case_04866"
+        }
       },
       "run": {
         "schemaVersion": "clawscan-run-v1"
@@ -78,7 +84,7 @@ A benchmark run writes a `clawscan-benchmark-v1` artifact:
   "summary": {
     "caseCount": 1,
     "expectedVerdicts": {
-      "suspicious": 1
+      "malicious": 1
     },
     "scannerStatuses": {
       "clawscan-static": {

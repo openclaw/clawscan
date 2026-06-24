@@ -95,8 +95,8 @@ Actual secret values are never written to run artifacts.
 | `--output <path>` | Write the run artifact JSON to a file. |
 | `--json` | Print the run artifact JSON to stdout. |
 | `--judge <cmd>` | Run an optional external judge harness. |
-| `--benchmark <id>` | Run a supported benchmark instead of one target. |
-| `--split <name>` | Benchmark split. Defaults to `eval_holdout`. |
+| `--benchmark [id]` | Run a supported benchmark instead of one target. Defaults to SkillTrustBench. |
+| `--split <name>` | Benchmark split. Defaults to `benchmark` for SkillTrustBench and `eval_holdout` for OpenClaw. |
 | `--limit <n>` | Maximum benchmark rows to run. `0` means all rows. |
 | `--offset <n>` | Benchmark row offset. Defaults to `0`. |
 

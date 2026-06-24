@@ -31,6 +31,7 @@ Choose the run mode:
 | --- | --- |
 | Scan one skill path | `clawscan ./my-skill --scanner clawscan-static --json` |
 | Scan one URL | `clawscan https://clawhub.ai/owner/skill --scanner gendigital --json` |
+| Run the default benchmark | `clawscan --benchmark --limit 10 --scanner clawscan-static --output run.json` |
 | Run the OpenClaw benchmark | `clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
 | Add a judge harness | Add `--judge '<command with placeholders>'`. |
@@ -57,25 +58,31 @@ secret values.
 
 ## Benchmarks
 
-V1 supports only:
+Supported benchmarks:
 
 ```text
+cuhk-zhuque/SkillTrustBench
 OpenClaw/clawhub-security-signals
 ```
 
-Use `eval_holdout` for normal benchmark checks:
+SkillTrustBench is the default benchmark. Use either `--benchmark` with no
+value or the alias `--benchmark SkillTrustBench`:
 
 ```bash
 clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
-  --split eval_holdout \
+  --benchmark \
   --limit 10 \
   --scanner clawscan-static \
   --output /tmp/clawscan-benchmark.json
 ```
 
-Splits: `train`, `validation`, `test`, `eval_holdout`. `--limit 0` means run
-the full split. Use `--offset` with `--limit` for reproducible chunks.
+SkillTrustBench uses split `benchmark`. The first live run downloads and caches
+`benchmark_full_v1.0.zip`, then extracts only the requested case directories
+into temporary scan targets.
+
+OpenClaw splits: `train`, `validation`, `test`, `eval_holdout`. `--limit 0`
+means run the full selected split. Use `--offset` with `--limit` for
+reproducible chunks.
 
 ## Judge Harness
 
@@ -107,7 +114,7 @@ Use static scanner smokes for local proof because they do not need secrets:
 
 ```bash
 go run ./cmd/clawscan ./README.md --scanner clawscan-static --output /tmp/clawscan-smoke.json
-go run ./cmd/clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json
+go run ./cmd/clawscan --benchmark --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json
 go test ./...
 go vet ./...
 ```
@@ -117,7 +124,7 @@ go vet ./...
 - Do not pass API keys as CLI flags.
 - Do not use benchmark flags such as `--split`, `--limit`, or `--offset`
   without `--benchmark`.
-- Do not add unsupported dataset names; v1 accepts only
+- Do not add unsupported dataset names; built-ins are SkillTrustBench and
   `OpenClaw/clawhub-security-signals`.
 - Do not assume scanner failures are final policy verdicts; scanner output is
   raw evidence for comparison or judging.

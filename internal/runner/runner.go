@@ -167,7 +167,7 @@ func ParseArgs(args []string) (Options, error) {
 	}
 	var judge string
 	var benchmarkID string
-	benchmarkSplit := defaultOpenClawBenchmarkSplit
+	var benchmarkSplit string
 	var benchmarkLimit int
 	var benchmarkOffset int
 	var benchmarkOnlyFlag string
@@ -175,12 +175,13 @@ func ParseArgs(args []string) (Options, error) {
 		arg := args[i]
 		switch arg {
 		case "--benchmark":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
+			next := i + 1
+			if next < len(args) && args[next] != "" && !strings.HasPrefix(args[next], "--") {
+				benchmarkID = args[next]
+				i = next
+			} else {
+				benchmarkID = defaultBenchmarkID()
 			}
-			benchmarkID = value
-			i = next
 		case "--split":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -270,6 +271,9 @@ func ParseArgs(args []string) (Options, error) {
 		id, err := canonicalBenchmarkID(benchmarkID)
 		if err != nil {
 			return Options{}, err
+		}
+		if benchmarkSplit == "" {
+			benchmarkSplit = defaultBenchmarkSplit(id)
 		}
 		if err := validateBenchmarkSplit(id, benchmarkSplit); err != nil {
 			return Options{}, err

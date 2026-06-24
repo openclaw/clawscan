@@ -73,6 +73,8 @@ func helpText() string {
 
 Usage:
   clawscan <target> --scanner <scanner-id> [flags]
+  clawscan --benchmark --scanner <scanner-id> [flags]
+  clawscan --benchmark SkillTrustBench --scanner <scanner-id> [flags]
   clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]
   clawscan --version
   clawscan --help
@@ -83,14 +85,15 @@ Core flags:
   --output <path>             Write the run artifact JSON to a file.
   --json                      Print the run artifact JSON to stdout.
   --judge <cmd>               Optional external judge harness command.
-  --benchmark <id>            Run a supported benchmark dataset instead of one target.
-  --split <name>              Benchmark split. Defaults to eval_holdout.
+  --benchmark [id]            Run a supported benchmark dataset instead of one target. Defaults to SkillTrustBench.
+  --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for OpenClaw.
   --limit <n>                 Maximum benchmark rows to run. 0 means all rows.
   --offset <n>                Benchmark row offset. Defaults to 0.
   --version                   Print build metadata.
   -h, --help                  Print this help.
 
 Supported benchmarks:
+  cuhk-zhuque/SkillTrustBench (alias: SkillTrustBench, default)
   OpenClaw/clawhub-security-signals
 
 Accepted scanner IDs:

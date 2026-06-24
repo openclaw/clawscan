@@ -22,8 +22,7 @@ Benchmark smoke:
 
 ```bash
 go run ./cmd/clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
-  --split eval_holdout \
+  --benchmark \
   --limit 1 \
   --scanner clawscan-static \
   --output /tmp/clawscan-benchmark-smoke.json

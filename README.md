@@ -29,16 +29,18 @@ clawscan ./my-skill \
   --output ./clawscan-run.json
 ```
 
-Run the supported benchmark:
+Run the default benchmark, SkillTrustBench:
 
 ```bash
 clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
-  --split eval_holdout \
+  --benchmark \
   --limit 10 \
   --scanner clawscan-static \
   --output ./clawscan-benchmark.json
 ```
+
+Use `--benchmark OpenClaw/clawhub-security-signals --split eval_holdout` for
+the OpenClaw security-signals benchmark.
 
 ## What It Does
 
