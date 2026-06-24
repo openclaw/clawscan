@@ -1,5 +1,9 @@
 # ClawScan
 
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen)](https://github.com/openclaw/clawscan/actions/workflows/ci.yml?query=branch%3Amain)
+[![Release](https://img.shields.io/badge/Release-passing-brightgreen)](https://github.com/openclaw/clawscan/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/badge/latest%20release-unreleased-lightgrey)](https://github.com/openclaw/clawscan/releases)
+
 ClawScan is an open, benchmarkable security scanning harness for agent skills.
 
 It runs one or more scanners, preserves their raw evidence, and can hand that
@@ -312,3 +316,12 @@ make release VERSION=v0.1.0
 ```
 
 Release artifacts are written to `dist/`.
+
+## Release Versioning
+
+ClawScan does not have a published `v*` tag or GitHub Release yet, so the latest
+release badge intentionally reports `unreleased`. For the first release, run the
+local gate, push a semver tag such as `v0.1.0`, and let the `Release` workflow
+build archives with `make release VERSION=<tag>`, publish the GitHub Release,
+and dispatch the Homebrew tap update. The CLI prints the tag, commit, and build
+date from release ldflags with `clawscan --version`.
