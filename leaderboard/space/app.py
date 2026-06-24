@@ -15,18 +15,22 @@ VALID_LABELS = {"clean", "suspicious", "malicious"}
 
 
 def load_results(path: str | None = None) -> list[dict[str, Any]]:
-    local_path = Path(path or os.environ.get("SECURITY_SIGNALS_RESULTS_PATH", DEFAULT_FIXTURE))
-    if path or local_path.exists():
-        return read_jsonl(local_path)
+    configured_path = path or os.environ.get("SECURITY_SIGNALS_RESULTS_PATH")
+    if configured_path:
+        return read_jsonl(Path(configured_path))
 
     repo = os.environ.get("SECURITY_SIGNALS_RESULTS_REPO")
-    if not repo:
-        return []
+    if repo:
+        from huggingface_hub import hf_hub_download
 
-    from huggingface_hub import hf_hub_download
+        downloaded = hf_hub_download(repo_id=repo, filename=RESULTS_FILENAME, repo_type="dataset")
+        return read_jsonl(Path(downloaded))
 
-    downloaded = hf_hub_download(repo_id=repo, filename=RESULTS_FILENAME, repo_type="dataset")
-    return read_jsonl(Path(downloaded))
+    local_path = DEFAULT_FIXTURE
+    if local_path.exists():
+        return read_jsonl(local_path)
+
+    return []
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
