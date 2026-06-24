@@ -1,0 +1,2 @@
+gradio>=4.44,<5
+huggingface_hub>=0.23
