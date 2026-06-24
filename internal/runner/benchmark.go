@@ -179,7 +179,14 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if opts.Benchmark == nil {
 		return BenchmarkArtifact{}, errors.New("missing benchmark options")
 	}
-	if opts.Benchmark.PredictionsOutputPath != "" && opts.Benchmark.ID != openClawBenchmarkID {
+	adapter, err := DefaultBenchmarkRegistry().Resolve(opts.Benchmark.ID)
+	if err != nil {
+		return BenchmarkArtifact{}, err
+	}
+	benchmarkOpts := *opts.Benchmark
+	benchmarkOpts.ID = adapter.ID()
+	opts.Benchmark = &benchmarkOpts
+	if opts.Benchmark.PredictionsOutputPath != "" && !adapter.SupportsPredictionsOutput() {
 		return BenchmarkArtifact{}, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
 	}
 	env := ctx.Env
@@ -202,8 +209,8 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 		SchemaVersion: "clawscan-benchmark-v1",
 		Benchmark: BenchmarkMetadata{
 			ID:     opts.Benchmark.ID,
-			Source: benchmarkSource(opts.Benchmark.ID),
-			Config: benchmarkConfig(opts.Benchmark.ID),
+			Source: adapter.Source(),
+			Config: adapter.Config(),
 			Split:  opts.Benchmark.Split,
 			Offset: opts.Benchmark.Offset,
 			Limit:  opts.Benchmark.Limit,
@@ -217,39 +224,15 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 			JudgeStatuses:    map[string]int{},
 		},
 	}
-	switch opts.Benchmark.ID {
-	case openClawBenchmarkID:
-		rows, err := client.FetchOpenClawRows(opts.Benchmark.ID, opts.Benchmark.Split, opts.Benchmark.Offset, opts.Benchmark.Limit)
-		if err != nil {
-			return BenchmarkArtifact{}, err
-		}
-		artifact.Benchmark.Rows = len(rows)
-		for _, row := range rows {
-			benchmarkCase, err := runOpenClawBenchmarkCase(opts, ctx, env, now, row)
-			if err != nil {
-				return BenchmarkArtifact{}, err
-			}
-			evaluateBenchmarkCase(&benchmarkCase)
-			artifact.Cases = append(artifact.Cases, benchmarkCase)
-			artifact.Summary.addCase(benchmarkCase)
-		}
-	case skillTrustBenchID:
-		rows, err := client.FetchSkillTrustBenchRows(opts.Benchmark.ID, opts.Benchmark.Split, opts.Benchmark.Offset, opts.Benchmark.Limit)
-		if err != nil {
-			return BenchmarkArtifact{}, err
-		}
-		artifact.Benchmark.Rows = len(rows)
-		for _, row := range rows {
-			benchmarkCase, err := runSkillTrustBenchBenchmarkCase(opts, ctx, env, now, client, row)
-			if err != nil {
-				return BenchmarkArtifact{}, err
-			}
-			evaluateBenchmarkCase(&benchmarkCase)
-			artifact.Cases = append(artifact.Cases, benchmarkCase)
-			artifact.Summary.addCase(benchmarkCase)
-		}
-	default:
-		return BenchmarkArtifact{}, fmt.Errorf("Unsupported benchmark: %s", opts.Benchmark.ID)
+	cases, err := adapter.RunCases(opts, ctx, env, now, client)
+	if err != nil {
+		return BenchmarkArtifact{}, err
+	}
+	artifact.Benchmark.Rows = len(cases)
+	for _, benchmarkCase := range cases {
+		evaluateBenchmarkCase(&benchmarkCase)
+		artifact.Cases = append(artifact.Cases, benchmarkCase)
+		artifact.Summary.addCase(benchmarkCase)
 	}
 	artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
@@ -473,67 +456,11 @@ func canonicalVerdict(verdict string) (string, bool) {
 	return normalizePredictionLabel(verdict)
 }
 
-func runOpenClawBenchmarkCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, row OpenClawBenchmarkRow) (BenchmarkCase, error) {
-	dir, err := os.MkdirTemp("", "clawscan-benchmark-*")
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	defer os.RemoveAll(dir)
-	target, err := materializeOpenClawBenchmarkRow(dir, row)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	run, err := runBenchmarkTarget(opts, ctx, env, now, target)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	return BenchmarkCase{
-		ID:           row.ID,
-		SkillSlug:    row.SkillSlug,
-		SkillVersion: row.SkillVersion,
-		Expected: BenchmarkExpected{
-			Verdict:    canonicalExpectedVerdict(row.ClawScanVerdict),
-			Confidence: row.ClawScanConfidence,
-			Model:      row.ClawScanModel,
-			Summary:    row.ClawScanSummary,
-			Context:    normalizedRawMessage(row.ClawScanContext),
-		},
-		Run: run,
-	}, nil
-}
-
 func canonicalExpectedVerdict(verdict string) string {
 	if canonical, ok := canonicalVerdict(verdict); ok {
 		return canonical
 	}
 	return verdict
-}
-
-func runSkillTrustBenchBenchmarkCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient, row SkillTrustBenchRow) (BenchmarkCase, error) {
-	dir, err := os.MkdirTemp("", "clawscan-benchmark-*")
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	defer os.RemoveAll(dir)
-	target, err := client.MaterializeSkillTrustBenchRow(dir, row)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	run, err := runBenchmarkTarget(opts, ctx, env, now, target)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	expected, err := skillTrustBenchExpected(row)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	return BenchmarkCase{
-		ID:           row.ID,
-		SkillSlug:    row.ID,
-		SkillVersion: skillTrustBenchVersion,
-		Expected:     expected,
-		Run:          run,
-	}, nil
 }
 
 func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now func() time.Time, target string) (Artifact, error) {
@@ -588,46 +515,6 @@ func safeBenchmarkPath(path string) (string, error) {
 	return clean, nil
 }
 
-func skillTrustBenchExpected(row SkillTrustBenchRow) (BenchmarkExpected, error) {
-	context, err := json.Marshal(struct {
-		RiskLabels     []string `json:"risk_labels"`
-		Source         string   `json:"source"`
-		BaseCategory   string   `json:"base_category"`
-		PrimaryPattern *string  `json:"primary_pattern"`
-		AttackPattern  []string `json:"attack_pattern"`
-		SkillPath      string   `json:"skill_path"`
-	}{
-		RiskLabels:     row.RiskLabels,
-		Source:         row.Source,
-		BaseCategory:   row.BaseCategory,
-		PrimaryPattern: row.PrimaryPattern,
-		AttackPattern:  row.AttackPattern,
-		SkillPath:      row.SkillPath,
-	})
-	if err != nil {
-		return BenchmarkExpected{}, err
-	}
-	return BenchmarkExpected{
-		Verdict: canonicalExpectedVerdict(row.Judgment),
-		Summary: skillTrustBenchSummary(row),
-		Context: json.RawMessage(context),
-	}, nil
-}
-
-func skillTrustBenchSummary(row SkillTrustBenchRow) string {
-	parts := []string{"SkillTrustBench judgment: " + row.Judgment}
-	if row.BaseCategory != "" {
-		parts = append(parts, "category: "+row.BaseCategory)
-	}
-	if row.PrimaryPattern != nil && *row.PrimaryPattern != "" {
-		parts = append(parts, "primary pattern: "+*row.PrimaryPattern)
-	}
-	if row.Source != "" {
-		parts = append(parts, "source: "+row.Source)
-	}
-	return strings.Join(parts, "; ")
-}
-
 func (summary *BenchmarkSummary) addCase(benchmarkCase BenchmarkCase) {
 	summary.CaseCount++
 	if benchmarkCase.Expected.Verdict != "" {
@@ -664,27 +551,25 @@ func (summary *BenchmarkSummary) addCase(benchmarkCase BenchmarkCase) {
 }
 
 func canonicalBenchmarkID(id string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(id)) {
-	case strings.ToLower(openClawBenchmarkID):
-		return openClawBenchmarkID, nil
-	case strings.ToLower(skillTrustBenchID), strings.ToLower(skillTrustBenchAlias):
-		return skillTrustBenchID, nil
-	default:
-		return "", fmt.Errorf("Unsupported benchmark: %s", id)
+	adapter, err := DefaultBenchmarkRegistry().Resolve(id)
+	if err != nil {
+		return "", err
 	}
+	return adapter.ID(), nil
 }
 
 func validateBenchmarkSplit(id string, split string) error {
-	validSplits := benchmarkSplits(id)
-	if validSplits[split] {
-		return nil
+	adapter, err := DefaultBenchmarkRegistry().Resolve(id)
+	if err != nil {
+		return err
 	}
-	valid := make([]string, 0, len(validSplits))
-	for split := range validSplits {
-		valid = append(valid, split)
+	validSplits := adapter.Splits()
+	for _, validSplit := range validSplits {
+		if split == validSplit {
+			return nil
+		}
 	}
-	sort.Strings(valid)
-	return fmt.Errorf("Unsupported split for %s: %s (valid: %s)", id, split, strings.Join(valid, ", "))
+	return fmt.Errorf("Unsupported split for %s: %s (valid: %s)", adapter.ID(), split, strings.Join(validSplits, ", "))
 }
 
 func defaultBenchmarkID() string {
@@ -692,39 +577,11 @@ func defaultBenchmarkID() string {
 }
 
 func defaultBenchmarkSplit(id string) string {
-	switch id {
-	case skillTrustBenchID:
-		return defaultSkillTrustBenchSplit
-	default:
+	adapter, err := DefaultBenchmarkRegistry().Resolve(id)
+	if err != nil {
 		return defaultOpenClawBenchmarkSplit
 	}
-}
-
-func benchmarkSplits(id string) map[string]bool {
-	switch id {
-	case skillTrustBenchID:
-		return skillTrustBenchSplits
-	default:
-		return openClawBenchmarkSplits
-	}
-}
-
-func benchmarkSource(id string) string {
-	switch id {
-	case skillTrustBenchID:
-		return skillTrustBenchSource
-	default:
-		return openClawBenchmarkSource
-	}
-}
-
-func benchmarkConfig(id string) string {
-	switch id {
-	case skillTrustBenchID:
-		return skillTrustBenchConfig
-	default:
-		return openClawBenchmarkConfig
-	}
+	return adapter.DefaultSplit()
 }
 
 func normalizedRawMessage(raw json.RawMessage) json.RawMessage {
