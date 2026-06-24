@@ -348,6 +348,54 @@ profiles:
 	}
 }
 
+func TestRunCommandConfigWithoutProfileRunsEveryConfigProfile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Multi-profile\n")
+	config := filepath.Join(dir, "security", "clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  release:
+    scanners:
+      - clawscan-static
+  review:
+    scanners:
+      - clawscan-static
+`)
+	t.Chdir(dir)
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--config", config, "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Runs          []struct {
+			Profile  string                 `json:"profile"`
+			Scanners map[string]interface{} `json:"scanners"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.SchemaVersion != "clawscan-batch-v1" {
+		t.Fatalf("schema = %q", artifact.SchemaVersion)
+	}
+	if len(artifact.Runs) != 2 {
+		t.Fatalf("runs = %#v", artifact.Runs)
+	}
+	if got := artifact.Runs[0].Profile + "," + artifact.Runs[1].Profile; got != "release,review" {
+		t.Fatalf("profiles = %q", got)
+	}
+	for _, run := range artifact.Runs {
+		if _, ok := run.Scanners["clawscan-static"]; !ok {
+			t.Fatalf("missing clawscan-static scanner for %s: %#v", run.Profile, run.Scanners)
+		}
+	}
+}
+
 func TestRunCommandProfilePlusOverride(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")

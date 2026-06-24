@@ -98,7 +98,13 @@ Run a project profile:
 clawscan ./my-skill --profile clawhub-release
 ```
 
-Load one specific config file and skip discovery:
+Load one specific config file and run every profile in it:
+
+```bash
+clawscan ./my-skill --config ./security/clawscan.yml
+```
+
+Load one profile from a specific config file:
 
 ```bash
 clawscan ./my-skill --config ./security/clawscan.yml --profile skills-sh-review
@@ -174,7 +180,7 @@ Actual secret values are never written to run artifacts.
 | Flag | Description |
 | --- | --- |
 | `--profile <name>` | Profile to run. Defaults to `clawhub`. |
-| `--config <path>` | Load one config file instead of discovering `.clawscan.yml` / `.clawscan.yaml`; pair with `--profile` to run a project profile from that file. |
+| `--config <path>` | Load one config file instead of discovering `.clawscan.yml` / `.clawscan.yaml`; omit `--profile` to run every profile in that file. |
 | `--scanner <id>` | Scanner to run. Repeat for multiple scanners. |
 | `--scanner-result <id=path>` | Use a JSON fixture instead of running that scanner. |
 | `--output <path>` | Write the run artifact JSON to a file. |

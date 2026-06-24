@@ -70,20 +70,41 @@ const defaultProfile = "clawhub"
 
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
 
+type ResolvedRunSet struct {
+	Options     []runner.Options
+	OutputPath  string
+	JSON        bool
+	AllProfiles bool
+}
+
 func ResolveArgs(args []string, cwd string) (runner.Options, error) {
-	intent, err := parseCLIIntent(args)
+	resolved, err := ResolveRunSet(args, cwd)
 	if err != nil {
 		return runner.Options{}, err
+	}
+	if resolved.AllProfiles {
+		return runner.Options{}, errors.New("--config without --profile resolves multiple profiles")
+	}
+	return resolved.Options[0], nil
+}
+
+func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
+	intent, err := parseCLIIntent(args)
+	if err != nil {
+		return ResolvedRunSet{}, err
 	}
 	if cwd == "" {
 		cwd, err = os.Getwd()
 		if err != nil {
-			return runner.Options{}, err
+			return ResolvedRunSet{}, err
 		}
+	}
+	if intent.configPath != "" && !intent.profileSet {
+		return resolveAllConfigProfiles(intent, cwd)
 	}
 	registry, err := loadConfigs(cwd, intent.configPath)
 	if err != nil {
-		return runner.Options{}, err
+		return ResolvedRunSet{}, err
 	}
 	profileName := intent.profile
 	if profileName == "" {
@@ -91,20 +112,24 @@ func ResolveArgs(args []string, cwd string) (runner.Options, error) {
 	}
 	selected, ok := registry.Profile(profileName)
 	if !ok {
-		return runner.Options{}, unknownProfileError(profileName, registry.IDs())
+		return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
 	}
 
 	finalArgs, extraEnv, err := buildRunnerArgs(intent, selected, profileName)
 	if err != nil {
-		return runner.Options{}, err
+		return ResolvedRunSet{}, err
 	}
 	opts, err := runner.ParseArgs(finalArgs)
 	if err != nil {
-		return runner.Options{}, err
+		return ResolvedRunSet{}, err
 	}
 	opts.Profile = profileName
 	opts.AdditionalRequiredEnv = extraEnv
-	return opts, nil
+	return ResolvedRunSet{
+		Options:    []runner.Options{opts},
+		OutputPath: opts.OutputPath,
+		JSON:       opts.JSON,
+	}, nil
 }
 
 func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
@@ -126,13 +151,70 @@ func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
 	if projectPath == "" {
 		return registry, nil
 	}
-	projectConfig, err := readConfigFile(projectPath)
+	projectProfiles, err := loadProjectProfiles(projectPath)
 	if err != nil {
 		return ProfileRegistry{}, err
 	}
+	return registry.Merge(projectProfiles)
+}
+
+func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, error) {
+	if intent.benchmarkSet {
+		return ResolvedRunSet{}, errors.New("--config without --profile does not support --benchmark")
+	}
+	projectPath := intent.configPath
+	if !filepath.IsAbs(projectPath) {
+		projectPath = filepath.Join(cwd, projectPath)
+	}
+	projectProfiles, err := loadProjectProfiles(projectPath)
+	if err != nil {
+		return ResolvedRunSet{}, err
+	}
+	profileNames := sortedProfileNames(projectProfiles)
+	if len(profileNames) == 0 {
+		return ResolvedRunSet{}, fmt.Errorf("ClawScan config %s defines no profiles", projectPath)
+	}
+	registry, err := DefaultProfileRegistry().Merge(projectProfiles)
+	if err != nil {
+		return ResolvedRunSet{}, err
+	}
+	resolved := ResolvedRunSet{
+		Options:     []runner.Options{},
+		OutputPath:  intent.outputPath,
+		JSON:        intent.json,
+		AllProfiles: true,
+	}
+	for _, profileName := range profileNames {
+		selected, ok := registry.Profile(profileName)
+		if !ok {
+			return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
+		}
+		finalArgs, extraEnv, err := buildRunnerArgs(intent, selected, profileName)
+		if err != nil {
+			return ResolvedRunSet{}, err
+		}
+		opts, err := runner.ParseArgs(finalArgs)
+		if err != nil {
+			return ResolvedRunSet{}, err
+		}
+		opts.Profile = profileName
+		opts.OutputPath = ""
+		opts.JSON = false
+		opts.AdditionalRequiredEnv = extraEnv
+		resolved.JSON = resolved.JSON || selected.profile.JSON
+		resolved.Options = append(resolved.Options, opts)
+	}
+	return resolved, nil
+}
+
+func loadProjectProfiles(projectPath string) (map[string]resolvedProfile, error) {
+	projectConfig, err := readConfigFile(projectPath)
+	if err != nil {
+		return nil, err
+	}
 	projectProfiles := map[string]resolvedProfile{}
 	mergeProfiles(projectProfiles, projectConfig, filepath.Dir(projectPath))
-	return registry.Merge(projectProfiles)
+	return projectProfiles, nil
 }
 
 func loadBuiltinProfiles() (map[string]resolvedProfile, error) {
@@ -444,6 +526,15 @@ func unknownProfileError(profile string, available []string) error {
 
 func unknownScannerInProfileError(profile string, scanner string) error {
 	return fmt.Errorf("Profile %s references unknown scanner: %s", profile, scanner)
+}
+
+func sortedProfileNames(profiles map[string]resolvedProfile) []string {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func sortedKeys(values map[string]string) []string {

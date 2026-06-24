@@ -108,10 +108,17 @@ type BatchArtifact struct {
 	CompletedAt   string            `json:"completedAt"`
 	Env           map[string]string `json:"env"`
 	Runs          []Artifact        `json:"runs"`
+	Errors        []BatchError      `json:"errors,omitempty"`
 	Summary       BatchSummary      `json:"summary"`
 }
 
+type BatchError struct {
+	Profile string `json:"profile"`
+	Error   string `json:"error"`
+}
+
 type BatchSummary struct {
+	ProfileCount    int                       `json:"profileCount,omitempty"`
 	TargetCount     int                       `json:"targetCount"`
 	ScannerStatuses map[string]map[string]int `json:"scannerStatuses"`
 }
@@ -494,6 +501,70 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		}
 	}
 	return RunTargetsResult{Batch: &batch}, nil
+}
+
+func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtifact, error) {
+	env := ctx.Env
+	if env == nil {
+		env = EnvMap(os.Environ())
+	}
+	now := ctx.Now
+	if now == nil {
+		now = time.Now
+	}
+	startedAt := now().UTC().Format(time.RFC3339Nano)
+	runCtx := ctx
+	runCtx.Env = env
+	runCtx.Now = now
+	batch := BatchArtifact{
+		SchemaVersion: "clawscan-batch-v1",
+		StartedAt:     startedAt,
+		Env:           map[string]string{},
+		Runs:          []Artifact{},
+		Summary: BatchSummary{
+			ProfileCount:    len(optsList),
+			ScannerStatuses: map[string]map[string]int{},
+		},
+	}
+	targets := map[string]bool{}
+	for _, opts := range optsList {
+		runOpts := opts
+		runOpts.OutputPath = ""
+		for key, value := range envPresence(runOpts, env) {
+			batch.Env[key] = value
+		}
+		result, err := RunTargets(runOpts, runCtx, cwd)
+		if err != nil {
+			batch.Errors = append(batch.Errors, BatchError{Profile: runOpts.Profile, Error: err.Error()})
+			continue
+		}
+		if result.Single != nil {
+			addBatchRun(&batch, *result.Single, targets)
+		}
+		if result.Batch != nil {
+			for _, run := range result.Batch.Runs {
+				addBatchRun(&batch, run, targets)
+			}
+		}
+	}
+	batch.Summary.TargetCount = len(targets)
+	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+	return batch, nil
+}
+
+func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]bool) {
+	batch.Runs = append(batch.Runs, artifact)
+	targets[artifact.Target.Input] = true
+	for scanner, result := range artifact.Scanners {
+		if batch.Summary.ScannerStatuses[scanner] == nil {
+			batch.Summary.ScannerStatuses[scanner] = map[string]int{}
+		}
+		batch.Summary.ScannerStatuses[scanner][result.Status]++
+	}
+}
+
+func WriteJSONFile(path string, value interface{}) error {
+	return writeJSONFile(path, value)
 }
 
 func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {

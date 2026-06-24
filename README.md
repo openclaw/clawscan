@@ -75,9 +75,9 @@ silently scanning `.`.
 Profiles can come from the embedded built-ins or from the nearest project-local
 `.clawscan.yml` / `.clawscan.yaml`. Project profiles shadow built-in profile
 names, and CLI flags such as `--scanner`, `--output`, `--json`, and `--judge`
-override the selected profile for one run. Pair `--config <path>` with
-`--profile <name>` to load one profile from a specific config file instead of
-upward discovery.
+override profile values for one command. Use `--config <path>` by itself to run
+every profile in that config, or add `--profile <name>` to run just one profile
+from that config.
 
 ## Supported Scanners
 

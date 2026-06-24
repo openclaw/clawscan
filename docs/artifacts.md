@@ -46,7 +46,7 @@ Consumers should branch on the top-level `schemaVersion` field:
 | `schemaVersion` | Meaning |
 | --- | --- |
 | `clawscan-run-v1` | One normal scan run for one target and one selected profile. |
-| `clawscan-batch-v1` | One command wrapping multiple normal run artifacts. |
+| `clawscan-batch-v1` | One command wrapping multiple normal run artifacts, such as discovered targets or every profile from `--config <path>`. |
 | `clawscan-benchmark-v1` | One benchmark artifact with cases that embed normal run artifacts. |
 
 ## Discovered Target Run
@@ -87,6 +87,53 @@ When a command discovers multiple child skills under `./skills`, JSON output and
   }
 }
 ```
+
+## Config Profile Batch
+
+When `--config <path>` is passed without `--profile`, ClawScan runs every
+profile defined in that config and writes one `clawscan-batch-v1` wrapper. Each
+entry in `runs` is a normal `clawscan-run-v1` artifact with its own `profile`:
+
+```json
+{
+  "schemaVersion": "clawscan-batch-v1",
+  "runs": [
+    {
+      "schemaVersion": "clawscan-run-v1",
+      "profile": "clawhub-release",
+      "target": {
+        "kind": "skill",
+        "input": "./my-skill",
+        "resolvedPath": "/absolute/path/to/my-skill"
+      }
+    },
+    {
+      "schemaVersion": "clawscan-run-v1",
+      "profile": "skills-sh-review",
+      "target": {
+        "kind": "skill",
+        "input": "./my-skill",
+        "resolvedPath": "/absolute/path/to/my-skill"
+      }
+    }
+  ],
+  "summary": {
+    "profileCount": 2,
+    "targetCount": 1,
+    "scannerStatuses": {
+      "clawscan-static": {
+        "completed": 2
+      }
+    }
+  }
+}
+```
+
+Passing `--profile <name>` with the same config runs only that profile and keeps
+the normal `clawscan-run-v1` artifact shape.
+
+If a profile fails before it can produce a run artifact, the batch includes an
+entry in `errors` with the profile name and error message.
 
 ## Benchmark Run
 

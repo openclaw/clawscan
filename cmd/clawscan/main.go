@@ -45,10 +45,14 @@ func run(args []string, environ []string) error {
 	if err != nil {
 		return err
 	}
-	opts, err := profiles.ResolveArgs(args, cwd)
+	resolved, err := profiles.ResolveRunSet(args, cwd)
 	if err != nil {
 		return err
 	}
+	if resolved.AllProfiles {
+		return runAllProfiles(resolved, environ, cwd)
+	}
+	opts := resolved.Options[0]
 	if opts.Benchmark != nil {
 		artifact, err := runner.RunBenchmark(opts, runner.RunContext{Env: runner.EnvMap(environ)})
 		if err != nil {
@@ -84,6 +88,25 @@ func run(args []string, environ []string) error {
 		return nil
 	}
 	printRunSummary(os.Stdout, result)
+	return nil
+}
+
+func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd string) error {
+	batch, err := runner.RunProfileBatch(resolved.Options, runner.RunContext{Env: runner.EnvMap(environ)}, cwd)
+	if err != nil {
+		return err
+	}
+	if resolved.JSON {
+		return runner.WriteJSON(os.Stdout, batch)
+	}
+	if resolved.OutputPath != "" {
+		if err := runner.WriteJSONFile(resolved.OutputPath, batch); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout, "Wrote %s\n", resolved.OutputPath)
+		return nil
+	}
+	printRunSummary(os.Stdout, runner.RunTargetsResult{Batch: &batch})
 	return nil
 }
 
@@ -136,6 +159,9 @@ func printRunSummary(w io.Writer, result runner.RunTargetsResult) {
 		for _, run := range result.Batch.Runs {
 			fmt.Fprintf(w, "- %s: %d scanner(s)\n", run.Target.Input, len(run.Scanners))
 		}
+		for _, err := range result.Batch.Errors {
+			fmt.Fprintf(w, "- profile %s: %s\n", err.Profile, err.Error)
+		}
 		return
 	}
 	if result.Single != nil {
@@ -158,7 +184,7 @@ Usage:
 
 Core flags:
   --profile <name>            Profile to run. Defaults to clawhub.
-  --config <path>             Load profiles from a specific .clawscan.yml file instead of discovery.
+  --config <path>             Load profiles from a specific .clawscan.yml file; omit --profile to run them all.
   --scanner <id>              Scanner to run. Repeat for multiple scanners.
   --scanner-result <id=path>  Use a JSON fixture instead of running that scanner.
   --output <path>             Write the run artifact JSON to a file.
