@@ -1787,7 +1787,7 @@ func envPresence(opts Options, env map[string]string) map[string]string {
 
 func skillSpectorLLMEnabled(env map[string]string) bool {
 	value := strings.TrimSpace(strings.ToLower(env["CLAWSCAN_SKILLSPECTOR_LLM"]))
-	return value == "1" || value == "true" || value == "yes" || value == "on"
+	return value != "0" && value != "false" && value != "no" && value != "off"
 }
 
 func skillSpectorProviderKeyEnv(env map[string]string) string {

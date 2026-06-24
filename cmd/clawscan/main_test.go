@@ -47,7 +47,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"SOCKET_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
-		"CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key",
+		"skillspector: OPENAI_API_KEY by default",
 		"AI-Infra-Guard uses the self-hosted A.I.G taskapi",
 		"No target with --scanner, --profile, or --config scans child skill directories under ./skills",
 		"--judge <cmd>",

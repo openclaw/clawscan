@@ -894,7 +894,7 @@ func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := Run(opts, RunContext{Env: map[string]string{}, ScannerRunner: skippedScannerRunner{}})
+	artifact, err := Run(opts, RunContext{Env: map[string]string{"OPENAI_API_KEY": "present"}, ScannerRunner: skippedScannerRunner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -937,7 +937,7 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:                 map[string]string{},
+		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
@@ -967,8 +967,8 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	if !containsArg(call.args, "--output") {
 		t.Fatalf("missing output arg: %#v", call.args)
 	}
-	if !containsArg(call.args, "--no-llm") {
-		t.Fatalf("missing default --no-llm opt-out: %#v", call.args)
+	if containsArg(call.args, "--no-llm") {
+		t.Fatalf("unexpected default --no-llm opt-out: %#v", call.args)
 	}
 }
 
@@ -1008,6 +1008,7 @@ printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
 			"CLAWSCAN_ENV_PROBE":      "context",
 			"CLAWSCAN_ENV_PROBE_FILE": probePath,
 			"CLAWSCAN_LEAK_FILE":      leakPath,
+			"OPENAI_API_KEY":          "present",
 		},
 		SkillSpectorCommand: []string{script},
 	})
@@ -1047,7 +1048,7 @@ func TestRunMarksInvalidSkillSpectorJSONAsFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:                 map[string]string{},
+		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
@@ -1078,7 +1079,7 @@ func TestRunMarksMissingSkillSpectorOutputAsFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:                 map[string]string{},
+		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
@@ -1097,7 +1098,7 @@ func TestRunMarksMissingSkillSpectorOutputAsFailed(t *testing.T) {
 	}
 }
 
-func TestRunAllowsExplicitSkillSpectorLLM(t *testing.T) {
+func TestRunRecordsDefaultSkillSpectorProviderEnv(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
@@ -1109,18 +1110,18 @@ func TestRunAllowsExplicitSkillSpectorLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:                 map[string]string{"CLAWSCAN_SKILLSPECTOR_LLM": "1", "OPENAI_API_KEY": "present"},
+		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Env["CLAWSCAN_SKILLSPECTOR_LLM"] != "present" {
+	if artifact.Env["OPENAI_API_KEY"] != "present" {
 		t.Fatalf("env = %#v", artifact.Env)
 	}
 	if containsArg(runner.calls[0].args, "--no-llm") {
-		t.Fatalf("unexpected --no-llm with explicit opt-in: %#v", runner.calls[0].args)
+		t.Fatalf("unexpected --no-llm by default: %#v", runner.calls[0].args)
 	}
 }
 
@@ -1588,47 +1589,44 @@ func TestAgentVerusInvalidJSONIsFailedScannerResult(t *testing.T) {
 	}
 }
 
-func TestSkillSpectorRequiresOpenAIKeyWhenLLMOptedIn(t *testing.T) {
+func TestSkillSpectorRequiresOpenAIKeyByDefault(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ValidateRequirements(opts, map[string]string{"CLAWSCAN_SKILLSPECTOR_LLM": "1"})
+	err = ValidateRequirements(opts, map[string]string{})
 	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY required by scanner skillspector llm") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestSkillSpectorLLMUsesAnthropicProviderRequirement(t *testing.T) {
+func TestSkillSpectorUsesAnthropicProviderRequirement(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = ValidateRequirements(opts, map[string]string{
-		"CLAWSCAN_SKILLSPECTOR_LLM": "1",
-		"SKILLSPECTOR_PROVIDER":     "anthropic",
+		"SKILLSPECTOR_PROVIDER": "anthropic",
 	})
 	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY required by scanner skillspector llm") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestSkillSpectorLLMUsesNVIDIAProviderRequirement(t *testing.T) {
+func TestSkillSpectorUsesNVIDIAProviderRequirement(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = ValidateRequirements(opts, map[string]string{
-		"CLAWSCAN_SKILLSPECTOR_LLM": "1",
-		"SKILLSPECTOR_PROVIDER":     "nv_inference",
+		"SKILLSPECTOR_PROVIDER": "nv_inference",
 	})
 	if err == nil || !strings.Contains(err.Error(), "NVIDIA_INFERENCE_KEY required by scanner skillspector llm") {
 		t.Fatalf("err = %v", err)
 	}
 	if err := ValidateRequirements(opts, map[string]string{
-		"CLAWSCAN_SKILLSPECTOR_LLM": "1",
-		"SKILLSPECTOR_PROVIDER":     "nv_build",
-		"NVIDIA_INFERENCE_KEY":      "present",
+		"SKILLSPECTOR_PROVIDER": "nv_build",
+		"NVIDIA_INFERENCE_KEY":  "present",
 	}); err != nil {
 		t.Fatalf("expected NVIDIA provider key to satisfy SkillSpector LLM requirement, got %v", err)
 	}
@@ -1649,7 +1647,7 @@ func TestSkillSpectorReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:                 map[string]string{},
+		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
@@ -2011,7 +2009,7 @@ func TestRunExecutesJudgeCommandWithDefaultPromptAndSchemaPlaceholders(t *testin
 	}
 	judgeRunner := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{},
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2056,7 +2054,7 @@ func TestRunRecordsInvalidJudgeJSONAsFailedResult(t *testing.T) {
 	}
 	judgeRunner := &recordingCommandRunner{stdout: "not json"}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{},
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2173,7 +2171,7 @@ func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
 
 	judgeRunner := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{},
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(skillSpectorJSON)},
 		}},
@@ -2228,7 +2226,7 @@ func TestRunJudgeWorkspaceSkipsIgnoredAndLargeTargetFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{},
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2419,7 +2417,7 @@ func TestRunJudgeRejectsNonObjectJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{},
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2457,7 +2455,7 @@ func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{},
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2496,7 +2494,7 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStderr(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{"SNYK_TOKEN": "secret-token"},
+		Env: map[string]string{"OPENAI_API_KEY": "present", "SNYK_TOKEN": "secret-token"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2539,7 +2537,7 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{"SNYK_TOKEN": "secret-token"},
+		Env: map[string]string{"OPENAI_API_KEY": "present", "SNYK_TOKEN": "secret-token"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2582,7 +2580,7 @@ func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{"SNYK_TOKEN": "secret-token"},
+		Env: map[string]string{"OPENAI_API_KEY": "present", "SNYK_TOKEN": "secret-token"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -2634,7 +2632,7 @@ func TestRunJudgeQuotesGeneratedPlaceholderPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{},
+		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},

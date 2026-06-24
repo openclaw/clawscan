@@ -112,7 +112,7 @@ Credential rules:
 | `socket` | `SOCKET_TOKEN` |
 | `snyk` | `SNYK_TOKEN` |
 | `virustotal` | `VIRUSTOTAL_API_KEY` |
-| `skillspector` | none by default; with `CLAWSCAN_SKILLSPECTOR_LLM=1`, set the provider key |
+| `skillspector` | `OPENAI_API_KEY` by default; `SKILLSPECTOR_PROVIDER=anthropic` uses `ANTHROPIC_API_KEY`; `SKILLSPECTOR_PROVIDER=nv_inference` / `nv_build` / `nvidia` uses `NVIDIA_INFERENCE_KEY` |
 
 Artifact env fields record only `present` or `missing`; they must never contain
 secret values. GenDigital/Gen Agent Trust Hub is not a built-in scanner because

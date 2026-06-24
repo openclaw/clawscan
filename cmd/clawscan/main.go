@@ -383,7 +383,7 @@ Required environment variables:
   socket: SOCKET_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
-  skillspector: CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key.
+  skillspector: OPENAI_API_KEY by default; SKILLSPECTOR_PROVIDER=anthropic uses ANTHROPIC_API_KEY; SKILLSPECTOR_PROVIDER=nv_inference uses NVIDIA_INFERENCE_KEY.
   judge: provider credentials belong to the command passed to --judge.
 
 Target notes:

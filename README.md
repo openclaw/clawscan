@@ -17,10 +17,12 @@ From a repository root with skills under `./skills/<name>/SKILL.md`, choose a
 scanner, profile, config, or benchmark explicitly. Plain `clawscan` is invalid
 so local runs do not accidentally use ClawHub's production profile.
 
-Run SkillSpector across discovered skills:
+Run SkillSpector and Snyk across discovered skills:
 
 ```bash
-clawscan --scanner skillspector
+export OPENAI_API_KEY=...
+export SNYK_TOKEN=...
+clawscan --scanner skillspector --scanner snyk
 ```
 
 Run AI-Infra-Guard across discovered skills:
@@ -30,13 +32,6 @@ export AIG_BASE_URL=http://127.0.0.1:8088
 export AIG_MODEL=gpt-4.1
 export AIG_MODEL_API_KEY=...
 clawscan --scanner ai-infra-guard
-```
-
-Run Snyk across discovered skills:
-
-```bash
-export SNYK_TOKEN=...
-clawscan --scanner snyk
 ```
 
 Run the built-in `clawhub` profile. This runs the ClawHub scanner suite and the
@@ -129,9 +124,10 @@ export SNYK_TOKEN=...
 clawscan ./skills/csv-summarizer --profile skills-sh
 ```
 
-For a quick, secretless scanner-evidence example, run SkillSpector by itself:
+For a scanner-evidence example, run SkillSpector by itself:
 
 ```bash
+export OPENAI_API_KEY=...
 clawscan ./skills/csv-summarizer \
   --scanner skillspector \
   --json |

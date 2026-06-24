@@ -148,9 +148,7 @@ func skillSpectorRequirements(env map[string]string) []EnvRequirement {
 	if !skillSpectorLLMEnabled(env) {
 		return nil
 	}
-	reqs := []EnvRequirement{
-		{EnvVar: "CLAWSCAN_SKILLSPECTOR_LLM", Reason: "scanner skillspector llm opt-in"},
-	}
+	reqs := []EnvRequirement{}
 	if envVar := skillSpectorProviderKeyEnv(env); envVar != "" {
 		reqs = append(reqs, EnvRequirement{EnvVar: envVar, Reason: "scanner skillspector llm"})
 	}
