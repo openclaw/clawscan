@@ -9,7 +9,9 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_FIXTURE = HERE / "fixtures" / "results.jsonl"
+DEFAULT_EXPECTED = HERE / "fixtures" / "expected_eval_holdout.jsonl"
 RESULTS_FILENAME = "results.jsonl"
+VALID_LABELS = {"clean", "suspicious", "malicious"}
 
 
 def load_results(path: str | None = None) -> list[dict[str, Any]]:
@@ -81,6 +83,121 @@ def filter_rows(role: str, verification: str, results_path: str = "") -> list[di
     return rows
 
 
+def load_expected_labels(path: str | None = None) -> dict[str, str]:
+    expected_path = Path(path or os.environ.get("SECURITY_SIGNALS_EXPECTED_PATH", DEFAULT_EXPECTED))
+    labels: dict[str, str] = {}
+    with expected_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            labels[row["id"]] = row["prediction"]
+    return labels
+
+
+def read_predictions(path: str | Path) -> list[dict[str, str]]:
+    predictions: list[dict[str, str]] = []
+    with Path(path).open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                row = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"line {line_number}: invalid JSON: {exc.msg}") from exc
+            predictions.append(
+                {
+                    "id": str(row.get("id", "")),
+                    "prediction": str(row.get("prediction", "")),
+                }
+            )
+    return predictions
+
+
+def validate_predictions_file(upload_path: str | Path | None, expected_path: str | None = None) -> tuple[str, list[dict[str, Any]]]:
+    if upload_path is None:
+        return "Upload a predictions.jsonl file to preview a score.", []
+    expected = load_expected_labels(expected_path)
+    try:
+        predictions = read_predictions(upload_path)
+    except ValueError as exc:
+        return f"Invalid predictions.jsonl: {exc}", []
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    predicted: dict[str, str] = {}
+    for row in predictions:
+        case_id = row["id"]
+        label = row["prediction"]
+        if not case_id:
+            errors.append("prediction id is required")
+            continue
+        if case_id in seen:
+            errors.append(f"duplicate prediction id: {case_id}")
+        seen.add(case_id)
+        predicted[case_id] = label
+        if case_id not in expected:
+            errors.append(f"unknown prediction id: {case_id}")
+        if label not in VALID_LABELS:
+            errors.append(f"invalid prediction label for {case_id}: {label}")
+    for case_id in expected:
+        if case_id not in seen:
+            errors.append(f"missing prediction id: {case_id}")
+
+    if errors:
+        preview = "\n".join(f"- {error}" for error in errors[:25])
+        if len(errors) > 25:
+            preview += f"\n- ... {len(errors) - 25} more error(s)"
+        return f"Validation failed with {len(errors)} error(s):\n{preview}", []
+
+    metrics = score_loose_non_clean(expected, predicted)
+    return "Validation passed. This preview does not publish leaderboard results.", [metrics]
+
+
+def score_loose_non_clean(expected: dict[str, str], predicted: dict[str, str]) -> dict[str, Any]:
+    tp = fp = tn = fn = 0
+    for case_id, expected_label in expected.items():
+        expected_positive = expected_label in {"suspicious", "malicious"}
+        predicted_positive = predicted[case_id] in {"suspicious", "malicious"}
+        if expected_positive and predicted_positive:
+            tp += 1
+        elif not expected_positive and predicted_positive:
+            fp += 1
+        elif not expected_positive and not predicted_positive:
+            tn += 1
+        else:
+            fn += 1
+    precision = divide(tp, tp + fp)
+    recall = divide(tp, tp + fn)
+    f1 = divide_float(2 * precision * recall, precision + recall)
+    fpr = divide(fp, fp + tn)
+    return {
+        "caseCount": len(expected),
+        "f1": f1,
+        "precision": precision,
+        "recall": recall,
+        "fpr": fpr,
+        "tp": tp,
+        "fp": fp,
+        "tn": tn,
+        "fn": fn,
+    }
+
+
+def divide(numerator: int, denominator: int) -> float:
+    if denominator == 0:
+        return 0
+    return round(numerator / denominator, 4)
+
+
+def divide_float(numerator: float, denominator: float) -> float:
+    if denominator == 0:
+        return 0
+    return round(numerator / denominator, 4)
+
+
 def filter_options(results: list[dict[str, Any]], key: str) -> list[str]:
     values = sorted({row[key] for row in leaderboard_rows(results) if row[key]})
     return ["all", *values]
@@ -128,22 +245,42 @@ def build_app():
         )
         role.change(filter_rows, inputs=[role, verification], outputs=table)
         verification.change(filter_rows, inputs=[role, verification], outputs=table)
+
+        gr.Markdown(
+            """
+            ## Preview a predictions file
+
+            Upload validation is local to this Space session. It does not create
+            official leaderboard rows; open a GitHub PR with `metadata.json` and
+            `predictions.jsonl` for official submission.
+            """
+        )
+        upload = gr.File(label="predictions.jsonl", file_types=[".jsonl"], type="filepath")
+        validation_message = gr.Textbox(label="Validation", lines=8, interactive=False)
+        preview = gr.Dataframe(interactive=False, label="Score Preview")
+        upload.change(validate_predictions_file, inputs=upload, outputs=[validation_message, preview])
     return app
 
 
-def smoke(path: str | None = None) -> None:
+def smoke(path: str | None = None, upload_path: str | None = None) -> None:
     rows = leaderboard_rows(load_results(path))
     print(f"loaded_rows={len(rows)}")
     if rows:
         print(json.dumps(rows[0], sort_keys=True))
+    if upload_path:
+        message, preview = validate_predictions_file(upload_path)
+        print(message)
+        if preview:
+            print(json.dumps(preview[0], sort_keys=True))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--results", default="")
+    parser.add_argument("--validate-upload", default="")
     args = parser.parse_args()
     if args.smoke:
-        smoke(args.results or None)
+        smoke(args.results or None, args.validate_upload or None)
     else:
         build_app().launch()

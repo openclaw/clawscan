@@ -27,6 +27,10 @@ Face, configure `SECURITY_SIGNALS_RESULTS_REPO` to
 `OpenClaw/clawhub-security-signals-results` so the app downloads
 `results.jsonl` from the private results dataset.
 
+The upload preview uses `leaderboard/space/fixtures/expected_eval_holdout.jsonl`
+by default. Set `SECURITY_SIGNALS_EXPECTED_PATH` if the expected-label fixture is
+mounted elsewhere.
+
 Manual provisioning checklist:
 
 1. Create a private Gradio Space named
@@ -35,3 +39,7 @@ Manual provisioning checklist:
 3. Configure Space access to the private results dataset.
 4. Set `SECURITY_SIGNALS_RESULTS_REPO=OpenClaw/clawhub-security-signals-results`.
 5. Smoke locally with the fixture before relying on hosted runtime state.
+
+Upload validation is intentionally non-authoritative. It reports schema and case
+coverage errors and computes a loose non-clean score preview, but official
+leaderboard rows still require a GitHub PR.
