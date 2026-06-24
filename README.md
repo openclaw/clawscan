@@ -156,6 +156,9 @@ GitHub Pages publishes the docs site from `docs/` on pushes to `main`.
 
 ## Roadmap
 
+- Command-backed custom scanner adapters, so teams can add their own scanner
+  commands through a documented adapter contract once the built-in scanner
+  boundary has settled.
 - Reusable GitHub Action or workflow for CI. The goal is a copy-pasteable way
   to install ClawScan, install the dependencies needed by built-in scanners,
   run a selected profile or config, and upload the JSON artifact. Judge harness

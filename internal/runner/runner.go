@@ -172,8 +172,8 @@ type JudgeResult struct {
 const defaultProfileName = "clawhub"
 
 var builtInProfiles = map[string][]string{
-	"clawhub":   {"clawscan-static"},
-	"skills-sh": {"skillspector", "clawscan-static"},
+	"clawhub":   {"skillspector", "virustotal", "clawscan-static"},
+	"skills-sh": {"gendigital", "snyk", "clawscan-static"},
 }
 
 func ScannerIDs() []string {

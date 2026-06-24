@@ -20,7 +20,7 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if opts.Target != "./skill" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -33,7 +33,7 @@ func TestResolveArgsDefaultsToClawHubProfileForExplicitTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -49,8 +49,26 @@ func TestResolveArgsAllowsExplicitProfileWithoutTarget(t *testing.T) {
 	if opts.Target != "" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "gendigital,snyk,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
+	}
+}
+
+func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "skills-sh"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = runner.ValidateRequirements(opts, map[string]string{"SNYK_TOKEN": ""})
+	if err == nil {
+		t.Fatal("expected missing env error")
+	}
+	if !strings.Contains(err.Error(), "- SNYK_TOKEN required by scanner snyk") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Fatalf("error leaked value: %v", err)
 	}
 }
 
@@ -336,28 +354,6 @@ profiles:
 
 	_, err := ResolveArgs([]string{"./skill", "--profile", "bad"}, dir)
 	if err == nil || !strings.Contains(err.Error(), "field env not found") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestResolveArgsDefersCustomScannerExecution(t *testing.T) {
-	dir := t.TempDir()
-	config := filepath.Join(dir, ".clawscan.yml")
-	writeFile(t, config, `version: 1
-profiles:
-  partner:
-    scanners:
-      - partner-static
-customScanners:
-  partner-static:
-    command: ./partner --target {{ target }} --output {{ output }}
-    requiredEnv:
-      - PARTNER_TOKEN
-    timeout: 2m
-`)
-
-	_, err := ResolveArgs([]string{"./skill", "--profile", "partner"}, dir)
-	if err == nil || err.Error() != "Custom scanner adapters are not implemented yet: partner-static" {
 		t.Fatalf("err = %v", err)
 	}
 }

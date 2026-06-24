@@ -54,8 +54,12 @@ Built-in profiles:
 
 | Profile | Scanners |
 | --- | --- |
-| `clawhub` | `clawscan-static` |
-| `skills-sh` | `skillspector`, `clawscan-static` |
+| `clawhub` | `skillspector`, `virustotal`, `clawscan-static` |
+| `skills-sh` | `gendigital`, `snyk`, `clawscan-static` |
+
+The embedded `clawhub` profile ships the generic scanner suite only. ClawHub's
+repo-specific judge prompt and output-schema paths should live in ClawHub's own
+project `.clawscan.yml`.
 
 If `./skills` is missing or has no child directories containing `SKILL.md`,
 ClawScan exits with a target-discovery error. Pass an explicit target when you

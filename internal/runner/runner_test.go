@@ -66,7 +66,7 @@ func TestParseArgsDefaultsToClawHubProfile(t *testing.T) {
 	if opts.Profile != "clawhub" {
 		t.Fatalf("profile = %q", opts.Profile)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -79,7 +79,7 @@ func TestParseArgsUsesSelectedBuiltInProfile(t *testing.T) {
 	if opts.Profile != "skills-sh" {
 		t.Fatalf("profile = %q", opts.Profile)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "gendigital,snyk,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -732,9 +732,20 @@ func TestRunTargetsScansDiscoveredSkillsWithDefaultProfile(t *testing.T) {
 	dir := t.TempDir()
 	writeSkill(t, filepath.Join(dir, "skills", "foo"), "# Foo\nUse tools carefully.\n")
 	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\nUse tools carefully.\n")
+	skillSpectorFixture := filepath.Join(dir, "skillspector.json")
+	if err := os.WriteFile(skillSpectorFixture, []byte(`{"status":"clean","findings":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	virusTotalFixture := filepath.Join(dir, "virustotal.json")
+	if err := os.WriteFile(virusTotalFixture, []byte(`{"data":{"attributes":{"last_analysis_stats":{"malicious":0}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(dir)
 
-	opts, err := ParseArgs(nil)
+	opts, err := ParseArgs([]string{
+		"--scanner-result", "skillspector=" + skillSpectorFixture,
+		"--scanner-result", "virustotal=" + virusTotalFixture,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -780,9 +791,21 @@ func TestRunTargetsExplicitTargetOverridesDiscovery(t *testing.T) {
 	dir := t.TempDir()
 	writeSkill(t, filepath.Join(dir, "skills", "foo"), "# Foo\n")
 	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\n")
+	skillSpectorFixture := filepath.Join(dir, "skillspector.json")
+	if err := os.WriteFile(skillSpectorFixture, []byte(`{"status":"clean","findings":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	virusTotalFixture := filepath.Join(dir, "virustotal.json")
+	if err := os.WriteFile(virusTotalFixture, []byte(`{"data":{"attributes":{"last_analysis_stats":{"malicious":0}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(dir)
 
-	opts, err := ParseArgs([]string{"./skills/foo"})
+	opts, err := ParseArgs([]string{
+		"./skills/foo",
+		"--scanner-result", "skillspector=" + skillSpectorFixture,
+		"--scanner-result", "virustotal=" + virusTotalFixture,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -802,13 +825,13 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 	dir := t.TempDir()
 	writeSkill(t, filepath.Join(dir, "skills", "foo"), "# Foo\n")
 	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\n")
-	fixture := filepath.Join(dir, "skillspector.json")
-	if err := os.WriteFile(fixture, []byte(`{"status":"clean","findings":[]}`), 0o644); err != nil {
+	snykFixture := filepath.Join(dir, "snyk.json")
+	if err := os.WriteFile(snykFixture, []byte(`{"ok":true,"issues":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
 
-	opts, err := ParseArgs([]string{"--profile", "skills-sh", "--scanner-result", "skillspector=" + fixture})
+	opts, err := ParseArgs([]string{"--profile", "skills-sh", "--scanner-result", "snyk=" + snykFixture})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,8 +843,11 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 		t.Fatalf("batch = %#v", result.Batch)
 	}
 	for _, run := range result.Batch.Runs {
-		if run.Scanners["skillspector"].Status != "completed" {
-			t.Fatalf("skillspector result for %s = %#v", run.Target.Input, run.Scanners["skillspector"])
+		if run.Scanners["gendigital"].Status != "skipped" {
+			t.Fatalf("gendigital result for %s = %#v", run.Target.Input, run.Scanners["gendigital"])
+		}
+		if run.Scanners["snyk"].Status != "completed" {
+			t.Fatalf("snyk result for %s = %#v", run.Target.Input, run.Scanners["snyk"])
 		}
 		if run.Scanners["clawscan-static"].Status != "completed" {
 			t.Fatalf("static result for %s = %#v", run.Target.Input, run.Scanners["clawscan-static"])

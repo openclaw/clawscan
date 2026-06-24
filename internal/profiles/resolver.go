@@ -20,9 +20,8 @@ import (
 var builtinFiles embed.FS
 
 type Config struct {
-	Version        int                      `yaml:"version"`
-	Profiles       map[string]Profile       `yaml:"profiles"`
-	CustomScanners map[string]CustomScanner `yaml:"customScanners,omitempty"`
+	Version  int                `yaml:"version"`
+	Profiles map[string]Profile `yaml:"profiles"`
 }
 
 type Profile struct {
@@ -36,12 +35,6 @@ type Profile struct {
 type Judge struct {
 	Command     string   `yaml:"command"`
 	RequiredEnv []string `yaml:"requiredEnv,omitempty"`
-}
-
-type CustomScanner struct {
-	Command     string   `yaml:"command"`
-	RequiredEnv []string `yaml:"requiredEnv,omitempty"`
-	Timeout     string   `yaml:"timeout,omitempty"`
 }
 
 type resolvedProfile struct {
@@ -88,7 +81,7 @@ func ResolveArgs(args []string, cwd string) (runner.Options, error) {
 			return runner.Options{}, err
 		}
 	}
-	configs, customScanners, err := loadConfigs(cwd, intent.configPath)
+	configs, err := loadConfigs(cwd, intent.configPath)
 	if err != nil {
 		return runner.Options{}, err
 	}
@@ -104,7 +97,7 @@ func ResolveArgs(args []string, cwd string) (runner.Options, error) {
 		return runner.Options{}, err
 	}
 
-	finalArgs, extraEnv, err := buildRunnerArgs(intent, selected, profileName, customScanners)
+	finalArgs, extraEnv, err := buildRunnerArgs(intent, selected, profileName)
 	if err != nil {
 		return runner.Options{}, err
 	}
@@ -117,17 +110,15 @@ func ResolveArgs(args []string, cwd string) (runner.Options, error) {
 	return opts, nil
 }
 
-func loadConfigs(cwd string, explicitConfig string) (map[string]resolvedProfile, map[string]CustomScanner, error) {
+func loadConfigs(cwd string, explicitConfig string) (map[string]resolvedProfile, error) {
 	builtins, err := readConfigBytes("embedded built-in profiles", func() ([]byte, error) {
 		return builtinFiles.ReadFile("builtin.yml")
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	profiles := map[string]resolvedProfile{}
-	customScanners := map[string]CustomScanner{}
 	mergeProfiles(profiles, builtins, "")
-	mergeCustomScanners(customScanners, builtins)
 
 	var projectPath string
 	if explicitConfig != "" {
@@ -138,22 +129,18 @@ func loadConfigs(cwd string, explicitConfig string) (map[string]resolvedProfile,
 	} else {
 		projectPath, err = discoverConfig(cwd)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if projectPath == "" {
-		return profiles, customScanners, nil
+		return profiles, nil
 	}
 	projectConfig, err := readConfigFile(projectPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	mergeProfiles(profiles, projectConfig, filepath.Dir(projectPath))
-	mergeCustomScanners(customScanners, projectConfig)
-	if err := validateCustomScannerIDs(customScanners); err != nil {
-		return nil, nil, err
-	}
-	return profiles, customScanners, nil
+	return profiles, nil
 }
 
 func readConfigFile(path string) (Config, error) {
@@ -183,21 +170,12 @@ func readConfigBytes(label string, read func() ([]byte, error)) (Config, error) 
 	if config.Profiles == nil {
 		config.Profiles = map[string]Profile{}
 	}
-	if config.CustomScanners == nil {
-		config.CustomScanners = map[string]CustomScanner{}
-	}
 	return config, nil
 }
 
 func mergeProfiles(out map[string]resolvedProfile, config Config, configDir string) {
 	for name, profile := range config.Profiles {
 		out[name] = resolvedProfile{profile: profile, configDir: configDir}
-	}
-}
-
-func mergeCustomScanners(out map[string]CustomScanner, config Config) {
-	for name, scanner := range config.CustomScanners {
-		out[name] = scanner
 	}
 }
 
@@ -348,7 +326,7 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 	return intent, nil
 }
 
-func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName string, customScanners map[string]CustomScanner) ([]string, []runner.EnvRequirement, error) {
+func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName string) ([]string, []runner.EnvRequirement, error) {
 	profile := selected.profile
 	scanners := append([]string{}, profile.Scanners...)
 	if len(intent.scanners) > 0 {
@@ -356,9 +334,6 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	}
 	if len(scanners) == 0 {
 		return nil, nil, fmt.Errorf("Profile %s must include at least one scanner or use --scanner", profileName)
-	}
-	if err := rejectCustomScannerReferences(scanners, customScanners); err != nil {
-		return nil, nil, err
 	}
 
 	scannerResults := map[string]string{}
@@ -448,15 +423,6 @@ func resolveJudgePaths(command string, configDir string) string {
 	})
 }
 
-func rejectCustomScannerReferences(scanners []string, customScanners map[string]CustomScanner) error {
-	for _, scanner := range scanners {
-		if _, ok := customScanners[scanner]; ok {
-			return fmt.Errorf("Custom scanner adapters are not implemented yet: %s", scanner)
-		}
-	}
-	return nil
-}
-
 func validateProfile(name string, profile Profile) error {
 	seen := map[string]bool{}
 	for _, scanner := range profile.Scanners {
@@ -464,19 +430,6 @@ func validateProfile(name string, profile Profile) error {
 			return fmt.Errorf("Duplicate scanner in profile %s: %s", name, scanner)
 		}
 		seen[scanner] = true
-	}
-	return nil
-}
-
-func validateCustomScannerIDs(customScanners map[string]CustomScanner) error {
-	builtins := map[string]bool{}
-	for _, scanner := range runner.ScannerIDs() {
-		builtins[scanner] = true
-	}
-	for id := range customScanners {
-		if builtins[id] {
-			return fmt.Errorf("Custom scanner id reuses built-in scanner id: %s", id)
-		}
 	}
 	return nil
 }

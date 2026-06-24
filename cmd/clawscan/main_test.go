@@ -199,10 +199,18 @@ func TestRunCommandPrintsBatchJSONForDiscoveredSkills(t *testing.T) {
 	dir := t.TempDir()
 	writeSkill(t, filepath.Join(dir, "skills", "foo"), "# Foo\n")
 	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\n")
+	skillSpectorFixture := filepath.Join(dir, "skillspector.json")
+	writeFile(t, skillSpectorFixture, `{"status":"clean","findings":[]}`)
+	virusTotalFixture := filepath.Join(dir, "virustotal.json")
+	writeFile(t, virusTotalFixture, `{"data":{"attributes":{"last_analysis_stats":{"malicious":0}}}}`)
 	t.Chdir(dir)
 
 	stdout := captureStdout(t, func() {
-		if err := run([]string{"--json"}, []string{}); err != nil {
+		if err := run([]string{
+			"--scanner-result", "skillspector=" + skillSpectorFixture,
+			"--scanner-result", "virustotal=" + virusTotalFixture,
+			"--json",
+		}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -273,9 +281,19 @@ func TestRunCommandUsesBuiltInProfile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	writeSkill(t, target, "# Profile\n")
+	skillSpectorFixture := filepath.Join(dir, "skillspector.json")
+	writeFile(t, skillSpectorFixture, `{"status":"clean","findings":[]}`)
+	virusTotalFixture := filepath.Join(dir, "virustotal.json")
+	writeFile(t, virusTotalFixture, `{"data":{"attributes":{"last_analysis_stats":{"malicious":0}}}}`)
 
 	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--profile", "clawhub", "--json"}, []string{}); err != nil {
+		if err := run([]string{
+			target,
+			"--profile", "clawhub",
+			"--scanner-result", "skillspector=" + skillSpectorFixture,
+			"--scanner-result", "virustotal=" + virusTotalFixture,
+			"--json",
+		}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})

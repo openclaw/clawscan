@@ -3,9 +3,12 @@ version: 1
 profiles:
   clawhub:
     scanners:
+      - skillspector
+      - virustotal
       - clawscan-static
 
   skills-sh:
     scanners:
-      - skillspector
+      - gendigital
+      - snyk
       - clawscan-static
