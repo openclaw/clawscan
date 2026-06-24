@@ -112,3 +112,91 @@ findings are `malicious`.
 Benchmark artifacts keep the canonical prediction next to the expected verdict
 and record whether the case was `correct`, `incorrect`, `abstained`,
 `unscorable`, or `error`.
+
+## Security Signals Leaderboard Submissions
+
+The v1 Security Signals leaderboard submission path is GitHub PRs to this repo.
+The Hugging Face Space is a display and convenience preview surface only; it
+does not publish official rows.
+
+1. Run ClawScan locally against the full OpenClaw benchmark split.
+2. Put `metadata.json` and `predictions.jsonl` in a new
+   `leaderboard/submissions/<run-id>/` directory.
+3. Optionally include a full `artifact.json` from the benchmark run.
+4. Validate locally with `clawscan validate-submission`.
+5. Open a PR. CI recomputes metrics and uploads a score preview artifact.
+6. After review and merge, the post-merge publish workflow updates the private
+   results dataset when Hugging Face credentials are configured.
+
+Full benchmark run:
+
+```bash
+clawscan \
+  --benchmark OpenClaw/clawhub-security-signals \
+  --split eval_holdout \
+  --scanner clawscan-static \
+  --output ./clawscan-benchmark.json
+```
+
+Submission directory:
+
+```text
+leaderboard/submissions/<run-id>/
+  metadata.json
+  predictions.jsonl
+  artifact.json        # optional full ClawScan benchmark artifact
+```
+
+Minimal `metadata.json`:
+
+```json
+{
+  "schemaVersion": "clawscan-security-signals-submission-v1",
+  "benchmark": {
+    "dataset": "OpenClaw/clawhub-security-signals",
+    "split": "eval_holdout",
+    "revision": "<hugging-face-dataset-sha>"
+  },
+  "system": {
+    "name": "example-system",
+    "role": "community"
+  },
+  "verificationStatus": "artifact-validated"
+}
+```
+
+Provenance-rich metadata can use the same required fields and make the system
+name/role more specific, such as `clawhub-production`, `community-example`, or
+a scanner/profile/judge name. Keep secrets out of metadata and artifacts.
+
+Validate before opening a PR:
+
+```bash
+clawscan validate-submission leaderboard/submissions/<run-id>
+```
+
+The validator rejects duplicate case IDs, missing case IDs, unknown case IDs,
+invalid prediction labels, mismatched dataset IDs, unsupported splits, and
+missing dataset revision metadata. It recomputes loose non-clean metrics:
+`suspicious` and `malicious` count as positive, and `clean` counts as negative.
+
+Verification statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `artifact-validated` | CI validated submitted artifacts and recomputed score math. Scanner or judge execution was not rerun by OpenClaw. |
+| `clawhub-production` | Row represents a ClawHub/OpenClaw-maintained production-style reference or baseline. |
+| `openclaw-rerun` | Reserved for future rows rerun by OpenClaw-controlled infrastructure. |
+
+The Gradio Space upload flow can validate and preview a `predictions.jsonl`
+file before you open a PR. That upload does not publish results. Official
+leaderboard rows come from reviewed and merged PR submissions.
+
+Operational source files:
+
+- `leaderboard/submissions/README.md` documents the repo submission shape and
+  seed rows.
+- `leaderboard/results/README.md` documents the private results dataset and
+  publish path.
+- `leaderboard/space/README.md` documents the private Gradio Space scaffold and
+  local smoke flow.
