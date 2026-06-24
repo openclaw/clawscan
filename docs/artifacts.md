@@ -51,9 +51,10 @@ Consumers should branch on the top-level `schemaVersion` field:
 
 ## Discovered Target Run
 
-When a command discovers multiple child skills under `./skills`, JSON output and
-`--output` use a `clawscan-batch-v1` wrapper. Each entry in `runs` is a normal
-`clawscan-run-v1` artifact with its own target and raw scanner evidence:
+When a command discovers multiple child skills under `./skills`, the default
+artifact file, `--json`, and `--output` use a `clawscan-batch-v1` wrapper. Each
+entry in `runs` is a normal `clawscan-run-v1` artifact with its own target and
+raw scanner evidence:
 
 ```json
 {

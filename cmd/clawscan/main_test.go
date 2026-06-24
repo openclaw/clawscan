@@ -30,6 +30,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"--limit <n>",
 		"--offset <n>",
 		"--predictions-output <path>",
+		"clawscan-results.json",
 		"Supported benchmarks:",
 		"cuhk-zhuque/SkillTrustBench",
 		"SkillTrustBench",
@@ -173,6 +174,66 @@ func TestRunCommandWritesArtifact(t *testing.T) {
 	}
 	if _, ok := artifact.Scanners["clawscan-static"]; !ok {
 		t.Fatalf("missing clawscan-static scanner: %#v", artifact.Scanners)
+	}
+}
+
+func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Summary\n")
+	t.Chdir(dir)
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--scanner", "clawscan-static"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{
+		"profile: clawhub",
+		"targets: 1",
+		"scanner_completed: 1",
+		"scanner_failed: 0",
+		"scanner_skipped: 0",
+		"issues_found: 0",
+		"full_results: ./clawscan-results.json",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "clawscan-results.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact struct {
+		SchemaVersion string `json:"schemaVersion"`
+	}
+	if err := json.Unmarshal(data, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.SchemaVersion != "clawscan-run-v1" {
+		t.Fatalf("schema = %q", artifact.SchemaVersion)
+	}
+}
+
+func TestRunCommandJSONDoesNotWriteDefaultOutput(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# JSON\n")
+	t.Chdir(dir)
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(stdout, `"schemaVersion": "clawscan-run-v1"`) {
+		t.Fatalf("stdout was not artifact JSON:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "clawscan-results.json")); !os.IsNotExist(err) {
+		t.Fatalf("default output file exists or stat failed: %v", err)
 	}
 }
 

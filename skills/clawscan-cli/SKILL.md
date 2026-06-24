@@ -9,7 +9,9 @@ description: Use when running or explaining the ClawScan CLI, including one-off 
 
 Use ClawScan to run one or more security scanners against agent skills, preserve
 raw scanner evidence, and optionally pass the evidence to an external judge
-harness. Keep secrets in environment variables, never CLI flags.
+harness. The public CLI is general-purpose; ClawHub-specific parity helpers
+belong outside `cmd/clawscan`. Keep secrets in environment variables, never CLI
+flags.
 
 ## Command Surface
 
@@ -29,11 +31,67 @@ Choose the run mode:
 
 | Need | Shape |
 | --- | --- |
-| Scan one skill path | `clawscan ./my-skill --scanner clawscan-static --json` |
+| Scan repo skills with the default profile | `clawscan` from a repo with `./skills/<name>/SKILL.md` |
+| Scan one explicit target with a profile | `clawscan ./my-skill --profile clawhub` |
+| Capture raw scanner evidence only | `clawscan ./my-skill --scanner clawscan-static` |
+| Print raw JSON to stdout | Add `--json`. |
+| Run all profiles from a config | `clawscan ./my-skill --config ./security/clawscan.yml` |
+| Run one config profile | `clawscan ./my-skill --config ./security/clawscan.yml --profile review` |
 | Run the default benchmark | `clawscan --benchmark --limit 10 --scanner clawscan-static --output run.json` |
 | Run the OpenClaw benchmark | `clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
-| Add a judge harness | Add `--judge '<command with placeholders>'`. |
+| Add or override a judge harness | Add `--judge '<command with placeholders>'`. |
+
+Helpful metadata:
+
+```bash
+clawscan --help
+clawscan -h
+clawscan --version
+```
+
+Unless `--json` is passed, ClawScan writes the full artifact to
+`./clawscan-results.json` by default and prints a concise key/value summary
+ending in `full_results: ./clawscan-results.json`. Use `--output <path>` to
+choose a different artifact path.
+
+## Targets, Profiles, And Config
+
+If no target is passed, ClawScan scans child skill directories under `./skills`.
+If `./skills` is missing or contains no children with `SKILL.md`, it fails with
+a target-discovery error. Benchmark runs do not accept scan targets.
+
+The default profile is `clawhub`. Built-in profiles:
+
+| Profile | Scanners | Judge |
+| --- | --- | --- |
+| `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | bundled Codex judge with ClawHub prompt/schema |
+| `skills-sh` | `socket`, `snyk` | none |
+
+Profiles are loaded from embedded built-ins plus the nearest `.clawscan.yml` or
+`.clawscan.yaml` discovered upward from the current directory. A project profile
+with the same name shadows the built-in whole profile. `--config <path>` loads a
+specific config; without `--profile`, it runs every profile in that config and
+emits a `clawscan-batch-v1` artifact.
+
+CLI flags override the selected profile for one run. Passing `--scanner`
+without `--profile` creates an ad hoc scanner-only run, so the default
+`clawhub` judge is not invoked accidentally.
+
+Minimal config:
+
+```yaml
+version: 1
+profiles:
+  review:
+    scanners:
+      - clawscan-static
+    json: true
+    judge:
+      command: judge --out {{ output }}
+      requiredEnv:
+        - OPENAI_API_KEY
+```
 
 ## Scanners
 
@@ -54,7 +112,20 @@ Credential rules:
 | `skillspector` | none by default; with `CLAWSCAN_SKILLSPECTOR_LLM=1`, set the provider key |
 
 Artifact env fields record only `present` or `missing`; they must never contain
-secret values.
+secret values. GenDigital/Gen Agent Trust Hub is not a built-in scanner because
+there is no local CLI for ClawScan to invoke.
+
+Use `--scanner-result` when a test or fixture should supply stable scanner JSON:
+
+```bash
+clawscan ./my-skill \
+  --scanner skillspector \
+  --scanner-result skillspector=./fixtures/skillspector.json \
+  --json
+```
+
+The scanner must still be requested with `--scanner` or via the selected
+profile.
 
 ## Benchmarks
 
@@ -84,6 +155,16 @@ OpenClaw splits: `train`, `validation`, `test`, `eval_holdout`. `--limit 0`
 means run the full selected split. Use `--offset` with `--limit` for
 reproducible chunks.
 
+For the OpenClaw benchmark, `--output ./clawscan-benchmark.json` also writes
+`./predictions.jsonl`. Use `--predictions-output <path>` to choose another path.
+`--predictions-output` is only supported for
+`OpenClaw/clawhub-security-signals`.
+
+Benchmark artifacts use `clawscan-benchmark-v1`. Each case embeds the normal
+`clawscan-run-v1` artifact, expected verdict metadata, and evaluation status.
+The summary includes case counts, scanner/judge statuses, and accuracy over
+scored cases. Inspect the JSON artifact for full evidence.
+
 ## Judge Harness
 
 `--judge` runs through the platform shell and must produce a JSON object on
@@ -107,6 +188,8 @@ Prompt files can reference requested scanner JSON:
 ````
 
 If a prompt references an unrequested scanner, ClawScan should fail clearly.
+The built-in `clawhub` profile uses this same judge mechanism with embedded
+prompt and output-schema files.
 
 ## Verification
 
@@ -115,15 +198,21 @@ Use static scanner smokes for local proof because they do not need secrets:
 ```bash
 go run ./cmd/clawscan ./README.md --scanner clawscan-static --output /tmp/clawscan-smoke.json
 go run ./cmd/clawscan --benchmark --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json
-go test ./...
+go run ./cmd/clawscan --help
+go test -count=1 ./...
 go vet ./...
 ```
 
 ## Common Mistakes
 
 - Do not pass API keys as CLI flags.
+- Do not assume `clawscan` scans `.`; no target means discover `./skills`.
+- Do not expect a profile judge when passing explicit `--scanner` flags without
+  `--profile`.
 - Do not use benchmark flags such as `--split`, `--limit`, or `--offset`
   without `--benchmark`.
+- Do not use `--config` without `--profile` for benchmark runs; all-profile
+  config runs are target scans only.
 - Do not add unsupported dataset names; built-ins are SkillTrustBench and
   `OpenClaw/clawhub-security-signals`.
 - Do not assume scanner failures are final policy verdicts; scanner output is

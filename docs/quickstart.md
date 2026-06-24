@@ -47,6 +47,11 @@ export OPENAI_API_KEY=...
 clawscan
 ```
 
+Unless `--json` is passed, ClawScan writes the full artifact to
+`./clawscan-results.json` by default, prints a concise key/value summary, and
+ends with the full results path. Use `--output <path>` to choose a different
+artifact path.
+
 To use another built-in profile over the same discovered skill targets:
 
 ```bash
@@ -120,7 +125,7 @@ Project profile names shadow built-in names as whole-profile replacements. CLI
 flags override the selected profile for one run:
 
 ```bash
-clawscan ./my-skill --profile skills-sh --scanner clawscan-static --json
+clawscan ./my-skill --profile skills-sh --scanner clawscan-static
 ```
 
 Passing `--scanner` without `--profile` creates an ad hoc scanner-only run, so
@@ -138,7 +143,7 @@ overridden with `--scanner`.
 Scan a local skill directory with the built-in static scanner:
 
 ```bash
-clawscan ./my-skill --scanner clawscan-static --json
+clawscan ./my-skill --scanner clawscan-static
 ```
 
 Run multiple scanners and save the artifact:
@@ -184,8 +189,8 @@ Actual secret values are never written to run artifacts.
 | `--config <path>` | Load one config file instead of discovering `.clawscan.yml` / `.clawscan.yaml`; omit `--profile` to run every profile in that file. |
 | `--scanner <id>` | Scanner to run. Repeat for multiple scanners. |
 | `--scanner-result <id=path>` | Use a JSON fixture instead of running that scanner. |
-| `--output <path>` | Write the run artifact JSON to a file. |
-| `--json` | Print the run artifact JSON to stdout. |
+| `--output <path>` | Write the full artifact JSON to a specific file. Defaults to `./clawscan-results.json` when `--json` is not passed. |
+| `--json` | Print the full artifact JSON to stdout and skip the default output file. |
 | `--judge <cmd>` | Run an optional external judge harness. |
 | `--benchmark [id]` | Run a supported benchmark instead of one target. Defaults to SkillTrustBench. |
 | `--split <name>` | Benchmark split. Defaults to `benchmark` for SkillTrustBench and `eval_holdout` for OpenClaw. |

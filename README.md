@@ -32,13 +32,13 @@ go run ./cmd/clawscan ./my-skill --scanner clawscan-static --json
 Run a built-in profile against one explicit target:
 
 ```bash
-clawscan ./my-skill --profile clawhub --json
+clawscan ./my-skill --profile clawhub
 ```
 
 If you only want raw scanner evidence with no judge, pass explicit scanners:
 
 ```bash
-clawscan ./my-skill --scanner clawscan-static --scanner skillspector --json
+clawscan ./my-skill --scanner clawscan-static --scanner skillspector
 ```
 
 Run several scanners and save the result:
@@ -66,6 +66,11 @@ the OpenClaw security-signals benchmark. The `clawscan-benchmark.json` artifact
 is the primary result to inspect; ClawScan can also derive a lightweight
 `predictions.jsonl` file for leaderboard and CI submission plumbing.
 
+Unless `--json` is passed, ClawScan writes the full artifact to
+`./clawscan-results.json` by default, prints a concise key/value summary, and
+ends with the full results path. Use `--output <path>` to choose a different
+artifact path.
+
 ## Example: Malicious Skill Output
 
 [Trail of Bits](https://www.trailofbits.com/) publishes
@@ -87,7 +92,7 @@ Run the default ClawHub profile, which is the scan recipe ClawHub consumes:
 export VIRUSTOTAL_API_KEY=...
 export OPENAI_API_KEY=...
 
-clawscan ./skills/csv-summarizer --json
+clawscan ./skills/csv-summarizer
 ```
 
 Run the skills-sh comparison profile over the same target:
@@ -96,7 +101,7 @@ Run the skills-sh comparison profile over the same target:
 export SOCKET_TOKEN=...
 export SNYK_TOKEN=...
 
-clawscan ./skills/csv-summarizer --profile skills-sh --json
+clawscan ./skills/csv-summarizer --profile skills-sh
 ```
 
 For a quick, secretless scanner-evidence example, run SkillSpector by itself:
