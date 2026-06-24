@@ -1,0 +1,59 @@
+name: Publish Security Signals results
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'pe/**'
+    paths:
+      - '.github/workflows/publish-security-signals-results.yml'
+      - 'cmd/clawscan/**'
+      - 'internal/**'
+      - 'leaderboard/submissions/**'
+      - 'scripts/publish-security-signals-results.sh'
+      - 'scripts/validate-security-signals-submissions.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish accepted results
+    runs-on: ubuntu-latest
+    env:
+      HF_RESULTS_DATASET: OpenClaw/clawhub-security-signals-results
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Hugging Face CLI
+        run: python -m pip install --upgrade huggingface_hub
+
+      - name: Validate accepted submissions
+        run: scripts/validate-security-signals-submissions.sh --all
+
+      - name: Publish results dataset payload
+        if: env.HF_TOKEN != ''
+        run: scripts/publish-security-signals-results.sh --publish
+
+      - name: Explain skipped publish
+        if: env.HF_TOKEN == ''
+        run: |
+          echo "HF_TOKEN is not configured; validated submissions but skipped Hugging Face publish."
+          scripts/publish-security-signals-results.sh --dry-run
+
+      - name: Upload dry-run/published payload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-signals-results-payload
+          path: dist/security-signals-results/results.jsonl
+          if-no-files-found: ignore
