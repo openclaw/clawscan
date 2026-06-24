@@ -1,0 +1,42 @@
+name: Security Signals submissions
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/security-signals-submissions.yml'
+      - 'cmd/clawscan/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'leaderboard/submissions/**'
+      - 'scripts/validate-security-signals-submissions.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate submissions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate changed submissions
+        run: scripts/validate-security-signals-submissions.sh
+
+      - name: Upload score previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-signals-submission-scores
+          path: dist/security-signals-submission-scores
+          if-no-files-found: ignore
