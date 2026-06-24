@@ -8,6 +8,9 @@ go vet ./...
 make docs-site
 ```
 
+Contributor setup, validation expectations, and review conventions live in
+[Contributing](contributing.md).
+
 ## Local Smoke Tests
 
 The static scanner needs no secrets:
@@ -81,3 +84,6 @@ go run ./cmd/verify-clawhub-prompt \
 
 ClawHub-specific proof helpers live outside the public `clawscan` command so
 the main CLI stays useful for non-ClawHub users.
+
+For the public ClawHub improvement loop, see
+[Improving ClawHub scans](improving-clawhub-scans.md).

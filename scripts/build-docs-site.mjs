@@ -9,10 +9,12 @@ const outDir = path.join(root, 'dist', 'docs-site');
 const pages = [
   ['index.md', 'Overview'],
   ['quickstart.md', 'Quickstart'],
+  ['contributing.md', 'Contributing'],
   ['scanners.md', 'Scanners'],
   ['judge.md', 'Judge'],
   ['benchmarks.md', 'Benchmarks'],
   ['artifacts.md', 'Artifacts'],
+  ['improving-clawhub-scans.md', 'ClawHub Scans'],
   ['development.md', 'Development'],
   ['releasing.md', 'Releasing'],
 ];

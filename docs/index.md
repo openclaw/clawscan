@@ -16,10 +16,12 @@ that wants repeatable agent-skill security checks.
 | Page | Use it for |
 | --- | --- |
 | [Quickstart](quickstart.md) | Install, first scan, env vars, and common commands. |
+| [Contributing](contributing.md) | Setup, validation, review expectations, and deeper contributor paths. |
 | [Scanners](scanners.md) | Supported scanner IDs, upstream links, target support, and credentials. |
 | [Judge harness](judge.md) | `--judge`, placeholders, prompt interpolation, and schema handoff. |
-| [Benchmarks](benchmarks.md) | Running the supported OpenClaw security-signals dataset. |
+| [Benchmarks](benchmarks.md) | Running supported benchmarks and reading local score artifacts. |
 | [Artifacts](artifacts.md) | `clawscan-run-v1` and `clawscan-benchmark-v1` JSON shapes. |
+| [Improving ClawHub scans](improving-clawhub-scans.md) | ClawHub profile, Security Signals comparison, and upstreaming scan improvements. |
 | [Development](development.md) | Tests, docs site build, releases, and ClawHub parity tooling. |
 | [Releasing](releasing.md) | Release, Homebrew tap, verification, and rollback steps. |
 

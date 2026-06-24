@@ -39,13 +39,14 @@ row for each case in the declared split:
 {"id":"case-id-3","prediction":"malicious"}
 ```
 
-Validate a submission locally before opening a PR:
+CI validates changed submission directories. If you are debugging a submission
+locally, run:
 
 ```bash
-go run ./cmd/clawscan validate-submission leaderboard/submissions/<run-id>
+scripts/validate-security-signals-submissions.sh leaderboard/submissions/<run-id>
 ```
 
-CI validates changed submission directories with the same ClawScan validator,
+CI validates changed submission directories with the same repository validator,
 recomputes loose non-clean metrics, and uploads JSON score previews as workflow
 artifacts. The PR path is artifact-validated: CI verifies structure and score
 math, but it does not rerun expensive scanners or model judges.

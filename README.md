@@ -53,9 +53,9 @@ clawscan \
 ```
 
 Use `--benchmark OpenClaw/clawhub-security-signals --split eval_holdout` for
-the OpenClaw security-signals benchmark. When that benchmark is run with
-`--output`, ClawScan also writes a submission-friendly `predictions.jsonl` file
-next to the benchmark artifact.
+the OpenClaw security-signals benchmark. The `clawscan-benchmark.json` artifact
+is the primary result to inspect; ClawScan can also derive a lightweight
+`predictions.jsonl` file for leaderboard and CI submission plumbing.
 
 ## What It Does
 
@@ -139,10 +139,12 @@ clawscan --version
 The detailed manual lives in [`docs/`](docs/index.md):
 
 - [Quickstart](docs/quickstart.md)
+- [Contributing](docs/contributing.md)
 - [Scanners](docs/scanners.md)
 - [Judge harness](docs/judge.md)
 - [Benchmarks](docs/benchmarks.md)
 - [Artifacts](docs/artifacts.md)
+- [Improving ClawHub scans](docs/improving-clawhub-scans.md)
 - [Development](docs/development.md)
 - [Releasing](docs/releasing.md)
 

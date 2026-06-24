@@ -1,6 +1,9 @@
 # Benchmarks
 
 ClawScan can run the same scanner and judge setup over a supported benchmark.
+The primary local result is the `clawscan-benchmark.json` artifact. It embeds
+the normal per-case `clawscan-run-v1` artifacts, expected labels, scanner
+statuses, and score metadata when the benchmark can be scored.
 
 Supported benchmarks:
 
@@ -36,7 +39,9 @@ clawscan \
 ```
 
 For the OpenClaw benchmark, `--output ./clawscan-benchmark.json` also writes a
-submission-friendly `./predictions.jsonl` file. Use `--predictions-output` to
+submission-friendly `./predictions.jsonl` file. Treat this JSONL as a derived
+leaderboard/CI input; use the benchmark artifact when you need to understand
+why a scanner or judge behaved a certain way. Use `--predictions-output` to
 choose a different path:
 
 ```bash
@@ -88,10 +93,10 @@ Each benchmark case then runs the normal one-off ClawScan path. That keeps
 scanner output, prompt rendering, judge execution, env validation, and secret
 redaction consistent between one-off scans and benchmark runs.
 
-## Predictions JSONL
+## Derived Predictions JSONL
 
-`predictions.jsonl` is the canonical lightweight submission file for the
-OpenClaw security-signals leaderboard workflow. Each line is one JSON object:
+`predictions.jsonl` is the derived lightweight submission file for the OpenClaw
+security-signals leaderboard workflow. Each line is one JSON object:
 
 ```json
 {"id":"case-1","prediction":"clean"}
@@ -113,6 +118,34 @@ Benchmark artifacts keep the canonical prediction next to the expected verdict
 and record whether the case was `correct`, `incorrect`, `abstained`,
 `unscorable`, or `error`.
 
+## Reading Local Results
+
+Start with the benchmark artifact summary:
+
+- `summary.caseCount` is the number of cases attempted.
+- `summary.expectedVerdicts` shows the label distribution.
+- `summary.scannerStatuses` counts completed, skipped, and errored scanner runs
+  by scanner ID.
+- case-level evaluation records whether ClawScan could score the prediction and
+  whether it matched the expected verdict.
+
+Then inspect individual cases:
+
+- `cases[].expected` explains the expected verdict and benchmark context.
+- `cases[].run.scannerResults` contains raw scanner evidence for that case.
+- `cases[].run.judge` contains external judge output when `--judge` was used.
+
+Use `--limit` and descriptive output paths to compare candidate changes:
+
+```bash
+clawscan \
+  --benchmark OpenClaw/clawhub-security-signals \
+  --split eval_holdout \
+  --limit 25 \
+  --scanner clawscan-static \
+  --output ./baseline-clawscan-benchmark.json
+```
+
 ## Security Signals Leaderboard Submissions
 
 The v1 Security Signals leaderboard submission path is GitHub PRs to this repo.
@@ -123,8 +156,10 @@ does not publish official rows.
 2. Put `metadata.json` and `predictions.jsonl` in a new
    `leaderboard/submissions/<run-id>/` directory.
 3. Optionally include a full `artifact.json` from the benchmark run.
-4. Validate locally with `clawscan validate-submission`.
-5. Open a PR. CI recomputes metrics and uploads a score preview artifact.
+4. Open a PR. CI validates structure, recomputes metrics, and uploads a score
+   preview artifact.
+5. Optionally run the repository validation script locally if you are debugging
+   a submission failure.
 6. After review and merge, the post-merge publish workflow updates the private
    results dataset when Hugging Face credentials are configured.
 
@@ -169,16 +204,17 @@ Provenance-rich metadata can use the same required fields and make the system
 name/role more specific, such as `clawhub-production`, `community-example`, or
 a scanner/profile/judge name. Keep secrets out of metadata and artifacts.
 
-Validate before opening a PR:
+Optional local validation while debugging:
 
 ```bash
-clawscan validate-submission leaderboard/submissions/<run-id>
+scripts/validate-security-signals-submissions.sh leaderboard/submissions/<run-id>
 ```
 
-The validator rejects duplicate case IDs, missing case IDs, unknown case IDs,
-invalid prediction labels, mismatched dataset IDs, unsupported splits, and
-missing dataset revision metadata. It recomputes loose non-clean metrics:
-`suspicious` and `malicious` count as positive, and `clean` counts as negative.
+The script runs the repository-only Security Signals validator. It rejects
+duplicate case IDs, missing case IDs, unknown case IDs, invalid prediction
+labels, mismatched dataset IDs, unsupported splits, and missing dataset revision
+metadata. It recomputes loose non-clean metrics: `suspicious` and `malicious`
+count as positive, and `clean` counts as negative.
 
 Verification statuses:
 

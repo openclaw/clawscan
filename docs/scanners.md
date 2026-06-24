@@ -47,3 +47,70 @@ and lets ClawScan validate that prompts only reference requested scanners.
 
 ClawScan never accepts scanner API keys as CLI flags. This avoids leaking
 secrets through shell history, process lists, CI logs, and run artifacts.
+
+## Adding A Built-In Scanner Adapter
+
+Built-in scanners are registered through `internal/runner.ScannerRegistry`.
+Avoid one-off switches in the CLI. The registry keeps scanner IDs, env
+requirements, and dispatch behavior in one place so help output, profiles, and
+tests can reason about the same public scanner surface.
+
+### Registry Contract
+
+A built-in adapter must provide:
+
+- a stable public scanner ID
+- any required environment variables through `Requirements`
+- a `Run` implementation that returns a `ScannerResult`
+
+Register the adapter in `defaultScannerAdapters()` in
+`internal/runner/scanner_registry.go`. Public scanner IDs are part of the CLI
+surface, so choose a lowercase, hyphenated ID that you are willing to document.
+
+### Environment Requirements
+
+Declare required credentials before the scanner runs. Use
+`staticEnvRequirements` when the scanner always needs the same env vars, or a
+custom requirements function when credentials are conditional.
+
+Do not add API-key flags. Credentials belong in environment variables, and run
+artifacts should record only whether those variables were `present` or
+`missing`.
+
+### Raw Evidence
+
+Scanner adapters should preserve the upstream JSON evidence whenever possible.
+If a scanner skips a target or fails before producing upstream JSON, return a
+small wrapper that explains the skipped or error state. Do not flatten scanner
+output into ClawScan policy verdicts inside the adapter.
+
+At minimum, a result should make these facts clear:
+
+- scanner status: completed, skipped, or errored
+- command or API path used, without secrets
+- started and completed timestamps
+- raw JSON evidence or a clear skipped/error explanation
+
+### Tests And Fixtures
+
+Add fixture-backed tests for adapter behavior. Prefer stub commands, fake HTTP
+clients, or `--scanner-result` fixtures over live service calls. Live smoke
+tests are useful only when credentials are already available and the output can
+be safely redacted.
+
+Update the registry tests when the set of built-in IDs changes, and add focused
+tests for env validation, target handling, raw evidence capture, skipped states,
+and error redaction.
+
+### Docs And Help Updates
+
+When adding or removing a built-in scanner, update:
+
+- `docs/scanners.md`
+- `README.md`
+- `docs/quickstart.md` if profile examples change
+- public help tests in `cmd/clawscan`
+- profile fixtures or docs if built-in profiles change
+
+Run `go run ./cmd/clawscan --help` before handoff and confirm the accepted
+scanner ID list matches the docs.
