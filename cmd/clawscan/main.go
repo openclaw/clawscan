@@ -16,6 +16,10 @@ var (
 	date    = "unknown"
 )
 
+var validateSubmission = func(path string) (runner.SecuritySignalsSubmissionResult, error) {
+	return runner.ValidateSecuritySignalsSubmission(path, runner.HuggingFaceBenchmarkClient{})
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Environ()); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -31,6 +35,9 @@ func run(args []string, environ []string) error {
 	if len(args) == 1 && args[0] == "--version" {
 		fmt.Fprintln(os.Stdout, versionString())
 		return nil
+	}
+	if len(args) > 0 && args[0] == "validate-submission" {
+		return runValidateSubmission(args[1:])
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -78,8 +85,47 @@ func run(args []string, environ []string) error {
 	return nil
 }
 
+func runValidateSubmission(args []string) error {
+	var submissionDir string
+	jsonOutput := false
+	for _, arg := range args {
+		switch arg {
+		case "--json":
+			jsonOutput = true
+		default:
+			if strings.HasPrefix(arg, "--") {
+				return fmt.Errorf("Unknown argument: %s", arg)
+			}
+			if submissionDir != "" {
+				return fmt.Errorf("Unexpected argument: %s", arg)
+			}
+			submissionDir = arg
+		}
+	}
+	if submissionDir == "" {
+		return fmt.Errorf("validate-submission requires <submission-dir>")
+	}
+	result, err := validateSubmission(submissionDir)
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		return runner.WriteJSON(os.Stdout, result)
+	}
+	printSubmissionSummary(os.Stdout, result)
+	return nil
+}
+
 func versionString() string {
 	return fmt.Sprintf("clawscan %s (commit %s, built %s)", version, commit, date)
+}
+
+func printSubmissionSummary(w io.Writer, result runner.SecuritySignalsSubmissionResult) {
+	metrics := result.Metrics
+	fmt.Fprintf(w, "Security Signals submission valid: %d case(s)\n", metrics.CaseCount)
+	fmt.Fprintf(w, "dataset=%s split=%s revision=%s\n", result.Benchmark.Dataset, result.Benchmark.Split, result.Benchmark.Revision)
+	fmt.Fprintf(w, "F1=%.4f precision=%.4f recall=%.4f FPR=%.4f\n", metrics.F1, metrics.Precision, metrics.Recall, metrics.FalsePositiveRate)
+	fmt.Fprintf(w, "TP=%d FP=%d TN=%d FN=%d\n", metrics.TruePositive, metrics.FalsePositive, metrics.TrueNegative, metrics.FalseNegative)
 }
 
 func printRunSummary(w io.Writer, result runner.RunTargetsResult) {
@@ -104,6 +150,7 @@ Usage:
   clawscan --benchmark --scanner <scanner-id> [flags]
   clawscan --benchmark SkillTrustBench --scanner <scanner-id> [flags]
   clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]
+  clawscan validate-submission <submission-dir> [--json]
   clawscan --version
   clawscan --help
 
@@ -122,6 +169,11 @@ Core flags:
   --predictions-output <path> Write benchmark predictions JSONL. Defaults next to --output for OpenClaw benchmarks.
   --version                   Print build metadata.
   -h, --help                  Print this help.
+
+Submission validation:
+  validate-submission reads metadata.json and predictions.jsonl from a Security
+  Signals leaderboard submission directory, validates case coverage, and
+  recomputes loose non-clean metrics.
 
 Supported benchmarks:
   cuhk-zhuque/SkillTrustBench (alias: SkillTrustBench, default)

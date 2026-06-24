@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openclaw/clawscan/internal/runner"
 )
 
 func TestRunCommandPrintsHelp(t *testing.T) {
@@ -22,6 +24,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"clawscan --profile skills-sh [flags]",
 		"clawscan --benchmark --scanner <scanner-id> [flags]",
 		"clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]",
+		"clawscan validate-submission <submission-dir> [--json]",
 		"--scanner <id>",
 		"--profile <name>",
 		"--config <path>",
@@ -30,6 +33,9 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"--limit <n>",
 		"--offset <n>",
 		"--predictions-output <path>",
+		"Submission validation:",
+		"metadata.json",
+		"predictions.jsonl",
 		"Supported benchmarks:",
 		"cuhk-zhuque/SkillTrustBench",
 		"SkillTrustBench",
@@ -54,6 +60,109 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunCommandValidatesSubmissionJSON(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "metadata.json"), `{
+  "schemaVersion": "clawscan-security-signals-submission-v1",
+  "benchmark": {
+    "dataset": "OpenClaw/clawhub-security-signals",
+    "split": "eval_holdout",
+    "revision": "fixture-sha"
+  },
+  "system": {
+    "name": "fixture-system",
+    "role": "community"
+  },
+  "verificationStatus": "artifact-validated"
+}
+`)
+	writeFile(t, filepath.Join(dir, "predictions.jsonl"), `{"id":"case-1","prediction":"clean"}
+`)
+	oldValidator := validateSubmission
+	validateSubmission = func(path string) (runner.SecuritySignalsSubmissionResult, error) {
+		if path != dir {
+			t.Fatalf("submission path = %q", path)
+		}
+		return runner.SecuritySignalsSubmissionResult{
+			SchemaVersion: "clawscan-security-signals-score-v1",
+			Benchmark: runner.SecuritySignalsSubmissionBenchmark{
+				Dataset:  "OpenClaw/clawhub-security-signals",
+				Split:    "eval_holdout",
+				Revision: "fixture-sha",
+			},
+			Metrics: runner.SecuritySignalsSubmissionMetrics{
+				CaseCount:    1,
+				TrueNegative: 1,
+				Precision:    1,
+				Recall:       1,
+				F1:           1,
+			},
+		}, nil
+	}
+	t.Cleanup(func() {
+		validateSubmission = oldValidator
+	})
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"validate-submission", dir, "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var result runner.SecuritySignalsSubmissionResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("stdout was not JSON: %v\n%s", err, stdout)
+	}
+	if result.Metrics.CaseCount != 1 || result.Metrics.TrueNegative != 1 || result.Metrics.F1 != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRunCommandValidatesSubmissionSummary(t *testing.T) {
+	dir := t.TempDir()
+	oldValidator := validateSubmission
+	validateSubmission = func(path string) (runner.SecuritySignalsSubmissionResult, error) {
+		return runner.SecuritySignalsSubmissionResult{
+			Benchmark: runner.SecuritySignalsSubmissionBenchmark{
+				Dataset:  "OpenClaw/clawhub-security-signals",
+				Split:    "eval_holdout",
+				Revision: "fixture-sha",
+			},
+			Metrics: runner.SecuritySignalsSubmissionMetrics{
+				CaseCount:         4,
+				TruePositive:      1,
+				FalsePositive:     1,
+				TrueNegative:      1,
+				FalseNegative:     1,
+				Precision:         0.5,
+				Recall:            0.5,
+				F1:                0.5,
+				FalsePositiveRate: 0.5,
+			},
+		}, nil
+	}
+	t.Cleanup(func() {
+		validateSubmission = oldValidator
+	})
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"validate-submission", dir}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{
+		"Security Signals submission valid: 4 case(s)",
+		"dataset=OpenClaw/clawhub-security-signals split=eval_holdout revision=fixture-sha",
+		"F1=0.5000 precision=0.5000 recall=0.5000 FPR=0.5000",
+		"TP=1 FP=1 TN=1 FN=1",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
 		}
 	}
 }

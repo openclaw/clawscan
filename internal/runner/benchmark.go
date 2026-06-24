@@ -823,15 +823,20 @@ func (client HuggingFaceBenchmarkClient) fetchOpenClawRowsPage(httpClient *http.
 		return nil, err
 	}
 	defer response.Body.Close()
-	var parsed huggingFaceRowsResponse
-	if err := json.NewDecoder(response.Body).Decode(&parsed); err != nil {
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
 		return nil, err
 	}
+	var parsed huggingFaceRowsResponse
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_ = json.Unmarshal(raw, &parsed)
 		if parsed.Error != "" {
 			return nil, fmt.Errorf("fetch benchmark rows: %s", parsed.Error)
 		}
 		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", response.StatusCode)
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, err
 	}
 	rows := make([]OpenClawBenchmarkRow, 0, len(parsed.Rows))
 	for _, row := range parsed.Rows {
@@ -853,15 +858,20 @@ func (client HuggingFaceBenchmarkClient) fetchSkillTrustBenchRowsPage(httpClient
 		return nil, err
 	}
 	defer response.Body.Close()
-	var parsed skillTrustBenchRowsResponse
-	if err := json.NewDecoder(response.Body).Decode(&parsed); err != nil {
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
 		return nil, err
 	}
+	var parsed skillTrustBenchRowsResponse
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_ = json.Unmarshal(raw, &parsed)
 		if parsed.Error != "" {
 			return nil, fmt.Errorf("fetch benchmark rows: %s", parsed.Error)
 		}
 		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", response.StatusCode)
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, err
 	}
 	rows := make([]SkillTrustBenchRow, 0, len(parsed.Rows))
 	for _, row := range parsed.Rows {
