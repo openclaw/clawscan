@@ -1,0 +1,114 @@
+package runner
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+)
+
+type stubScannerAdapter struct {
+	id           string
+	requirements []EnvRequirement
+	run          func(target string, startedAt string) (ScannerResult, error)
+}
+
+func (adapter stubScannerAdapter) ID() string {
+	return adapter.id
+}
+
+func (adapter stubScannerAdapter) Requirements(env map[string]string) []EnvRequirement {
+	return append([]EnvRequirement(nil), adapter.requirements...)
+}
+
+func (adapter stubScannerAdapter) Run(_ ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
+	if adapter.run != nil {
+		return adapter.run(target, startedAt)
+	}
+	return ScannerResult{
+		Status:      "completed",
+		StartedAt:   startedAt,
+		CompletedAt: startedAt,
+		Raw:         json.RawMessage(`{"ok":true}`),
+	}, nil
+}
+
+func TestScannerRegistryReturnsSortedIDs(t *testing.T) {
+	registry, err := NewScannerRegistry(
+		stubScannerAdapter{id: "virustotal"},
+		stubScannerAdapter{id: "clawscan-static"},
+		stubScannerAdapter{id: "skillspector"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(registry.IDs(), ","); got != "clawscan-static,skillspector,virustotal" {
+		t.Fatalf("ids = %q", got)
+	}
+}
+
+func TestScannerRegistryRejectsDuplicateIDs(t *testing.T) {
+	_, err := NewScannerRegistry(
+		stubScannerAdapter{id: "clawscan-static"},
+		stubScannerAdapter{id: "clawscan-static"},
+	)
+	if err == nil || err.Error() != "Duplicate scanner adapter id: clawscan-static" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
+	_, err := NewScannerRegistry(stubScannerAdapter{id: " "})
+	if err == nil || err.Error() != "Scanner adapter id cannot be empty" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
+	want := "agentverus,ai-infra-guard,cisco,clawscan-static,gendigital,skillspector,snyk,virustotal"
+	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
+		t.Fatalf("ids = %q, want %q", got, want)
+	}
+	for profile, scanners := range builtInProfiles {
+		for _, scanner := range scanners {
+			if !DefaultScannerRegistry().Contains(scanner) {
+				t.Fatalf("profile %s references unregistered scanner %s", profile, scanner)
+			}
+		}
+	}
+}
+
+func TestExternalScannerRunnerDispatchesThroughRegistry(t *testing.T) {
+	wantErr := errors.New("adapter called")
+	registry, err := NewScannerRegistry(stubScannerAdapter{
+		id: "demo",
+		run: func(target string, startedAt string) (ScannerResult, error) {
+			if target != "/tmp/skill" {
+				t.Fatalf("target = %q", target)
+			}
+			if startedAt != "2026-06-23T12:00:00Z" {
+				t.Fatalf("startedAt = %q", startedAt)
+			}
+			return ScannerResult{}, wantErr
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (ExternalScannerRunner{Registry: registry}).RunScanner("demo", "/tmp/skill", "2026-06-23T12:00:00Z")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestScannerAdapterRequirementsFeedValidation(t *testing.T) {
+	requirements := stubScannerAdapter{
+		id: "demo",
+		requirements: []EnvRequirement{
+			{EnvVar: "DEMO_TOKEN", Reason: "scanner demo"},
+		},
+	}.Requirements(map[string]string{})
+	if len(requirements) != 1 || requirements[0].EnvVar != "DEMO_TOKEN" {
+		t.Fatalf("requirements = %#v", requirements)
+	}
+}

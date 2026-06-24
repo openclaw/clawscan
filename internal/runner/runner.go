@@ -169,22 +169,6 @@ type JudgeResult struct {
 	Result           interface{} `json:"result"`
 }
 
-type requirement struct {
-	envVar string
-	reason string
-}
-
-var scannerSet = map[string]bool{
-	"agentverus":      true,
-	"ai-infra-guard":  true,
-	"skillspector":    true,
-	"snyk":            true,
-	"cisco":           true,
-	"virustotal":      true,
-	"gendigital":      true,
-	"clawscan-static": true,
-}
-
 const defaultProfileName = "clawhub"
 
 var builtInProfiles = map[string][]string{
@@ -193,12 +177,7 @@ var builtInProfiles = map[string][]string{
 }
 
 func ScannerIDs() []string {
-	ids := make([]string, 0, len(scannerSet))
-	for id := range scannerSet {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return DefaultScannerRegistry().IDs()
 }
 
 func ProfileIDs() []string {
@@ -287,7 +266,7 @@ func ParseArgs(args []string) (Options, error) {
 			if err != nil {
 				return Options{}, err
 			}
-			if !scannerSet[value] {
+			if !DefaultScannerRegistry().Contains(value) {
 				return Options{}, fmt.Errorf("Unknown scanner: %s", value)
 			}
 			opts.Scanners = append(opts.Scanners, value)
@@ -311,7 +290,7 @@ func ParseArgs(args []string) (Options, error) {
 			if !ok || scanner == "" || path == "" {
 				return Options{}, errors.New("Expected --scanner-result value as scanner=path")
 			}
-			if !scannerSet[scanner] {
+			if !DefaultScannerRegistry().Contains(scanner) {
 				return Options{}, fmt.Errorf("Unknown scanner: %s", scanner)
 			}
 			opts.ScannerResultPaths[scanner] = path
@@ -393,9 +372,9 @@ func builtInProfileScanners(profile string) ([]string, error) {
 }
 
 func ValidateRequirements(opts Options, env map[string]string) error {
-	var missing []requirement
+	var missing []EnvRequirement
 	for _, req := range requirements(opts, env) {
-		if strings.TrimSpace(env[req.envVar]) == "" {
+		if strings.TrimSpace(env[req.EnvVar]) == "" {
 			missing = append(missing, req)
 		}
 	}
@@ -404,7 +383,7 @@ func ValidateRequirements(opts Options, env map[string]string) error {
 	}
 	lines := []string{"Missing required environment variables:", ""}
 	for _, req := range missing {
-		lines = append(lines, fmt.Sprintf("- %s required by %s", req.envVar, req.reason))
+		lines = append(lines, fmt.Sprintf("- %s required by %s", req.EnvVar, req.Reason))
 	}
 	return errors.New(strings.Join(lines, "\n"))
 }
@@ -1342,6 +1321,7 @@ func isSourceReadError(err error, source string) bool {
 type ExternalScannerRunner struct {
 	CommandRunner          CommandRunner
 	Env                    map[string]string
+	Registry               ScannerRegistry
 	SkillSpectorCommand    []string
 	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
 	VirusTotalHTTPClient   VirusTotalHTTPClient
@@ -1411,24 +1391,12 @@ func OpenAIRequestBody(opts OpenAIRequestOptions, systemPrompt string, prompt st
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
-	switch name {
-	case "agentverus":
-		return runner.runAgentVerus(target, startedAt)
-	case "ai-infra-guard":
-		return runner.runAIInfraGuard(target, startedAt)
-	case "skillspector":
-		return runner.runSkillSpector(target, startedAt)
-	case "clawscan-static":
-		return runner.runStatic(target, startedAt)
-	case "snyk":
-		return runner.runSnyk(target, startedAt)
-	case "cisco":
-		return runner.runCisco(target, startedAt)
-	case "virustotal":
-		return runner.runVirusTotal(target, startedAt)
-	case "gendigital":
-		return runner.runGenDigital(target, startedAt)
-	default:
+	registry := runner.Registry
+	if registry.isZero() {
+		registry = DefaultScannerRegistry()
+	}
+	adapter, ok := registry.Adapter(name)
+	if !ok {
 		return ScannerResult{
 			Status:      "skipped",
 			StartedAt:   startedAt,
@@ -1438,6 +1406,7 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 			Raw:         nil,
 		}, nil
 	}
+	return adapter.Run(runner, target, startedAt)
 }
 
 func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt string) (ScannerResult, error) {
@@ -1735,34 +1704,18 @@ func isSecretEnvKey(key string) bool {
 		strings.Contains(upper, "API_KEY")
 }
 
-func requirements(opts Options, env map[string]string) []requirement {
-	var reqs []requirement
+func requirements(opts Options, env map[string]string) []EnvRequirement {
+	var reqs []EnvRequirement
 	for _, scanner := range opts.Scanners {
 		if opts.ScannerResultPaths[scanner] != "" {
 			continue
 		}
-		switch scanner {
-		case "skillspector":
-			if skillSpectorLLMEnabled(env) {
-				reqs = append(reqs, requirement{"CLAWSCAN_SKILLSPECTOR_LLM", "scanner skillspector llm opt-in"})
-				if envVar := skillSpectorProviderKeyEnv(env); envVar != "" {
-					reqs = append(reqs, requirement{envVar, "scanner skillspector llm"})
-				}
-			}
-		case "ai-infra-guard":
-			reqs = append(reqs,
-				requirement{"AIG_BASE_URL", "scanner ai-infra-guard"},
-				requirement{"AIG_MODEL", "scanner ai-infra-guard"},
-				requirement{"AIG_MODEL_API_KEY", "scanner ai-infra-guard"},
-			)
-		case "virustotal":
-			reqs = append(reqs, requirement{"VIRUSTOTAL_API_KEY", "scanner virustotal"})
-		case "snyk":
-			reqs = append(reqs, requirement{"SNYK_TOKEN", "scanner snyk"})
+		if adapter, ok := DefaultScannerRegistry().Adapter(scanner); ok {
+			reqs = append(reqs, adapter.Requirements(env)...)
 		}
 	}
 	for _, req := range opts.AdditionalRequiredEnv {
-		reqs = append(reqs, requirement{req.EnvVar, req.Reason})
+		reqs = append(reqs, req)
 	}
 	return dedupe(reqs)
 }
@@ -1770,10 +1723,10 @@ func requirements(opts Options, env map[string]string) []requirement {
 func envPresence(opts Options, env map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, req := range requirements(opts, env) {
-		if strings.TrimSpace(env[req.envVar]) == "" {
-			out[req.envVar] = "missing"
+		if strings.TrimSpace(env[req.EnvVar]) == "" {
+			out[req.EnvVar] = "missing"
 		} else {
-			out[req.envVar] = "present"
+			out[req.EnvVar] = "present"
 		}
 	}
 	return out
@@ -1797,11 +1750,11 @@ func skillSpectorProviderKeyEnv(env map[string]string) string {
 	}
 }
 
-func dedupe(reqs []requirement) []requirement {
+func dedupe(reqs []EnvRequirement) []EnvRequirement {
 	seen := map[string]bool{}
-	var out []requirement
+	var out []EnvRequirement
 	for _, req := range reqs {
-		key := req.envVar + ":" + req.reason
+		key := req.EnvVar + ":" + req.Reason
 		if !seen[key] {
 			seen[key] = true
 			out = append(out, req)
