@@ -7,6 +7,7 @@ install path.
 ## Release Channels
 
 - Homebrew: `brew install openclaw/tap/clawscan`
+- npm: `npm install -g @openclaw/clawscan@<version>`
 - GitHub Releases: macOS, Linux, and Windows archives plus `checksums.txt`
 - Go module: `go install github.com/openclaw/clawscan/cmd/clawscan@latest`
 - Source build: `make release VERSION=<version>`
@@ -26,7 +27,17 @@ install path.
    ```
 
 4. Inspect `dist/` and `dist/checksums.txt`.
-5. Confirm the release workflow has access to one of these secrets:
+5. Validate the npm package locally:
+
+   ```bash
+   make npm-package VERSION=v0.0.0-test
+   ```
+
+   This builds the bundled Go binaries, runs `npm pack`, installs the packed
+   tarball into a temporary prefix, verifies `clawscan --version`, and runs a
+   secretless `clawscan-static` smoke test through the installed package.
+
+6. Confirm the release workflow has access to one of these secrets:
    `HOMEBREW_TAP_TOKEN` or `HOMEBREW_TAP_GITHUB_TOKEN`.
 
 The Homebrew token must be able to dispatch workflows and push to
@@ -52,6 +63,30 @@ The `Release` workflow will:
 
 Manual release publishing is also available from the workflow dispatch form.
 Set `tag` to an existing `v*` tag and `publish` to `true`.
+
+## Publish npm
+
+Use npm for CI and ClawHub worker installs. The package name is
+`@openclaw/clawscan`, and ClawHub should pin an exact package version:
+
+```bash
+npm install -g @openclaw/clawscan@0.1.0
+clawscan --version
+```
+
+The npm package bundles prebuilt Go binaries for supported macOS, Linux, and
+Windows targets. It does not download binaries or build from source during
+install.
+
+The `NPM Release` workflow is manual and two-step:
+
+1. Dispatch from `main` with `tag=<release tag>` and `preflight_only=true`.
+2. After the preflight succeeds, dispatch from `main` with `preflight_only=false`
+   and `preflight_run_id=<successful preflight run id>`.
+
+Real publishes use npm trusted publishing from the `npm-release` GitHub
+environment. Required npm trusted publisher settings: repository
+`openclaw/clawscan`, workflow `npm-release.yml`, environment `npm-release`.
 
 ## Verify
 
@@ -82,6 +117,15 @@ After the workflow finishes:
    ```
 
 5. Confirm the version printed by both install paths matches the release tag.
+6. Test the npm package:
+
+   ```bash
+   npm install -g @openclaw/clawscan@<version>
+   clawscan --version
+   ```
+
+   The npm package version omits the leading `v`, while `clawscan --version`
+   should print the release tag embedded in the binary.
 
 ## Rollback
 

@@ -1,9 +1,12 @@
 VERSION ?= dev
 
-.PHONY: release docs-site clean
+.PHONY: release npm-package docs-site clean
 
 release:
 	./scripts/build-release.sh "$(VERSION)"
+
+npm-package:
+	node scripts/build-npm-package.mjs --version "$(VERSION)" --pack --smoke
 
 docs-site:
 	node scripts/build-docs-site.mjs

@@ -1,0 +1,220 @@
+name: NPM Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.1.0
+        required: true
+        type: string
+      preflight_only:
+        description: Run validation/build only and skip the gated publish job
+        required: true
+        default: true
+        type: boolean
+      preflight_run_id:
+        description: Existing successful preflight workflow run id to promote without rebuilding
+        required: false
+        type: string
+
+concurrency:
+  group: clawscan-npm-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  NODE_VERSION: "24.x"
+
+jobs:
+  preflight_clawscan_npm:
+    if: ${{ inputs.preflight_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Forbid preflight artifact promotion on validation-only runs
+        if: ${{ inputs.preflight_run_id != '' }}
+        run: |
+          echo "preflight_run_id is only valid for real publish runs."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+
+      - name: Test npm packaging helpers
+        run: |
+          node --test npm/clawscan/test/*.test.mjs
+          node --test scripts/build-npm-package.test.mjs
+
+      - name: Build and smoke packed npm package
+        run: node scripts/build-npm-package.mjs --version "${{ inputs.tag }}" --pack --smoke
+
+      - name: Upload prepared npm publish bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawscan-npm-preflight-${{ inputs.tag }}
+          path: |
+            dist/npm/*.tgz
+            dist/npm/release-tag.txt
+            dist/npm/release-sha.txt
+            dist/npm/package-version.txt
+          if-no-files-found: error
+
+  validate_publish_request:
+    if: ${{ !inputs.preflight_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require main workflow ref for publish
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "${WORKFLOW_REF}" != "refs/heads/main" ]]; then
+            echo "Real npm publish runs must be dispatched from main. Use preflight_only=true for branch validation."
+            exit 1
+          fi
+
+      - name: Require preflight artifact promotion on real publish
+        env:
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PREFLIGHT_RUN_ID}" ]]; then
+            echo "Real npm publish requires preflight_run_id from a successful npm preflight run." >&2
+            exit 1
+          fi
+
+  publish_clawscan_npm:
+    needs: [validate_publish_request]
+    if: ${{ !inputs.preflight_only }}
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify preflight run metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+        run: |
+          set -euo pipefail
+          RUN_JSON="$(gh run view "$PREFLIGHT_RUN_ID" --repo "$GITHUB_REPOSITORY" --json workflowName,headBranch,event,conclusion,url)"
+          # shellcheck disable=SC2016
+          printf '%s' "$RUN_JSON" | node --input-type=module -e 'const chunks=[]; process.stdin.on("data", (chunk) => chunks.push(chunk)); process.stdin.on("end", () => { const run = JSON.parse(Buffer.concat(chunks).toString("utf8")); const checks = [["workflowName", "NPM Release"], ["headBranch", "main"], ["event", "workflow_dispatch"], ["conclusion", "success"]]; for (const [key, expected] of checks) { if (run[key] !== expected) { console.error(`Referenced npm preflight run ${process.env.PREFLIGHT_RUN_ID} must have ${key}=${expected}, got ${run[key] ?? "<missing>"}.`); process.exit(1); } } console.log(`Using npm preflight run ${process.env.PREFLIGHT_RUN_ID}: ${run.url}`); });'
+
+      - name: Download prepared npm tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: clawscan-npm-preflight-${{ inputs.tag }}
+          path: dist/npm
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.preflight_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify prepared tarball provenance
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          EXPECTED_RELEASE_SHA="$(git rev-parse HEAD)"
+          EXPECTED_PACKAGE_VERSION="$(node --input-type=module <<'EOF'
+          import { normalizePackageVersion } from "./scripts/build-npm-package.mjs";
+          process.stdout.write(normalizePackageVersion(process.env.RELEASE_TAG));
+          EOF
+          )"
+          TAG_FILE="dist/npm/release-tag.txt"
+          SHA_FILE="dist/npm/release-sha.txt"
+          VERSION_FILE="dist/npm/package-version.txt"
+          if [[ ! -f "$TAG_FILE" || ! -f "$SHA_FILE" || ! -f "$VERSION_FILE" ]]; then
+            echo "Prepared preflight metadata is missing." >&2
+            ls -la dist/npm >&2 || true
+            exit 1
+          fi
+          ARTIFACT_RELEASE_TAG="$(tr -d '\r\n' < "$TAG_FILE")"
+          ARTIFACT_RELEASE_SHA="$(tr -d '\r\n' < "$SHA_FILE")"
+          ARTIFACT_PACKAGE_VERSION="$(tr -d '\r\n' < "$VERSION_FILE")"
+          if [[ "$ARTIFACT_RELEASE_TAG" != "$RELEASE_TAG" ]]; then
+            echo "Prepared preflight tag mismatch: expected $RELEASE_TAG, got $ARTIFACT_RELEASE_TAG" >&2
+            exit 1
+          fi
+          if [[ "$ARTIFACT_RELEASE_SHA" != "$EXPECTED_RELEASE_SHA" ]]; then
+            echo "Prepared preflight SHA mismatch: expected $EXPECTED_RELEASE_SHA, got $ARTIFACT_RELEASE_SHA" >&2
+            exit 1
+          fi
+          if [[ "$ARTIFACT_PACKAGE_VERSION" != "$EXPECTED_PACKAGE_VERSION" ]]; then
+            echo "Prepared preflight package version mismatch: expected $EXPECTED_PACKAGE_VERSION, got $ARTIFACT_PACKAGE_VERSION" >&2
+            exit 1
+          fi
+          echo "PACKAGE_VERSION=$EXPECTED_PACKAGE_VERSION" >> "$GITHUB_ENV"
+
+      - name: Resolve publish tarball
+        id: publish_tarball
+        run: |
+          set -euo pipefail
+          TARBALL_PATH="$(find dist/npm -type f -name 'openclaw-clawscan-*.tgz' -print | sort | tail -n 1)"
+          if [[ -z "$TARBALL_PATH" ]]; then
+            echo "Prepared preflight tarball not found." >&2
+            ls -la dist/npm >&2 || true
+            exit 1
+          fi
+          echo "path=$TARBALL_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure version is not already published
+        run: |
+          set -euo pipefail
+          if npm view "@openclaw/clawscan@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "@openclaw/clawscan@${PACKAGE_VERSION} is already published on npm."
+            exit 1
+          fi
+          echo "Publishing @openclaw/clawscan@${PACKAGE_VERSION}"
+
+      - name: Publish
+        run: npm publish "${{ steps.publish_tarball.outputs.path }}" --access public
+
+      - name: Verify npm release metadata
+        run: |
+          set -euo pipefail
+          NPM_DIST_JSON=""
+          for attempt in {1..12}; do
+            if NPM_DIST_JSON="$(npm view "@openclaw/clawscan@${PACKAGE_VERSION}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$NPM_DIST_JSON" ]]; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              cat /tmp/npm-view-error >&2 || true
+              exit 1
+            fi
+            sleep 5
+          done
+          printf '%s\n' "$NPM_DIST_JSON"

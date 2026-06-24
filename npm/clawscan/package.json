@@ -1,0 +1,23 @@
+{
+  "name": "@openclaw/clawscan",
+  "version": "0.0.0-dev",
+  "description": "Agent-skill security scanner harness for ClawHub and OpenClaw workflows.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "clawscan": "./bin/clawscan.js"
+  },
+  "files": [
+    "bin/",
+    "binaries/",
+    "lib/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

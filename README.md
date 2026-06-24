@@ -238,6 +238,12 @@ Homebrew is the recommended install path on macOS and Linux:
 brew install openclaw/tap/clawscan
 ```
 
+For Node-based CI or cross-platform automation, install the npm package:
+
+```bash
+npm install -g @openclaw/clawscan
+```
+
 You can also download a release archive from GitHub Releases. Pick the archive
 for your OS and CPU, unpack it, and put the `clawscan` binary on your `PATH`.
 
@@ -313,6 +319,12 @@ Build release archives:
 
 ```bash
 make release VERSION=v0.1.0
+```
+
+Build and smoke test the npm package:
+
+```bash
+make npm-package VERSION=v0.1.0
 ```
 
 Release artifacts are written to `dist/`.
