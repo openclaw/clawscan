@@ -31,7 +31,8 @@ Choose the run mode:
 
 | Need | Shape |
 | --- | --- |
-| Scan repo skills with the default profile | `clawscan` from a repo with `./skills/<name>/SKILL.md` |
+| Scan repo skills with one scanner | `clawscan --scanner skillspector` from a repo with `./skills/<name>/SKILL.md` |
+| Scan repo skills with the ClawHub profile | `clawscan --profile clawhub` from a repo with `./skills/<name>/SKILL.md` |
 | Scan one explicit target with a profile | `clawscan ./my-skill --profile clawhub` |
 | Capture raw scanner evidence only | `clawscan ./my-skill --scanner clawscan-static` |
 | Print raw JSON to stdout | Add `--json`. |
@@ -57,11 +58,13 @@ choose a different artifact path.
 
 ## Targets, Profiles, And Config
 
-If no target is passed, ClawScan scans child skill directories under `./skills`.
-If `./skills` is missing or contains no children with `SKILL.md`, it fails with
-a target-discovery error. Benchmark runs do not accept scan targets.
+If no target is passed with `--scanner`, `--profile`, or `--config`, ClawScan
+scans child skill directories under `./skills`. If `./skills` is missing or
+contains no children with `SKILL.md`, it fails with a target-discovery error.
+Plain `clawscan` without `--scanner`, `--profile`, `--config`, or `--benchmark`
+is invalid. Benchmark runs do not accept scan targets.
 
-The default profile is `clawhub`. Built-in profiles:
+Built-in profiles:
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
@@ -75,8 +78,8 @@ specific config; without `--profile`, it runs every profile in that config and
 emits a `clawscan-batch-v1` artifact.
 
 CLI flags override the selected profile for one run. Passing `--scanner`
-without `--profile` creates an ad hoc scanner-only run, so the default
-`clawhub` judge is not invoked accidentally.
+without `--profile` creates an ad hoc scanner-only run, so profile judges are
+not invoked accidentally.
 
 Minimal config:
 
@@ -206,6 +209,8 @@ go vet ./...
 ## Common Mistakes
 
 - Do not pass API keys as CLI flags.
+- Do not run plain `clawscan`; choose `--scanner`, `--profile`, `--config`, or
+  `--benchmark`.
 - Do not assume `clawscan` scans `.`; no target means discover `./skills`.
 - Do not expect a profile judge when passing explicit `--scanner` flags without
   `--profile`.

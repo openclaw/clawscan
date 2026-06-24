@@ -340,7 +340,9 @@ func helpText() string {
 	return fmt.Sprintf(`ClawScan runs agent-skill scanners, preserves raw evidence, and can hand results to an external judge.
 
 Usage:
-  clawscan [target] [flags]
+  clawscan <target> --scanner <scanner-id> [flags]
+  clawscan --scanner <scanner-id> [flags]
+  clawscan --profile clawhub [flags]
   clawscan --profile skills-sh [flags]
   clawscan --benchmark --scanner <scanner-id> [flags]
   clawscan --benchmark SkillTrustBench --scanner <scanner-id> [flags]
@@ -349,7 +351,7 @@ Usage:
   clawscan --help
 
 Core flags:
-  --profile <name>            Profile to run. Defaults to clawhub.
+  --profile <name>            Profile to run. Use --profile clawhub for ClawHub parity.
   --config <path>             Load profiles from a specific .clawscan.yml file; omit --profile to run them all.
   --scanner <id>              Scanner to run. Repeat for multiple scanners.
   --scanner-result <id=path>  Use a JSON fixture instead of running that scanner.
@@ -385,7 +387,8 @@ Required environment variables:
   judge: provider credentials belong to the command passed to --judge.
 
 Target notes:
-  No target scans child skill directories under ./skills.
+  No target with --scanner, --profile, or --config scans child skill directories under ./skills.
+  Plain clawscan without --scanner, --profile, --config, or --benchmark is invalid.
   Most scanners use a local skill file or directory target.
   AI-Infra-Guard uses the self-hosted A.I.G taskapi; local targets are uploaded as a temporary zip.
   Socket runs the public Socket CLI full-scan path over local dependency manifests.

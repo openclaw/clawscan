@@ -35,16 +35,37 @@ During development, run the CLI directly:
 go run ./cmd/clawscan ./my-skill --scanner clawscan-static --json
 ```
 
-## Default Scan
+## Explicit Scan Selection
 
-From a repository root that stores skills under `./skills/<name>/SKILL.md`, run
-the default built-in `clawhub` profile. This runs the ClawHub scanner suite and
-the bundled ClawHub Codex judge harness:
+From a repository root that stores skills under `./skills/<name>/SKILL.md`,
+choose a scanner, profile, config, or benchmark explicitly. Plain `clawscan` is
+invalid so local runs do not accidentally use ClawHub's production profile.
+
+Run one scanner across discovered skills:
+
+```bash
+clawscan --scanner skillspector
+```
+
+Run scanners that require credentials by exporting env vars next to the command:
+
+```bash
+export AIG_BASE_URL=http://127.0.0.1:8088
+export AIG_MODEL=gpt-4.1
+export AIG_MODEL_API_KEY=...
+clawscan --scanner ai-infra-guard
+
+export SNYK_TOKEN=...
+clawscan --scanner snyk
+```
+
+Run the built-in `clawhub` profile. This runs the ClawHub scanner suite and the
+bundled ClawHub Codex judge harness:
 
 ```bash
 export VIRUSTOTAL_API_KEY=...
 export OPENAI_API_KEY=...
-clawscan
+clawscan --profile clawhub
 ```
 
 Unless `--json` is passed, ClawScan writes the full artifact to
@@ -72,9 +93,11 @@ invoke.
 The embedded `clawhub` profile owns ClawHub's prompt and output schema inside
 ClawScan. ClawHub can run the same setup by invoking this profile.
 
-If `./skills` is missing or has no child directories containing `SKILL.md`,
-ClawScan exits with a target-discovery error. Pass an explicit target when you
-want to scan something else.
+If no target is passed with `--scanner`, `--profile`, or `--config`, ClawScan
+discovers child skill directories under `./skills`. If `./skills` is missing or
+has no child directories containing `SKILL.md`, ClawScan exits with a
+target-discovery error. Pass an explicit target when you want to scan something
+else.
 
 ## Project Profiles
 
@@ -185,7 +208,7 @@ Actual secret values are never written to run artifacts.
 
 | Flag | Description |
 | --- | --- |
-| `--profile <name>` | Profile to run. Defaults to `clawhub`. |
+| `--profile <name>` | Profile to run. Use `--profile clawhub` for ClawHub parity. |
 | `--config <path>` | Load one config file instead of discovering `.clawscan.yml` / `.clawscan.yaml`; omit `--profile` to run every profile in that file. |
 | `--scanner <id>` | Scanner to run. Repeat for multiple scanners. |
 | `--scanner-result <id=path>` | Use a JSON fixture instead of running that scanner. |

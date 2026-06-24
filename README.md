@@ -13,14 +13,39 @@ project can use it for agent-skill security scanning.
 
 ## Quick Start
 
-From a repository root with skills under `./skills/<name>/SKILL.md`, run the
-default built-in `clawhub` profile. This runs the ClawHub scanner suite and the
+From a repository root with skills under `./skills/<name>/SKILL.md`, choose a
+scanner, profile, config, or benchmark explicitly. Plain `clawscan` is invalid
+so local runs do not accidentally use ClawHub's production profile.
+
+Run SkillSpector across discovered skills:
+
+```bash
+clawscan --scanner skillspector
+```
+
+Run AI-Infra-Guard across discovered skills:
+
+```bash
+export AIG_BASE_URL=http://127.0.0.1:8088
+export AIG_MODEL=gpt-4.1
+export AIG_MODEL_API_KEY=...
+clawscan --scanner ai-infra-guard
+```
+
+Run Snyk across discovered skills:
+
+```bash
+export SNYK_TOKEN=...
+clawscan --scanner snyk
+```
+
+Run the built-in `clawhub` profile. This runs the ClawHub scanner suite and the
 bundled ClawHub Codex judge harness:
 
 ```bash
 export VIRUSTOTAL_API_KEY=...
 export OPENAI_API_KEY=...
-clawscan
+clawscan --profile clawhub
 ```
 
 Run a local static scan against one explicit target and print the artifact:
@@ -86,13 +111,13 @@ cd /tmp/overtly-malicious-skills
 git checkout 4ffbf9461ef0505f9ce76a0d3694a18ec33ea531
 ```
 
-Run the default ClawHub profile, which is the scan recipe ClawHub consumes:
+Run the ClawHub profile, which is the scan recipe ClawHub consumes:
 
 ```bash
 export VIRUSTOTAL_API_KEY=...
 export OPENAI_API_KEY=...
 
-clawscan ./skills/csv-summarizer
+clawscan ./skills/csv-summarizer --profile clawhub
 ```
 
 Run the skills-sh comparison profile over the same target:
@@ -148,18 +173,21 @@ Abbreviated real output from that pinned revision:
 
 ## What It Does
 
-- Runs scanner adapters against discovered `./skills` targets, one explicit
-  skill target, or a supported benchmark.
+- Runs explicitly selected scanner adapters, profiles, or configs against
+  discovered `./skills` targets, one explicit skill target, or a supported
+  benchmark.
 - Keeps scanner output as raw JSON evidence.
 - Records scanner status, errors, commands, and secret-safe env presence.
 - Optionally invokes an external judge command through `--judge`.
 - Lets prompts interpolate scanner JSON with placeholders such as
   `{{ scanners.skillspector }}`.
 
-If no target is passed, ClawScan looks for child skill directories under
-`./skills`. If that directory is missing or contains no child directories with a
-`SKILL.md`, the CLI exits with a clear target-discovery error instead of
-silently scanning `.`.
+If no target is passed with `--scanner`, `--profile`, or `--config`, ClawScan
+looks for child skill directories under `./skills`. If that directory is
+missing or contains no child directories with a `SKILL.md`, the CLI exits with
+a clear target-discovery error instead of silently scanning `.`. Plain
+`clawscan` without `--scanner`, `--profile`, `--config`, or `--benchmark`
+exits before target discovery and asks for an explicit selection.
 
 Profiles can come from the embedded built-ins or from the nearest project-local
 `.clawscan.yml` / `.clawscan.yaml`. Project profiles shadow built-in profile

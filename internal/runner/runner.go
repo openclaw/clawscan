@@ -176,14 +176,12 @@ type JudgeResult struct {
 	Result           interface{} `json:"result"`
 }
 
-const defaultProfileName = "clawhub"
-
 func ScannerIDs() []string {
 	return DefaultScannerRegistry().IDs()
 }
 
 func ParseArgs(args []string) (Options, error) {
-	opts := Options{Profile: defaultProfileName, ScannerResultPaths: map[string]string{}}
+	opts := Options{ScannerResultPaths: map[string]string{}}
 	start := 0
 	if len(args) > 0 && !strings.HasPrefix(args[0], "--") {
 		opts.Target = args[0]

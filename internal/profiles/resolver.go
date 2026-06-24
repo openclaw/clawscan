@@ -67,8 +67,6 @@ type cliIntent struct {
 	predictionsOutputSet bool
 }
 
-const defaultProfile = "clawhub"
-
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
 
 type ResolvedRunSet struct {
@@ -100,20 +98,26 @@ func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
 			return ResolvedRunSet{}, err
 		}
 	}
+	if !hasExplicitRunSelection(intent) {
+		return ResolvedRunSet{}, explicitRunSelectionError()
+	}
 	if intent.configPath != "" && !intent.profileSet {
 		return resolveAllConfigProfiles(intent, cwd)
 	}
-	registry, err := loadConfigs(cwd, intent.configPath)
-	if err != nil {
-		return ResolvedRunSet{}, err
-	}
-	profileName := intent.profile
-	if profileName == "" {
-		profileName = defaultProfile
-	}
-	selected, ok := registry.Profile(profileName)
-	if !ok {
-		return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
+
+	profileName := ""
+	selected := resolvedProfile{profile: Profile{}}
+	if intent.profileSet || intent.configPath != "" {
+		registry, err := loadConfigs(cwd, intent.configPath)
+		if err != nil {
+			return ResolvedRunSet{}, err
+		}
+		profileName = intent.profile
+		var ok bool
+		selected, ok = registry.Profile(profileName)
+		if !ok {
+			return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
+		}
 	}
 
 	finalArgs, extraEnv, files, err := buildRunnerArgs(intent, selected, profileName)
@@ -134,6 +138,14 @@ func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
 		OutputPath: opts.OutputPath,
 		JSON:       opts.JSON,
 	}, nil
+}
+
+func hasExplicitRunSelection(intent cliIntent) bool {
+	return len(intent.scanners) > 0 || intent.profileSet || intent.configPath != "" || intent.benchmarkSet
+}
+
+func explicitRunSelectionError() error {
+	return errors.New("No scanner, profile, config, or benchmark selected. Pass --scanner, --profile, --config, or --benchmark.")
 }
 
 func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
@@ -446,6 +458,9 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 		scanners = append([]string{}, intent.scanners...)
 	}
 	if len(scanners) == 0 {
+		if profileName == "" {
+			return nil, nil, nil, errors.New("At least one --scanner is required")
+		}
 		return nil, nil, nil, fmt.Errorf("Profile %s must include at least one scanner or use --scanner", profileName)
 	}
 

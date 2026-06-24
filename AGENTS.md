@@ -73,8 +73,8 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - Built-in profiles live in `internal/profiles/builtin.yml`.
 - Project-local `.clawscan.yml` / `.clawscan.yaml` files may shadow built-ins.
   CLI flags override profile values for a single run.
-- The default profile is `clawhub`. `--config <path>` without `--profile` runs
-  every profile in that config.
+- Select the ClawHub production profile explicitly with `--profile clawhub`.
+  `--config <path>` without `--profile` runs every profile in that config.
 - Supported benchmark verdicts are `clean`, `suspicious`, and `malicious`.
 - OpenClaw Security Signals predictions use `predictions.jsonl`; keep that file
   lightweight and secret-free.

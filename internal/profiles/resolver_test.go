@@ -43,19 +43,20 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	}
 }
 
-func TestResolveArgsDefaultsToClawHubProfileForExplicitTarget(t *testing.T) {
+func TestResolveArgsRejectsMissingExplicitSelection(t *testing.T) {
 	dir := t.TempDir()
 
-	opts, err := ResolveArgs([]string{"./skill"}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
-		t.Fatalf("scanners = %q", got)
-	}
-	if opts.Judge == nil {
-		t.Fatal("expected default clawhub judge")
+	for _, args := range [][]string{
+		{},
+		{"./skill"},
+	} {
+		_, err := ResolveArgs(args, dir)
+		if err == nil {
+			t.Fatalf("ResolveArgs(%v) succeeded", args)
+		}
+		if !strings.Contains(err.Error(), "Pass --scanner, --profile, --config, or --benchmark") {
+			t.Fatalf("err = %v", err)
+		}
 	}
 }
 
@@ -69,6 +70,9 @@ func TestResolveArgsTreatsScannerOnlyCommandAsAdHocWithoutDefaultJudge(t *testin
 
 	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
 		t.Fatalf("scanners = %q", got)
+	}
+	if opts.Profile != "" {
+		t.Fatalf("profile = %q", opts.Profile)
 	}
 	if opts.Judge != nil {
 		t.Fatalf("judge = %#v", opts.Judge)
@@ -130,22 +134,26 @@ func TestResolveArgsValidatesClawHubJudgeEnv(t *testing.T) {
 	}
 }
 
-func TestResolveArgsLeavesPlainCommandTargetForRunnerDiscovery(t *testing.T) {
-	opts, err := ResolveArgs([]string{}, t.TempDir())
+func TestResolveArgsAllowsExplicitScannerWithoutTarget(t *testing.T) {
+	opts, err := ResolveArgs([]string{"--scanner", "clawscan-static"}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.Target != "" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if opts.Profile != "clawhub" {
+	if opts.Profile != "" {
 		t.Fatalf("profile = %q", opts.Profile)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+		t.Fatalf("scanners = %q", got)
 	}
 }
 
 func TestResolveArgsForwardsBenchmarkPredictionsOutput(t *testing.T) {
 	opts, err := ResolveArgs([]string{
 		"--benchmark", "OpenClaw/clawhub-security-signals",
+		"--scanner", "clawscan-static",
 		"--predictions-output", "./submission/predictions.jsonl",
 	}, t.TempDir())
 	if err != nil {
@@ -180,7 +188,7 @@ profiles:
     json: true
 `)
 
-	opts, err := ResolveArgs([]string{"./skill"}, child)
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, child)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +257,7 @@ func TestResolveArgsRejectsAmbiguousDiscoveredConfig(t *testing.T) {
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles: {}\n")
 	writeFile(t, filepath.Join(dir, ".clawscan.yaml"), "version: 1\nprofiles: {}\n")
 
-	_, err := ResolveArgs([]string{"./skill"}, dir)
+	_, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, dir)
 	if err == nil || !strings.Contains(err.Error(), "Ambiguous ClawScan config files") {
 		t.Fatalf("err = %v", err)
 	}
@@ -262,7 +270,7 @@ func TestResolveArgsRejectsMalformedYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: [\n")
 
-	_, err := ResolveArgs([]string{"./skill"}, dir)
+	_, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, dir)
 	if err == nil || !strings.Contains(err.Error(), "parse ClawScan config") {
 		t.Fatalf("err = %v", err)
 	}

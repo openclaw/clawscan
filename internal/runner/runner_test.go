@@ -65,12 +65,12 @@ func TestParseArgsRequiresExplicitScanner(t *testing.T) {
 	}
 }
 
-func TestParseArgsDefaultsArtifactProfileLabelToClawHub(t *testing.T) {
+func TestParseArgsLeavesArtifactProfileLabelEmptyWithoutProfile(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "clawscan-static"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Profile != "clawhub" {
+	if opts.Profile != "" {
 		t.Fatalf("profile = %q", opts.Profile)
 	}
 }
@@ -765,7 +765,7 @@ func TestRunTargetsScansDiscoveredSkillsWithDefaultProfile(t *testing.T) {
 	if result.Batch == nil || result.Batch.SchemaVersion != "clawscan-batch-v1" {
 		t.Fatalf("batch = %#v", result.Batch)
 	}
-	if result.Batch.Profile != "clawhub" {
+	if result.Batch.Profile != "" {
 		t.Fatalf("profile = %q", result.Batch.Profile)
 	}
 	if len(result.Batch.Runs) != 2 {
