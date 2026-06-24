@@ -215,7 +215,7 @@ Built-in profiles:
 
 Required environment variables:
   ai-infra-guard: AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY
-  socket: SOCKET_CLI_API_TOKEN
+  socket: SOCKET_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
   skillspector: CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key.

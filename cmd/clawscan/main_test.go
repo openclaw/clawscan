@@ -46,7 +46,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"AIG_BASE_URL",
 		"AIG_MODEL",
 		"AIG_MODEL_API_KEY",
-		"SOCKET_CLI_API_TOKEN",
+		"SOCKET_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
 		"CLAWSCAN_SKILLSPECTOR_LLM=1 requires the configured provider key",

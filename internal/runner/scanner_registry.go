@@ -127,7 +127,7 @@ func defaultScannerAdapters() []ScannerAdapter {
 		},
 		scannerAdapter{
 			id:           "socket",
-			requirements: staticEnvRequirements("scanner socket", "SOCKET_CLI_API_TOKEN"),
+			requirements: staticEnvRequirements("scanner socket", "SOCKET_TOKEN"),
 			run:          ExternalScannerRunner.runSocket,
 		},
 		scannerAdapter{

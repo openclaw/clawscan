@@ -60,11 +60,11 @@ func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runner.ValidateRequirements(opts, map[string]string{"SOCKET_CLI_API_TOKEN": "", "SNYK_TOKEN": ""})
+	err = runner.ValidateRequirements(opts, map[string]string{"SOCKET_TOKEN": "", "SNYK_TOKEN": ""})
 	if err == nil {
 		t.Fatal("expected missing env error")
 	}
-	if !strings.Contains(err.Error(), "- SOCKET_CLI_API_TOKEN required by scanner socket") {
+	if !strings.Contains(err.Error(), "- SOCKET_TOKEN required by scanner socket") {
 		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(err.Error(), "- SNYK_TOKEN required by scanner snyk") {

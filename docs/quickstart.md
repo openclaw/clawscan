@@ -120,7 +120,7 @@ clawscan ./my-skill --profile skills-sh --scanner clawscan-static --json
 Config files may declare env var names that a judge needs, but they must not
 store secret values. Scanner and judge credentials stay in environment
 variables, such as `OPENAI_API_KEY` for the example judge command.
-The built-in `skills-sh` profile needs `SOCKET_CLI_API_TOKEN` and `SNYK_TOKEN`
+The built-in `skills-sh` profile needs `SOCKET_TOKEN` and `SNYK_TOKEN`
 unless those scanners are supplied through `--scanner-result` fixtures or
 overridden with `--scanner`.
 
