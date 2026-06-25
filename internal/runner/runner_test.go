@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,6 +203,58 @@ func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
 	}
 	if scanners.bundleContent != "echo ok\n" {
 		t.Fatalf("bundle file = %q", scanners.bundleContent)
+	}
+}
+
+func TestHuggingFaceBenchmarkClientRetriesTransientRowsFailures(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			fmt.Fprint(w, "<html>temporary upstream failure</html>")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"rows":[{"row":{"id":"row-1","skill_slug":"owner/demo","skill_version":"1.0.0","skill_md_content":"# Demo\n","skill_bundle_content":[],"clawscan_verdict":"clean","clawscan_confidence":"high","clawscan_model":"gpt-5","clawscan_summary":"ok","split":"eval_holdout"}}]}`)
+	}))
+	defer server.Close()
+
+	client := HuggingFaceBenchmarkClient{
+		Endpoint: server.URL,
+		Sleep:    func(time.Duration) {},
+	}
+	rows, err := client.FetchOpenClawRows(openClawBenchmarkID, defaultOpenClawBenchmarkSplit, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 {
+		t.Fatalf("requests = %d, want 3", requests)
+	}
+	if len(rows) != 1 || rows[0].ID != "row-1" {
+		t.Fatalf("rows = %#v", rows)
+	}
+}
+
+func TestHuggingFaceBenchmarkClientDoesNotRetryClientErrors(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":"bad dataset request"}`)
+	}))
+	defer server.Close()
+
+	client := HuggingFaceBenchmarkClient{
+		Endpoint: server.URL,
+		Sleep:    func(time.Duration) {},
+	}
+	_, err := client.FetchOpenClawRows(openClawBenchmarkID, defaultOpenClawBenchmarkSplit, 0, 1)
+	if err == nil || err.Error() != "fetch benchmark rows: bad dataset request" {
+		t.Fatalf("err = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
 	}
 }
 
