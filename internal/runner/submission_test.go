@@ -195,6 +195,33 @@ func TestHuggingFaceBenchmarkClientRetriesTransientHTTPError(t *testing.T) {
 	}
 }
 
+func TestHuggingFaceBenchmarkClientRetriesRateLimitHTTPError(t *testing.T) {
+	withHuggingFaceRowsRetryDelay(t, 0)
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests < 3 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"slow down"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := HuggingFaceBenchmarkClient{Endpoint: server.URL}
+	_, err := client.FetchOpenClawRows("OpenClaw/clawhub-security-signals", "eval_holdout", 0, 1)
+	if err != nil {
+		t.Fatalf("FetchOpenClawRows err = %v", err)
+	}
+	if requests != 3 {
+		t.Fatalf("requests = %d, want 3", requests)
+	}
+}
+
 func withHuggingFaceRowsRetryDelay(t *testing.T, delay time.Duration) {
 	t.Helper()
 	previous := huggingFaceRowsRetryDelay

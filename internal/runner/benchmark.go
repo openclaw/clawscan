@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,7 +32,7 @@ const (
 	skillTrustBenchArchiveURL     = "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench/resolve/main/benchmark_full_v1.0.zip"
 	huggingFaceRowsEndpoint       = "https://datasets-server.huggingface.co/rows"
 	huggingFaceRowsPageSize       = 100
-	huggingFaceRowsMaxAttempts    = 3
+	huggingFaceRowsMaxAttempts    = 6
 )
 
 var huggingFaceRowsRetryDelay = 2 * time.Second
@@ -732,7 +733,7 @@ func (client HuggingFaceBenchmarkClient) fetchSkillTrustBenchRowsPage(httpClient
 func fetchHuggingFaceRowsPage(httpClient *http.Client, requestURL string) ([]byte, int, error) {
 	var lastErr error
 	for attempt := 1; attempt <= huggingFaceRowsMaxAttempts; attempt++ {
-		raw, statusCode, err := fetchHuggingFaceRowsPageOnce(httpClient, requestURL)
+		raw, statusCode, headers, err := fetchHuggingFaceRowsPageOnce(httpClient, requestURL)
 		if err == nil && !isRetriableHuggingFaceRowsStatus(statusCode) {
 			return raw, statusCode, nil
 		}
@@ -747,28 +748,46 @@ func fetchHuggingFaceRowsPage(httpClient *http.Client, requestURL string) ([]byt
 		if attempt == huggingFaceRowsMaxAttempts {
 			break
 		}
-		time.Sleep(huggingFaceRowsRetryDelay)
+		time.Sleep(huggingFaceRowsBackoff(attempt, headers))
 	}
 	return nil, 0, lastErr
 }
 
-func fetchHuggingFaceRowsPageOnce(httpClient *http.Client, requestURL string) ([]byte, int, error) {
+func fetchHuggingFaceRowsPageOnce(httpClient *http.Client, requestURL string) ([]byte, int, http.Header, error) {
 	response, err := httpClient.Get(requestURL)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, response.StatusCode, err
+		return nil, response.StatusCode, response.Header, err
 	}
-	return raw, response.StatusCode, nil
+	return raw, response.StatusCode, response.Header, nil
 }
 
 func isRetriableHuggingFaceRowsStatus(statusCode int) bool {
 	return statusCode == http.StatusRequestTimeout ||
 		statusCode == http.StatusTooManyRequests ||
 		(statusCode >= http.StatusInternalServerError && statusCode <= 599)
+}
+
+func huggingFaceRowsBackoff(attempt int, headers http.Header) time.Duration {
+	if retryAfter := headers.Get("Retry-After"); retryAfter != "" {
+		if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds >= 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		if retryAt, err := http.ParseTime(retryAfter); err == nil {
+			if delay := time.Until(retryAt); delay > 0 {
+				return delay
+			}
+		}
+	}
+	delay := time.Duration(attempt*attempt) * huggingFaceRowsRetryDelay
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
 }
 
 func (client HuggingFaceBenchmarkClient) MaterializeSkillTrustBenchRow(root string, row SkillTrustBenchRow) (string, error) {
