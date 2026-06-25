@@ -31,7 +31,10 @@ const (
 	skillTrustBenchArchiveURL     = "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench/resolve/main/benchmark_full_v1.0.zip"
 	huggingFaceRowsEndpoint       = "https://datasets-server.huggingface.co/rows"
 	huggingFaceRowsPageSize       = 100
+	huggingFaceRowsMaxAttempts    = 3
 )
+
+var huggingFaceRowsRetryDelay = 2 * time.Second
 
 var openClawBenchmarkSplits = map[string]bool{
 	"train":        true,
@@ -674,22 +677,17 @@ func (client HuggingFaceBenchmarkClient) fetchOpenClawRowsPage(httpClient *http.
 	values.Set("offset", fmt.Sprintf("%d", offset))
 	values.Set("length", fmt.Sprintf("%d", length))
 	requestURL := endpoint + "?" + values.Encode()
-	response, err := httpClient.Get(requestURL)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	raw, err := io.ReadAll(response.Body)
+	raw, statusCode, err := fetchHuggingFaceRowsPage(httpClient, requestURL)
 	if err != nil {
 		return nil, err
 	}
 	var parsed huggingFaceRowsResponse
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if statusCode < 200 || statusCode >= 300 {
 		_ = json.Unmarshal(raw, &parsed)
 		if parsed.Error != "" {
 			return nil, fmt.Errorf("fetch benchmark rows: %s", parsed.Error)
 		}
-		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", statusCode)
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, err
@@ -709,22 +707,17 @@ func (client HuggingFaceBenchmarkClient) fetchSkillTrustBenchRowsPage(httpClient
 	values.Set("offset", fmt.Sprintf("%d", offset))
 	values.Set("length", fmt.Sprintf("%d", length))
 	requestURL := endpoint + "?" + values.Encode()
-	response, err := httpClient.Get(requestURL)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	raw, err := io.ReadAll(response.Body)
+	raw, statusCode, err := fetchHuggingFaceRowsPage(httpClient, requestURL)
 	if err != nil {
 		return nil, err
 	}
 	var parsed skillTrustBenchRowsResponse
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if statusCode < 200 || statusCode >= 300 {
 		_ = json.Unmarshal(raw, &parsed)
 		if parsed.Error != "" {
 			return nil, fmt.Errorf("fetch benchmark rows: %s", parsed.Error)
 		}
-		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", statusCode)
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, err
@@ -734,6 +727,48 @@ func (client HuggingFaceBenchmarkClient) fetchSkillTrustBenchRowsPage(httpClient
 		rows = append(rows, row.Row)
 	}
 	return rows, nil
+}
+
+func fetchHuggingFaceRowsPage(httpClient *http.Client, requestURL string) ([]byte, int, error) {
+	var lastErr error
+	for attempt := 1; attempt <= huggingFaceRowsMaxAttempts; attempt++ {
+		raw, statusCode, err := fetchHuggingFaceRowsPageOnce(httpClient, requestURL)
+		if err == nil && !isRetriableHuggingFaceRowsStatus(statusCode) {
+			return raw, statusCode, nil
+		}
+		if err == nil && attempt == huggingFaceRowsMaxAttempts {
+			return raw, statusCode, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("fetch benchmark rows: HTTP %d", statusCode)
+		}
+		if attempt == huggingFaceRowsMaxAttempts {
+			break
+		}
+		time.Sleep(huggingFaceRowsRetryDelay)
+	}
+	return nil, 0, lastErr
+}
+
+func fetchHuggingFaceRowsPageOnce(httpClient *http.Client, requestURL string) ([]byte, int, error) {
+	response, err := httpClient.Get(requestURL)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, response.StatusCode, err
+	}
+	return raw, response.StatusCode, nil
+}
+
+func isRetriableHuggingFaceRowsStatus(statusCode int) bool {
+	return statusCode == http.StatusRequestTimeout ||
+		statusCode == http.StatusTooManyRequests ||
+		(statusCode >= http.StatusInternalServerError && statusCode <= 599)
 }
 
 func (client HuggingFaceBenchmarkClient) MaterializeSkillTrustBenchRow(root string, row SkillTrustBenchRow) (string, error) {
