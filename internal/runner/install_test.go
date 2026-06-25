@@ -165,20 +165,3 @@ func TestInstallScannersRejectsUnknownScanner(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
-
-func TestInstallScannersRejectsServiceBackedScanner(t *testing.T) {
-	_, err := InstallScanners([]string{"ai-infra-guard"}, InstallOptions{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "ai-infra-guard has no local scanner CLI to install") {
-		t.Fatalf("err = %v", err)
-	}
-	_, installIDs, ok := strings.Cut(err.Error(), "Accepted install scanner IDs:")
-	if !ok {
-		t.Fatalf("err missing accepted install scanner IDs: %v", err)
-	}
-	if strings.Contains(installIDs, "ai-infra-guard") {
-		t.Fatalf("installable scanner list should not include ai-infra-guard: %v", err)
-	}
-}

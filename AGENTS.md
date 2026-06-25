@@ -59,8 +59,7 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - Scanner adapters should declare required environment variables up front so
   ClawScan can fail before doing partial work.
 - Never add API-key CLI flags. Credentials belong in environment variables such
-  as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`, `SOCKET_TOKEN`, `AIG_BASE_URL`,
-  `AIG_MODEL`, and `AIG_MODEL_API_KEY`.
+  as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`, and `SOCKET_TOKEN`.
 - Run artifacts must record only secret-safe env presence, such as `present` or
   `missing`, never secret values.
 - `--judge` is an external harness command. Do not add a model-provider

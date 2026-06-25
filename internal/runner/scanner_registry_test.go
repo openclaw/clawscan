@@ -75,7 +75,7 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,ai-infra-guard,cisco,clawscan-static,skillspector,snyk,socket,virustotal"
+	want := "agentverus,cisco,clawscan-static,skillspector,snyk,socket,virustotal"
 	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
 	}
@@ -154,10 +154,6 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 		}
 	}
 
-	aig, _ := registry.Info("ai-infra-guard")
-	if got := strings.Join(aig.RequiredEnv, ","); got != "AIG_BASE_URL,AIG_MODEL,AIG_MODEL_API_KEY" {
-		t.Fatalf("ai-infra-guard required env = %q", got)
-	}
 	skillspector, _ := registry.Info("skillspector")
 	if got := strings.Join(skillspector.OptionalEnv, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY,NVIDIA_INFERENCE_KEY,SKILLSPECTOR_PROVIDER" {
 		t.Fatalf("skillspector optional env = %q", got)

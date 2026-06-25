@@ -61,8 +61,6 @@ The install command accepts one or more scanner IDs and prints one concise
 status per scanner. It uses the install commands published by each scanner's
 upstream docs where available, verifies launcher-only tools such as `uvx`, and
 skips built-in or API-backed scanners that have no local CLI to install.
-Service-backed scanners such as AI-Infra-Guard are not accepted by
-`clawscan install`; run or deploy that service separately.
 
 Cisco's upstream README recommends `uv pip install cisco-ai-skill-scanner` for
 the base scanner package, so it uses the same Python environment context as the
@@ -84,11 +82,6 @@ clawscan --scanner skillspector
 Run scanners that require credentials by exporting env vars next to the command:
 
 ```bash
-export AIG_BASE_URL=http://127.0.0.1:8088
-export AIG_MODEL=gpt-4.1
-export AIG_MODEL_API_KEY=...
-clawscan --scanner ai-infra-guard
-
 export SNYK_TOKEN=...
 clawscan --scanner snyk
 ```
@@ -231,9 +224,6 @@ export VIRUSTOTAL_API_KEY=...
 export OPENAI_API_KEY=...
 export SNYK_TOKEN=...
 export SOCKET_TOKEN=...
-export AIG_BASE_URL=http://127.0.0.1:8088
-export AIG_MODEL=gpt-4.1
-export AIG_MODEL_API_KEY=...
 ```
 
 ClawScan validates required env vars before starting a run and records only

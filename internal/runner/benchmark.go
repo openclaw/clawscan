@@ -473,13 +473,12 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 	caseOpts.Benchmark = nil
 	caseOpts.OutputPath = ""
 	return Run(caseOpts, RunContext{
-		Env:                    env,
-		Now:                    now,
-		CommandRunner:          ctx.CommandRunner,
-		ScannerRunner:          ctx.ScannerRunner,
-		SkillSpectorCommand:    ctx.SkillSpectorCommand,
-		AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
-		VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
+		Env:                  env,
+		Now:                  now,
+		CommandRunner:        ctx.CommandRunner,
+		ScannerRunner:        ctx.ScannerRunner,
+		SkillSpectorCommand:  ctx.SkillSpectorCommand,
+		VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
 	})
 }
 

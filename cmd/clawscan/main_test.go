@@ -47,17 +47,13 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"SkillTrustBench",
 		"OpenClaw/clawhub-security-signals",
 		"Accepted scanner IDs:",
-		"agentverus, ai-infra-guard, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
+		"agentverus, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
 		"Required environment variables:",
 		"OPENAI_API_KEY",
-		"AIG_BASE_URL",
-		"AIG_MODEL",
-		"AIG_MODEL_API_KEY",
 		"SOCKET_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
 		"skillspector: no ClawScan-required env vars",
-		"AI-Infra-Guard uses the self-hosted A.I.G taskapi",
 		"No target with --scanner, --profile, or --config scans child skill directories under ./skills",
 		"--judge <cmd>",
 		"{{ workspace }}",
@@ -90,16 +86,6 @@ func TestRunCommandInstallStaticScannerPrintsSkippedStatus(t *testing.T) {
 	}
 }
 
-func TestRunCommandInstallRejectsServiceBackedScanner(t *testing.T) {
-	err := run([]string{"install", "ai-infra-guard"}, []string{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "ai-infra-guard has no local scanner CLI to install") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		if err := run([]string{"scanners"}, []string{}); err != nil {
@@ -119,8 +105,6 @@ func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
 		"ID",
 		"Name",
 		"Required env",
-		"ai-infra-guard",
-		"AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY",
 		"skillspector",
 		"none",
 		"virustotal",

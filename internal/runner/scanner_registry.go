@@ -189,21 +189,6 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runAgentVerus,
 		},
 		scannerAdapter{
-			id:           "ai-infra-guard",
-			requirements: staticEnvRequirements("scanner ai-infra-guard", "AIG_BASE_URL", "AIG_MODEL", "AIG_MODEL_API_KEY"),
-			info: ScannerInfo{
-				DisplayName:   "Tencent AI-Infra-Guard",
-				RepositoryURL: "https://github.com/Tencent/AI-Infra-Guard",
-				Description:   "Uploads local targets to a self-hosted A.I.G taskapi service, or passes URL targets to mcp_scan.",
-			},
-			installPlan: InstallPlan{
-				ScannerID:                "ai-infra-guard",
-				Name:                     "Tencent AI-Infra-Guard",
-				InstallUnsupportedReason: "Run/deploy the A.I.G service separately, then configure AIG_BASE_URL, AIG_MODEL, and AIG_MODEL_API_KEY at scan time.",
-			},
-			run: ExternalScannerRunner.runAIInfraGuard,
-		},
-		scannerAdapter{
 			id: "cisco",
 			info: ScannerInfo{
 				DisplayName:   "Cisco AI Defense skill-scanner",

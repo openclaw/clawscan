@@ -591,7 +591,6 @@ Built-in profiles:
 
 Required environment variables:
   clawhub judge: OPENAI_API_KEY
-  ai-infra-guard: AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY
   socket: SOCKET_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
@@ -602,7 +601,6 @@ Target notes:
   No target with --scanner, --profile, or --config scans child skill directories under ./skills.
   Plain clawscan without --scanner, --profile, --config, or --benchmark is invalid.
   Most scanners use a local skill file or directory target.
-  AI-Infra-Guard uses the self-hosted A.I.G taskapi; local targets are uploaded as a temporary zip.
   Socket runs the public Socket CLI full-scan path over local dependency manifests.
 
 Judge summary:

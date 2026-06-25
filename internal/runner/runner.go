@@ -53,14 +53,13 @@ type EnvRequirement struct {
 }
 
 type RunContext struct {
-	Env                    map[string]string
-	Now                    func() time.Time
-	CommandRunner          CommandRunner
-	ScannerRunner          ScannerRunner
-	SkillSpectorCommand    []string
-	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
-	VirusTotalHTTPClient   VirusTotalHTTPClient
-	BenchmarkClient        BenchmarkClient
+	Env                  map[string]string
+	Now                  func() time.Time
+	CommandRunner        CommandRunner
+	ScannerRunner        ScannerRunner
+	SkillSpectorCommand  []string
+	VirusTotalHTTPClient VirusTotalHTTPClient
+	BenchmarkClient      BenchmarkClient
 }
 
 type ScannerRunner interface {
@@ -390,12 +389,11 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
 		scannerRunner = ExternalScannerRunner{
-			CommandRunner:          commandRunner,
-			Env:                    env,
-			SkillSpectorCommand:    ctx.SkillSpectorCommand,
-			AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
-			VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
-			Timeout:                20 * time.Minute,
+			CommandRunner:        commandRunner,
+			Env:                  env,
+			SkillSpectorCommand:  ctx.SkillSpectorCommand,
+			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
+			Timeout:              20 * time.Minute,
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -1532,13 +1530,12 @@ func isSourceReadError(err error, source string) bool {
 }
 
 type ExternalScannerRunner struct {
-	CommandRunner          CommandRunner
-	Env                    map[string]string
-	Registry               ScannerRegistry
-	SkillSpectorCommand    []string
-	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
-	VirusTotalHTTPClient   VirusTotalHTTPClient
-	Timeout                time.Duration
+	CommandRunner        CommandRunner
+	Env                  map[string]string
+	Registry             ScannerRegistry
+	SkillSpectorCommand  []string
+	VirusTotalHTTPClient VirusTotalHTTPClient
+	Timeout              time.Duration
 }
 
 type OpenAIRequestOptions struct {

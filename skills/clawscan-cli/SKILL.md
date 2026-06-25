@@ -121,14 +121,13 @@ env vars, and install guidance.
 Accepted scanner IDs:
 
 ```text
-agentverus, ai-infra-guard, cisco, clawscan-static, skillspector, snyk, socket, virustotal
+agentverus, cisco, clawscan-static, skillspector, snyk, socket, virustotal
 ```
 
 Credential rules:
 
 | Scanner | Required env vars |
 | --- | --- |
-| `ai-infra-guard` | `AIG_BASE_URL`, `AIG_MODEL`, `AIG_MODEL_API_KEY` |
 | `socket` | `SOCKET_TOKEN` |
 | `snyk` | `SNYK_TOKEN` |
 | `virustotal` | `VIRUSTOTAL_API_KEY` |
@@ -151,8 +150,6 @@ install docs where they publish an install command, including Cisco's
 `npm install -g socket`, and AgentVerus'
 `npm install --save-dev agentverus-scanner`. Snyk is launcher-based, so
 ClawScan verifies `uvx`; built-in and API-backed scanners are skipped.
-AI-Infra-Guard is service-backed and is not accepted by `clawscan install`;
-deploy/configure the A.I.G service separately before scanning.
 
 Use `--scanner-result` when a test or fixture should supply stable scanner JSON:
 

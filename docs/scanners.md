@@ -12,7 +12,6 @@ upstream link, description, env vars, and install guidance.
 | Scanner ID | Source | Target support | Required env vars |
 | --- | --- | --- | --- |
 | `agentverus` | [AgentVerus](https://github.com/agentverus/agentverus-scanner) | Local file or directory through `npx --yes agentverus-scanner scan <target> --json`. | None for the local scanner path. |
-| `ai-infra-guard` | [Tencent AI-Infra-Guard](https://github.com/Tencent/AI-Infra-Guard) | Local targets are zipped and uploaded to a self-hosted A.I.G taskapi service. URL targets are passed to `mcp_scan`. | `AIG_BASE_URL`, `AIG_MODEL`, `AIG_MODEL_API_KEY`. |
 | `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Local file or directory through `skill-scanner scan <target> --format json --output <tempfile>`. | None required by ClawScan. Configure Cisco's CLI separately. |
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Local file or directory. Uses SkillSpector LLM mode when provider env vars are set; otherwise passes `--no-llm`. | None required by ClawScan. |
 | `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Local skill path through `uvx snyk-agent-scan@latest scan --json --no-bootstrap --skills <target>`. | `SNYK_TOKEN`. |
@@ -41,11 +40,6 @@ nonzero if any requested install fails.
 | `snyk` | Verifies `uvx`, because scans run through `uvx snyk-agent-scan@latest ...`. |
 | `socket` | Runs the upstream install command `npm install -g socket`, then verifies `socket --help`. |
 | `virustotal` | Skips local install. Configure `VIRUSTOTAL_API_KEY` at scan time. |
-
-`ai-infra-guard` is intentionally not accepted by `clawscan install`: it is a
-service-backed scanner, not a local scanner CLI. Run or deploy the A.I.G service
-separately, then set `AIG_BASE_URL`, `AIG_MODEL`, and `AIG_MODEL_API_KEY` for
-scan time.
 
 ## Static Scanner
 

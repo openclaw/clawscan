@@ -33,7 +33,7 @@ go run ./cmd/clawscan ./README.md \
 
 Use live scanner credentials only when you already have them. Credentials must
 come from environment variables such as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`,
-`SOCKET_TOKEN`, `AIG_BASE_URL`, `AIG_MODEL`, and `AIG_MODEL_API_KEY`.
+and `SOCKET_TOKEN`.
 
 ## Validation Matrix
 
