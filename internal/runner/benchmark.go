@@ -20,6 +20,8 @@ const (
 	defaultOpenClawBenchmarkSplit = "eval_holdout"
 	huggingFaceRowsEndpoint       = "https://datasets-server.huggingface.co/rows"
 	huggingFaceRowsPageSize       = 100
+	huggingFaceRowsMaxAttempts    = 4
+	huggingFaceRowsRetryBaseDelay = 500 * time.Millisecond
 )
 
 var openClawBenchmarkSplits = map[string]bool{
@@ -100,6 +102,7 @@ type OpenClawBundleFile struct {
 type HuggingFaceBenchmarkClient struct {
 	HTTPClient *http.Client
 	Endpoint   string
+	Sleep      func(time.Duration)
 }
 
 type huggingFaceRowsResponse struct {
@@ -326,7 +329,7 @@ func (client HuggingFaceBenchmarkClient) FetchOpenClawRows(dataset string, split
 				length = remaining
 			}
 		}
-		page, err := client.fetchOpenClawRowsPage(httpClient, endpoint, dataset, split, nextOffset, length)
+		page, err := client.fetchOpenClawRowsPageWithRetry(httpClient, endpoint, dataset, split, nextOffset, length)
 		if err != nil {
 			return nil, err
 		}
@@ -342,7 +345,29 @@ func (client HuggingFaceBenchmarkClient) FetchOpenClawRows(dataset string, split
 	return rows, nil
 }
 
-func (client HuggingFaceBenchmarkClient) fetchOpenClawRowsPage(httpClient *http.Client, endpoint string, dataset string, split string, offset int, length int) ([]OpenClawBenchmarkRow, error) {
+func (client HuggingFaceBenchmarkClient) fetchOpenClawRowsPageWithRetry(httpClient *http.Client, endpoint string, dataset string, split string, offset int, length int) ([]OpenClawBenchmarkRow, error) {
+	sleep := client.Sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	for attempt := 0; attempt < huggingFaceRowsMaxAttempts; attempt++ {
+		rows, transient, err := fetchOpenClawRowsPage(httpClient, endpoint, dataset, split, offset, length)
+		if err == nil {
+			return rows, nil
+		}
+		if !transient || attempt == huggingFaceRowsMaxAttempts-1 {
+			return nil, err
+		}
+		sleep(huggingFaceRowsRetryDelay(attempt))
+	}
+	return nil, errors.New("fetch benchmark rows failed")
+}
+
+func huggingFaceRowsRetryDelay(attempt int) time.Duration {
+	return huggingFaceRowsRetryBaseDelay * time.Duration(1<<attempt)
+}
+
+func fetchOpenClawRowsPage(httpClient *http.Client, endpoint string, dataset string, split string, offset int, length int) ([]OpenClawBenchmarkRow, bool, error) {
 	values := url.Values{}
 	values.Set("dataset", dataset)
 	values.Set("config", openClawBenchmarkConfig)
@@ -352,22 +377,30 @@ func (client HuggingFaceBenchmarkClient) fetchOpenClawRowsPage(httpClient *http.
 	requestURL := endpoint + "?" + values.Encode()
 	response, err := httpClient.Get(requestURL)
 	if err != nil {
-		return nil, err
+		return nil, true, fmt.Errorf("fetch benchmark rows: %w", err)
 	}
 	defer response.Body.Close()
 	var parsed huggingFaceRowsResponse
-	if err := json.NewDecoder(response.Body).Decode(&parsed); err != nil {
-		return nil, err
-	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_ = json.NewDecoder(response.Body).Decode(&parsed)
 		if parsed.Error != "" {
-			return nil, fmt.Errorf("fetch benchmark rows: %s", parsed.Error)
+			return nil, isTransientBenchmarkStatus(response.StatusCode), fmt.Errorf("fetch benchmark rows: %s", parsed.Error)
 		}
-		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", response.StatusCode)
+		return nil, isTransientBenchmarkStatus(response.StatusCode), fmt.Errorf("fetch benchmark rows: HTTP %d", response.StatusCode)
+	}
+	if err := json.NewDecoder(response.Body).Decode(&parsed); err != nil {
+		return nil, false, err
 	}
 	rows := make([]OpenClawBenchmarkRow, 0, len(parsed.Rows))
 	for _, row := range parsed.Rows {
 		rows = append(rows, row.Row)
 	}
-	return rows, nil
+	return rows, false, nil
+}
+
+func isTransientBenchmarkStatus(statusCode int) bool {
+	return statusCode == http.StatusRequestTimeout ||
+		statusCode == http.StatusTooEarly ||
+		statusCode == http.StatusTooManyRequests ||
+		statusCode >= http.StatusInternalServerError
 }
