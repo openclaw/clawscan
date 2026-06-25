@@ -61,6 +61,7 @@ func TestRunBenchmarkRejectsUnsupportedBenchmarkThroughRegistry(t *testing.T) {
 type stubBenchmarkAdapter struct {
 	id      string
 	aliases []string
+	info    DatasetInfo
 }
 
 func (adapter stubBenchmarkAdapter) ID() string {
@@ -69,6 +70,10 @@ func (adapter stubBenchmarkAdapter) ID() string {
 
 func (adapter stubBenchmarkAdapter) Aliases() []string {
 	return append([]string(nil), adapter.aliases...)
+}
+
+func (adapter stubBenchmarkAdapter) Info() DatasetInfo {
+	return adapter.info
 }
 
 func (adapter stubBenchmarkAdapter) Source() string {
@@ -93,6 +98,53 @@ func (adapter stubBenchmarkAdapter) RunCases(Options, RunContext, map[string]str
 
 func (adapter stubBenchmarkAdapter) SupportsPredictionsOutput() bool {
 	return false
+}
+
+func TestDefaultBenchmarkRegistryProvidesDatasetCatalogInfo(t *testing.T) {
+	registry := DefaultBenchmarkRegistry()
+	for _, id := range registry.IDs() {
+		info, ok := registry.Info(id)
+		if !ok {
+			t.Fatalf("missing dataset info for %s", id)
+		}
+		if info.ID != id {
+			t.Fatalf("%s info id = %q", id, info.ID)
+		}
+		if strings.TrimSpace(info.DisplayName) == "" {
+			t.Fatalf("%s info missing display name", id)
+		}
+		if strings.TrimSpace(info.SourceURL) == "" {
+			t.Fatalf("%s info missing source URL", id)
+		}
+		if strings.TrimSpace(info.Description) == "" {
+			t.Fatalf("%s info missing description", id)
+		}
+		if len(info.Splits) == 0 {
+			t.Fatalf("%s info missing splits", id)
+		}
+		if info.DefaultSplit == "" {
+			t.Fatalf("%s info missing default split", id)
+		}
+		if strings.TrimSpace(info.RequiredEnv) == "" {
+			t.Fatalf("%s info missing required env summary", id)
+		}
+	}
+
+	openClaw, _ := registry.Info("OpenClaw/clawhub-security-signals")
+	if got := strings.Join(openClaw.Splits, ","); got != "eval_holdout,test,train,validation" {
+		t.Fatalf("OpenClaw splits = %q", got)
+	}
+	if openClaw.DefaultSplit != "eval_holdout" {
+		t.Fatalf("OpenClaw default split = %q", openClaw.DefaultSplit)
+	}
+
+	skillTrustBench, _ := registry.Info("cuhk-zhuque/SkillTrustBench")
+	if got := strings.Join(skillTrustBench.Aliases, ","); got != "SkillTrustBench" {
+		t.Fatalf("SkillTrustBench aliases = %q", got)
+	}
+	if skillTrustBench.DefaultSplit != "benchmark" {
+		t.Fatalf("SkillTrustBench default split = %q", skillTrustBench.DefaultSplit)
+	}
 }
 
 func canonicalBenchmarkIDForTest(input string) string {

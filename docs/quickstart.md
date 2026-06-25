@@ -41,6 +41,34 @@ During development, run the CLI directly:
 go run ./cmd/clawscan ./my-skill --scanner clawscan-static --json
 ```
 
+## Scanner Dependencies
+
+List available scanners and inspect one scanner before installing or running it:
+
+```bash
+clawscan scanners
+clawscan scanners skillspector
+```
+
+Install or verify local scanner dependencies before running scanners that shell
+out to upstream CLIs:
+
+```bash
+clawscan install cisco skillspector
+```
+
+The install command accepts one or more scanner IDs and prints one concise
+status per scanner. It uses the install commands published by each scanner's
+upstream docs where available, verifies launcher-only tools such as `uvx`, and
+skips built-in or API-backed scanners that have no local CLI to install.
+Service-backed scanners such as AI-Infra-Guard are not accepted by
+`clawscan install`; run or deploy that service separately.
+
+Cisco's upstream README recommends `uv pip install cisco-ai-skill-scanner` for
+the base scanner package, so it uses the same Python environment context as the
+Cisco docs. Socket and AgentVerus use npm-based installs, and AgentVerus'
+upstream install is a project-local dev dependency.
+
 ## Explicit Scan Selection
 
 From a repository root that stores skills under `./skills/<name>/SKILL.md`,
@@ -50,7 +78,6 @@ invalid so local runs do not accidentally use ClawHub's production profile.
 Run one scanner across discovered skills:
 
 ```bash
-export OPENAI_API_KEY=...
 clawscan --scanner skillspector
 ```
 
@@ -76,9 +103,11 @@ clawscan --profile clawhub
 ```
 
 Unless `--json` is passed, ClawScan writes the full artifact to
-`./clawscan-results.json` by default, prints a concise key/value summary, and
-ends with the full results path. Use `--output <path>` to choose a different
-artifact path.
+`./clawscan-results/artifact.json` by default, preserves per-scanner JSON files
+in the same results directory, prints a concise key/value summary, and ends
+with the full results path. Use `--output <path>` to choose a different
+artifact path; explicit `.json` paths keep that artifact file and write scanner
+JSON beside it.
 
 To use another built-in profile over the same discovered skill targets:
 
@@ -96,6 +125,13 @@ Built-in profiles:
 Gen Agent Trust Hub runs on skills.sh skills, but is omitted from ClawScan's
 `skills-sh` profile because Gen does not provide a local CLI for ClawScan to
 invoke.
+
+Inspect the resolved profile catalog, including nearest project-local profiles:
+
+```bash
+clawscan profiles
+clawscan profiles -v
+```
 
 The embedded `clawhub` profile owns ClawHub's prompt and output schema inside
 ClawScan. ClawHub can run the same setup by invoking this profile.
@@ -212,6 +248,16 @@ whether each value was present:
 
 Actual secret values are never written to run artifacts.
 
+## Dataset Catalog
+
+Inspect supported benchmark datasets before choosing `--benchmark` and
+`--split` values:
+
+```bash
+clawscan datasets
+clawscan datasets SkillTrustBench
+```
+
 ## Common Flags
 
 | Flag | Description |
@@ -220,8 +266,8 @@ Actual secret values are never written to run artifacts.
 | `--config <path>` | Load one config file instead of discovering `.clawscan.yml` / `.clawscan.yaml`; omit `--profile` to run every profile in that file. |
 | `--scanner <id>` | Scanner to run. Repeat for multiple scanners. |
 | `--scanner-result <id=path>` | Use a JSON fixture instead of running that scanner. |
-| `--output <path>` | Write the full artifact JSON to a specific file. Defaults to `./clawscan-results.json` when `--json` is not passed. |
-| `--json` | Print the full artifact JSON to stdout and skip the default output file. |
+| `--output <path>` | Write the full artifact JSON to a specific file. Defaults to `./clawscan-results/artifact.json` when `--json` is not passed. Explicit `.json` paths keep that artifact file and write scanner JSON beside it. |
+| `--json` | Print the full artifact JSON to stdout and skip default file writes unless `--output` is also passed. |
 | `--judge <cmd>` | Run an optional external judge harness. |
 | `--benchmark [id]` | Run a supported benchmark instead of one target. Defaults to SkillTrustBench. |
 | `--split <name>` | Benchmark split. Defaults to `benchmark` for SkillTrustBench and `eval_holdout` for OpenClaw. |

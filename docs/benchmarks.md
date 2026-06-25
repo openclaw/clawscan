@@ -12,6 +12,14 @@ cuhk-zhuque/SkillTrustBench
 OpenClaw/clawhub-security-signals
 ```
 
+Use the dataset catalog commands to inspect supported benchmarks, source links,
+split names, defaults, and env requirements:
+
+```bash
+clawscan datasets
+clawscan datasets SkillTrustBench
+```
+
 SkillTrustBench is the default benchmark. Use the canonical Hugging Face ID or
 the short alias `SkillTrustBench`, or omit the value after `--benchmark`.
 

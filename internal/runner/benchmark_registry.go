@@ -12,12 +12,26 @@ import (
 type BenchmarkAdapter interface {
 	ID() string
 	Aliases() []string
+	Info() DatasetInfo
 	Source() string
 	Config() string
 	DefaultSplit() string
 	Splits() []string
 	RunCases(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient) ([]BenchmarkCase, error)
 	SupportsPredictionsOutput() bool
+}
+
+type DatasetInfo struct {
+	ID                        string
+	DisplayName               string
+	Aliases                   []string
+	Source                    string
+	SourceURL                 string
+	Description               string
+	Splits                    []string
+	DefaultSplit              string
+	RequiredEnv               string
+	SupportsPredictionsOutput bool
 }
 
 type BenchmarkRegistry struct {
@@ -70,6 +84,31 @@ func (registry BenchmarkRegistry) Resolve(id string) (BenchmarkAdapter, error) {
 	return adapter, nil
 }
 
+func (registry BenchmarkRegistry) Info(id string) (DatasetInfo, bool) {
+	adapter, ok := registry.adapters[id]
+	if !ok {
+		return DatasetInfo{}, false
+	}
+	return datasetInfo(adapter), true
+}
+
+func (registry BenchmarkRegistry) ResolveInfo(id string) (DatasetInfo, error) {
+	adapter, err := registry.Resolve(id)
+	if err != nil {
+		return DatasetInfo{}, err
+	}
+	return datasetInfo(adapter), nil
+}
+
+func (registry BenchmarkRegistry) Infos() []DatasetInfo {
+	infos := make([]DatasetInfo, 0, len(registry.adapters))
+	for _, id := range registry.IDs() {
+		info, _ := registry.Info(id)
+		infos = append(infos, info)
+	}
+	return infos
+}
+
 func (registry BenchmarkRegistry) IDs() []string {
 	ids := make([]string, 0, len(registry.adapters))
 	for id := range registry.adapters {
@@ -77,6 +116,25 @@ func (registry BenchmarkRegistry) IDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+func datasetInfo(adapter BenchmarkAdapter) DatasetInfo {
+	info := adapter.Info()
+	if info.ID == "" {
+		info.ID = adapter.ID()
+	}
+	if info.DisplayName == "" {
+		info.DisplayName = info.ID
+	}
+	info.Aliases = append([]string(nil), adapter.Aliases()...)
+	info.Source = adapter.Source()
+	info.Splits = append([]string(nil), adapter.Splits()...)
+	info.DefaultSplit = adapter.DefaultSplit()
+	if info.RequiredEnv == "" {
+		info.RequiredEnv = "none"
+	}
+	info.SupportsPredictionsOutput = adapter.SupportsPredictionsOutput()
+	return info
 }
 
 func benchmarkLookupKey(id string) string {
@@ -104,6 +162,15 @@ func (openClawBenchmarkAdapter) ID() string {
 
 func (openClawBenchmarkAdapter) Aliases() []string {
 	return nil
+}
+
+func (openClawBenchmarkAdapter) Info() DatasetInfo {
+	return DatasetInfo{
+		DisplayName: "OpenClaw ClawHub Security Signals",
+		SourceURL:   "https://huggingface.co/datasets/OpenClaw/clawhub-security-signals",
+		Description: "Weekly refreshed ClawHub security-signals dataset for evaluating clean, suspicious, and malicious skill predictions.",
+		RequiredEnv: "none",
+	}
 }
 
 func (openClawBenchmarkAdapter) Source() string {
@@ -179,6 +246,15 @@ func (skillTrustBenchBenchmarkAdapter) ID() string {
 
 func (skillTrustBenchBenchmarkAdapter) Aliases() []string {
 	return []string{skillTrustBenchAlias}
+}
+
+func (skillTrustBenchBenchmarkAdapter) Info() DatasetInfo {
+	return DatasetInfo{
+		DisplayName: "SkillTrustBench",
+		SourceURL:   "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench",
+		Description: "Hugging Face benchmark of agent skills with canonical clean and malicious judgments, materialized from the versioned skill archive.",
+		RequiredEnv: "none",
+	}
 }
 
 func (skillTrustBenchBenchmarkAdapter) Source() string {

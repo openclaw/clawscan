@@ -4,10 +4,21 @@ import (
 	"sort"
 
 	"github.com/openclaw/clawscan/internal/runner"
+	"gopkg.in/yaml.v3"
 )
 
 type ProfileRegistry struct {
 	profiles map[string]resolvedProfile
+}
+
+type ProfileInfo struct {
+	ID      string
+	Profile Profile
+	Source  string
+}
+
+type ProfileCatalog struct {
+	profiles map[string]ProfileInfo
 }
 
 func NewProfileRegistry(profiles map[string]resolvedProfile) (ProfileRegistry, error) {
@@ -40,6 +51,49 @@ func DefaultProfileRegistry() ProfileRegistry {
 
 func ProfileIDs() []string {
 	return DefaultProfileRegistry().IDs()
+}
+
+func InspectProfiles(cwd string) (ProfileCatalog, error) {
+	registry, err := loadConfigs(cwd, "")
+	if err != nil {
+		return ProfileCatalog{}, err
+	}
+	catalog := ProfileCatalog{profiles: map[string]ProfileInfo{}}
+	for _, id := range registry.IDs() {
+		resolved, _ := registry.Profile(id)
+		catalog.profiles[id] = ProfileInfo{
+			ID:      id,
+			Profile: resolved.profile,
+			Source:  resolved.source,
+		}
+	}
+	return catalog, nil
+}
+
+func (catalog ProfileCatalog) IDs() []string {
+	ids := make([]string, 0, len(catalog.profiles))
+	for id := range catalog.profiles {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (catalog ProfileCatalog) Profile(id string) (ProfileInfo, bool) {
+	profile, ok := catalog.profiles[id]
+	return profile, ok
+}
+
+func (catalog ProfileCatalog) Config() Config {
+	config := Config{Version: 1, Profiles: map[string]Profile{}}
+	for _, id := range catalog.IDs() {
+		config.Profiles[id] = catalog.profiles[id].Profile
+	}
+	return config
+}
+
+func (catalog ProfileCatalog) YAML() ([]byte, error) {
+	return yaml.Marshal(catalog.Config())
 }
 
 func (registry ProfileRegistry) Profile(id string) (resolvedProfile, bool) {

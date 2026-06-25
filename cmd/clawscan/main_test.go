@@ -18,6 +18,10 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 
 	for _, want := range []string{
 		"Usage:",
+		"clawscan install <scanner-id> [scanner-id ...]",
+		"clawscan scanners [list|<scanner-id>]",
+		"clawscan profiles [-v]",
+		"clawscan datasets [list|<dataset>]",
 		"clawscan <target> --scanner <scanner-id> [flags]",
 		"clawscan --scanner <scanner-id> [flags]",
 		"clawscan --profile clawhub [flags]",
@@ -25,6 +29,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"clawscan --benchmark --scanner <scanner-id> [flags]",
 		"clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]",
 		"--scanner <id>",
+		"Install scanner dependencies without running scans.",
 		"--profile <name>",
 		"--config <path>",
 		"--benchmark [id]",
@@ -32,7 +37,11 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"--limit <n>",
 		"--offset <n>",
 		"--predictions-output <path>",
-		"clawscan-results.json",
+		"clawscan-results/artifact.json",
+		"Catalog commands:",
+		"List supported scanners with required env vars.",
+		"Print the resolved profile catalog as pasteable YAML.",
+		"List supported benchmark datasets with splits.",
 		"Supported benchmarks:",
 		"cuhk-zhuque/SkillTrustBench",
 		"SkillTrustBench",
@@ -47,7 +56,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"SOCKET_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
-		"skillspector: OPENAI_API_KEY by default",
+		"skillspector: no ClawScan-required env vars",
 		"AI-Infra-Guard uses the self-hosted A.I.G taskapi",
 		"No target with --scanner, --profile, or --config scans child skill directories under ./skills",
 		"--judge <cmd>",
@@ -63,6 +72,217 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 
 	if strings.Contains(stdout, "validate-submission") {
 		t.Fatalf("help should not expose repository-only submission validation:\n%s", stdout)
+	}
+}
+
+func TestRunCommandInstallStaticScannerPrintsSkippedStatus(t *testing.T) {
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"install", "clawscan-static"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(stdout, "clawscan-static: skipped") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stdout, "built in") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+func TestRunCommandInstallRejectsServiceBackedScanner(t *testing.T) {
+	err := run([]string{"install", "ai-infra-guard"}, []string{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "ai-infra-guard has no local scanner CLI to install") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"scanners"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	aliasStdout := captureStdout(t, func() {
+		if err := run([]string{"scanners", "list"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if stdout != aliasStdout {
+		t.Fatalf("scanners and scanners list differ:\n--- scanners ---\n%s\n--- scanners list ---\n%s", stdout, aliasStdout)
+	}
+	for _, want := range []string{
+		"ID",
+		"Name",
+		"Required env",
+		"ai-infra-guard",
+		"AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY",
+		"skillspector",
+		"none",
+		"virustotal",
+		"VIRUSTOTAL_API_KEY",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("scanner catalog missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"scanners", "skillspector"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{
+		"NVIDIA SkillSpector",
+		"ID: skillspector",
+		"Repository: https://github.com/NVIDIA/skillspector",
+		"Description:",
+		"Required env vars: none",
+		"Optional env vars: OPENAI_API_KEY, ANTHROPIC_API_KEY, NVIDIA_INFERENCE_KEY, SKILLSPECTOR_PROVIDER",
+		"Install:",
+		"uv tool install git+https://github.com/NVIDIA/skillspector.git",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("scanner detail missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunCommandProfilesPrintsMergedDiscoveredProfiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
+profiles:
+  clawhub:
+    scanners:
+      - clawscan-static
+  local-review:
+    scanners:
+      - snyk
+    judge:
+      command: judge --out {{ output }}
+      requiredEnv:
+        - OPENAI_API_KEY
+`)
+	t.Chdir(dir)
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"profiles"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{
+		"Profile",
+		"Source",
+		"Scanners",
+		"clawhub",
+		".clawscan.yml",
+		"clawscan-static",
+		"local-review",
+		"snyk",
+		"skills-sh",
+		"built-in",
+		"socket, snyk",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("profiles output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunCommandProfilesVerbosePrintsResolvedYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
+profiles:
+  local-review:
+    scanners:
+      - clawscan-static
+    json: true
+`)
+	t.Chdir(dir)
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"profiles", "-v"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{
+		"version: 1",
+		"profiles:",
+		"clawhub:",
+		"skills-sh:",
+		"local-review:",
+		"- clawscan-static",
+		"json: true",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("verbose profiles output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunCommandDatasetsPrintsCatalogTable(t *testing.T) {
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"datasets"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	aliasStdout := captureStdout(t, func() {
+		if err := run([]string{"datasets", "list"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if stdout != aliasStdout {
+		t.Fatalf("datasets and datasets list differ:\n--- datasets ---\n%s\n--- datasets list ---\n%s", stdout, aliasStdout)
+	}
+	for _, want := range []string{
+		"ID",
+		"Name",
+		"Default split",
+		"Required env",
+		"OpenClaw/clawhub-security-signals",
+		"eval_holdout",
+		"eval_holdout, test, train, validation",
+		"cuhk-zhuque/SkillTrustBench",
+		"benchmark",
+		"none",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("dataset catalog missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunCommandDatasetDetailPrintsHumanReadableInfo(t *testing.T) {
+	stdout := captureStdout(t, func() {
+		if err := run([]string{"datasets", "SkillTrustBench"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{
+		"SkillTrustBench",
+		"ID: cuhk-zhuque/SkillTrustBench",
+		"Aliases: SkillTrustBench",
+		"Source: huggingface",
+		"Link: https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench",
+		"Description:",
+		"Supported splits: benchmark",
+		"Default split: benchmark",
+		"Required env vars: none",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("dataset detail missing %q:\n%s", want, stdout)
+		}
 	}
 }
 
@@ -208,24 +428,34 @@ func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
 		"scanner_failed: 0",
 		"scanner_skipped: 0",
 		"issues_found: 0",
-		"full_results: ./clawscan-results.json",
+		"full_results: ./clawscan-results/artifact.json",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout)
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "clawscan-results.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "clawscan-results", "artifact.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var artifact struct {
 		SchemaVersion string `json:"schemaVersion"`
+		Scanners      map[string]struct {
+			OutputPath string `json:"outputPath"`
+		} `json:"scanners"`
 	}
 	if err := json.Unmarshal(data, &artifact); err != nil {
 		t.Fatal(err)
 	}
 	if artifact.SchemaVersion != "clawscan-run-v1" {
 		t.Fatalf("schema = %q", artifact.SchemaVersion)
+	}
+	outputPath := artifact.Scanners["clawscan-static"].OutputPath
+	if outputPath != "skill/clawscan-static.json" {
+		t.Fatalf("scanner output path = %q", outputPath)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "clawscan-results", outputPath)); err != nil {
+		t.Fatalf("scanner output file missing: %v", err)
 	}
 }
 
@@ -244,8 +474,44 @@ func TestRunCommandJSONDoesNotWriteDefaultOutput(t *testing.T) {
 	if !strings.Contains(stdout, `"schemaVersion": "clawscan-run-v1"`) {
 		t.Fatalf("stdout was not artifact JSON:\n%s", stdout)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "clawscan-results.json")); !os.IsNotExist(err) {
-		t.Fatalf("default output file exists or stat failed: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "clawscan-results")); !os.IsNotExist(err) {
+		t.Fatalf("default output directory exists or stat failed: %v", err)
+	}
+}
+
+func TestRunCommandJSONWithExplicitOutputWritesArtifactBundle(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# JSON output bundle\n")
+	out := filepath.Join(dir, "run.json")
+
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--scanner", "clawscan-static", "--json", "--output", out}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(stdout, `"schemaVersion": "clawscan-run-v1"`) {
+		t.Fatalf("stdout was not artifact JSON:\n%s", stdout)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact struct {
+		Scanners map[string]struct {
+			OutputPath string `json:"outputPath"`
+		} `json:"scanners"`
+	}
+	if err := json.Unmarshal(data, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := artifact.Scanners["clawscan-static"].OutputPath
+	if outputPath != "run/skill/clawscan-static.json" {
+		t.Fatalf("scanner output path = %q", outputPath)
+	}
+	if _, err := os.Stat(filepath.Join(dir, outputPath)); err != nil {
+		t.Fatalf("scanner output file missing: %v", err)
 	}
 }
 

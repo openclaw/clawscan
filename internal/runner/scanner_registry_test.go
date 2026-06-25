@@ -10,6 +10,8 @@ import (
 type stubScannerAdapter struct {
 	id           string
 	requirements []EnvRequirement
+	info         ScannerInfo
+	installPlan  InstallPlan
 	run          func(target string, startedAt string) (ScannerResult, error)
 }
 
@@ -19,6 +21,14 @@ func (adapter stubScannerAdapter) ID() string {
 
 func (adapter stubScannerAdapter) Requirements(env map[string]string) []EnvRequirement {
 	return append([]EnvRequirement(nil), adapter.requirements...)
+}
+
+func (adapter stubScannerAdapter) Info() ScannerInfo {
+	return adapter.info
+}
+
+func (adapter stubScannerAdapter) InstallPlan() InstallPlan {
+	return adapter.installPlan
 }
 
 func (adapter stubScannerAdapter) Run(_ ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
@@ -103,5 +113,53 @@ func TestScannerAdapterRequirementsFeedValidation(t *testing.T) {
 	}.Requirements(map[string]string{})
 	if len(requirements) != 1 || requirements[0].EnvVar != "DEMO_TOKEN" {
 		t.Fatalf("requirements = %#v", requirements)
+	}
+}
+
+func TestDefaultScannerRegistryProvidesInstallPlans(t *testing.T) {
+	registry := DefaultScannerRegistry()
+	for _, id := range registry.IDs() {
+		adapter, ok := registry.Adapter(id)
+		if !ok {
+			t.Fatalf("missing adapter for %s", id)
+		}
+		plan := adapter.InstallPlan()
+		if plan.ScannerID != id {
+			t.Fatalf("%s install plan scanner id = %q", id, plan.ScannerID)
+		}
+		if strings.TrimSpace(plan.Name) == "" {
+			t.Fatalf("%s install plan missing name", id)
+		}
+	}
+}
+
+func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
+	registry := DefaultScannerRegistry()
+	for _, id := range registry.IDs() {
+		info, ok := registry.Info(id)
+		if !ok {
+			t.Fatalf("missing info for %s", id)
+		}
+		if info.ID != id {
+			t.Fatalf("%s info id = %q", id, info.ID)
+		}
+		if strings.TrimSpace(info.DisplayName) == "" {
+			t.Fatalf("%s info missing display name", id)
+		}
+		if strings.TrimSpace(info.Description) == "" {
+			t.Fatalf("%s info missing description", id)
+		}
+		if strings.TrimSpace(info.RepositoryURL) == "" {
+			t.Fatalf("%s info missing repository URL", id)
+		}
+	}
+
+	aig, _ := registry.Info("ai-infra-guard")
+	if got := strings.Join(aig.RequiredEnv, ","); got != "AIG_BASE_URL,AIG_MODEL,AIG_MODEL_API_KEY" {
+		t.Fatalf("ai-infra-guard required env = %q", got)
+	}
+	skillspector, _ := registry.Info("skillspector")
+	if got := strings.Join(skillspector.OptionalEnv, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY,NVIDIA_INFERENCE_KEY,SKILLSPECTOR_PROVIDER" {
+		t.Fatalf("skillspector optional env = %q", got)
 	}
 }

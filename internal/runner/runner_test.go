@@ -972,6 +972,143 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	}
 }
 
+func TestRunWritesScannerOutputFilesBesideExplicitArtifact(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "run.json")
+	opts, err := ParseArgs([]string{target, "--scanner", "clawscan-static", "--output", out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["clawscan-static"]
+	if result.OutputPath != "run/skill/clawscan-static.json" {
+		t.Fatalf("output path = %q", result.OutputPath)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, result.OutputPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("scanner output is not valid JSON: %s", data)
+	}
+	written, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(written, []byte(`"outputPath": "run/skill/clawscan-static.json"`)) {
+		t.Fatalf("artifact missing scanner output path: %s", written)
+	}
+}
+
+func TestRunTargetsWritesCollisionSafeScannerOutputsForDiscoveredTargets(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\n")
+	writeSkill(t, filepath.Join(dir, "skills", "foo"), "# Foo\n")
+	t.Chdir(dir)
+	out := filepath.Join(dir, "clawscan-results", "artifact.json")
+	opts, err := ParseArgs([]string{"--scanner", "clawscan-static", "--output", out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunTargets(opts, RunContext{Env: map[string]string{}}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Batch == nil {
+		t.Fatal("missing batch artifact")
+	}
+	for _, run := range result.Batch.Runs {
+		outputPath := run.Scanners["clawscan-static"].OutputPath
+		want := filepath.ToSlash(filepath.Join(run.Target.Input, "clawscan-static.json"))
+		if outputPath != want {
+			t.Fatalf("output path for %s = %q, want %q", run.Target.Input, outputPath, want)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "clawscan-results", outputPath)); err != nil {
+			t.Fatalf("scanner output for %s missing: %v", run.Target.Input, err)
+		}
+	}
+}
+
+func TestWriteRunTargetsResultBundleUsesProfileFoldersForProfileBatch(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	out := filepath.Join(dir, "clawscan-results", "artifact.json")
+	batch := BatchArtifact{
+		SchemaVersion: "clawscan-batch-v1",
+		Runs: []Artifact{
+			{
+				SchemaVersion: "clawscan-run-v1",
+				Profile:       "release",
+				Target:        Target{Kind: "skill", Input: target, ResolvedPath: target},
+				Scanners: map[string]ScannerResult{
+					"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{"release":true}`)},
+				},
+			},
+			{
+				SchemaVersion: "clawscan-run-v1",
+				Profile:       "review",
+				Target:        Target{Kind: "skill", Input: target, ResolvedPath: target},
+				Scanners: map[string]ScannerResult{
+					"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{"review":true}`)},
+				},
+			},
+		},
+	}
+
+	err := WriteRunTargetsResultBundle(out, RunTargetsResult{Batch: &batch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range batch.Runs {
+		outputPath := run.Scanners["clawscan-static"].OutputPath
+		if !strings.HasPrefix(outputPath, "profiles/"+run.Profile+"/") {
+			t.Fatalf("output path for profile %s = %q", run.Profile, outputPath)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "clawscan-results", outputPath)); err != nil {
+			t.Fatalf("scanner output for profile %s missing: %v", run.Profile, err)
+		}
+	}
+}
+
+func TestRunUsesSkillSpectorNoLLMWhenProviderKeyMissing(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{
+		writeOutput: `{"status":"clean","findings":[]}`,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                 map[string]string{},
+		CommandRunner:       runner,
+		SkillSpectorCommand: []string{"skillspector"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Scanners["skillspector"].Status != "completed" {
+		t.Fatalf("scanner = %#v", artifact.Scanners["skillspector"])
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls = %#v", runner.calls)
+	}
+	if !containsArg(runner.calls[0].args, "--no-llm") {
+		t.Fatalf("missing --no-llm without provider key: %#v", runner.calls[0].args)
+	}
+}
+
 func TestRunPassesResolvedEnvToDefaultCommandRunner(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -980,6 +1117,7 @@ func TestRunPassesResolvedEnvToDefaultCommandRunner(t *testing.T) {
 	}
 	script := filepath.Join(dir, "skillspector-env-probe.sh")
 	probePath := filepath.Join(dir, "probe.txt")
+	openAIProbePath := filepath.Join(dir, "openai-probe.txt")
 	leakPath := filepath.Join(dir, "leak.txt")
 	scriptContent := `#!/bin/sh
 out=""
@@ -992,6 +1130,7 @@ while [ "$#" -gt 0 ]; do
 done
 printf '{"status":"clean","findings":[]}' > "$out"
 printf '%s' "$CLAWSCAN_ENV_PROBE" > "$CLAWSCAN_ENV_PROBE_FILE"
+printf '%s' "$OPENAI_API_KEY" > "$CLAWSCAN_OPENAI_PROBE_FILE"
 printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
 `
 	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
@@ -1005,10 +1144,11 @@ printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
 	}
 	artifact, err := Run(opts, RunContext{
 		Env: map[string]string{
-			"CLAWSCAN_ENV_PROBE":      "context",
-			"CLAWSCAN_ENV_PROBE_FILE": probePath,
-			"CLAWSCAN_LEAK_FILE":      leakPath,
-			"OPENAI_API_KEY":          "present",
+			"CLAWSCAN_ENV_PROBE":         "context",
+			"CLAWSCAN_ENV_PROBE_FILE":    probePath,
+			"CLAWSCAN_OPENAI_PROBE_FILE": openAIProbePath,
+			"CLAWSCAN_LEAK_FILE":         leakPath,
+			"OPENAI_API_KEY":             "present",
 		},
 		SkillSpectorCommand: []string{script},
 	})
@@ -1024,6 +1164,13 @@ printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
 	}
 	if string(probe) != "context" {
 		t.Fatalf("env probe = %q", probe)
+	}
+	openAIProbe, err := os.ReadFile(openAIProbePath)
+	if err != nil {
+		t.Fatalf("read openai probe: %v", err)
+	}
+	if string(openAIProbe) != "present" {
+		t.Fatalf("openai probe = %q", openAIProbe)
 	}
 	leak, err := os.ReadFile(leakPath)
 	if err != nil {
@@ -1117,7 +1264,7 @@ func TestRunRecordsDefaultSkillSpectorProviderEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Env["OPENAI_API_KEY"] != "present" {
+	if _, ok := artifact.Env["OPENAI_API_KEY"]; ok {
 		t.Fatalf("env = %#v", artifact.Env)
 	}
 	if containsArg(runner.calls[0].args, "--no-llm") {
@@ -1589,46 +1736,25 @@ func TestAgentVerusInvalidJSONIsFailedScannerResult(t *testing.T) {
 	}
 }
 
-func TestSkillSpectorRequiresOpenAIKeyByDefault(t *testing.T) {
+func TestSkillSpectorDoesNotRequireProviderKeys(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ValidateRequirements(opts, map[string]string{})
-	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY required by scanner skillspector llm") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestSkillSpectorUsesAnthropicProviderRequirement(t *testing.T) {
-	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = ValidateRequirements(opts, map[string]string{
-		"SKILLSPECTOR_PROVIDER": "anthropic",
-	})
-	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY required by scanner skillspector llm") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestSkillSpectorUsesNVIDIAProviderRequirement(t *testing.T) {
-	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = ValidateRequirements(opts, map[string]string{
-		"SKILLSPECTOR_PROVIDER": "nv_inference",
-	})
-	if err == nil || !strings.Contains(err.Error(), "NVIDIA_INFERENCE_KEY required by scanner skillspector llm") {
-		t.Fatalf("err = %v", err)
-	}
-	if err := ValidateRequirements(opts, map[string]string{
-		"SKILLSPECTOR_PROVIDER": "nv_build",
-		"NVIDIA_INFERENCE_KEY":  "present",
-	}); err != nil {
-		t.Fatalf("expected NVIDIA provider key to satisfy SkillSpector LLM requirement, got %v", err)
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "default provider without openai key", env: map[string]string{}},
+		{name: "anthropic provider without anthropic key", env: map[string]string{"SKILLSPECTOR_PROVIDER": "anthropic"}},
+		{name: "nvidia provider without nvidia key", env: map[string]string{"SKILLSPECTOR_PROVIDER": "nv_inference"}},
+		{name: "openai key present", env: map[string]string{"OPENAI_API_KEY": "present"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateRequirements(opts, tc.env); err != nil {
+				t.Fatalf("expected SkillSpector provider keys to be optional for ClawScan validation, got %v", err)
+			}
+		})
 	}
 }
 

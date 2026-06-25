@@ -40,6 +40,7 @@ type Judge struct {
 type resolvedProfile struct {
 	profile   Profile
 	configDir string
+	source    string
 	files     map[string][]byte
 }
 
@@ -232,7 +233,7 @@ func loadProjectProfiles(projectPath string) (map[string]resolvedProfile, error)
 		return nil, err
 	}
 	projectProfiles := map[string]resolvedProfile{}
-	mergeProfiles(projectProfiles, projectConfig, filepath.Dir(projectPath), nil)
+	mergeProfiles(projectProfiles, projectConfig, filepath.Dir(projectPath), projectPath, nil)
 	return projectProfiles, nil
 }
 
@@ -248,7 +249,7 @@ func loadBuiltinProfiles() (map[string]resolvedProfile, error) {
 		return nil, err
 	}
 	profiles := map[string]resolvedProfile{}
-	mergeProfiles(profiles, builtins, "", files)
+	mergeProfiles(profiles, builtins, "", "built-in", files)
 	return profiles, nil
 }
 
@@ -298,9 +299,9 @@ func readConfigBytes(label string, read func() ([]byte, error)) (Config, error) 
 	return config, nil
 }
 
-func mergeProfiles(out map[string]resolvedProfile, config Config, configDir string, files map[string][]byte) {
+func mergeProfiles(out map[string]resolvedProfile, config Config, configDir string, source string, files map[string][]byte) {
 	for name, profile := range config.Profiles {
-		out[name] = resolvedProfile{profile: profile, configDir: configDir, files: files}
+		out[name] = resolvedProfile{profile: profile, configDir: configDir, source: source, files: files}
 	}
 }
 

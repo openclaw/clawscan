@@ -38,6 +38,13 @@ Choose the run mode:
 | Print raw JSON to stdout | Add `--json`. |
 | Run all profiles from a config | `clawscan ./my-skill --config ./security/clawscan.yml` |
 | Run one config profile | `clawscan ./my-skill --config ./security/clawscan.yml --profile review` |
+| Install scanner dependencies | `clawscan install cisco skillspector` |
+| List scanner catalog | `clawscan scanners` |
+| Inspect one scanner | `clawscan scanners skillspector` |
+| List resolved profiles | `clawscan profiles` |
+| Print resolved profile YAML | `clawscan profiles -v` |
+| List dataset catalog | `clawscan datasets` |
+| Inspect one dataset | `clawscan datasets SkillTrustBench` |
 | Run the default benchmark | `clawscan --benchmark --limit 10 --scanner clawscan-static --output run.json` |
 | Run the OpenClaw benchmark | `clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
@@ -49,12 +56,17 @@ Helpful metadata:
 clawscan --help
 clawscan -h
 clawscan --version
+clawscan scanners
+clawscan profiles
+clawscan datasets
 ```
 
 Unless `--json` is passed, ClawScan writes the full artifact to
-`./clawscan-results.json` by default and prints a concise key/value summary
-ending in `full_results: ./clawscan-results.json`. Use `--output <path>` to
-choose a different artifact path.
+`./clawscan-results/artifact.json` by default, preserves per-scanner JSON files
+in the same visible results bundle, and prints a concise key/value summary
+ending in `full_results: ./clawscan-results/artifact.json`. Use
+`--output <path>` to choose a different artifact path; explicit `.json` paths
+keep that artifact file and write scanner JSON beside it.
 
 ## Targets, Profiles, And Config
 
@@ -77,6 +89,10 @@ with the same name shadows the built-in whole profile. `--config <path>` loads a
 specific config; without `--profile`, it runs every profile in that config and
 emits a `clawscan-batch-v1` artifact.
 
+Use `clawscan profiles` to inspect the resolved built-in plus nearest local
+profile catalog. Use `clawscan profiles -v` to print the merged catalog as
+pasteable YAML.
+
 CLI flags override the selected profile for one run. Passing `--scanner`
 without `--profile` creates an ad hoc scanner-only run, so profile judges are
 not invoked accidentally.
@@ -98,6 +114,10 @@ profiles:
 
 ## Scanners
 
+Use `clawscan scanners` for the registry-backed scanner catalog and
+`clawscan scanners <scanner-id>` for one scanner's repository, description,
+env vars, and install guidance.
+
 Accepted scanner IDs:
 
 ```text
@@ -112,11 +132,27 @@ Credential rules:
 | `socket` | `SOCKET_TOKEN` |
 | `snyk` | `SNYK_TOKEN` |
 | `virustotal` | `VIRUSTOTAL_API_KEY` |
-| `skillspector` | `OPENAI_API_KEY` by default; `SKILLSPECTOR_PROVIDER=anthropic` uses `ANTHROPIC_API_KEY`; `SKILLSPECTOR_PROVIDER=nv_inference` / `nv_build` / `nvidia` uses `NVIDIA_INFERENCE_KEY` |
+| `skillspector` | none required by ClawScan; provider env vars enable LLM mode, otherwise `--no-llm` is used |
 
 Artifact env fields record only `present` or `missing`; they must never contain
 secret values. GenDigital/Gen Agent Trust Hub is not a built-in scanner because
 there is no local CLI for ClawScan to invoke.
+
+Dependency setup:
+
+```bash
+clawscan install cisco skillspector
+```
+
+`clawscan install` accepts one or more scanner IDs. It follows upstream scanner
+install docs where they publish an install command, including Cisco's
+`uv pip install cisco-ai-skill-scanner`, SkillSpector's
+`uv tool install git+https://github.com/NVIDIA/skillspector.git`, Socket's
+`npm install -g socket`, and AgentVerus'
+`npm install --save-dev agentverus-scanner`. Snyk is launcher-based, so
+ClawScan verifies `uvx`; built-in and API-backed scanners are skipped.
+AI-Infra-Guard is service-backed and is not accepted by `clawscan install`;
+deploy/configure the A.I.G service separately before scanning.
 
 Use `--scanner-result` when a test or fixture should supply stable scanner JSON:
 
@@ -131,6 +167,11 @@ The scanner must still be requested with `--scanner` or via the selected
 profile.
 
 ## Benchmarks
+
+Use `clawscan datasets` for the registry-backed dataset catalog and
+`clawscan datasets <dataset>` for one dataset's source link, description,
+supported splits, default split, env requirements, and predictions-output
+support.
 
 Supported benchmarks:
 

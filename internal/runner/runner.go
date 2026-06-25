@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -141,6 +142,7 @@ type ScannerResult struct {
 	CompletedAt string          `json:"completedAt"`
 	Command     []string        `json:"command"`
 	Error       string          `json:"error"`
+	OutputPath  string          `json:"outputPath,omitempty"`
 	Raw         json.RawMessage `json:"raw"`
 }
 
@@ -415,15 +417,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
-		if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
-			return Artifact{}, err
-		}
-		file, err := os.Create(opts.OutputPath)
-		if err != nil {
-			return Artifact{}, err
-		}
-		defer file.Close()
-		if err := WriteJSON(file, artifact); err != nil {
+		if err := WriteRunTargetsResultBundle(opts.OutputPath, RunTargetsResult{Single: &artifact}); err != nil {
 			return Artifact{}, err
 		}
 	}
@@ -445,7 +439,7 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 			return RunTargetsResult{}, err
 		}
 		if outputPath != "" {
-			if err := writeJSONFile(outputPath, artifact); err != nil {
+			if err := WriteRunTargetsResultBundle(outputPath, RunTargetsResult{Single: &artifact}); err != nil {
 				return RunTargetsResult{}, err
 			}
 		}
@@ -493,7 +487,7 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 	}
 	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
-		if err := writeJSONFile(opts.OutputPath, batch); err != nil {
+		if err := WriteRunTargetsResultBundle(opts.OutputPath, RunTargetsResult{Batch: &batch}); err != nil {
 			return RunTargetsResult{}, err
 		}
 	}
@@ -562,6 +556,171 @@ func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]boo
 
 func WriteJSONFile(path string, value interface{}) error {
 	return writeJSONFile(path, value)
+}
+
+func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) error {
+	if outputPath == "" {
+		return errors.New("output path is required")
+	}
+	spec := outputBundleSpecFor(outputPath)
+	switch {
+	case result.Single != nil:
+		if err := writeScannerOutputFiles(spec, []*Artifact{result.Single}); err != nil {
+			return err
+		}
+		return writeJSONFile(spec.ArtifactPath, result.Single)
+	case result.Batch != nil:
+		runs := make([]*Artifact, 0, len(result.Batch.Runs))
+		for i := range result.Batch.Runs {
+			runs = append(runs, &result.Batch.Runs[i])
+		}
+		if err := writeScannerOutputFiles(spec, runs); err != nil {
+			return err
+		}
+		return writeJSONFile(spec.ArtifactPath, result.Batch)
+	default:
+		return errors.New("run targets result is empty")
+	}
+}
+
+type outputBundleSpec struct {
+	ArtifactPath string
+	RootDir      string
+	PathPrefix   string
+}
+
+func outputBundleSpecFor(outputPath string) outputBundleSpec {
+	clean := filepath.Clean(outputPath)
+	rootDir := filepath.Dir(clean)
+	prefix := ""
+	base := filepath.Base(clean)
+	ext := filepath.Ext(base)
+	if !strings.EqualFold(base, "artifact.json") {
+		stem := strings.TrimSuffix(base, ext)
+		if ext == "" {
+			stem = base + "-scanners"
+		}
+		prefix = safeOutputPathSegment(stem)
+	}
+	return outputBundleSpec{ArtifactPath: clean, RootDir: rootDir, PathPrefix: prefix}
+}
+
+func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error {
+	usedRunPaths := map[string]int{}
+	for _, artifact := range artifacts {
+		runPath := uniqueOutputPath(scannerRunOutputPath(*artifact), usedRunPaths)
+		scanners := make([]string, 0, len(artifact.Scanners))
+		for scanner := range artifact.Scanners {
+			scanners = append(scanners, scanner)
+		}
+		sort.Strings(scanners)
+		for _, scanner := range scanners {
+			result := artifact.Scanners[scanner]
+			if len(result.Raw) == 0 {
+				result.OutputPath = ""
+				artifact.Scanners[scanner] = result
+				continue
+			}
+			relPath := filepath.ToSlash(filepath.Join(spec.PathPrefix, runPath, safeOutputPathSegment(scanner)+".json"))
+			absPath := filepath.Join(spec.RootDir, filepath.FromSlash(relPath))
+			if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(absPath, result.Raw, 0o644); err != nil {
+				return err
+			}
+			result.OutputPath = relPath
+			artifact.Scanners[scanner] = result
+		}
+	}
+	return nil
+}
+
+func scannerRunOutputPath(artifact Artifact) string {
+	targetPath := targetOutputPath(artifact.Target.Input)
+	if targetPath == "" {
+		targetPath = targetOutputPath(artifact.Target.ResolvedPath)
+	}
+	if targetPath == "" {
+		targetPath = "target"
+	}
+	if artifact.Profile == "" {
+		return targetPath
+	}
+	return filepath.ToSlash(filepath.Join("profiles", safeOutputPathSegment(artifact.Profile), targetPath))
+}
+
+func targetOutputPath(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	if isURLTarget(input) {
+		parsed, _ := url.Parse(input)
+		label := safeOutputPathSegment(parsed.Host + parsed.EscapedPath())
+		if label == "" {
+			label = "url"
+		}
+		return filepath.ToSlash(filepath.Join("targets", label+"-"+shortSHA(input)))
+	}
+	clean := filepath.Clean(input)
+	if filepath.IsAbs(clean) {
+		return safeOutputPathSegment(filepath.Base(clean))
+	}
+	parts := strings.Split(filepath.ToSlash(clean), "/")
+	safeParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			safeParts = append(safeParts, "up")
+		default:
+			safeParts = append(safeParts, safeOutputPathSegment(part))
+		}
+	}
+	return strings.Join(safeParts, "/")
+}
+
+func uniqueOutputPath(base string, used map[string]int) string {
+	used[base]++
+	if used[base] == 1 {
+		return base
+	}
+	dir, file := path.Split(base)
+	return dir + file + "-" + strconv.Itoa(used[base])
+}
+
+func safeOutputPathSegment(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if r == '-' || r == '_' {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	safe := strings.Trim(builder.String(), "-")
+	if safe == "" {
+		return "item"
+	}
+	return safe
+}
+
+func shortSHA(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
@@ -1787,19 +1946,25 @@ func envPresence(opts Options, env map[string]string) map[string]string {
 
 func skillSpectorLLMEnabled(env map[string]string) bool {
 	value := strings.TrimSpace(strings.ToLower(env["CLAWSCAN_SKILLSPECTOR_LLM"]))
-	return value != "0" && value != "false" && value != "no" && value != "off"
+	switch value {
+	case "0", "false", "no", "off":
+		return false
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return skillSpectorProviderKeyPresent(env)
 }
 
-func skillSpectorProviderKeyEnv(env map[string]string) string {
+func skillSpectorProviderKeyPresent(env map[string]string) bool {
 	switch strings.TrimSpace(strings.ToLower(env["SKILLSPECTOR_PROVIDER"])) {
 	case "", "openai":
-		return "OPENAI_API_KEY"
+		return strings.TrimSpace(env["OPENAI_API_KEY"]) != ""
 	case "anthropic":
-		return "ANTHROPIC_API_KEY"
+		return strings.TrimSpace(env["ANTHROPIC_API_KEY"]) != ""
 	case "nv_inference", "nv_build", "nvidia":
-		return "NVIDIA_INFERENCE_KEY"
+		return strings.TrimSpace(env["NVIDIA_INFERENCE_KEY"]) != ""
 	default:
-		return ""
+		return true
 	}
 }
 

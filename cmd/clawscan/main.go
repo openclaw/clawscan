@@ -2,17 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/openclaw/clawscan/internal/profiles"
 	"github.com/openclaw/clawscan/internal/runner"
 )
 
-const defaultOutputPath = "clawscan-results.json"
+const defaultOutputPath = "clawscan-results/artifact.json"
 
 var (
 	version = "dev"
@@ -35,6 +37,18 @@ func run(args []string, environ []string) error {
 	if len(args) == 1 && args[0] == "--version" {
 		fmt.Fprintln(os.Stdout, versionString())
 		return nil
+	}
+	if len(args) > 0 && args[0] == "scanners" {
+		return runScanners(args[1:])
+	}
+	if len(args) > 0 && args[0] == "datasets" {
+		return runDatasets(args[1:])
+	}
+	if len(args) > 0 && args[0] == "profiles" {
+		return runProfiles(args[1:])
+	}
+	if len(args) > 0 && args[0] == "install" {
+		return runInstall(args[1:], environ)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -100,7 +114,7 @@ func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd stri
 		return runner.WriteJSON(os.Stdout, batch)
 	}
 	if resolved.OutputPath != "" {
-		if err := runner.WriteJSONFile(resolved.OutputPath, batch); err != nil {
+		if err := runner.WriteRunTargetsResultBundle(resolved.OutputPath, runner.RunTargetsResult{Batch: &batch}); err != nil {
 			return err
 		}
 		printRunSummary(os.Stdout, runner.RunTargetsResult{Batch: &batch}, resolved.OutputPath)
@@ -108,6 +122,184 @@ func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd stri
 	}
 	printRunSummary(os.Stdout, runner.RunTargetsResult{Batch: &batch}, "")
 	return nil
+}
+
+func runDatasets(args []string) error {
+	registry := runner.DefaultBenchmarkRegistry()
+	if len(args) == 0 || (len(args) == 1 && args[0] == "list") {
+		printDatasetCatalog(os.Stdout, registry)
+		return nil
+	}
+	if len(args) == 1 {
+		info, err := registry.ResolveInfo(args[0])
+		if err != nil {
+			return err
+		}
+		printDatasetDetail(os.Stdout, info)
+		return nil
+	}
+	return errors.New("Usage: clawscan datasets [list|<dataset>]")
+}
+
+func printDatasetCatalog(w io.Writer, registry runner.BenchmarkRegistry) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tName\tDefault split\tSplits\tRequired env")
+	for _, info := range registry.Infos() {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", info.ID, info.DisplayName, info.DefaultSplit, strings.Join(info.Splits, ", "), info.RequiredEnv)
+	}
+	_ = tw.Flush()
+}
+
+func printDatasetDetail(w io.Writer, info runner.DatasetInfo) {
+	fmt.Fprintf(w, "%s\n", info.DisplayName)
+	fmt.Fprintf(w, "ID: %s\n", info.ID)
+	if len(info.Aliases) > 0 {
+		fmt.Fprintf(w, "Aliases: %s\n", strings.Join(info.Aliases, ", "))
+	}
+	fmt.Fprintf(w, "Source: %s\n", info.Source)
+	fmt.Fprintf(w, "Link: %s\n", info.SourceURL)
+	fmt.Fprintf(w, "Description: %s\n", info.Description)
+	fmt.Fprintf(w, "Supported splits: %s\n", strings.Join(info.Splits, ", "))
+	fmt.Fprintf(w, "Default split: %s\n", info.DefaultSplit)
+	fmt.Fprintf(w, "Required env vars: %s\n", info.RequiredEnv)
+	if info.SupportsPredictionsOutput {
+		fmt.Fprintln(w, "Predictions output: supported")
+	} else {
+		fmt.Fprintln(w, "Predictions output: not supported")
+	}
+}
+
+func runScanners(args []string) error {
+	registry := runner.DefaultScannerRegistry()
+	if len(args) == 0 || (len(args) == 1 && args[0] == "list") {
+		printScannerCatalog(os.Stdout, registry)
+		return nil
+	}
+	if len(args) == 1 {
+		info, ok := registry.Info(args[0])
+		if !ok {
+			return fmt.Errorf("Unknown scanner: %s. Accepted scanner IDs: %s", args[0], strings.Join(registry.IDs(), ", "))
+		}
+		printScannerDetail(os.Stdout, info)
+		return nil
+	}
+	return errors.New("Usage: clawscan scanners [list|<scanner-id>]")
+}
+
+func printScannerCatalog(w io.Writer, registry runner.ScannerRegistry) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tName\tRequired env\tInstall")
+	for _, info := range registry.Infos() {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, info.DisplayName, formatEnvList(info.RequiredEnv), info.InstallHint)
+	}
+	_ = tw.Flush()
+}
+
+func printScannerDetail(w io.Writer, info runner.ScannerInfo) {
+	fmt.Fprintf(w, "%s\n", info.DisplayName)
+	fmt.Fprintf(w, "ID: %s\n", info.ID)
+	fmt.Fprintf(w, "Repository: %s\n", info.RepositoryURL)
+	fmt.Fprintf(w, "Description: %s\n", info.Description)
+	fmt.Fprintf(w, "Required env vars: %s\n", formatEnvList(info.RequiredEnv))
+	if len(info.OptionalEnv) > 0 {
+		fmt.Fprintf(w, "Optional env vars: %s\n", strings.Join(info.OptionalEnv, ", "))
+	}
+	fmt.Fprintf(w, "Install: %s\n", info.InstallHint)
+}
+
+func runProfiles(args []string) error {
+	verbose := false
+	switch {
+	case len(args) == 0:
+	case len(args) == 1 && (args[0] == "-v" || args[0] == "--verbose"):
+		verbose = true
+	default:
+		return errors.New("Usage: clawscan profiles [-v|--verbose]")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	catalog, err := profiles.InspectProfiles(cwd)
+	if err != nil {
+		return err
+	}
+	if verbose {
+		data, err := catalog.YAML()
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(data)
+		return err
+	}
+	printProfileCatalog(os.Stdout, catalog, cwd)
+	return nil
+}
+
+func printProfileCatalog(w io.Writer, catalog profiles.ProfileCatalog, cwd string) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "Profile\tSource\tScanners\tJudge")
+	for _, id := range catalog.IDs() {
+		info, _ := catalog.Profile(id)
+		judge := "none"
+		if info.Profile.Judge != nil {
+			judge = "configured"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, displayProfileSource(info.Source, cwd), strings.Join(info.Profile.Scanners, ", "), judge)
+	}
+	_ = tw.Flush()
+}
+
+func displayProfileSource(source string, cwd string) string {
+	if source == "" || source == "built-in" {
+		return "built-in"
+	}
+	rel, err := filepath.Rel(cwd, source)
+	if err == nil && rel != "" && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+		return rel
+	}
+	return source
+}
+
+func formatEnvList(envVars []string) string {
+	if len(envVars) == 0 {
+		return "none"
+	}
+	return strings.Join(envVars, ", ")
+}
+
+func runInstall(args []string, environ []string) error {
+	results, err := runner.InstallScanners(args, runner.InstallOptions{Env: runner.EnvMap(environ)})
+	for _, result := range results {
+		printInstallResult(os.Stdout, result)
+	}
+	return err
+}
+
+func printInstallResult(w io.Writer, result runner.InstallResult) {
+	fmt.Fprintf(w, "%s: %s", result.ScannerID, result.Status)
+	details := []string{}
+	if result.Name != "" {
+		details = append(details, result.Name)
+	}
+	switch {
+	case result.Message != "":
+		details = append(details, result.Message)
+	case result.Error != "":
+		details = append(details, result.Error)
+	}
+	if len(details) > 0 {
+		fmt.Fprintf(w, " (%s)", strings.Join(details, "; "))
+	}
+	fmt.Fprintln(w)
+	for _, command := range result.Commands {
+		fmt.Fprintf(w, "  command: %s\n", formatCommand(command.Command, command.Args))
+	}
+}
+
+func formatCommand(command string, args []string) string {
+	parts := append([]string{command}, args...)
+	return strings.Join(parts, " ")
 }
 
 func versionString() string {
@@ -340,6 +532,10 @@ func helpText() string {
 	return fmt.Sprintf(`ClawScan runs agent-skill scanners, preserves raw evidence, and can hand results to an external judge.
 
 Usage:
+  clawscan install <scanner-id> [scanner-id ...]
+  clawscan scanners [list|<scanner-id>]
+  clawscan profiles [-v]
+  clawscan datasets [list|<dataset>]
   clawscan <target> --scanner <scanner-id> [flags]
   clawscan --scanner <scanner-id> [flags]
   clawscan --profile clawhub [flags]
@@ -356,8 +552,9 @@ Core flags:
   --scanner <id>              Scanner to run. Repeat for multiple scanners.
   --scanner-result <id=path>  Use a JSON fixture instead of running that scanner.
   --output <path>             Write the full artifact JSON to a specific file.
-                              Defaults to ./clawscan-results.json unless --json is passed.
-  --json                      Print the full artifact JSON to stdout and skip the default output file.
+                              Defaults to ./clawscan-results/artifact.json unless --json is passed.
+                              Explicit .json paths keep the artifact file and write scanner JSON beside it.
+  --json                      Print the full artifact JSON to stdout and skip default file writes unless --output is passed.
   --judge <cmd>               Optional external judge harness command.
   --benchmark [id]            Run a supported benchmark dataset instead of one target. Defaults to SkillTrustBench.
   --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for OpenClaw.
@@ -366,6 +563,21 @@ Core flags:
   --predictions-output <path> Write benchmark predictions JSONL. Defaults next to --output for OpenClaw benchmarks.
   --version                   Print build metadata.
   -h, --help                  Print this help.
+
+Install command:
+  clawscan install <scanner-id> [scanner-id ...]
+                              Install scanner dependencies without running scans.
+                              Each scanner contributes its install plan through the registry.
+
+Catalog commands:
+  clawscan scanners           List supported scanners with required env vars.
+  clawscan scanners list      Alias for clawscan scanners.
+  clawscan scanners <id>      Show scanner repository, description, env vars, and install guidance.
+  clawscan profiles           List built-in plus nearest project .clawscan.yml/.clawscan.yaml profiles.
+  clawscan profiles -v        Print the resolved profile catalog as pasteable YAML.
+  clawscan datasets           List supported benchmark datasets with splits.
+  clawscan datasets list      Alias for clawscan datasets.
+  clawscan datasets <id>      Show dataset source, description, splits, and env requirements.
 
 Supported benchmarks:
   cuhk-zhuque/SkillTrustBench (alias: SkillTrustBench, default)
@@ -383,7 +595,7 @@ Required environment variables:
   socket: SOCKET_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
-  skillspector: OPENAI_API_KEY by default; SKILLSPECTOR_PROVIDER=anthropic uses ANTHROPIC_API_KEY; SKILLSPECTOR_PROVIDER=nv_inference uses NVIDIA_INFERENCE_KEY.
+  skillspector: no ClawScan-required env vars; provider env vars enable LLM mode, otherwise --no-llm is used.
   judge: provider credentials belong to the command passed to --judge.
 
 Target notes:

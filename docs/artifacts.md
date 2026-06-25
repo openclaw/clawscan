@@ -3,6 +3,20 @@
 ClawScan writes JSON artifacts so scanner evidence and judge output can be
 reviewed, compared, and attached to reports.
 
+Unless `--json` is passed, target scans write a visible results bundle by
+default:
+
+```text
+clawscan-results/
+  artifact.json
+  <target>/
+    <scanner>.json
+```
+
+The top-level `artifact.json` keeps embedded scanner `raw` JSON for
+compatibility, and each scanner result includes an `outputPath` relative to the
+results bundle so the preserved scanner report can be opened directly.
+
 ## One-Off Run
 
 A one-off scan writes a `clawscan-run-v1` artifact:
@@ -39,7 +53,9 @@ A one-off scan writes a `clawscan-run-v1` artifact:
 ```
 
 Scanner `raw` fields preserve upstream scanner JSON as evidence. Scanner
-`status` and `error` explain ClawScan's adapter-level outcome.
+`outputPath` points to the preserved per-scanner JSON file when raw evidence is
+available. Scanner `status` and `error` explain ClawScan's adapter-level
+outcome.
 
 Consumers should branch on the top-level `schemaVersion` field:
 
@@ -88,6 +104,11 @@ raw scanner evidence:
   }
 }
 ```
+
+For discovered targets, scanner output files are written under deterministic
+target paths such as `skills/foo/clawscan-static.json`. For all-profile config
+runs, profile names are included to avoid collisions, for example
+`profiles/release/skills/foo/clawscan-static.json`.
 
 ## Config Profile Batch
 

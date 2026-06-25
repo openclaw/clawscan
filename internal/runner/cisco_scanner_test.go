@@ -58,6 +58,40 @@ func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
 	}
 }
 
+func TestCiscoScannerOutputFileIsPreservedInArtifactBundle(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "clawscan-results", "artifact.json")
+	const ciscoJSON = `{"scanner":"cisco","findings":[{"id":"network"}]}`
+	runner := &ciscoRecordingCommandRunner{output: ciscoJSON}
+	opts, err := ParseArgs([]string{target, "--scanner", "cisco", "--output", out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{},
+		CommandRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outputPath := artifact.Scanners["cisco"].OutputPath
+	if outputPath != "skill/cisco.json" {
+		t.Fatalf("output path = %q", outputPath)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "clawscan-results", outputPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != ciscoJSON {
+		t.Fatalf("preserved output = %s", data)
+	}
+}
+
 func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
