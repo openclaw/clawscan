@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateSecuritySignalsSubmissionComputesLooseNonCleanMetrics(t *testing.T) {
@@ -150,6 +151,8 @@ func TestValidateSecuritySignalsSubmissionRejectsInvalidInputs(t *testing.T) {
 }
 
 func TestHuggingFaceBenchmarkClientReportsNonJSONHTTPError(t *testing.T) {
+	withHuggingFaceRowsRetryDelay(t, 0)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte("<html>bad gateway</html>"))
@@ -161,6 +164,44 @@ func TestHuggingFaceBenchmarkClientReportsNonJSONHTTPError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "fetch benchmark rows: HTTP 502") {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestHuggingFaceBenchmarkClientRetriesTransientHTTPError(t *testing.T) {
+	withHuggingFaceRowsRetryDelay(t, 0)
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html>bad gateway</html>"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := HuggingFaceBenchmarkClient{Endpoint: server.URL}
+	rows, err := client.FetchOpenClawRows("OpenClaw/clawhub-security-signals", "eval_holdout", 0, 1)
+	if err != nil {
+		t.Fatalf("FetchOpenClawRows err = %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %v, want empty rows", rows)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+}
+
+func withHuggingFaceRowsRetryDelay(t *testing.T, delay time.Duration) {
+	t.Helper()
+	previous := huggingFaceRowsRetryDelay
+	huggingFaceRowsRetryDelay = delay
+	t.Cleanup(func() {
+		huggingFaceRowsRetryDelay = previous
+	})
 }
 
 func writeSecuritySignalsSubmission(t *testing.T, metadata SecuritySignalsSubmissionMetadata, predictions []BenchmarkPrediction) string {
