@@ -31,6 +31,7 @@ type Options struct {
 	JSON                  bool
 	Judge                 *JudgeOptions
 	AdditionalRequiredEnv []EnvRequirement
+	Sandbox               SandboxOptions
 }
 
 type BenchmarkOptions struct {
@@ -55,6 +56,8 @@ type RunContext struct {
 	Env                    map[string]string
 	Now                    func() time.Time
 	CommandRunner          CommandRunner
+	HostCommandRunner      CommandRunner
+	DockerAvailability     func() error
 	ScannerRunner          ScannerRunner
 	SkillSpectorCommand    []string
 	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
@@ -82,6 +85,7 @@ type Artifact struct {
 	StartedAt     string                   `json:"startedAt"`
 	CompletedAt   string                   `json:"completedAt"`
 	Env           map[string]string        `json:"env"`
+	Sandbox       SandboxMetadata          `json:"sandbox"`
 	Scanners      map[string]ScannerResult `json:"scanners"`
 	Judge         *JudgeResult             `json:"judge"`
 }
@@ -107,6 +111,7 @@ type BatchArtifact struct {
 	StartedAt     string            `json:"startedAt"`
 	CompletedAt   string            `json:"completedAt"`
 	Env           map[string]string `json:"env"`
+	Sandbox       SandboxMetadata   `json:"sandbox"`
 	Runs          []Artifact        `json:"runs"`
 	Errors        []BatchError      `json:"errors,omitempty"`
 	Summary       BatchSummary      `json:"summary"`
@@ -299,6 +304,24 @@ func ParseArgs(args []string) (Options, error) {
 			}
 			judge = value
 			i = next
+		case "--sandbox":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			value = strings.ToLower(strings.TrimSpace(value))
+			if err := validateSandboxMode(value, "--sandbox"); err != nil {
+				return Options{}, err
+			}
+			opts.Sandbox.Mode = value
+			i = next
+		case "--sandbox-image":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			opts.Sandbox.Image = value
+			i = next
 		default:
 			return Options{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
@@ -381,15 +404,20 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	commandRunner := ctx.CommandRunner
-	if commandRunner == nil {
-		commandRunner = defaultCommandRunner{Env: env}
+	commandRunner, sandbox, err := commandRunnerForOptions(opts, ctx, env)
+	if err != nil {
+		return Artifact{}, err
 	}
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
+		scannerSandboxMode := sandbox.Mode
+		if ctx.CommandRunner != nil {
+			scannerSandboxMode = SandboxModeOff
+		}
 		scannerRunner = ExternalScannerRunner{
 			CommandRunner:          commandRunner,
 			Env:                    env,
+			SandboxMode:            scannerSandboxMode,
 			SkillSpectorCommand:    ctx.SkillSpectorCommand,
 			AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
 			VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
@@ -397,6 +425,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
+	artifact.Sandbox = sandbox
 	artifact.Target.Kind = target.kind
 	for _, scanner := range opts.Scanners {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
@@ -475,6 +504,9 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 			ScannerStatuses: map[string]map[string]int{},
 		},
 	}
+	if sandbox, err := sandboxMetadata(opts, env); err == nil {
+		batch.Sandbox = sandbox
+	}
 	for _, targetInput := range targetInputs {
 		runOpts := opts
 		runOpts.Target = targetInput
@@ -523,6 +555,7 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 			ScannerStatuses: map[string]map[string]int{},
 		},
 	}
+	batch.Sandbox = sandboxMetadataForOptionList(optsList, env)
 	targets := map[string]bool{}
 	for _, opts := range optsList {
 		runOpts := opts
@@ -1376,6 +1409,7 @@ type ExternalScannerRunner struct {
 	CommandRunner          CommandRunner
 	Env                    map[string]string
 	Registry               ScannerRegistry
+	SandboxMode            string
 	SkillSpectorCommand    []string
 	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
 	VirusTotalHTTPClient   VirusTotalHTTPClient
@@ -1465,6 +1499,10 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt string) (ScannerResult, error) {
 	command := "npx"
 	args := []string{"--yes", "agentverus-scanner", "scan", target, "--json"}
+	if runner.SandboxMode == SandboxModeDocker {
+		command = "agentverus-scanner"
+		args = []string{"scan", target, "--json"}
+	}
 	fullCommand := append([]string{command}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
@@ -1527,7 +1565,11 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt string) (ScannerResult, error) {
 	commandParts := runner.SkillSpectorCommand
 	if len(commandParts) == 0 {
-		commandParts = discoverSkillSpectorCommand()
+		if runner.SandboxMode == SandboxModeDocker {
+			commandParts = []string{"skillspector"}
+		} else {
+			commandParts = discoverSkillSpectorCommand()
+		}
 	}
 	command := commandParts[0]
 	args := append([]string{}, commandParts[1:]...)
@@ -1663,6 +1705,7 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
 		Env:         envPresence(opts, env),
+		Sandbox:     mustSandboxMetadata(opts, env),
 		Scanners:    scanners,
 		Judge:       nil,
 	}

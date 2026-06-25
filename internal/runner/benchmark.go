@@ -56,6 +56,7 @@ type BenchmarkArtifact struct {
 	StartedAt     string            `json:"startedAt"`
 	CompletedAt   string            `json:"completedAt"`
 	Env           map[string]string `json:"env"`
+	Sandbox       SandboxMetadata   `json:"sandbox"`
 	Cases         []BenchmarkCase   `json:"cases"`
 	Summary       BenchmarkSummary  `json:"summary"`
 }
@@ -196,6 +197,10 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if err := ValidateRequirements(opts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
+	sandbox, err := sandboxMetadata(opts, env)
+	if err != nil {
+		return BenchmarkArtifact{}, err
+	}
 	now := ctx.Now
 	if now == nil {
 		now = time.Now
@@ -217,6 +222,7 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 		},
 		StartedAt: startedAt,
 		Env:       envPresence(opts, env),
+		Sandbox:   sandbox,
 		Cases:     []BenchmarkCase{},
 		Summary: BenchmarkSummary{
 			ExpectedVerdicts: map[string]int{},
@@ -472,6 +478,8 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 		Env:                    env,
 		Now:                    now,
 		CommandRunner:          ctx.CommandRunner,
+		HostCommandRunner:      ctx.HostCommandRunner,
+		DockerAvailability:     ctx.DockerAvailability,
 		ScannerRunner:          ctx.ScannerRunner,
 		SkillSpectorCommand:    ctx.SkillSpectorCommand,
 		AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,

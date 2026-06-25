@@ -55,6 +55,10 @@ type cliIntent struct {
 	json                 bool
 	judge                string
 	judgeSet             bool
+	sandbox              string
+	sandboxSet           bool
+	sandboxImage         string
+	sandboxImageSet      bool
 	benchmark            string
 	benchmarkSet         bool
 	split                string
@@ -397,6 +401,22 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			intent.judge = value
 			intent.judgeSet = true
 			i = next
+		case "--sandbox":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.sandbox = value
+			intent.sandboxSet = true
+			i = next
+		case "--sandbox-image":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.sandboxImage = value
+			intent.sandboxImageSet = true
+			i = next
 		case "--benchmark":
 			intent.benchmarkSet = true
 			next := i + 1
@@ -526,6 +546,12 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	}
 	if judgeCommand != "" {
 		args = append(args, "--judge", judgeCommand)
+	}
+	if intent.sandboxSet {
+		args = append(args, "--sandbox", intent.sandbox)
+	}
+	if intent.sandboxImageSet {
+		args = append(args, "--sandbox-image", intent.sandboxImage)
 	}
 	return args, extraEnv, selected.files, nil
 }

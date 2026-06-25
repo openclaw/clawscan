@@ -7,12 +7,12 @@ by themselves.
 
 | Scanner ID | Source | Target support | Required env vars |
 | --- | --- | --- | --- |
-| `agentverus` | [AgentVerus](https://agentverus.ai/) | Local file or directory through `npx --yes agentverus-scanner scan <target> --json`. | None for the local scanner path. |
+| `agentverus` | [AgentVerus](https://agentverus.ai/) | Local file or directory through the runtime image's `agentverus-scanner scan <target> --json`. With `--sandbox off`, ClawScan falls back to `npx --yes agentverus-scanner scan <target> --json`. | None for the local scanner path. |
 | `ai-infra-guard` | [Tencent AI-Infra-Guard](https://github.com/Tencent/AI-Infra-Guard) | Local targets are zipped and uploaded to a self-hosted A.I.G taskapi service. URL targets are passed to `mcp_scan`. | `AIG_BASE_URL`, `AIG_MODEL`, `AIG_MODEL_API_KEY`. |
-| `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Local file or directory through `skill-scanner scan <target> --format json --output <tempfile>`. | None required by ClawScan. Configure Cisco's CLI separately. |
+| `cisco` | [Cisco AI Defense skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Local file or directory through the runtime image's `skill-scanner scan <target> --format json --output <tempfile>`. With `--sandbox off`, ClawScan expects `skill-scanner` on the host path. | None required by ClawScan. Configure Cisco's CLI separately. |
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | Local file or directory. Runs the SkillSpector LLM path by default. | `OPENAI_API_KEY` by default. Set `SKILLSPECTOR_PROVIDER=anthropic` for `ANTHROPIC_API_KEY` or `SKILLSPECTOR_PROVIDER=nv_inference` / `nv_build` / `nvidia` for `NVIDIA_INFERENCE_KEY`. |
-| `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Local skill path through `uvx snyk-agent-scan@latest scan --json --no-bootstrap --skills <target>`. | `SNYK_TOKEN`. |
-| `socket` | [Socket CLI](https://github.com/SocketDev/socket-cli) | Local file or directory through `npx --yes socket scan create --json <target>`. This uses Socket's public full-scan CLI path and does not claim private skills.sh backend parity. | `SOCKET_TOKEN`. |
+| `snyk` | [Snyk Agent Scan](https://github.com/snyk/agent-scan) | Local skill path through the runtime image's `snyk-agent-scan scan --json --no-bootstrap --skills <target>`. With `--sandbox off`, ClawScan falls back to `uvx snyk-agent-scan@latest scan --json --no-bootstrap --skills <target>`. | `SNYK_TOKEN`. |
+| `socket` | [Socket CLI](https://github.com/SocketDev/socket-cli) | Local file or directory through the runtime image's `socket scan create --json <target>`. With `--sandbox off`, ClawScan falls back to `npx --yes socket scan create --json <target>`. This uses Socket's public full-scan CLI path and does not claim private skills.sh backend parity. | `SOCKET_TOKEN`. |
 | `clawscan-static` | Built in | Local file or directory. URL targets return a skipped result. | None. |
 | `virustotal` | [VirusTotal API](https://docs.virustotal.com/reference/file) | Single local file hash lookup in v1. Directories return a skipped result. | `VIRUSTOTAL_API_KEY`. |
 
@@ -46,6 +46,23 @@ and lets ClawScan validate that prompts only reference requested scanners.
 
 ClawScan never accepts scanner API keys as CLI flags. This avoids leaking
 secrets through shell history, process lists, CI logs, and run artifacts.
+
+## Docker Sandbox
+
+Command-backed scanners and judge commands run through Docker by default using
+`ghcr.io/openclaw/clawscan-runtime:latest`. The runtime image contains the
+built-in command-backed scanner tools and the Codex CLI used by the built-in
+ClawHub judge profile, so operators do not need to install those tools on the
+host.
+
+ClawScan keeps network access enabled for scanner APIs, mounts the target and
+temporary output paths needed by the command, and passes only declared env var
+names for the selected scanners or profile judge. It never passes the whole
+host environment into the container.
+
+Use `--sandbox off` or `CLAWSCAN_SANDBOX=off` only when the caller is already
+running in an isolated CI worker or another environment where Docker is
+unavailable by design.
 
 ## Adding A Built-In Scanner Adapter
 

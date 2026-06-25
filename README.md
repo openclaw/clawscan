@@ -230,6 +230,34 @@ export AIG_MODEL=gpt-4.1
 export AIG_MODEL_API_KEY=...
 ```
 
+## Sandbox Runtime
+
+ClawScan runs command-backed scanners and judge commands through Docker by
+default. The runtime image is `ghcr.io/openclaw/clawscan-runtime:latest`, which
+is built to contain the built-in scanner CLIs and the Codex CLI used by the
+built-in ClawHub judge profile, so users do not need to install those tools on
+the host.
+
+The Docker sandbox keeps network access on for scanner APIs, mounts only the
+target/work/output paths needed by the command, and passes only the declared env
+var names for the selected scanners or profile judge. ClawScan records env
+presence as `present` or `missing`; it never writes secret values to artifacts.
+
+Use the opt-out only when the surrounding environment is already isolated, such
+as a locked-down CI worker where Docker is unavailable:
+
+```bash
+clawscan ./my-skill --scanner skillspector --sandbox off
+CLAWSCAN_SANDBOX=off clawscan ./my-skill --scanner skillspector
+```
+
+CI runners can smoke-test Docker support with:
+
+```bash
+docker version
+docker run --rm ghcr.io/openclaw/clawscan-runtime:latest skillspector --help
+```
+
 ## Install
 
 Homebrew is the recommended install path on macOS and Linux:
@@ -299,11 +327,8 @@ GitHub Pages publishes the docs site from `docs/` on pushes to `main`.
 - Command-backed custom scanner adapters, so teams can add their own scanner
   commands through a documented adapter contract once the built-in scanner
   boundary has settled.
-- Reusable GitHub Action or workflow for CI. The goal is a copy-pasteable way
-  to install ClawScan, install the dependencies needed by built-in scanners,
-  run a selected profile or config, and upload the JSON artifact. Judge harness
-  CLIs such as `codex` should stay explicit setup steps because `--judge` is an
-  arbitrary command supplied by the workflow author.
+- Version-pinned Docker runtime image tags that pair each ClawScan release with
+  a reviewed scanner toolchain.
 
 ## Development
 

@@ -32,6 +32,8 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"--limit <n>",
 		"--offset <n>",
 		"--predictions-output <path>",
+		"--sandbox <docker|off>",
+		"--sandbox-image <image>",
 		"clawscan-results.json",
 		"Supported benchmarks:",
 		"cuhk-zhuque/SkillTrustBench",
@@ -40,6 +42,8 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"Accepted scanner IDs:",
 		"agentverus, ai-infra-guard, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
 		"Required environment variables:",
+		"CLAWSCAN_SANDBOX=off",
+		"CLAWSCAN_SANDBOX_IMAGE",
 		"OPENAI_API_KEY",
 		"AIG_BASE_URL",
 		"AIG_MODEL",
@@ -265,6 +269,7 @@ func TestRunCommandUsesBuiltInProfile(t *testing.T) {
 			"--scanner-result", "skillspector=" + skillSpectorFixture,
 			"--scanner-result", "virustotal=" + virusTotalFixture,
 			"--judge", "printf '{\"verdict\":\"benign\"}\\n' > {{ output }}",
+			"--sandbox", "off",
 			"--json",
 		}, []string{}); err != nil {
 			t.Fatal(err)

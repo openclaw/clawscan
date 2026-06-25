@@ -31,6 +31,14 @@ go run ./cmd/clawscan \
   --output /tmp/clawscan-benchmark-smoke.json
 ```
 
+Docker runtime smoke:
+
+```bash
+docker build -t clawscan-runtime:dev docker/clawscan-runtime
+docker run --rm clawscan-runtime:dev codex --help
+docker run --rm clawscan-runtime:dev skillspector --help
+```
+
 ## Docs Site
 
 The docs site is generated from Markdown in `docs/`:

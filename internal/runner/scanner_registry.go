@@ -62,9 +62,10 @@ func (registry ScannerRegistry) isZero() bool {
 }
 
 type scannerAdapter struct {
-	id           string
-	requirements func(env map[string]string) []EnvRequirement
-	run          func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
+	id            string
+	requirements  func(env map[string]string) []EnvRequirement
+	commandBacked bool
+	run           func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
 
 func (adapter scannerAdapter) ID() string {
@@ -82,6 +83,10 @@ func (adapter scannerAdapter) Run(runner ExternalScannerRunner, target string, s
 	return adapter.run(runner, target, startedAt)
 }
 
+func (adapter scannerAdapter) CommandBacked() bool {
+	return adapter.commandBacked
+}
+
 var defaultScannerRegistry = mustScannerRegistry(defaultScannerAdapters()...)
 
 func mustScannerRegistry(adapters ...ScannerAdapter) ScannerRegistry {
@@ -95,8 +100,9 @@ func mustScannerRegistry(adapters ...ScannerAdapter) ScannerRegistry {
 func defaultScannerAdapters() []ScannerAdapter {
 	return []ScannerAdapter{
 		scannerAdapter{
-			id:  "agentverus",
-			run: ExternalScannerRunner.runAgentVerus,
+			id:            "agentverus",
+			commandBacked: true,
+			run:           ExternalScannerRunner.runAgentVerus,
 		},
 		scannerAdapter{
 			id:           "ai-infra-guard",
@@ -104,27 +110,31 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run:          ExternalScannerRunner.runAIInfraGuard,
 		},
 		scannerAdapter{
-			id:  "cisco",
-			run: ExternalScannerRunner.runCisco,
+			id:            "cisco",
+			commandBacked: true,
+			run:           ExternalScannerRunner.runCisco,
 		},
 		scannerAdapter{
 			id:  "clawscan-static",
 			run: ExternalScannerRunner.runStatic,
 		},
 		scannerAdapter{
-			id:           "skillspector",
-			requirements: skillSpectorRequirements,
-			run:          ExternalScannerRunner.runSkillSpector,
+			id:            "skillspector",
+			requirements:  skillSpectorRequirements,
+			commandBacked: true,
+			run:           ExternalScannerRunner.runSkillSpector,
 		},
 		scannerAdapter{
-			id:           "snyk",
-			requirements: staticEnvRequirements("scanner snyk", "SNYK_TOKEN"),
-			run:          ExternalScannerRunner.runSnyk,
+			id:            "snyk",
+			requirements:  staticEnvRequirements("scanner snyk", "SNYK_TOKEN"),
+			commandBacked: true,
+			run:           ExternalScannerRunner.runSnyk,
 		},
 		scannerAdapter{
-			id:           "socket",
-			requirements: staticEnvRequirements("scanner socket", "SOCKET_TOKEN"),
-			run:          ExternalScannerRunner.runSocket,
+			id:            "socket",
+			requirements:  staticEnvRequirements("scanner socket", "SOCKET_TOKEN"),
+			commandBacked: true,
+			run:           ExternalScannerRunner.runSocket,
 		},
 		scannerAdapter{
 			id:           "virustotal",
@@ -132,6 +142,14 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run:          ExternalScannerRunner.runVirusTotal,
 		},
 	}
+}
+
+func commandBackedScanner(adapter ScannerAdapter) bool {
+	type commandBacked interface {
+		CommandBacked() bool
+	}
+	typed, ok := adapter.(commandBacked)
+	return ok && typed.CommandBacked()
 }
 
 func staticEnvRequirements(reason string, envVars ...string) func(env map[string]string) []EnvRequirement {

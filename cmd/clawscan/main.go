@@ -359,6 +359,8 @@ Core flags:
                               Defaults to ./clawscan-results.json unless --json is passed.
   --json                      Print the full artifact JSON to stdout and skip the default output file.
   --judge <cmd>               Optional external judge harness command.
+  --sandbox <docker|off>      Command sandbox mode. Defaults to docker; use off only in already-isolated environments.
+  --sandbox-image <image>     Docker runtime image. Defaults to %s or CLAWSCAN_SANDBOX_IMAGE.
   --benchmark [id]            Run a supported benchmark dataset instead of one target. Defaults to SkillTrustBench.
   --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for OpenClaw.
   --limit <n>                 Maximum benchmark rows to run. 0 means all rows.
@@ -378,6 +380,7 @@ Built-in profiles:
   %s
 
 Required environment variables:
+  sandbox: CLAWSCAN_SANDBOX=off disables Docker by default; CLAWSCAN_SANDBOX_IMAGE overrides the runtime image.
   clawhub judge: OPENAI_API_KEY
   ai-infra-guard: AIG_BASE_URL, AIG_MODEL, AIG_MODEL_API_KEY
   socket: SOCKET_TOKEN
@@ -398,5 +401,5 @@ Judge summary:
   If no judge is configured, ClawScan only records scanner evidence.
   If a judge is configured, ClawScan runs it through the platform shell and expects a JSON object on stdout or at {{ output }}.
   Placeholders: {{ workspace }}, {{ prompt[:path] }}, {{ output_schema[:path] }}, {{ output }}.
-`, strings.Join(runner.ScannerIDs(), ", "), strings.Join(profiles.ProfileIDs(), ", "))
+`, runner.DefaultSandboxImage, strings.Join(runner.ScannerIDs(), ", "), strings.Join(profiles.ProfileIDs(), ", "))
 }

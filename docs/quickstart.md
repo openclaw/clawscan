@@ -54,6 +54,11 @@ export OPENAI_API_KEY=...
 clawscan --scanner skillspector
 ```
 
+By default, ClawScan runs command-backed scanners and judge commands inside the
+Docker runtime image `ghcr.io/openclaw/clawscan-runtime:latest`. The sandbox
+keeps network access on for scanner APIs and passes only the env var names
+declared by the selected scanner or profile judge.
+
 Run scanners that require credentials by exporting env vars next to the command:
 
 ```bash
@@ -84,6 +89,13 @@ To use another built-in profile over the same discovered skill targets:
 
 ```bash
 clawscan --profile skills-sh
+```
+
+If Docker is unavailable because the surrounding worker is already isolated,
+opt out explicitly:
+
+```bash
+clawscan --profile skills-sh --sandbox off
 ```
 
 Built-in profiles:
