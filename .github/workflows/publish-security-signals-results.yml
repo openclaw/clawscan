@@ -2,17 +2,6 @@ name: Publish Security Signals results
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - 'pe/**'
-    paths:
-      - '.github/workflows/publish-security-signals-results.yml'
-      - 'cmd/clawscan/**'
-      - 'internal/**'
-      - 'leaderboard/submissions/**'
-      - 'scripts/publish-security-signals-results.sh'
-      - 'scripts/validate-security-signals-submissions.sh'
 
 permissions:
   contents: read
