@@ -1,40 +1,112 @@
-# ClawScan Docs
+# Introduction
 
-ClawScan is an open, benchmarkable security scanning harness for agent skills.
+ClawScan is a composable security scanning harness for agent skills.
 
-It gives security researchers, maintainers, and contributors one CLI for running
-scanners, comparing raw evidence, and optionally passing that evidence into an
-external judge harness. The point is not to hide scanner differences behind one
-verdict. The point is to make those differences easy to see, test, and improve.
+Run a suite of skill security scanners, pass the results to a judge harness, and compare against multiple skill security benchmarks.
 
-OpenClaw uses ClawScan to make ClawHub's production skill scanning visible and
-improvable. The tool itself is general purpose and can be used by any project
-that wants repeatable agent-skill security checks.
+## Quick Start
 
-## Manual
+Install ClawScan:
 
-| Page | Use it for |
+```bash
+brew install openclaw/tap/clawscan
+```
+
+Command-backed scanners and judges run in ClawScan's Docker runtime by default,
+so keep Docker running for local scans.
+
+Run NVIDIA SkillSpector and Cisco Skill Scanner against a local `skills/` folder:
+
+```bash
+clawscan --scanner skillspector --scanner cisco
+```
+
+## Scan a known malicious skill
+
+This example scans Trail of Bits' [`csv-summarizer`](https://github.com/trailofbits/overtly-malicious-skills/tree/4ffbf9461ef0505f9ce76a0d3694a18ec33ea531/skills/csv-summarizer) skill, which claims to summarize a CSV file but also prints every environment variable when run.
+
+```bash
+git clone https://github.com/trailofbits/overtly-malicious-skills.git /tmp/overtly-malicious-skills
+cd /tmp/overtly-malicious-skills
+git checkout 4ffbf9461ef0505f9ce76a0d3694a18ec33ea531
+clawscan skills/csv-summarizer \
+  --scanner skillspector \
+  --scanner cisco \
+  --output /tmp/clawscan-csv-summarizer.json
+```
+
+Sample findings:
+
+```txt
+targets: 1
+scanner_completed: 2
+scanner_failed: 0
+scanner_skipped: 0
+issues_found: 2
+errors: 0
+full_results: /tmp/clawscan-csv-summarizer.json
+```
+
+The results bundle keeps the top-level artifact plus per-scanner JSON reports.
+
+<details>
+<summary>Artifact excerpt</summary>
+
+```json
+{
+  "schemaVersion": "clawscan-run-v1",
+  "target": "skills/csv-summarizer",
+  "scanners": {
+    "cisco": {
+      "status": "completed",
+      "durationMs": 42,
+      "outputPath": "clawscan-csv-summarizer/skills/csv-summarizer/cisco.json",
+      "isSafe": true,
+      "maxSeverity": "SAFE",
+      "findingsCount": 0
+    },
+    "skillspector": {
+      "status": "completed",
+      "durationMs": 42,
+      "outputPath": "clawscan-csv-summarizer/skills/csv-summarizer/skillspector.json",
+      "severity": "MEDIUM",
+      "score": 31,
+      "recommendation": "CAUTION",
+      "issues": [
+        {
+          "id": "LP3",
+          "severity": "MEDIUM",
+          "file": "SKILL.md"
+        },
+        {
+          "id": "E2",
+          "severity": "HIGH",
+          "file": "scripts/summarize.py"
+        }
+      ]
+    }
+  }
+}
+```
+
+</details>
+
+## Motivation
+
+Agent-skill security is new and fast-moving, with researchers and companies
+exploring many promising scanners, datasets, and judge harnesses. In our
+[ClawHub Security Signals paper](https://arxiv.org/html/2606.01494v1), we found
+that combining multiple scanners with a configurable judge works better than
+relying on any single scanner.
+
+ClawScan turns that approach into a repeatable CLI. It includes a built-in `clawhub` profile, a saved scanner-and-judge configuration that matches what ClawHub runs in production, so researchers can reproduce results, test improvements, and help improve detection against the weekly refreshed ClawHub security-signals dataset.
+
+## Commands
+
+| Command family | Use |
 | --- | --- |
-| [Quickstart](quickstart.md) | Install, first scan, env vars, and common commands. |
-| [Contributing](contributing.md) | Setup, validation, review expectations, and deeper contributor paths. |
-| [Scanners](scanners.md) | Supported scanner IDs, upstream links, target support, and credentials. |
-| [Judge harness](judge.md) | `--judge`, placeholders, prompt interpolation, and schema handoff. |
-| [Benchmarks](benchmarks.md) | Running supported benchmarks and reading local score artifacts. |
-| [Artifacts](artifacts.md) | `clawscan-run-v1` and `clawscan-benchmark-v1` JSON shapes. |
-| [Improving ClawHub scans](improving-clawhub-scans.md) | ClawHub profile, Security Signals comparison, and upstreaming scan improvements. |
-| [Development](development.md) | Tests, docs site build, releases, and ClawHub parity tooling. |
-| [Releasing](releasing.md) | Release, Homebrew tap, verification, and rollback steps. |
-
-## Mental Model
-
-ClawScan has three layers:
-
-1. **Target**: discovered child skill directories under `./skills`, one
-   explicit local skill file or directory, a scanner-supported URL, or a
-   benchmark row materialized as a temporary skill directory.
-2. **Scanners**: built-in adapters that produce raw JSON evidence.
-3. **Judge**: an optional external command that interprets the evidence.
-
-If no judge is configured, ClawScan is still useful as a scanner comparison
-tool. If a judge is configured, ClawScan prepares the scanner evidence and paths
-that the external harness needs.
+| `clawscan <target> --scanner <id>` | Run one or more scanners against an explicit target. Omit `<target>` to scan child skill directories under `./skills`. |
+| `clawscan scanners [list\|<scanner-id>]` | Discover supported scanner IDs, required env vars, upstream links, descriptions, and install guidance. |
+| `clawscan profiles [-v]` | Inspect built-in plus nearest project-local profiles; `-v` prints the resolved profile catalog as YAML. |
+| `clawscan benchmark [list\|<benchmark-id>]` | Discover or run supported benchmarks through a selected scanner/profile/judge setup. |
+| `clawscan install <scanner-id> [...]` | Install or verify local scanner dependencies where ClawScan has registry-backed install plans. |

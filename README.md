@@ -279,23 +279,3 @@ Profile: `clawhub`
 Benchmark: pending maintainer `SkillTrustBench Profile Gate` run.
 Artifact: uploaded by the workflow as `skilltrustbench-candidate`.
 <!-- clawscan-benchmark:clawhub:end -->
-
-## Roadmap
-
-- [x] Reusable GitHub benchmark workflow that runs ClawScan through the Docker
-  runtime and uploads the JSON artifact.
-- [ ] Command-backed custom scanner adapters, so teams can add their own scanner
-  commands through a documented adapter contract once the built-in scanner
-  boundary has settled.
-- [ ] Published runtime-image versioning docs for pinning or overriding
-  `CLAWSCAN_SANDBOX_IMAGE` in long-lived CI.
-
-## Development
-
-Run the local checks:
-
-```bash
-go test ./...
-go vet ./...
-make docs-site
-```

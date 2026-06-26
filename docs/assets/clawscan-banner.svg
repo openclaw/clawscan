@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="ClawScan banner">
+  <defs>
+    <linearGradient id="bannerBg" x1="90" y1="40" x2="1110" y2="600" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#061217"/>
+      <stop offset="0.5" stop-color="#0b2026"/>
+      <stop offset="1" stop-color="#132819"/>
+    </linearGradient>
+    <radialGradient id="warmGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(710 210) rotate(120) scale(650 430)">
+      <stop offset="0" stop-color="#ffb35f" stop-opacity="0.46"/>
+      <stop offset="0.36" stop-color="#ff6f4d" stop-opacity="0.23"/>
+      <stop offset="0.72" stop-color="#00e5cc" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#07151a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="dishFill" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(518 286) rotate(39) scale(330 238)">
+      <stop offset="0" stop-color="#fff2db"/>
+      <stop offset="0.38" stop-color="#ffb36f"/>
+      <stop offset="0.7" stop-color="#ff744f"/>
+      <stop offset="1" stop-color="#c93b28"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="292" y1="118" x2="810" y2="522" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd8a5"/>
+      <stop offset="0.4" stop-color="#ff744f"/>
+      <stop offset="1" stop-color="#8f2417"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="455" y1="318" x2="838" y2="182" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff6e7"/>
+      <stop offset="0.52" stop-color="#f0b37b"/>
+      <stop offset="1" stop-color="#97301f"/>
+    </linearGradient>
+    <linearGradient id="horn" x1="788" y1="98" x2="920" y2="226" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffe0ac"/>
+      <stop offset="0.42" stop-color="#ff744f"/>
+      <stop offset="1" stop-color="#7f1f17"/>
+    </linearGradient>
+    <filter id="soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="shadow"/>
+      <feOffset in="shadow" dx="0" dy="18" result="offset"/>
+      <feColorMatrix in="offset" type="matrix" values="0 0 0 0 0.02 0 0 0 0 0.04 0 0 0 0 0.04 0 0 0 0.48 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" rx="44" fill="url(#bannerBg)"/>
+  <rect x="1" y="1" width="1198" height="628" rx="43" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+  <rect width="1200" height="630" rx="44" fill="url(#warmGlow)"/>
+
+  <g fill="#fff6e8" opacity="0.52">
+    <circle cx="106" cy="96" r="2.5"/>
+    <circle cx="188" cy="482" r="2"/>
+    <circle cx="316" cy="118" r="1.8"/>
+    <circle cx="1004" cy="463" r="2.4"/>
+    <circle cx="1102" cy="122" r="1.8"/>
+  </g>
+  <g fill="none" stroke="#173943" stroke-width="2" opacity="0.7" stroke-linecap="round">
+    <path d="M82 188h250M94 438h180M782 522h240"/>
+    <path d="M160 254h90M918 164h126M962 392h104"/>
+  </g>
+
+  <g transform="translate(287 -38) scale(1.32)" filter="url(#soft)">
+    <ellipse cx="143" cy="409" rx="77" ry="28" fill="#21333d"/>
+    <ellipse cx="143" cy="402" rx="70" ry="24" fill="#344653"/>
+    <path d="M153 398 153 317" stroke="#ffd9a7" stroke-width="17" stroke-linecap="round"/>
+    <circle cx="153" cy="317" r="30" fill="#2c2020"/>
+    <circle cx="153" cy="317" r="19" fill="#10191e"/>
+    <path d="M121 353c-21-4-34-17-33-34 1-19 21-29 47-22" fill="#1b252b"/>
+    <path d="M103 327c-22-6-32-20-27-36 6-17 27-22 50-11" fill="#26333b"/>
+    <path d="M366 167 405 333" stroke="#ffcf91" stroke-width="10" stroke-linecap="round"/>
+    <path d="M379 165 421 330" stroke="#fff2db" stroke-width="4" stroke-linecap="round" opacity="0.55"/>
+    <path d="M126 223 356 144" stroke="url(#metal)" stroke-width="12" stroke-linecap="round"/>
+    <path d="M133 230 361 150" stroke="#fff4df" stroke-width="4" stroke-linecap="round" opacity="0.72"/>
+    <g transform="rotate(-38 211 221)">
+      <ellipse cx="211" cy="221" rx="172" ry="96" fill="url(#dishFill)"/>
+      <ellipse cx="211" cy="221" rx="174" ry="98" fill="none" stroke="url(#rim)" stroke-width="18"/>
+      <path d="M70 211c61-54 172-82 280-36" fill="none" stroke="#fff0d8" stroke-width="4" opacity="0.34"/>
+      <path d="M96 258c62-31 148-43 236-13" fill="none" stroke="#8f2417" stroke-width="3" opacity="0.18"/>
+      <path d="M72 221h276" stroke="#fff2db" stroke-width="5" opacity="0.5"/>
+      <path d="M211 125v190" stroke="#fff2db" stroke-width="3.5" opacity="0.33"/>
+    </g>
+    <g transform="rotate(-38 368 138)">
+      <rect x="331" y="108" width="88" height="59" rx="24" fill="url(#horn)"/>
+      <rect x="337" y="115" width="76" height="46" rx="21" fill="#1b2429" opacity="0.18"/>
+      <ellipse cx="324" cy="140" rx="17" ry="22" fill="#151f24"/>
+      <ellipse cx="324" cy="140" rx="10" ry="15" fill="#ffd39a"/>
+    </g>
+  </g>
+</svg>
