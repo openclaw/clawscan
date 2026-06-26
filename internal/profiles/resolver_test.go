@@ -382,6 +382,88 @@ profiles:
 	}
 }
 
+func TestResolveArgsSupportsSandboxConfig(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+sandbox:
+  mode: docker
+  image: ghcr.io/acme/clawscan-runtime:v1
+profiles:
+  review:
+    scanners:
+      - clawscan-static
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Sandbox.Mode != "docker" {
+		t.Fatalf("sandbox mode = %q", opts.Sandbox.Mode)
+	}
+	if opts.Sandbox.Image != "ghcr.io/acme/clawscan-runtime:v1" {
+		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
+	}
+}
+
+func TestResolveArgsSupportsProfileSandboxOverride(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+sandbox:
+  mode: docker
+  image: ghcr.io/acme/default-runtime:v1
+profiles:
+  review:
+    scanners:
+      - clawscan-static
+    sandbox:
+      image: ghcr.io/acme/review-runtime:v2
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Sandbox.Mode != "docker" {
+		t.Fatalf("sandbox mode = %q", opts.Sandbox.Mode)
+	}
+	if opts.Sandbox.Image != "ghcr.io/acme/review-runtime:v2" {
+		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
+	}
+}
+
+func TestResolveArgsSandboxCLIOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+sandbox:
+  mode: docker
+  image: ghcr.io/acme/default-runtime:v1
+profiles:
+  review:
+    scanners:
+      - clawscan-static
+`)
+
+	opts, err := ResolveArgs([]string{
+		"./skill",
+		"--profile", "review",
+		"--sandbox", "off",
+		"--sandbox-image", "ghcr.io/acme/manual-runtime:v3",
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Sandbox.Mode != "off" {
+		t.Fatalf("sandbox mode = %q", opts.Sandbox.Mode)
+	}
+	if opts.Sandbox.Image != "ghcr.io/acme/manual-runtime:v3" {
+		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
+	}
+}
+
 func TestResolveArgsResolvesConfigRelativeJudgePlaceholderPaths(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, "security", ".clawscan.yml")

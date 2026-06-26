@@ -128,6 +128,10 @@ fails with an ambiguity error.
 ```yaml
 version: 1
 
+sandbox:
+  mode: docker
+  image: ghcr.io/openclaw/clawscan-runtime:latest
+
 profiles:
   clawhub-release:
     scanners:
@@ -139,6 +143,8 @@ profiles:
       - skillspector
       - clawscan-static
     output: ./clawscan-results/skills-sh-review.json
+    sandbox:
+      image: ghcr.io/acme/custom-clawscan-runtime:v1
     judge:
       command: judge --out {{ output }}
       requiredEnv:
@@ -235,6 +241,8 @@ Actual secret values are never written to run artifacts.
 | `--output <path>` | Write the full artifact JSON to a specific file. Defaults to `./clawscan-results.json` when `--json` is not passed. |
 | `--json` | Print the full artifact JSON to stdout and skip the default output file. |
 | `--judge <cmd>` | Run an optional external judge harness. |
+| `--sandbox <docker|off>` | Select command sandbox mode. Defaults to Docker. |
+| `--sandbox-image <image>` | Override the Docker runtime image. |
 | `--benchmark [id]` | Run a supported benchmark instead of one target. Defaults to SkillTrustBench. |
 | `--split <name>` | Benchmark split. Defaults to `benchmark` for SkillTrustBench and `eval_holdout` for OpenClaw. |
 | `--limit <n>` | Maximum benchmark rows to run. `0` means all rows. |

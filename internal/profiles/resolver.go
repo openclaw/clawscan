@@ -21,6 +21,7 @@ var builtinFiles embed.FS
 
 type Config struct {
 	Version  int                `yaml:"version"`
+	Sandbox  *Sandbox           `yaml:"sandbox,omitempty"`
 	Profiles map[string]Profile `yaml:"profiles"`
 }
 
@@ -29,7 +30,13 @@ type Profile struct {
 	ScannerResults map[string]string `yaml:"scannerResults,omitempty"`
 	Output         string            `yaml:"output,omitempty"`
 	JSON           bool              `yaml:"json,omitempty"`
+	Sandbox        *Sandbox          `yaml:"sandbox,omitempty"`
 	Judge          *Judge            `yaml:"judge,omitempty"`
+}
+
+type Sandbox struct {
+	Mode  string `yaml:"mode,omitempty"`
+	Image string `yaml:"image,omitempty"`
 }
 
 type Judge struct {
@@ -39,6 +46,7 @@ type Judge struct {
 
 type resolvedProfile struct {
 	profile   Profile
+	sandbox   Sandbox
 	configDir string
 	files     map[string][]byte
 }
@@ -304,8 +312,24 @@ func readConfigBytes(label string, read func() ([]byte, error)) (Config, error) 
 
 func mergeProfiles(out map[string]resolvedProfile, config Config, configDir string, files map[string][]byte) {
 	for name, profile := range config.Profiles {
-		out[name] = resolvedProfile{profile: profile, configDir: configDir, files: files}
+		out[name] = resolvedProfile{profile: profile, sandbox: mergeSandbox(config.Sandbox, profile.Sandbox), configDir: configDir, files: files}
 	}
+}
+
+func mergeSandbox(defaults *Sandbox, override *Sandbox) Sandbox {
+	var out Sandbox
+	if defaults != nil {
+		out = *defaults
+	}
+	if override != nil {
+		if override.Mode != "" {
+			out.Mode = override.Mode
+		}
+		if override.Image != "" {
+			out.Image = override.Image
+		}
+	}
+	return out
 }
 
 func discoverConfig(cwd string) (string, error) {
@@ -546,6 +570,12 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	}
 	if judgeCommand != "" {
 		args = append(args, "--judge", judgeCommand)
+	}
+	if selected.sandbox.Mode != "" {
+		args = append(args, "--sandbox", selected.sandbox.Mode)
+	}
+	if selected.sandbox.Image != "" {
+		args = append(args, "--sandbox-image", selected.sandbox.Image)
 	}
 	if intent.sandboxSet {
 		args = append(args, "--sandbox", intent.sandbox)
