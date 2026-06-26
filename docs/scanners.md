@@ -51,8 +51,8 @@ secrets through shell history, process lists, CI logs, and run artifacts.
 
 Command-backed scanners and judge commands run through Docker by default using
 `ghcr.io/openclaw/clawscan-runtime:latest`. The runtime image contains the
-built-in command-backed scanner tools and the Codex CLI used by the built-in
-ClawHub judge profile, so operators do not need to install those tools on the
+built-in command-backed scanner tools plus Codex and Claude Code for
+judge/profile commands, so operators do not need to install those tools on the
 host.
 
 ClawScan keeps network access enabled for scanner APIs, mounts the target and

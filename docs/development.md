@@ -36,6 +36,7 @@ Docker runtime smoke:
 ```bash
 docker build -t clawscan-runtime:dev docker/clawscan-runtime
 docker run --rm clawscan-runtime:dev codex --help
+docker run --rm clawscan-runtime:dev claude --help
 docker run --rm clawscan-runtime:dev skillspector --help
 ```
 

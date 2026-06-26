@@ -17,6 +17,6 @@ RUN python -m pip install --no-cache-dir --upgrade pip uv \
     && uv tool install "snyk-agent-scan@latest" \
     && ln -sf /root/.local/bin/snyk-agent-scan /usr/local/bin/snyk-agent-scan
 
-RUN npm install -g @openai/codex agentverus-scanner socket
+RUN npm install -g @anthropic-ai/claude-code @openai/codex agentverus-scanner socket
 
 WORKDIR /workspace

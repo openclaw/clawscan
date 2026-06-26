@@ -234,9 +234,8 @@ export AIG_MODEL_API_KEY=...
 
 ClawScan runs command-backed scanners and judge commands through Docker by
 default. The runtime image is `ghcr.io/openclaw/clawscan-runtime:latest`, which
-is built to contain the built-in scanner CLIs and the Codex CLI used by the
-built-in ClawHub judge profile, so users do not need to install those tools on
-the host.
+is built to contain the built-in scanner CLIs plus Codex and Claude Code for
+judge/profile commands, so users do not need to install those tools on the host.
 
 The Docker sandbox keeps network access on for scanner APIs, mounts only the
 target/work/output paths needed by the command, and passes only the declared env
