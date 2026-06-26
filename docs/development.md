@@ -40,6 +40,34 @@ docker run --rm clawscan-runtime:dev claude --help
 docker run --rm clawscan-runtime:dev skillspector --help
 ```
 
+## Runtime Tool Updates
+
+The runtime image pins scanner and judge-tool versions in
+`docker/clawscan-runtime/Dockerfile`. Do not float these installs to `latest`:
+runtime tool changes can alter scanner output, judge behavior, runtime, and
+failure rate.
+
+The `Runtime Tool Updates` workflow runs monthly, updates the pinned versions,
+builds the candidate image, runs CLI smoke checks, and opens a PR. That PR must
+not be auto-merged from smoke checks alone.
+
+Before merging a runtime-tool update PR, run a benchmark comparison from the PR
+branch and attach the result artifacts or summary to the PR:
+
+```bash
+docker build -t clawscan-runtime:candidate docker/clawscan-runtime
+
+CLAWSCAN_SANDBOX_IMAGE=clawscan-runtime:candidate \
+go run ./cmd/clawscan \
+  --benchmark SkillTrustBench \
+  --scanner clawscan-static \
+  --output /tmp/clawscan-skilltrustbench-candidate.json
+```
+
+For ClawHub-affecting changes, also compare the OpenClaw Security Signals
+benchmark or the relevant ClawHub profile benchmark path. Explain any verdict
+drift, scanner failures, or runtime regression before merge.
+
 ## Docs Site
 
 The docs site is generated from Markdown in `docs/`:
