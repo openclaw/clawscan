@@ -717,7 +717,7 @@ function pageShell(currentFile, title, body) {
   <title>${escapeHtml(title)} - ClawScan</title>
   <meta name="description" content="ClawScan is an open, benchmarkable security scanning harness for agent skills.">
   <meta property="og:image" content="assets/clawscan-banner.png">
-  <link rel="icon" href="assets/clawscan-logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/clawscan-logo.png" type="image/png">
   <link rel="apple-touch-icon" href="assets/clawscan-logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -733,7 +733,7 @@ function pageShell(currentFile, title, body) {
     <aside class="sidebar">
       <div class="sidebar-head">
         <a class="brand" href="index.html" aria-label="ClawScan docs home">
-          <img class="brand-mark" src="assets/clawscan-logo.svg" alt="" width="30" height="30" aria-hidden="true">
+          <img class="brand-mark" src="assets/clawscan-logo.png" alt="" width="30" height="30" aria-hidden="true">
           <span><strong>ClawScan</strong><small>Composable security scanning harness for agent skills</small></span>
         </a>
         <button class="theme-toggle" type="button" aria-label="Toggle dark mode" aria-pressed="false" data-theme-toggle>

@@ -14,7 +14,7 @@ Run a suite of skill security scanners, pass the results to a judge harness, and
 Install ClawScan:
 
 ```bash
-brew install openclaw/tap/clawscan
+npm install -g @openclaw/clawscan
 ```
 
 Command-backed scanners and judges run in ClawScan's Docker runtime by default,
