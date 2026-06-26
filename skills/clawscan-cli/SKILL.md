@@ -1,6 +1,6 @@
 ---
 name: clawscan-cli
-description: Use when running or explaining the ClawScan CLI, including one-off agent-skill scans, benchmark runs, scanner fixtures, judge harness commands, env var validation, or interpreting clawscan-run-v1 and clawscan-benchmark-v1 artifacts.
+description: Use when running or explaining the ClawScan CLI, including one-off agent-skill scans, benchmark runs, scanner fixtures, judge harness commands, env var validation, and interpreting clawscan-run-v1 and clawscan-benchmark-v1 artifacts.
 ---
 
 # ClawScan CLI

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Report ClawHub Malicious Skill"
+  short_description: "Report malicious ClawHub skills with ClawScan proof"
+  default_prompt: "Use $report-clawhub-malicious-skill to prepare a private malicious-skill report and candidate ClawScan config."
