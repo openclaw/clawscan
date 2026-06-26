@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review ClawHub Profile Proposal"
+  short_description: "Validate and promote ClawHub profile proposals"
+  default_prompt: "Use $review-clawhub-profile-proposal to validate a ClawHub profile proposal PR and promote it if accepted."
