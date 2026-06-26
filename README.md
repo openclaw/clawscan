@@ -30,41 +30,6 @@ Run NVIDIA SkillSpector and Cisco Skill Scanner against a local `skills/` folder
 clawscan --scanner skillspector --scanner cisco
 ```
 
-Sample findings from a four-skill repository:
-
-```txt
-targets: 4
-scanner_completed: 8
-scanner_failed: 0
-scanner_skipped: 0
-issues_found: 20
-errors: 0
-full_results: ./clawscan-results/artifact.json
-
-skills/context-loader
-  cisco: completed, HIGH, 8 findings
-  skillspector: completed, LOW, score 0, 0 issues
-    - cisco: HIGH LOW_ANALYZABILITY Critically low analyzability score
-    - cisco: HIGH FILE_MAGIC_MISMATCH .instructions.docx.txt
-
-skills/csv-summarizer
-  cisco: completed, SAFE, 0 findings
-  skillspector: completed, MEDIUM, score 31, 2 issues
-    - skillspector: MEDIUM LP3 MCP Least Privilege, SKILL.md
-    - skillspector: HIGH E2 Data Exfiltration, scripts/summarize.py
-
-skills/dev-env-setup
-  cisco: completed, SAFE, 0 findings
-  skillspector: completed, HIGH, score 55, 9 issues
-    - skillspector: MEDIUM LP3 MCP Least Privilege, SKILL.md
-    - skillspector: HIGH PE3 Privilege Escalation, scripts/bootstrap.sh
-
-skills/simple-formatter
-  cisco: completed, LOW, 1 findings
-  skillspector: completed, LOW, score 0, 0 issues
-    - cisco: LOW PYCACHE_FILES_DETECTED scripts/__pycache__
-```
-
 ## Scan a known malicious skill
 
 This example scans Trail of Bits' [`csv-summarizer`](https://github.com/trailofbits/overtly-malicious-skills/tree/4ffbf9461ef0505f9ce76a0d3694a18ec33ea531/skills/csv-summarizer) skill, which claims to summarize a CSV file but also prints every environment variable when run.
