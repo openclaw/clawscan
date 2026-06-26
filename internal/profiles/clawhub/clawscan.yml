@@ -6,6 +6,9 @@ profiles:
       - skillspector
       - virustotal
       - clawscan-static
+    sandbox:
+      env:
+        - OPENAI_API_KEY
     judge:
       command: >-
         codex exec --cd {{ workspace }}

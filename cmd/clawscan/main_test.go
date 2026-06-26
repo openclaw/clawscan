@@ -38,6 +38,10 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"--offset <n>",
 		"--predictions-output <path>",
 		"clawscan-results/artifact.json",
+		"--sandbox <docker|off>",
+		"--sandbox-image <image>",
+		"--sandbox-env <name>",
+		"ghcr.io/openclaw/clawscan-runtime:latest",
 		"Catalog commands:",
 		"List supported scanners with required env vars.",
 		"Print the resolved profile catalog as pasteable YAML.",
@@ -55,6 +59,8 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"VIRUSTOTAL_API_KEY",
 		"skillspector: no ClawScan-required env vars",
 		"cisco: no ClawScan-required env vars",
+		"CLAWSCAN_SANDBOX=off",
+		"CLAWSCAN_SANDBOX_IMAGE",
 		"No target with --scanner, --profile, or --config scans child skill directories under ./skills",
 		"--judge <cmd>",
 		"{{ workspace }}",
@@ -493,6 +499,7 @@ func TestRunCommandUsesBuiltInProfile(t *testing.T) {
 			"--scanner-result", "skillspector=" + skillSpectorFixture,
 			"--scanner-result", "virustotal=" + virusTotalFixture,
 			"--judge", "printf '{\"verdict\":\"benign\"}\\n' > {{ output }}",
+			"--sandbox", "off",
 			"--json",
 		}, []string{}); err != nil {
 			t.Fatal(err)
@@ -536,6 +543,7 @@ func TestRunCommandDiscoversSkillsWithExplicitProfile(t *testing.T) {
 			"--scanner-result", "skillspector=" + skillSpectorFixture,
 			"--scanner-result", "virustotal=" + virusTotalFixture,
 			"--judge", "printf '{\"verdict\":\"benign\"}\\n' > {{ output }}",
+			"--sandbox", "off",
 			"--json",
 		}, []string{}); err != nil {
 			t.Fatal(err)

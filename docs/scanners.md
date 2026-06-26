@@ -54,8 +54,11 @@ and Cisco AI Defense via `AI_DEFENSE_API_KEY` or `AI_DEFENSE_API_URL`.
 
 ## Installing Scanner Dependencies
 
-Use `clawscan install <scanner-id> [scanner-id ...]` to install or verify the
-local tools used by built-in scanner adapters without running a scan:
+By default, command-backed scanners run inside
+`ghcr.io/openclaw/clawscan-runtime:latest`, so local scanner installs are not
+required for normal Docker-sandboxed runs. Use `clawscan install <scanner-id>
+[scanner-id ...]` to install or verify host tools when running with
+`--sandbox off`:
 
 ```bash
 clawscan install cisco skillspector
@@ -105,6 +108,17 @@ and lets ClawScan validate that prompts only reference requested scanners.
 
 ClawScan never accepts scanner API keys as CLI flags. This avoids leaking
 secrets through shell history, process lists, CI logs, and run artifacts.
+
+## Sandboxed Execution
+
+Command-backed scanners and judges run in Docker by default. ClawScan infers
+scanner required env vars, passes present scanner optional env vars, and accepts
+additional allowlisted names through `--sandbox-env` or profile
+`sandbox.env`. The artifact records sandbox mode, runtime image, network
+setting, and env var names only.
+
+Use `--sandbox off` only when the host environment is already isolated and the
+needed scanner/judge CLIs are installed locally.
 
 ## Adding A Built-In Scanner Adapter
 

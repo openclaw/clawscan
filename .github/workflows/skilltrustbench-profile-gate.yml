@@ -83,8 +83,7 @@ jobs:
       limit: ${{ inputs.limit }}
       output_path: ./artifacts/skilltrustbench-candidate.json
       artifact_name: skilltrustbench-candidate
-      install_scanners: skillspector
-      install_codex: true
+      sandbox: docker
     secrets: inherit
 
   update-readme:

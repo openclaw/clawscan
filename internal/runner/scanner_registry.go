@@ -103,11 +103,12 @@ func (registry ScannerRegistry) isZero() bool {
 }
 
 type scannerAdapter struct {
-	id           string
-	requirements func(env map[string]string) []EnvRequirement
-	info         ScannerInfo
-	installPlan  InstallPlan
-	run          func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
+	id            string
+	requirements  func(env map[string]string) []EnvRequirement
+	info          ScannerInfo
+	installPlan   InstallPlan
+	commandBacked bool
+	run           func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
 
 func (adapter scannerAdapter) ID() string {
@@ -159,6 +160,10 @@ func (adapter scannerAdapter) Run(runner ExternalScannerRunner, target string, s
 	return adapter.run(runner, target, startedAt)
 }
 
+func (adapter scannerAdapter) CommandBacked() bool {
+	return adapter.commandBacked
+}
+
 var defaultScannerRegistry = mustScannerRegistry(defaultScannerAdapters()...)
 
 func mustScannerRegistry(adapters ...ScannerAdapter) ScannerRegistry {
@@ -172,7 +177,8 @@ func mustScannerRegistry(adapters ...ScannerAdapter) ScannerRegistry {
 func defaultScannerAdapters() []ScannerAdapter {
 	return []ScannerAdapter{
 		scannerAdapter{
-			id: "agentverus",
+			id:            "agentverus",
+			commandBacked: true,
 			info: ScannerInfo{
 				DisplayName:   "AgentVerus",
 				RepositoryURL: "https://github.com/agentverus/agentverus-scanner",
@@ -216,7 +222,8 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runAIG,
 		},
 		scannerAdapter{
-			id: "cisco",
+			id:            "cisco",
+			commandBacked: true,
 			info: ScannerInfo{
 				DisplayName:   "Cisco AI Defense skill-scanner",
 				RepositoryURL: "https://github.com/cisco-ai-defense/skill-scanner",
@@ -267,7 +274,8 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runStatic,
 		},
 		scannerAdapter{
-			id: "skillspector",
+			id:            "skillspector",
+			commandBacked: true,
 			info: ScannerInfo{
 				DisplayName:   "NVIDIA SkillSpector",
 				RepositoryURL: "https://github.com/NVIDIA/skillspector",
@@ -299,8 +307,9 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runSkillSpector,
 		},
 		scannerAdapter{
-			id:           "snyk",
-			requirements: staticEnvRequirements("scanner snyk", "SNYK_TOKEN"),
+			id:            "snyk",
+			requirements:  staticEnvRequirements("scanner snyk", "SNYK_TOKEN"),
+			commandBacked: true,
 			info: ScannerInfo{
 				DisplayName:   "Snyk Agent Scan",
 				RepositoryURL: "https://github.com/snyk/agent-scan",
@@ -314,8 +323,9 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runSnyk,
 		},
 		scannerAdapter{
-			id:           "socket",
-			requirements: staticEnvRequirements("scanner socket", "SOCKET_CLI_API_TOKEN"),
+			id:            "socket",
+			requirements:  staticEnvRequirements("scanner socket", "SOCKET_CLI_API_TOKEN"),
+			commandBacked: true,
 			info: ScannerInfo{
 				DisplayName:   "Socket CLI",
 				RepositoryURL: "https://github.com/SocketDev/socket-cli",
@@ -348,6 +358,14 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runVirusTotal,
 		},
 	}
+}
+
+func commandBackedScanner(adapter ScannerAdapter) bool {
+	type commandBacked interface {
+		CommandBacked() bool
+	}
+	typed, ok := adapter.(commandBacked)
+	return ok && typed.CommandBacked()
 }
 
 func requiredEnvVars(requirements []EnvRequirement) []string {

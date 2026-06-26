@@ -43,15 +43,18 @@ on:
         description: Uploaded artifact name.
         required: false
         default: clawscan-benchmark
-      install_scanners:
-        description: Comma/space-separated scanner dependencies to install before running.
+      sandbox:
+        description: ClawScan command sandbox mode.
         required: false
-        default: skillspector
-      install_codex:
-        description: Install Codex CLI for profiles or judges that invoke codex.
+        default: docker
+        type: choice
+        options:
+          - docker
+          - off
+      sandbox_image:
+        description: Docker runtime image when sandbox is docker.
         required: false
-        default: true
-        type: boolean
+        default: ghcr.io/openclaw/clawscan-runtime:latest
       pr_number:
         description: Optional PR number to checkout before running.
         required: false
@@ -97,14 +100,14 @@ on:
         type: string
         required: false
         default: clawscan-benchmark
-      install_scanners:
+      sandbox:
         type: string
         required: false
-        default: skillspector
-      install_codex:
-        type: boolean
+        default: docker
+      sandbox_image:
+        type: string
         required: false
-        default: true
+        default: ghcr.io/openclaw/clawscan-runtime:latest
       pr_number:
         type: string
         required: false
@@ -158,34 +161,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up Node for Codex
-        if: ${{ inputs.install_codex }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Set up uv for scanner installers
-        if: ${{ inputs.install_scanners != '' }}
-        uses: astral-sh/setup-uv@v5
-
       - name: Build ClawScan
         run: go build -o ./dist/clawscan ./cmd/clawscan
 
-      - name: Install Codex CLI
-        if: ${{ inputs.install_codex }}
-        run: npm install -g @openai/codex
-
-      - name: Install scanner dependencies
-        if: ${{ inputs.install_scanners != '' }}
+      - name: Pull ClawScan runtime image
+        if: ${{ inputs.sandbox == 'docker' }}
         env:
-          INSTALL_SCANNERS: ${{ inputs.install_scanners }}
-        run: |
-          set -euo pipefail
-          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
-          read -r -a scanners <<<"$(printf '%s' "$INSTALL_SCANNERS" | tr ',' ' ')"
-          if [ "${#scanners[@]}" -gt 0 ]; then
-            ./dist/clawscan install "${scanners[@]}"
-          fi
+          CLAWSCAN_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
+        run: docker pull "$CLAWSCAN_SANDBOX_IMAGE"
 
       - name: Run benchmark
         env:
@@ -198,6 +181,8 @@ jobs:
           OFFSET: ${{ inputs.offset }}
           PREDICTIONS_OUTPUT: ${{ inputs.predictions_output }}
           OUTPUT_PATH: ${{ inputs.output_path }}
+          CLAWSCAN_SANDBOX: ${{ inputs.sandbox }}
+          CLAWSCAN_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
           AIG_API_KEY: ${{ secrets.AIG_API_KEY }}
           AIG_BASE_URL: ${{ secrets.AIG_BASE_URL }}
           AIG_MODEL: ${{ secrets.AIG_MODEL }}

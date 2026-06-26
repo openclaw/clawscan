@@ -47,6 +47,9 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if string(opts.Judge.Files["clawhub/output.schema.json"]) == "" {
 		t.Fatal("expected embedded clawhub output schema file")
 	}
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY" {
+		t.Fatalf("sandbox env = %q", got)
+	}
 }
 
 func TestResolveArgsRejectsMissingExplicitSelection(t *testing.T) {
@@ -367,6 +370,9 @@ func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 		"--output", "cli.json",
 		"--json",
 		"--judge", "judge --out {{ output }}",
+		"--sandbox", "off",
+		"--sandbox-image", "ghcr.io/acme/runtime:v1",
+		"--sandbox-env", "ANTHROPIC_API_KEY",
 	}, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -386,6 +392,49 @@ func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 	}
 	if opts.Judge == nil || opts.Judge.Command != "judge --out {{ output }}" {
 		t.Fatalf("judge = %#v", opts.Judge)
+	}
+	if opts.Sandbox.Mode != "off" {
+		t.Fatalf("sandbox mode = %q", opts.Sandbox.Mode)
+	}
+	if opts.Sandbox.Image != "ghcr.io/acme/runtime:v1" {
+		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
+	}
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY" {
+		t.Fatalf("sandbox env = %q", got)
+	}
+}
+
+func TestResolveArgsSupportsSandboxConfig(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+sandbox:
+  mode: docker
+  image: ghcr.io/acme/default-runtime:v1
+  env:
+    - OPENAI_API_KEY
+profiles:
+  review:
+    scanners:
+      - clawscan-static
+    sandbox:
+      image: ghcr.io/acme/review-runtime:v2
+      env:
+        - ANTHROPIC_API_KEY
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Sandbox.Mode != "docker" {
+		t.Fatalf("sandbox mode = %q", opts.Sandbox.Mode)
+	}
+	if opts.Sandbox.Image != "ghcr.io/acme/review-runtime:v2" {
+		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
+	}
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY" {
+		t.Fatalf("sandbox env = %q", got)
 	}
 }
 

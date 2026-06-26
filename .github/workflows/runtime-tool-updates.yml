@@ -1,0 +1,88 @@
+name: Runtime Tool Updates
+
+on:
+  schedule:
+    - cron: '17 9 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-runtime-tools:
+    name: Update runtime tool pins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Update Dockerfile pins
+        run: node scripts/update-runtime-tool-versions.mjs
+
+      - name: Detect runtime pin changes
+        id: changes
+        run: |
+          if git diff --quiet -- docker/clawscan-runtime/Dockerfile; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build candidate runtime image
+        if: steps.changes.outputs.changed == 'true'
+        run: docker build -t clawscan-runtime:candidate docker/clawscan-runtime
+
+      - name: Smoke candidate runtime image
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          docker run --rm clawscan-runtime:candidate codex --help >/dev/null
+          docker run --rm clawscan-runtime:candidate claude --help >/dev/null
+          docker run --rm clawscan-runtime:candidate skillspector --help >/dev/null
+          docker run --rm clawscan-runtime:candidate snyk-agent-scan --help >/dev/null
+          docker run --rm clawscan-runtime:candidate socket --help >/dev/null
+          docker run --rm clawscan-runtime:candidate agentverus-scanner --help >/dev/null
+          docker run --rm clawscan-runtime:candidate skill-scanner --help >/dev/null
+
+      - name: Open runtime update PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: automation/runtime-tool-updates
+          TITLE: Update ClawScan runtime tool pins
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add docker/clawscan-runtime/Dockerfile
+          git commit -m "chore: update clawscan runtime tool pins"
+          git push --force-with-lease origin "$BRANCH"
+
+          cat > /tmp/runtime-tool-update-pr.md <<'EOF'
+            Updates pinned tool versions in `docker/clawscan-runtime/Dockerfile`.
+
+            Automated proof in this workflow:
+            - Docker runtime image builds.
+            - Baked CLIs print help successfully.
+
+            Manual merge gate:
+            - Build the candidate image from this branch.
+            - Run ClawScan with `CLAWSCAN_SANDBOX_IMAGE=clawscan-runtime:candidate`.
+            - Compare benchmark artifacts against the current runtime image.
+            - Include SkillTrustBench evidence before merge.
+            - Include OpenClaw Security Signals evidence when ClawHub profile behavior is affected.
+            - Explain any verdict drift, failure-rate change, or runtime regression.
+          EOF
+
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --title "$TITLE" --body-file /tmp/runtime-tool-update-pr.md
+          else
+            gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file /tmp/runtime-tool-update-pr.md
+          fi

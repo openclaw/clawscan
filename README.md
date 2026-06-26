@@ -17,12 +17,8 @@ Install ClawScan:
 brew install openclaw/tap/clawscan
 ```
 
-Install [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) and
-[Cisco Skill Scanner](https://github.com/cisco-ai-defense/skill-scanner):
-
-```bash
-clawscan install skillspector cisco
-```
+Command-backed scanners and judges run in ClawScan's Docker runtime by default,
+so keep Docker running for local scans.
 
 Run NVIDIA SkillSpector and Cisco Skill Scanner against a local `skills/` folder:
 
@@ -155,6 +151,20 @@ clawscan scanners skillspector
 | `socket` | Socket CLI | [repo](https://github.com/SocketDev/socket-cli) | Local file or directory scanner using Socket's public CLI full-scan path. | `SOCKET_CLI_API_TOKEN` | `npm install -g socket` |
 | `virustotal` | VirusTotal API | [docs](https://docs.virustotal.com/reference/file) | API-backed single local file hash lookup. Directories return a skipped result. | `VIRUSTOTAL_API_KEY` | skipped; API-backed |
 
+## Sandbox
+
+ClawScan runs command-backed scanners and judges in
+`ghcr.io/openclaw/clawscan-runtime:latest` by default:
+
+```bash
+clawscan ./my-skill --scanner skillspector
+```
+
+Use `--sandbox off` only in an already-isolated environment, or when you have
+installed scanner dependencies on the host with `clawscan install`. Use
+`--sandbox-env <NAME>` or a profile `sandbox.env` list to pass judge-specific
+environment variables into the container.
+
 ## Judge Harness
 
 `--judge` hands scanner evidence to an external agent command so it can inspect
@@ -219,6 +229,9 @@ profiles:
     scanners:
       - skillspector
       - snyk
+    sandbox:
+      env:
+        - OPENAI_API_KEY
     judge:
       command: >
         codex exec --cd {{ workspace }}
@@ -269,14 +282,13 @@ Artifact: uploaded by the workflow as `skilltrustbench-candidate`.
 
 ## Roadmap
 
+- [x] Reusable GitHub benchmark workflow that runs ClawScan through the Docker
+  runtime and uploads the JSON artifact.
 - [ ] Command-backed custom scanner adapters, so teams can add their own scanner
   commands through a documented adapter contract once the built-in scanner
   boundary has settled.
-- [ ] Reusable GitHub Action or workflow for CI. The goal is a copy-pasteable way
-  to install ClawScan, install the dependencies needed by built-in scanners,
-  run a selected profile or config, and upload the JSON artifact. Judge harness
-  CLIs such as `codex` should stay explicit setup steps because `--judge` is an
-  arbitrary command supplied by the workflow author.
+- [ ] Published runtime-image versioning docs for pinning or overriding
+  `CLAWSCAN_SANDBOX_IMAGE` in long-lived CI.
 
 ## Development
 

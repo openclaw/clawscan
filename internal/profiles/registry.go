@@ -61,9 +61,14 @@ func InspectProfiles(cwd string) (ProfileCatalog, error) {
 	catalog := ProfileCatalog{profiles: map[string]ProfileInfo{}}
 	for _, id := range registry.IDs() {
 		resolved, _ := registry.Profile(id)
+		profile := resolved.profile
+		if !sandboxIsZero(resolved.sandbox) {
+			sandbox := resolved.sandbox
+			profile.Sandbox = &sandbox
+		}
 		catalog.profiles[id] = ProfileInfo{
 			ID:      id,
-			Profile: resolved.profile,
+			Profile: profile,
 			Source:  resolved.source,
 		}
 	}
@@ -119,4 +124,8 @@ func (registry ProfileRegistry) IDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+func sandboxIsZero(sandbox Sandbox) bool {
+	return sandbox.Mode == "" && sandbox.Image == "" && len(sandbox.Env) == 0
 }

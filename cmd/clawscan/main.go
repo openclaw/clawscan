@@ -574,6 +574,9 @@ Core flags:
                               Explicit .json paths keep the artifact file and write scanner JSON beside it.
   --json                      Print the full artifact JSON to stdout and skip default file writes unless --output is passed.
   --judge <cmd>               Optional external judge harness command.
+  --sandbox <docker|off>      Command sandbox mode. Defaults to docker.
+  --sandbox-image <image>     Docker runtime image. Defaults to %s or CLAWSCAN_SANDBOX_IMAGE.
+  --sandbox-env <name>        Allow an env var through the Docker sandbox. Repeat for multiple vars.
 
 Benchmark command flags:
   --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for clawhub-security-signals.
@@ -614,6 +617,7 @@ Required environment variables:
   skillspector: no ClawScan-required env vars; provider env vars enable LLM mode, otherwise --no-llm is used. Use "clawscan scanners skillspector" for provider vars.
   cisco: no ClawScan-required env vars; optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers.
   judge: provider credentials belong to the command passed to --judge.
+  sandbox: CLAWSCAN_SANDBOX=off disables Docker by default; CLAWSCAN_SANDBOX_IMAGE overrides the runtime image.
 
 Target notes:
   No target with --scanner, --profile, or --config scans child skill directories under ./skills.
@@ -626,5 +630,5 @@ Judge summary:
   If no judge is configured, ClawScan only records scanner evidence.
   If a judge is configured, ClawScan runs it through the platform shell and expects a JSON object on stdout or at {{ output }}.
   Placeholders: {{ workspace }}, {{ prompt[:path] }}, {{ output_schema[:path] }}, {{ output }}.
-`, strings.Join(runner.ScannerIDs(), ", "), strings.Join(profiles.ProfileIDs(), ", "))
+`, runner.DefaultSandboxImage, strings.Join(runner.ScannerIDs(), ", "), strings.Join(profiles.ProfileIDs(), ", "))
 }

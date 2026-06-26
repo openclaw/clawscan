@@ -48,6 +48,7 @@ Choose the run mode:
 | Run ClawHub Security Signals | `clawscan benchmark clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
 | Add or override a judge harness | Add `--judge '<command with placeholders>'`. |
+| Use host-installed scanner/judge CLIs | Add `--sandbox off` only in an already-isolated environment. |
 
 Helpful metadata:
 
@@ -101,6 +102,10 @@ Minimal config:
 
 ```yaml
 version: 1
+sandbox:
+  mode: docker
+  env:
+    - OPENAI_API_KEY
 profiles:
   review:
     scanners:
@@ -109,6 +114,10 @@ profiles:
     judge:
       command: judge --out {{ output }}
 ```
+
+`sandbox.env` is an allowlist of env var names to pass into the Docker runtime;
+store names there, not secret values. CLI equivalents are `--sandbox`,
+`--sandbox-image`, and repeatable `--sandbox-env`.
 
 ## Scanners
 
@@ -153,6 +162,10 @@ ClawScan verifies `uvx`; built-in and simple API-backed scanners are skipped.
 `aig` is API-backed but not auto-started: run the A.I.G Docker/API service
 separately on localhost or a private network because upstream currently lacks
 built-in authentication.
+
+For normal runs, command-backed scanners and judges run in
+`ghcr.io/openclaw/clawscan-runtime:latest`. `clawscan install` is mainly for
+local development or `--sandbox off` environments.
 
 Use `--scanner-result` when a test or fixture should supply stable scanner JSON:
 
@@ -255,6 +268,8 @@ go vet ./...
   outside `clawscan benchmark <benchmark-id>`.
 - Do not use `--config` without `--profile` for benchmark runs; all-profile
   config runs are target scans only.
+- Do not assume host-installed scanner CLIs are used by default; command-backed
+  scanners and judges use the Docker runtime unless `--sandbox off` is set.
 - Do not add unsupported dataset names; built-ins are SkillTrustBench and
   `clawhub-security-signals`.
 - Do not assume scanner failures are final policy verdicts; scanner output is

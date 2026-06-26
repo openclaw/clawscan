@@ -59,9 +59,13 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - Scanner adapters should declare required environment variables up front so
   ClawScan can fail before doing partial work.
 - Never add API-key CLI flags. Credentials belong in environment variables such
-  as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`, and `SOCKET_TOKEN`.
+  as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`, and `SOCKET_CLI_API_TOKEN`.
 - Run artifacts must record only secret-safe env presence, such as `present` or
   `missing`, never secret values.
+- Command-backed scanners and judges run through the Docker sandbox by default.
+  Add host-install assumptions only for explicit `--sandbox off` paths.
+- Sandbox env passthrough is an allowlist of variable names, never values. Use
+  `--sandbox-env` or profile `sandbox.env` for judge-specific credentials.
 - `--judge` is an external harness command. Do not add a model-provider
   framework to ClawScan unless the product direction changes.
 - Judge placeholders and prompt interpolation must fail clearly when they
@@ -69,7 +73,7 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 
 ## Profiles And Benchmarks
 
-- Built-in profiles live in `internal/profiles/builtin.yml`.
+- Built-in profiles live in `internal/profiles/<profile>/clawscan.yml`.
 - Project-local `.clawscan.yml` / `.clawscan.yaml` files may shadow built-ins.
   CLI flags override profile values for a single run.
 - Select the ClawHub production profile explicitly with `--profile clawhub`.

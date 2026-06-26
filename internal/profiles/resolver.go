@@ -26,6 +26,7 @@ var builtinProfileConfigPaths = []string{
 
 type Config struct {
 	Version  int                `yaml:"version"`
+	Sandbox  *Sandbox           `yaml:"sandbox,omitempty"`
 	Profiles map[string]Profile `yaml:"profiles"`
 }
 
@@ -34,7 +35,14 @@ type Profile struct {
 	ScannerResults map[string]string `yaml:"scannerResults,omitempty"`
 	Output         string            `yaml:"output,omitempty"`
 	JSON           bool              `yaml:"json,omitempty"`
+	Sandbox        *Sandbox          `yaml:"sandbox,omitempty"`
 	Judge          *Judge            `yaml:"judge,omitempty"`
+}
+
+type Sandbox struct {
+	Mode  string   `yaml:"mode,omitempty"`
+	Image string   `yaml:"image,omitempty"`
+	Env   []string `yaml:"env,omitempty"`
 }
 
 type Judge struct {
@@ -43,6 +51,7 @@ type Judge struct {
 
 type resolvedProfile struct {
 	profile   Profile
+	sandbox   Sandbox
 	configDir string
 	source    string
 	files     map[string][]byte
@@ -60,6 +69,11 @@ type cliIntent struct {
 	json                 bool
 	judge                string
 	judgeSet             bool
+	sandbox              string
+	sandboxSet           bool
+	sandboxImage         string
+	sandboxImageSet      bool
+	sandboxEnv           []string
 	benchmark            string
 	benchmarkSet         bool
 	split                string
@@ -330,8 +344,35 @@ func readConfigBytes(label string, read func() ([]byte, error)) (Config, error) 
 
 func mergeProfiles(out map[string]resolvedProfile, config Config, configDir string, source string, files map[string][]byte) {
 	for name, profile := range config.Profiles {
-		out[name] = resolvedProfile{profile: profile, configDir: configDir, source: source, files: files}
+		out[name] = resolvedProfile{
+			profile:   profile,
+			sandbox:   mergeSandbox(config.Sandbox, profile.Sandbox),
+			configDir: configDir,
+			source:    source,
+			files:     files,
+		}
 	}
+}
+
+func mergeSandbox(defaults *Sandbox, override *Sandbox) Sandbox {
+	var out Sandbox
+	if defaults != nil {
+		out = *defaults
+		out.Env = append([]string(nil), defaults.Env...)
+	}
+	if override != nil {
+		if override.Mode != "" {
+			out.Mode = override.Mode
+		}
+		if override.Image != "" {
+			out.Image = override.Image
+		}
+		if len(override.Env) > 0 {
+			out.Env = append(out.Env, override.Env...)
+		}
+	}
+	out.Env = dedupeStrings(out.Env)
+	return out
 }
 
 func discoverConfig(cwd string) (string, error) {
@@ -426,6 +467,29 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			}
 			intent.judge = value
 			intent.judgeSet = true
+			i = next
+		case "--sandbox":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.sandbox = value
+			intent.sandboxSet = true
+			i = next
+		case "--sandbox-image":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.sandboxImage = value
+			intent.sandboxImageSet = true
+			i = next
+		case "--sandbox-env":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.sandboxEnv = append(intent.sandboxEnv, value)
 			i = next
 		case "--split":
 			value, next, err := readValue(args, i, arg)
@@ -542,6 +606,24 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	if judgeCommand != "" {
 		args = append(args, "--judge", judgeCommand)
 	}
+	if selected.sandbox.Mode != "" {
+		args = append(args, "--sandbox", selected.sandbox.Mode)
+	}
+	if selected.sandbox.Image != "" {
+		args = append(args, "--sandbox-image", selected.sandbox.Image)
+	}
+	for _, envVar := range selected.sandbox.Env {
+		args = append(args, "--sandbox-env", envVar)
+	}
+	if intent.sandboxSet {
+		args = append(args, "--sandbox", intent.sandbox)
+	}
+	if intent.sandboxImageSet {
+		args = append(args, "--sandbox-image", intent.sandboxImage)
+	}
+	for _, envVar := range intent.sandboxEnv {
+		args = append(args, "--sandbox-env", envVar)
+	}
 	return args, selected.files, nil
 }
 
@@ -608,6 +690,20 @@ func sortedKeys(values map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func dedupeStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func readValue(args []string, index int, flag string) (string, int, error) {

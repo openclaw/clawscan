@@ -121,6 +121,36 @@ func TestParseArgsSupportsJudgeCommand(t *testing.T) {
 	}
 }
 
+func TestParseArgsSupportsSandboxFlags(t *testing.T) {
+	opts, err := ParseArgs([]string{
+		"./my-skill",
+		"--scanner", "skillspector",
+		"--sandbox", "off",
+		"--sandbox-image", "ghcr.io/acme/runtime:v1",
+		"--sandbox-env", "OPENAI_API_KEY",
+		"--sandbox-env", "ANTHROPIC_API_KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Sandbox.Mode != "off" {
+		t.Fatalf("sandbox mode = %q", opts.Sandbox.Mode)
+	}
+	if opts.Sandbox.Image != "ghcr.io/acme/runtime:v1" {
+		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
+	}
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY" {
+		t.Fatalf("sandbox env = %q", got)
+	}
+}
+
+func TestParseArgsRejectsUnsupportedSandboxMode(t *testing.T) {
+	_, err := ParseArgs([]string{"./my-skill", "--scanner", "skillspector", "--sandbox", "host"})
+	if err == nil || err.Error() != "Unsupported --sandbox mode: host (valid: docker, off)" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestNewBenchmarkOptionsSupportsOpenClawBenchmark(t *testing.T) {
 	benchmark, err := NewBenchmarkOptions("clawhub-security-signals", "eval_holdout", 2, 10, "")
 	if err != nil {
@@ -842,7 +872,7 @@ func TestRunIncludesDurationMsForScannerResults(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -889,7 +919,7 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	runner := &recordingCommandRunner{
 		writeOutput: `{"status":"clean","findings":[]}`,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -926,6 +956,67 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	}
 	if containsArg(call.args, "--no-llm") {
 		t.Fatalf("unexpected default --no-llm opt-out: %#v", call.args)
+	}
+}
+
+func TestRunUsesDockerSandboxForCommandBackedScannersByDefault(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{
+		writeOutput: `{"status":"clean","findings":[]}`,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{
+			"OPENAI_API_KEY":            "secret-openai",
+			"SKILLSPECTOR_PROVIDER":     "openai",
+			"CLAWSCAN_UNRELATED_SECRET": "do-not-pass",
+		},
+		HostCommandRunner:  host,
+		DockerAvailability: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Sandbox.Mode != "docker" {
+		t.Fatalf("sandbox = %#v", artifact.Sandbox)
+	}
+	if artifact.Sandbox.Image != DefaultSandboxImage {
+		t.Fatalf("sandbox image = %q", artifact.Sandbox.Image)
+	}
+	if artifact.Sandbox.Network != "on" {
+		t.Fatalf("sandbox network = %q", artifact.Sandbox.Network)
+	}
+	if artifact.Scanners["skillspector"].Status != "completed" {
+		t.Fatalf("scanner = %#v", artifact.Scanners["skillspector"])
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %#v", host.calls)
+	}
+	call := host.calls[0]
+	if call.command != "docker" {
+		t.Fatalf("command = %q args = %#v", call.command, call.args)
+	}
+	for _, want := range []string{"run", "--rm", "-e", "OPENAI_API_KEY", "SKILLSPECTOR_PROVIDER", DefaultSandboxImage} {
+		if !containsArg(call.args, want) {
+			t.Fatalf("docker args missing %q: %#v", want, call.args)
+		}
+	}
+	joined := strings.Join(call.args, "\x00")
+	for _, forbidden := range []string{"secret-openai", "CLAWSCAN_UNRELATED_SECRET", "do-not-pass"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("docker args leaked %q: %#v", forbidden, call.args)
+		}
+	}
+	imageIndex := indexOfArg(call.args, DefaultSandboxImage)
+	if imageIndex < 0 || imageIndex+1 >= len(call.args) || call.args[imageIndex+1] != "skillspector" {
+		t.Fatalf("missing scanner command after image: %#v", call.args)
 	}
 }
 
@@ -1133,7 +1224,7 @@ printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
 	}
 	t.Setenv("CLAWSCAN_ENV_PROBE", "process")
 	t.Setenv("CLAWSCAN_UNRELATED_SECRET", "process-secret")
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1401,6 +1492,7 @@ func TestRunResolvesSymlinkedDirectoryTargets(t *testing.T) {
 		linkTarget,
 		"--scanner", "clawscan-static",
 		"--judge", "if test -f artifact/SKILL.md; then printf '{\"copied\":true}\\n'; else printf '{\"copied\":false}\\n'; fi",
+		"--sandbox", "off",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2342,6 +2434,7 @@ func TestRunJudgeWorkspaceSkipsIgnoredAndLargeTargetFiles(t *testing.T) {
 		target,
 		"--scanner", "skillspector",
 		"--judge", "test ! -e {{ workspace }}/artifact/node_modules/pkg/payload.js && test ! -e {{ workspace }}/artifact/large.txt && printf '{\"ok\":true}\\n' > {{ output }} # {{ prompt }} {{ output_schema }}",
+		"--sandbox", "off",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2533,6 +2626,7 @@ func TestRunJudgeRejectsNonObjectJSON(t *testing.T) {
 		target,
 		"--scanner", "skillspector",
 		"--judge", "printf '[true]\\n'",
+		"--sandbox", "off",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2748,6 +2842,7 @@ func TestRunJudgeQuotesGeneratedPlaceholderPaths(t *testing.T) {
 		target,
 		"--scanner", "skillspector",
 		"--judge", "test -d {{ workspace }} && printf '{\"ok\":true}\\n' > {{ output }}",
+		"--sandbox", "off",
 	})
 	if err != nil {
 		t.Fatal(err)

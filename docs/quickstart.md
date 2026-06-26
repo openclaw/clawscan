@@ -50,8 +50,9 @@ clawscan scanners
 clawscan scanners skillspector
 ```
 
-Install or verify local scanner dependencies before running scanners that shell
-out to upstream CLIs:
+Command-backed scanners and judges run in ClawScan's Docker runtime by default.
+Keep Docker running for local scans. Install or verify local scanner
+dependencies only when you intentionally run with `--sandbox off`:
 
 ```bash
 clawscan install cisco skillspector
@@ -115,10 +116,6 @@ Built-in profiles:
 | `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
 | `skills-sh` | `socket`, `snyk` | none |
 
-Gen Agent Trust Hub runs on skills.sh skills, but is omitted from ClawScan's
-`skills-sh` profile because Gen does not provide a local CLI for ClawScan to
-invoke.
-
 Inspect the resolved profile catalog, including nearest project-local profiles:
 
 ```bash
@@ -145,6 +142,12 @@ fails with an ambiguity error.
 ```yaml
 version: 1
 
+sandbox:
+  mode: docker
+  image: ghcr.io/openclaw/clawscan-runtime:latest
+  env:
+    - OPENAI_API_KEY
+
 profiles:
   clawhub-release:
     scanners:
@@ -156,6 +159,9 @@ profiles:
       - skillspector
       - clawscan-static
     output: ./clawscan-results/skills-sh-review.json
+    sandbox:
+      env:
+        - ANTHROPIC_API_KEY
     judge:
       command: judge --out {{ output }}
 ```
@@ -190,7 +196,8 @@ profile judges are not invoked accidentally.
 
 Config files must not store secret values. Scanner and judge credentials stay
 in environment variables, such as `OPENAI_API_KEY` for the example judge
-command.
+command. Use `sandbox.env` to allow judge-specific environment variables into
+the Docker runtime.
 The built-in `skills-sh` profile needs `SOCKET_CLI_API_TOKEN` and `SNYK_TOKEN`
 unless those scanners are supplied through `--scanner-result` fixtures or
 overridden with `--scanner`.
@@ -257,6 +264,9 @@ clawscan benchmark SkillTrustBench --limit 1 --scanner clawscan-static --json
 | `--output <path>` | Write the full artifact JSON to a specific file. Defaults to `./clawscan-results/artifact.json` when `--json` is not passed. Explicit `.json` paths keep that artifact file and write scanner JSON beside it. |
 | `--json` | Print the full artifact JSON to stdout and skip default file writes unless `--output` is also passed. |
 | `--judge <cmd>` | Run an optional external judge harness. |
+| `--sandbox <docker\|off>` | Select command sandbox mode. Defaults to Docker. |
+| `--sandbox-image <image>` | Override the Docker runtime image. |
+| `--sandbox-env <name>` | Allow an environment variable into the Docker runtime. Repeat for multiple variables. |
 | `clawscan benchmark <id>` | Run a supported benchmark instead of one target. |
 | `--split <name>` | Benchmark split. Defaults to `benchmark` for SkillTrustBench and `eval_holdout` for ClawHub Security Signals. |
 | `--limit <n>` | Maximum benchmark rows to run. `0` means all rows. |

@@ -30,6 +30,38 @@ go run ./cmd/clawscan benchmark SkillTrustBench \
   --output /tmp/clawscan-benchmark-smoke.json
 ```
 
+## Runtime Image
+
+Command-backed scanners and judges run in Docker by default. Build and smoke
+the local runtime image before changing `docker/clawscan-runtime/Dockerfile`:
+
+```bash
+docker build -t clawscan-runtime:dev docker/clawscan-runtime
+docker run --rm clawscan-runtime:dev codex --help
+docker run --rm clawscan-runtime:dev claude --help
+docker run --rm clawscan-runtime:dev skillspector --help
+docker run --rm clawscan-runtime:dev skill-scanner --help
+docker run --rm clawscan-runtime:dev snyk-agent-scan --help
+docker run --rm clawscan-runtime:dev socket --help
+docker run --rm clawscan-runtime:dev agentverus-scanner --help
+```
+
+Use a local candidate runtime for benchmark comparisons:
+
+```bash
+CLAWSCAN_SANDBOX_IMAGE=clawscan-runtime:dev \
+go run ./cmd/clawscan benchmark SkillTrustBench \
+  --limit 1 \
+  --scanner clawscan-static \
+  --output /tmp/clawscan-runtime-candidate.json
+```
+
+The `Runtime Tool Updates` workflow refreshes pinned tool versions in
+`docker/clawscan-runtime/Dockerfile`, builds the candidate image, runs CLI
+smokes, and opens a PR. Do not merge runtime-tool updates from smoke checks
+alone; attach benchmark artifacts and explain any scanner, judge, or failure
+rate drift.
+
 ## Docs Site
 
 The docs site is generated from Markdown in `docs/`:

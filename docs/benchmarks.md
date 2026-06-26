@@ -174,9 +174,10 @@ limit: 0
 ```
 
 The workflow uploads the full benchmark artifact and writes a short summary to
-the GitHub Actions run summary. For the built-in `clawhub` profile, configure
-the required repository secrets for the scanner and judge path, including
-`VIRUSTOTAL_API_KEY` and `OPENAI_API_KEY`.
+the GitHub Actions run summary. It builds ClawScan and runs command-backed
+scanners and judges through the ClawScan Docker runtime image. For the built-in
+`clawhub` profile, configure the required repository secrets for the scanner
+and judge path, including `VIRUSTOTAL_API_KEY` and `OPENAI_API_KEY`.
 
 The **SkillTrustBench Profile Gate** workflow is the maintainer-facing proposal
 gate. It validates `proposals/<GHSA-ID>/clawscan.yml`, then delegates the actual

@@ -35,11 +35,18 @@ A one-off scan writes a `clawscan-run-v1` artifact:
   "env": {
     "VIRUSTOTAL_API_KEY": "present"
   },
+  "sandbox": {
+    "mode": "docker",
+    "image": "ghcr.io/openclaw/clawscan-runtime:latest",
+    "network": "on",
+    "env": ["OPENAI_API_KEY", "VIRUSTOTAL_API_KEY"]
+  },
   "scanners": {
     "virustotal": {
       "status": "skipped",
       "startedAt": "2026-06-03T00:00:00Z",
       "completedAt": "2026-06-03T00:00:01Z",
+      "durationMs": 42,
       "command": [
         "virustotal",
         "file-report"
@@ -55,7 +62,9 @@ A one-off scan writes a `clawscan-run-v1` artifact:
 Scanner `raw` fields preserve upstream scanner JSON as evidence. Scanner
 `outputPath` points to the preserved per-scanner JSON file when raw evidence is
 available. Scanner `status` and `error` explain ClawScan's adapter-level
-outcome.
+outcome. Scanner `durationMs` records elapsed wall-clock time for that scanner
+adapter. Top-level `sandbox` records sandbox mode, runtime image, network, and
+allowed env var names, never secret values.
 
 Consumers should branch on the top-level `schemaVersion` field:
 
@@ -76,6 +85,11 @@ raw scanner evidence:
 {
   "schemaVersion": "clawscan-batch-v1",
   "profile": "clawhub",
+  "sandbox": {
+    "mode": "docker",
+    "image": "ghcr.io/openclaw/clawscan-runtime:latest",
+    "network": "on"
+  },
   "runs": [
     {
       "schemaVersion": "clawscan-run-v1",

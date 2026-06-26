@@ -12,6 +12,10 @@ var errInvalidSnykJSON = errors.New("Snyk scanner returned invalid JSON")
 func (runner ExternalScannerRunner) runSnyk(target string, startedAt string) (ScannerResult, error) {
 	command := "uvx"
 	args := []string{"snyk-agent-scan@latest", "scan", "--json", "--no-bootstrap", "--skills", target}
+	if runner.SandboxMode == SandboxModeDocker {
+		command = "snyk-agent-scan"
+		args = []string{"scan", "--json", "--no-bootstrap", "--skills", target}
+	}
 	fullCommand := append([]string{command}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {

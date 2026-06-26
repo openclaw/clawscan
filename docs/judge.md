@@ -32,6 +32,11 @@ The command must produce a JSON object on stdout or write one to `{{ output }}`.
 If it produces invalid JSON, a JSON array, or no JSON, ClawScan records a failed
 judge result.
 
+ClawScan runs judge commands in its Docker runtime by default. The Codex
+`--sandbox read-only` flag in the example is Codex's own sandbox setting inside
+that runtime. Use ClawScan's `--sandbox off` only in an already-isolated host
+environment.
+
 The built-in `clawhub` profile uses this same mechanism. It ships the ClawHub
 Codex command, prompt template, and output schema inside ClawScan so running
 `clawscan --profile clawhub` exercises the public ClawHub scan recipe.
