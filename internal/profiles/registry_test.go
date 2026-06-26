@@ -31,6 +31,18 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	if got := strings.Join(clawhub.profile.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("clawhub scanners = %q", got)
 	}
+	if clawhub.configDir != "clawhub" {
+		t.Fatalf("clawhub config dir = %q", clawhub.configDir)
+	}
+	if clawhub.source != "built-in" {
+		t.Fatalf("clawhub source = %q", clawhub.source)
+	}
+	if string(clawhub.files["clawhub/prompt.md"]) == "" {
+		t.Fatal("missing clawhub embedded prompt")
+	}
+	if string(clawhub.files["clawhub/output.schema.json"]) == "" {
+		t.Fatal("missing clawhub embedded output schema")
+	}
 
 	skillsSH, ok := registry.Profile("skills-sh")
 	if !ok {
@@ -38,6 +50,12 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	}
 	if got := strings.Join(skillsSH.profile.Scanners, ","); got != "socket,snyk" {
 		t.Fatalf("skills-sh scanners = %q", got)
+	}
+	if skillsSH.configDir != "skills-sh" {
+		t.Fatalf("skills-sh config dir = %q", skillsSH.configDir)
+	}
+	if skillsSH.source != "built-in" {
+		t.Fatalf("skills-sh source = %q", skillsSH.source)
 	}
 }
 

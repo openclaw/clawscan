@@ -18,15 +18,8 @@ profiles:
         -c service_tier=fast
         -c 'shell_environment_policy.inherit="core"'
         -c shell_environment_policy.ignore_default_excludes=false
-        --output-schema {{ output_schema:clawhub/output.schema.json }}
+        --output-schema {{ output_schema:output.schema.json }}
         --output-last-message {{ output }}
         --ephemeral
         --json
-        - < {{ prompt:clawhub/prompt.md }}
-
-  skills-sh:
-    # Gen Agent Trust Hub runs on skills.sh skills, but is omitted here
-    # because Gen does not provide a local CLI for ClawScan to invoke.
-    scanners:
-      - socket
-      - snyk
+        - < {{ prompt:prompt.md }}

@@ -29,11 +29,17 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if !strings.Contains(opts.Judge.Command, "codex exec") {
 		t.Fatalf("judge command = %q", opts.Judge.Command)
 	}
+	if strings.Contains(opts.Judge.Command, "{{ prompt:prompt.md }}") {
+		t.Fatalf("judge command kept unresolved profile-local prompt placeholder: %q", opts.Judge.Command)
+	}
 	if !strings.Contains(opts.Judge.Command, "{{ prompt:clawhub/prompt.md }}") {
-		t.Fatalf("judge command missing embedded prompt placeholder: %q", opts.Judge.Command)
+		t.Fatalf("judge command missing profile-local embedded prompt placeholder: %q", opts.Judge.Command)
+	}
+	if strings.Contains(opts.Judge.Command, "{{ output_schema:output.schema.json }}") {
+		t.Fatalf("judge command kept unresolved profile-local schema placeholder: %q", opts.Judge.Command)
 	}
 	if !strings.Contains(opts.Judge.Command, "{{ output_schema:clawhub/output.schema.json }}") {
-		t.Fatalf("judge command missing embedded schema placeholder: %q", opts.Judge.Command)
+		t.Fatalf("judge command missing profile-local embedded schema placeholder: %q", opts.Judge.Command)
 	}
 	if string(opts.Judge.Files["clawhub/prompt.md"]) == "" {
 		t.Fatal("expected embedded clawhub prompt file")

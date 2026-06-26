@@ -16,8 +16,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed builtin.yml clawhub/prompt.md clawhub/output.schema.json
+//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/output.schema.json skills-sh/clawscan.yml
 var builtinFiles embed.FS
+
+var builtinProfileConfigPaths = []string{
+	"clawhub/clawscan.yml",
+	"skills-sh/clawscan.yml",
+}
 
 type Config struct {
 	Version  int                `yaml:"version"`
@@ -259,18 +264,21 @@ func loadProjectProfiles(projectPath string) (map[string]resolvedProfile, error)
 }
 
 func loadBuiltinProfiles() (map[string]resolvedProfile, error) {
-	builtins, err := readConfigBytes("embedded built-in profiles", func() ([]byte, error) {
-		return builtinFiles.ReadFile("builtin.yml")
-	})
-	if err != nil {
-		return nil, err
-	}
 	files, err := loadBuiltinProfileFiles()
 	if err != nil {
 		return nil, err
 	}
 	profiles := map[string]resolvedProfile{}
-	mergeProfiles(profiles, builtins, "", "built-in", files)
+	for _, path := range builtinProfileConfigPaths {
+		configPath := path
+		config, err := readConfigBytes("embedded built-in profile "+configPath, func() ([]byte, error) {
+			return builtinFiles.ReadFile(configPath)
+		})
+		if err != nil {
+			return nil, err
+		}
+		mergeProfiles(profiles, config, filepath.Dir(configPath), "built-in", files)
+	}
 	return profiles, nil
 }
 

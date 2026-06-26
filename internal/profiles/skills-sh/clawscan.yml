@@ -1,0 +1,9 @@
+version: 1
+
+profiles:
+  skills-sh:
+    # Gen Agent Trust Hub runs on skills.sh skills, but is omitted here
+    # because Gen does not provide a local CLI for ClawScan to invoke.
+    scanners:
+      - socket
+      - snyk

@@ -27,7 +27,7 @@ secret redaction, benchmark submissions, or generated artifacts.
 - [ ] `go run ./cmd/clawscan --help`
 - [ ] Focused scanner/benchmark/manual proof:
 - [ ] For ClawHub profile proposals: I opened the sensitive report through GitHub private vulnerability reporting, and this PR contains only `proposals/<GHSA-ID>/clawscan.yml`
-- [ ] For ClawHub profile proposals: I did not edit `internal/profiles/builtin.yml`, `internal/profiles/clawhub/prompt.md`, or `internal/profiles/clawhub/output.schema.json`
+- [ ] For ClawHub profile proposals: I did not edit official bundled profile files under `internal/profiles/`
 - [ ] Docs site proof (`make docs-site`) or `N/A`:
 
 ## Notes

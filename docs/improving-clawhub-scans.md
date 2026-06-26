@@ -118,9 +118,7 @@ proposal flow instead:
    reporting.
 2. Open a PR containing only `proposals/<GHSA-ID>/clawscan.yml`.
 3. Define a candidate `clawhub` profile in that file.
-4. Do not edit `internal/profiles/builtin.yml`,
-   `internal/profiles/clawhub/prompt.md`, or
-   `internal/profiles/clawhub/output.schema.json`.
+4. Do not edit the official bundled profile files in the proposal PR.
 5. Wait for maintainers to run the official validation workflow.
 
 Maintainers validate the proposal with:
@@ -136,6 +134,8 @@ The provided `clawhub` profile in the proposal shadows the built-in `clawhub`
 profile for that run. The workflow uploads the full JSON artifact, extracts the
 summary metrics, updates the marked README benchmark block, and commits the
 README update back to the PR branch when the branch is writable.
+Accepted behavior is promoted into `internal/profiles/clawhub/clawscan.yml`;
+prompt or schema changes stay maintainer-owned follow-up edits.
 
 ## 5. Flow Back Into ClawHub
 

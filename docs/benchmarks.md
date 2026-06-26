@@ -253,10 +253,9 @@ clawscan benchmark SkillTrustBench \
 ```
 
 The proposal profile shadows the built-in `clawhub` profile for that validation
-run. Researchers should not edit `internal/profiles/builtin.yml`,
-`internal/profiles/clawhub/prompt.md`, or
-`internal/profiles/clawhub/output.schema.json` in the proposal PR. Maintainers
-port accepted behavior into the built-in profile after validation.
+run. Researchers should not edit the official bundled profile files in the
+proposal PR. Maintainers port accepted behavior into
+`internal/profiles/clawhub/clawscan.yml` after validation.
 
 Operational source files:
 
