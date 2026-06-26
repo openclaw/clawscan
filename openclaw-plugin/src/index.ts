@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { Type, type Static } from "typebox";
@@ -8,6 +8,7 @@ import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_OUTPUT_DIR = path.join(homedir(), ".openclaw", "clawscan");
 const MAX_CAPTURED_STDIO_BYTES = 256 * 1024;
+const MAX_ARTIFACT_SUMMARY_BYTES = 2 * 1024 * 1024;
 
 const ClawScanPluginConfigSchema = Type.Object(
   {
@@ -396,11 +397,23 @@ export function summarizeClawScanJson(stdout: string): ScanSummary | undefined {
   }
 }
 
-async function summarizeArtifactFile(outputPath: string): Promise<ScanSummary | undefined> {
+export async function summarizeClawScanArtifactFile(
+  outputPath: string,
+): Promise<ScanSummary | undefined> {
+  let file;
   try {
-    return summarizeArtifact(JSON.parse(await readFile(outputPath, "utf8")));
+    file = await open(outputPath, "r");
+    const info = await file.stat();
+    if (!info.isFile() || info.size <= 0 || info.size > MAX_ARTIFACT_SUMMARY_BYTES) {
+      return undefined;
+    }
+    const buffer = Buffer.alloc(info.size);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    return summarizeArtifact(JSON.parse(buffer.subarray(0, bytesRead).toString("utf8")));
   } catch {
     return undefined;
+  } finally {
+    await file?.close();
   }
 }
 
@@ -429,7 +442,7 @@ export default defineToolPlugin({
         });
         const result = await runCommand(invocation, { signal: context.signal });
         const summary =
-          (await summarizeArtifactFile(invocation.outputPath)) ?? summarizeClawScanJson(result.stdout);
+          (await summarizeClawScanArtifactFile(invocation.outputPath)) ?? summarizeClawScanJson(result.stdout);
         return {
           ok: result.exitCode === 0,
           exitCode: result.exitCode,

@@ -1,5 +1,12 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import entry, { buildClawScanInvocation, summarizeClawScanJson } from "./index.js";
+import entry, {
+  buildClawScanInvocation,
+  summarizeClawScanArtifactFile,
+  summarizeClawScanJson,
+} from "./index.js";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 
 describe("clawscan plugin", () => {
@@ -128,5 +135,33 @@ describe("clawscan plugin", () => {
       judgeStatus: undefined,
       verdict: undefined,
     });
+  });
+
+  it("summarizes small artifact files without reading oversized files", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "clawscan-plugin-"));
+    try {
+      const artifactPath = path.join(tempDir, "artifact.json");
+      await writeFile(
+        artifactPath,
+        JSON.stringify({
+          schemaVersion: "clawscan-run-v1",
+          target: { input: "skills/csv-summarizer" },
+          scannerCompleted: 1,
+          scanners: { skillspector: { status: "completed" } },
+        }),
+      );
+
+      await expect(summarizeClawScanArtifactFile(artifactPath)).resolves.toMatchObject({
+        schemaVersion: "clawscan-run-v1",
+        scannerCompleted: 1,
+        scanners: { skillspector: "completed" },
+      });
+
+      const largePath = path.join(tempDir, "large.json");
+      await writeFile(largePath, JSON.stringify({ padding: "x".repeat(2 * 1024 * 1024) }));
+      await expect(summarizeClawScanArtifactFile(largePath)).resolves.toBeUndefined();
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
