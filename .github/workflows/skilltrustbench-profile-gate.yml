@@ -27,8 +27,8 @@ permissions:
   pull-requests: read
 
 jobs:
-  gate:
-    name: Validate candidate clawhub profile
+  validate-proposal:
+    name: Validate proposal shape
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -41,12 +41,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
         run: gh pr checkout "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
 
       - name: Validate proposal shape
         env:
@@ -77,37 +71,67 @@ jobs:
             exit 1
           fi
 
-      - name: Build ClawScan
-        run: go build -o ./dist/clawscan ./cmd/clawscan
+  run-benchmark:
+    name: Run SkillTrustBench benchmark
+    needs: validate-proposal
+    uses: ./.github/workflows/run-clawscan-benchmark.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      benchmark_id: SkillTrustBench
+      profile: clawhub
+      config_path: ${{ inputs.proposal_path }}
+      limit: ${{ inputs.limit }}
+      output_path: ./artifacts/skilltrustbench-candidate.json
+      artifact_name: skilltrustbench-candidate
+      install_scanners: skillspector
+      install_codex: true
+    secrets: inherit
 
-      - name: Run SkillTrustBench gate
+  update-readme:
+    name: Update README benchmark block
+    needs: run-benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout pull request branch
         env:
-          PROPOSAL_PATH: ${{ inputs.proposal_path }}
-          LIMIT: ${{ inputs.limit }}
-        run: |
-          set -euo pipefail
-          mkdir -p ./artifacts
-          ./dist/clawscan benchmark SkillTrustBench \
-            --config "$PROPOSAL_PATH" \
-            --profile clawhub \
-            --limit "$LIMIT" \
-            --output ./artifacts/skilltrustbench-candidate.json
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: gh pr checkout "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
 
-      - name: Upload full benchmark artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download benchmark artifact
+        uses: actions/download-artifact@v4
         with:
           name: skilltrustbench-candidate
-          path: ./artifacts/skilltrustbench-candidate.json
-          if-no-files-found: error
+          path: ./downloaded-artifact
 
       - name: Update README benchmark block
         env:
           WORKFLOW_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          artifact="$(
+            find ./downloaded-artifact -type f \( -name 'skilltrustbench-candidate.json' -o -name 'clawscan-benchmark.json' \) |
+              head -n 1
+          )"
+          if [ -z "$artifact" ]; then
+            echo "Downloaded artifact did not include a benchmark JSON file." >&2
+            find ./downloaded-artifact -type f >&2 || true
+            exit 1
+          fi
+
           go run ./scripts/update-benchmark-readme \
-            --artifact ./artifacts/skilltrustbench-candidate.json \
+            --artifact "$artifact" \
             --readme README.md \
             --profile clawhub \
             --workflow-url "$WORKFLOW_URL" \

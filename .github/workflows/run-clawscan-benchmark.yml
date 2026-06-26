@@ -1,0 +1,275 @@
+name: Run ClawScan Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark_id:
+        description: Benchmark ID or alias, for example clawhub-security-signals or SkillTrustBench.
+        required: true
+        default: clawhub-security-signals
+      profile:
+        description: Profile to run. Leave empty to use --scanner values instead.
+        required: false
+        default: clawhub
+      config_path:
+        description: Optional .clawscan.yml path. Requires profile.
+        required: false
+        default: ""
+      scanners:
+        description: Optional comma/space-separated scanners when profile is empty.
+        required: false
+        default: ""
+      split:
+        description: Optional benchmark split. Empty uses the benchmark default.
+        required: false
+        default: ""
+      limit:
+        description: Row limit. Use 0 for the full split.
+        required: false
+        default: "10"
+      offset:
+        description: Row offset for reproducible chunks.
+        required: false
+        default: "0"
+      predictions_output:
+        description: Optional predictions JSONL path for clawhub-security-signals.
+        required: false
+        default: ""
+      output_path:
+        description: Benchmark artifact JSON path.
+        required: false
+        default: ./artifacts/clawscan-benchmark.json
+      artifact_name:
+        description: Uploaded artifact name.
+        required: false
+        default: clawscan-benchmark
+      install_scanners:
+        description: Comma/space-separated scanner dependencies to install before running.
+        required: false
+        default: skillspector
+      install_codex:
+        description: Install Codex CLI for profiles or judges that invoke codex.
+        required: false
+        default: true
+        type: boolean
+      pr_number:
+        description: Optional PR number to checkout before running.
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      benchmark_id:
+        type: string
+        required: true
+      profile:
+        type: string
+        required: false
+        default: clawhub
+      config_path:
+        type: string
+        required: false
+        default: ""
+      scanners:
+        type: string
+        required: false
+        default: ""
+      split:
+        type: string
+        required: false
+        default: ""
+      limit:
+        type: string
+        required: false
+        default: "10"
+      offset:
+        type: string
+        required: false
+        default: "0"
+      predictions_output:
+        type: string
+        required: false
+        default: ""
+      output_path:
+        type: string
+        required: false
+        default: ./artifacts/clawscan-benchmark.json
+      artifact_name:
+        type: string
+        required: false
+        default: clawscan-benchmark
+      install_scanners:
+        type: string
+        required: false
+        default: skillspector
+      install_codex:
+        type: boolean
+        required: false
+        default: true
+      pr_number:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      AIG_API_KEY:
+        required: false
+      AIG_BASE_URL:
+        required: false
+      AIG_MODEL:
+        required: false
+      AIG_MODEL_API_KEY:
+        required: false
+      AIG_MODEL_BASE_URL:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      SNYK_TOKEN:
+        required: false
+      SOCKET_CLI_API_TOKEN:
+        required: false
+      VIRUSTOTAL_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  benchmark:
+    name: Run ${{ inputs.benchmark_id }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout pull request branch
+        if: ${{ inputs.pr_number != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: gh pr checkout "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node for Codex
+        if: ${{ inputs.install_codex }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up uv for scanner installers
+        if: ${{ inputs.install_scanners != '' }}
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build ClawScan
+        run: go build -o ./dist/clawscan ./cmd/clawscan
+
+      - name: Install Codex CLI
+        if: ${{ inputs.install_codex }}
+        run: npm install -g @openai/codex
+
+      - name: Install scanner dependencies
+        if: ${{ inputs.install_scanners != '' }}
+        env:
+          INSTALL_SCANNERS: ${{ inputs.install_scanners }}
+        run: |
+          set -euo pipefail
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+          read -r -a scanners <<<"$(printf '%s' "$INSTALL_SCANNERS" | tr ',' ' ')"
+          if [ "${#scanners[@]}" -gt 0 ]; then
+            ./dist/clawscan install "${scanners[@]}"
+          fi
+
+      - name: Run benchmark
+        env:
+          BENCHMARK_ID: ${{ inputs.benchmark_id }}
+          PROFILE: ${{ inputs.profile }}
+          CONFIG_PATH: ${{ inputs.config_path }}
+          SCANNERS: ${{ inputs.scanners }}
+          SPLIT: ${{ inputs.split }}
+          LIMIT: ${{ inputs.limit }}
+          OFFSET: ${{ inputs.offset }}
+          PREDICTIONS_OUTPUT: ${{ inputs.predictions_output }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+          AIG_API_KEY: ${{ secrets.AIG_API_KEY }}
+          AIG_BASE_URL: ${{ secrets.AIG_BASE_URL }}
+          AIG_MODEL: ${{ secrets.AIG_MODEL }}
+          AIG_MODEL_API_KEY: ${{ secrets.AIG_MODEL_API_KEY }}
+          AIG_MODEL_BASE_URL: ${{ secrets.AIG_MODEL_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SOCKET_CLI_API_TOKEN: ${{ secrets.SOCKET_CLI_API_TOKEN }}
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$OUTPUT_PATH")"
+
+          args=(benchmark "$BENCHMARK_ID" --limit "$LIMIT" --offset "$OFFSET" --output "$OUTPUT_PATH")
+          if [ -n "$SPLIT" ]; then
+            args+=(--split "$SPLIT")
+          fi
+          if [ -n "$PREDICTIONS_OUTPUT" ]; then
+            mkdir -p "$(dirname "$PREDICTIONS_OUTPUT")"
+            args+=(--predictions-output "$PREDICTIONS_OUTPUT")
+          fi
+          if [ -n "$CONFIG_PATH" ]; then
+            args+=(--config "$CONFIG_PATH")
+          fi
+          if [ -n "$PROFILE" ]; then
+            args+=(--profile "$PROFILE")
+          else
+            read -r -a scanners <<<"$(printf '%s' "$SCANNERS" | tr ',' ' ')"
+            if [ "${#scanners[@]}" -eq 0 ]; then
+              echo "Either profile or scanners must be set." >&2
+              exit 1
+            fi
+            for scanner in "${scanners[@]}"; do
+              args+=(--scanner "$scanner")
+            done
+          fi
+
+          ./dist/clawscan "${args[@]}"
+
+      - name: Summarize benchmark
+        if: always()
+        env:
+          OUTPUT_PATH: ${{ inputs.output_path }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          {
+            echo "## ClawScan benchmark"
+            echo
+            echo "- Artifact: \`$ARTIFACT_NAME\`"
+            echo "- Output path: \`$OUTPUT_PATH\`"
+            if [ -f "$OUTPUT_PATH" ]; then
+              echo
+              echo "### Summary"
+              jq -r '
+                "- benchmark: \(.benchmark.id) (\(.benchmark.split) split)",
+                "- cases: \(.summary.caseCount // 0)",
+                "- correct: \(.summary.evaluation.correct // 0)",
+                "- incorrect: \(.summary.evaluation.incorrect // 0)",
+                "- abstained: \(.summary.evaluation.abstained // 0)",
+                "- errors: \(.summary.evaluation.errors // 0)"
+              ' "$OUTPUT_PATH"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            ./artifacts/**
+            ${{ inputs.output_path }}
+            ${{ inputs.predictions_output }}
+          if-no-files-found: error

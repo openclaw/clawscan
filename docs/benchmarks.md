@@ -151,6 +151,38 @@ clawscan benchmark clawhub-security-signals \
   --output ./baseline-clawscan-benchmark.json
 ```
 
+## Run Benchmarks In GitHub Actions
+
+Use the **Run ClawScan Benchmark** workflow when you want a hosted artifact for
+any supported benchmark/profile combination. It accepts the same core choices as
+the CLI: benchmark ID, profile, optional config path, split, limit, offset, and
+predictions output path.
+
+Examples:
+
+```text
+benchmark_id: clawhub-security-signals
+profile: clawhub
+split: eval_holdout
+limit: 10
+```
+
+```text
+benchmark_id: SkillTrustBench
+profile: clawhub
+limit: 0
+```
+
+The workflow uploads the full benchmark artifact and writes a short summary to
+the GitHub Actions run summary. For the built-in `clawhub` profile, configure
+the required repository secrets for the scanner and judge path, including
+`VIRUSTOTAL_API_KEY` and `OPENAI_API_KEY`.
+
+The **SkillTrustBench Profile Gate** workflow is the maintainer-facing proposal
+gate. It validates `proposals/<GHSA-ID>/clawscan.yml`, then delegates the actual
+benchmark execution to **Run ClawScan Benchmark** and uses the uploaded artifact
+to update the README benchmark block.
+
 ## Security Signals Leaderboard Submissions
 
 The v1 Security Signals leaderboard submission path is GitHub PRs to this repo.
