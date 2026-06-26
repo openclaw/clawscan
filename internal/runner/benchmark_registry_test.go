@@ -8,11 +8,11 @@ import (
 
 func TestDefaultBenchmarkRegistryResolvesBuiltInsAndAliases(t *testing.T) {
 	registry := DefaultBenchmarkRegistry()
-	if got := strings.Join(registry.IDs(), ","); got != "OpenClaw/clawhub-security-signals,cuhk-zhuque/SkillTrustBench" {
+	if got := strings.Join(registry.IDs(), ","); got != "clawhub-security-signals,cuhk-zhuque/SkillTrustBench" {
 		t.Fatalf("ids = %q", got)
 	}
 	for _, input := range []string{
-		"OpenClaw/clawhub-security-signals",
+		"clawhub-security-signals",
 		"openclaw/clawhub-security-signals",
 		"cuhk-zhuque/SkillTrustBench",
 		"SkillTrustBench",
@@ -130,7 +130,7 @@ func TestDefaultBenchmarkRegistryProvidesDatasetCatalogInfo(t *testing.T) {
 		}
 	}
 
-	openClaw, _ := registry.Info("OpenClaw/clawhub-security-signals")
+	openClaw, _ := registry.Info("clawhub-security-signals")
 	if got := strings.Join(openClaw.Splits, ","); got != "eval_holdout,test,train,validation" {
 		t.Fatalf("OpenClaw splits = %q", got)
 	}
@@ -149,7 +149,7 @@ func TestDefaultBenchmarkRegistryProvidesDatasetCatalogInfo(t *testing.T) {
 
 func canonicalBenchmarkIDForTest(input string) string {
 	switch strings.ToLower(strings.TrimSpace(input)) {
-	case strings.ToLower(openClawBenchmarkID):
+	case strings.ToLower(openClawBenchmarkID), strings.ToLower(openClawBenchmarkDataset):
 		return openClawBenchmarkID
 	default:
 		return skillTrustBenchID

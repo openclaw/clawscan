@@ -5,8 +5,7 @@ first.
 
 Use GitHub's private vulnerability reporting flow for this repository. Do not
 open a public issue or pull request that discloses an unpatched vulnerability,
-exploit path, credential, or security-sensitive proof of concept. If you are not
-sure where the issue belongs, email security@openclaw.ai and we will route it.
+exploit path, credential, or security-sensitive proof of concept.
 
 ## Supported Versions
 
@@ -62,9 +61,20 @@ only tools and profiles you trust, and review artifacts before sharing them.
 ## Reporting Malicious Skills
 
 If your report is about a malicious or deceptive skill listing rather than a
-bug in ClawScan itself, report it through the relevant marketplace or upstream
-publisher. For ClawHub listings, use ClawHub's listing report flow so moderators
-can triage the live content.
+bug in ClawScan itself, do not disclose the skill payload, bypass details, or
+private proof in a public issue or PR.
+
+For ClawHub listings, submit sensitive findings through GitHub private
+vulnerability reporting so maintainers can triage the live content without
+exposing bypass details publicly. Include the affected listing, impact, the
+ClawScan command or candidate profile that catches it, and any generated
+artifact with secrets redacted.
+
+If you want to propose a ClawHub scan improvement after filing the private
+report, open a PR containing only `proposals/<GHSA-ID>/clawscan.yml`. The
+proposal config should define a `clawhub` profile. Do not edit the built-in
+ClawHub profile files directly; maintainers run the official SkillTrustBench
+gate and port accepted behavior after validation.
 
 If a ClawScan bug lets malicious content evade a configured scan, causes false
 results, leaks secrets, corrupts artifacts, or breaks benchmark/submission

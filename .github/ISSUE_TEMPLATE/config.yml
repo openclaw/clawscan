@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/openclaw/clawscan/security/advisories/new
+    about: Report vulnerabilities privately through GitHub Security Advisories.
+  - name: ClawHub malicious skill report
+    url: https://clawhub.ai
+    about: Report live marketplace listings through ClawHub's listing report flow.
+

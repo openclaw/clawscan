@@ -24,8 +24,7 @@ go run ./cmd/clawscan ./README.md \
 Benchmark smoke:
 
 ```bash
-go run ./cmd/clawscan \
-  --benchmark \
+go run ./cmd/clawscan benchmark SkillTrustBench \
   --limit 1 \
   --scanner clawscan-static \
   --output /tmp/clawscan-benchmark-smoke.json

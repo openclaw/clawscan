@@ -1,0 +1,133 @@
+name: SkillTrustBench Profile Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number containing proposals/<GHSA-ID>/clawscan.yml
+        required: true
+      proposal_path:
+        description: Candidate config path, for example proposals/GHSA-xxxx-yyyy-zzzz/clawscan.yml
+        required: true
+      limit:
+        description: SkillTrustBench row limit. Use 0 for the full benchmark.
+        required: false
+        default: "0"
+      commit_readme:
+        description: Commit the README benchmark block update back to the PR branch.
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  gate:
+    name: Validate candidate clawhub profile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout pull request branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: gh pr checkout "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate proposal shape
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PROPOSAL_PATH: ${{ inputs.proposal_path }}
+        run: |
+          set -euo pipefail
+          case "$PROPOSAL_PATH" in
+            proposals/GHSA-*/clawscan.yml) ;;
+            *)
+              echo "proposal_path must match proposals/<GHSA-ID>/clawscan.yml" >&2
+              exit 1
+              ;;
+          esac
+          test -f "$PROPOSAL_PATH"
+
+          base_ref="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefName --jq .baseRefName)"
+          git fetch --no-tags origin "$base_ref"
+          unexpected="$(
+            git diff --name-only "origin/$base_ref"...HEAD |
+              grep -Fxv "$PROPOSAL_PATH" |
+              grep -Fxv "README.md" || true
+          )"
+          if [ -n "$unexpected" ]; then
+            echo "ClawHub profile proposal PRs should contain only $PROPOSAL_PATH plus README.md after this workflow updates metrics." >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+
+      - name: Build ClawScan
+        run: go build -o ./dist/clawscan ./cmd/clawscan
+
+      - name: Run SkillTrustBench gate
+        env:
+          PROPOSAL_PATH: ${{ inputs.proposal_path }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./artifacts
+          ./dist/clawscan benchmark SkillTrustBench \
+            --config "$PROPOSAL_PATH" \
+            --profile clawhub \
+            --limit "$LIMIT" \
+            --output ./artifacts/skilltrustbench-candidate.json
+
+      - name: Upload full benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skilltrustbench-candidate
+          path: ./artifacts/skilltrustbench-candidate.json
+          if-no-files-found: error
+
+      - name: Update README benchmark block
+        env:
+          WORKFLOW_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          go run ./scripts/update-benchmark-readme \
+            --artifact ./artifacts/skilltrustbench-candidate.json \
+            --readme README.md \
+            --profile clawhub \
+            --workflow-url "$WORKFLOW_URL" \
+            --commit "$(git rev-parse --short HEAD)" | tee /tmp/clawhub-benchmark-block.md
+          {
+            echo "## ClawHub SkillTrustBench profile gate"
+            echo
+            cat /tmp/clawhub-benchmark-block.md
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Commit README update
+        if: ${{ inputs.commit_readme == 'true' }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "README benchmark block already up to date."
+            exit 0
+          fi
+          git commit -m "docs: update clawhub SkillTrustBench benchmark"
+          git push

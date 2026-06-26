@@ -23,8 +23,6 @@ profiles:
         --ephemeral
         --json
         - < {{ prompt:clawhub/prompt.md }}
-      requiredEnv:
-        - OPENAI_API_KEY
 
   skills-sh:
     # Gen Agent Trust Hub runs on skills.sh skills, but is omitted here

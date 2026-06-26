@@ -54,7 +54,7 @@ func TestResolveArgsRejectsMissingExplicitSelection(t *testing.T) {
 		if err == nil {
 			t.Fatalf("ResolveArgs(%v) succeeded", args)
 		}
-		if !strings.Contains(err.Error(), "Pass --scanner, --profile, --config, or --benchmark") {
+		if !strings.Contains(err.Error(), "Pass --scanner, --profile, or --config") {
 			t.Fatalf("err = %v", err)
 		}
 	}
@@ -101,11 +101,11 @@ func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runner.ValidateRequirements(opts, map[string]string{"SOCKET_TOKEN": "", "SNYK_TOKEN": ""})
+	err = runner.ValidateRequirements(opts, map[string]string{"SOCKET_CLI_API_TOKEN": "", "SNYK_TOKEN": ""})
 	if err == nil {
 		t.Fatal("expected missing env error")
 	}
-	if !strings.Contains(err.Error(), "- SOCKET_TOKEN required by scanner socket") {
+	if !strings.Contains(err.Error(), "- SOCKET_CLI_API_TOKEN required by scanner socket") {
 		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(err.Error(), "- SNYK_TOKEN required by scanner snyk") {
@@ -116,20 +116,23 @@ func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
 	}
 }
 
-func TestResolveArgsValidatesClawHubJudgeEnv(t *testing.T) {
+func TestResolveArgsValidatesClawHubScannerEnv(t *testing.T) {
 	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	err = runner.ValidateRequirements(opts, map[string]string{
-		"VIRUSTOTAL_API_KEY": "present",
+		"VIRUSTOTAL_API_KEY": "",
 		"OPENAI_API_KEY":     "",
 	})
 	if err == nil {
 		t.Fatal("expected missing env error")
 	}
-	if !strings.Contains(err.Error(), "- OPENAI_API_KEY required by judge clawhub") {
+	if !strings.Contains(err.Error(), "- VIRUSTOTAL_API_KEY required by scanner virustotal") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(err.Error(), "OPENAI_API_KEY") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -150,20 +153,60 @@ func TestResolveArgsAllowsExplicitScannerWithoutTarget(t *testing.T) {
 	}
 }
 
-func TestResolveArgsForwardsBenchmarkPredictionsOutput(t *testing.T) {
-	opts, err := ResolveArgs([]string{
-		"--benchmark", "OpenClaw/clawhub-security-signals",
+func TestResolveBenchmarkRunSetForwardsPredictionsOutput(t *testing.T) {
+	resolved, err := ResolveBenchmarkRunSet("clawhub-security-signals", []string{
 		"--scanner", "clawscan-static",
 		"--predictions-output", "./submission/predictions.jsonl",
 	}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	opts := resolved.Options[0]
 	if opts.Benchmark == nil {
 		t.Fatal("missing benchmark options")
 	}
 	if opts.Benchmark.PredictionsOutputPath != "./submission/predictions.jsonl" {
 		t.Fatalf("predictions output = %q", opts.Benchmark.PredictionsOutputPath)
+	}
+}
+
+func TestResolveBenchmarkRunSetUsesProposalClawHubProfileBeforeBuiltIn(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "proposals", "GHSA-abcd-1234-5678", "clawscan.yml"), `version: 1
+profiles:
+  clawhub:
+    scanners:
+      - clawscan-static
+    json: true
+`)
+
+	resolved, err := ResolveBenchmarkRunSet("SkillTrustBench", []string{
+		"--config", "proposals/GHSA-abcd-1234-5678/clawscan.yml",
+		"--profile", "clawhub",
+		"--output", "./artifacts/skilltrustbench-candidate.json",
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := resolved.Options[0]
+	if opts.Profile != "clawhub" {
+		t.Fatalf("profile = %q", opts.Profile)
+	}
+	if opts.Benchmark == nil || opts.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" || opts.Benchmark.Split != "benchmark" {
+		t.Fatalf("benchmark = %#v", opts.Benchmark)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+		t.Fatalf("scanners = %q", got)
+	}
+	if opts.Judge != nil {
+		t.Fatalf("expected proposal profile to shadow built-in judge, got %#v", opts.Judge)
+	}
+	if !opts.JSON {
+		t.Fatal("expected proposal profile json setting")
+	}
+	if opts.OutputPath != "./artifacts/skilltrustbench-candidate.json" {
+		t.Fatalf("output = %q", opts.OutputPath)
 	}
 }
 
@@ -349,36 +392,6 @@ func TestResolveArgsRejectsUnrequestedScannerResultAfterOverrides(t *testing.T) 
 	}, t.TempDir())
 	if err == nil || err.Error() != "Scanner result provided for unrequested scanner: virustotal" {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestResolveArgsAddsJudgeRequiredEnvWithoutLeakingValues(t *testing.T) {
-	dir := t.TempDir()
-	config := filepath.Join(dir, ".clawscan.yml")
-	writeFile(t, config, `version: 1
-profiles:
-  review:
-    scanners:
-      - clawscan-static
-    judge:
-      command: judge --out {{ output }}
-      requiredEnv:
-        - OPENAI_API_KEY
-`)
-
-	opts, err := ResolveArgs([]string{"./skill", "--profile", "review"}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = runner.ValidateRequirements(opts, map[string]string{"OPENAI_API_KEY": ""})
-	if err == nil {
-		t.Fatal("expected missing env error")
-	}
-	if !strings.Contains(err.Error(), "- OPENAI_API_KEY required by judge review") {
-		t.Fatalf("err = %v", err)
-	}
-	if strings.Contains(err.Error(), "secret") {
-		t.Fatalf("error leaked value: %v", err)
 	}
 }
 

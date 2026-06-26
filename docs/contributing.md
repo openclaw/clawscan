@@ -33,7 +33,7 @@ go run ./cmd/clawscan ./README.md \
 
 Use live scanner credentials only when you already have them. Credentials must
 come from environment variables such as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`,
-and `SOCKET_TOKEN`.
+and `SOCKET_CLI_API_TOKEN`.
 
 ## Validation Matrix
 
@@ -42,7 +42,7 @@ and `SOCKET_TOKEN`.
 | Docs only | `make docs-site` |
 | Public help or CLI behavior | `go test -count=1 ./...`, `go vet ./...`, `go run ./cmd/clawscan --help` |
 | Scanner adapter | Focused fixture-backed tests, `go test -count=1 ./...`, `go vet ./...`, docs/help updates |
-| Benchmark behavior | Focused benchmark tests, `go test -count=1 ./...`, a `--benchmark --limit 1` smoke when practical |
+| Benchmark behavior | Focused benchmark tests, `go test -count=1 ./...`, a `clawscan benchmark SkillTrustBench --limit 1` smoke when practical |
 | Leaderboard submission plumbing | Relevant script test or repo validator run, plus CI |
 
 CI owns normal Security Signals submission validation for PRs. If you are

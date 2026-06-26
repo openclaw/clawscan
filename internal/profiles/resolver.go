@@ -33,8 +33,7 @@ type Profile struct {
 }
 
 type Judge struct {
-	Command     string   `yaml:"command"`
-	RequiredEnv []string `yaml:"requiredEnv,omitempty"`
+	Command string `yaml:"command"`
 }
 
 type resolvedProfile struct {
@@ -93,6 +92,24 @@ func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
+	return resolveRunSetIntent(intent, cwd)
+}
+
+func ResolveBenchmarkRunSet(benchmarkID string, args []string, cwd string) (ResolvedRunSet, error) {
+	intent, err := parseCLIIntent(args)
+	if err != nil {
+		return ResolvedRunSet{}, err
+	}
+	if intent.target != "" {
+		return ResolvedRunSet{}, errors.New("clawscan benchmark does not accept a scan target")
+	}
+	intent.benchmark = benchmarkID
+	intent.benchmarkSet = true
+	return resolveRunSetIntent(intent, cwd)
+}
+
+func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
+	var err error
 	if cwd == "" {
 		cwd, err = os.Getwd()
 		if err != nil {
@@ -121,7 +138,7 @@ func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
 		}
 	}
 
-	finalArgs, extraEnv, files, err := buildRunnerArgs(intent, selected, profileName)
+	finalArgs, files, err := buildRunnerArgs(intent, selected, profileName)
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
@@ -130,9 +147,14 @@ func ResolveRunSet(args []string, cwd string) (ResolvedRunSet, error) {
 		return ResolvedRunSet{}, err
 	}
 	opts.Profile = profileName
-	opts.AdditionalRequiredEnv = extraEnv
 	if opts.Judge != nil {
 		opts.Judge.Files = files
+	}
+	if intent.benchmarkSet {
+		opts.Benchmark, err = runner.NewBenchmarkOptions(intent.benchmark, intent.split, intent.limit, intent.offset, intent.predictionsOutput)
+		if err != nil {
+			return ResolvedRunSet{}, err
+		}
 	}
 	return ResolvedRunSet{
 		Options:    []runner.Options{opts},
@@ -146,7 +168,7 @@ func hasExplicitRunSelection(intent cliIntent) bool {
 }
 
 func explicitRunSelectionError() error {
-	return errors.New("No scanner, profile, config, or benchmark selected. Pass --scanner, --profile, --config, or --benchmark.")
+	return errors.New("No scanner, profile, or config selected. Pass --scanner, --profile, or --config. Use `clawscan benchmark <benchmark-id>` for benchmark runs.")
 }
 
 func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
@@ -177,7 +199,7 @@ func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
 
 func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if intent.benchmarkSet {
-		return ResolvedRunSet{}, errors.New("--config without --profile does not support --benchmark")
+		return ResolvedRunSet{}, errors.New("clawscan benchmark requires --profile when --config is passed")
 	}
 	projectPath := intent.configPath
 	if !filepath.IsAbs(projectPath) {
@@ -206,7 +228,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		if !ok {
 			return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
 		}
-		finalArgs, extraEnv, files, err := buildRunnerArgs(intent, selected, profileName)
+		finalArgs, files, err := buildRunnerArgs(intent, selected, profileName)
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
@@ -217,7 +239,6 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		opts.Profile = profileName
 		opts.OutputPath = ""
 		opts.JSON = false
-		opts.AdditionalRequiredEnv = extraEnv
 		if opts.Judge != nil {
 			opts.Judge.Files = files
 		}
@@ -398,13 +419,6 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			intent.judge = value
 			intent.judgeSet = true
 			i = next
-		case "--benchmark":
-			intent.benchmarkSet = true
-			next := i + 1
-			if next < len(args) && args[next] != "" && !strings.HasPrefix(args[next], "--") {
-				intent.benchmark = args[next]
-				i = next
-			}
 		case "--split":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -452,7 +466,22 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 	return intent, nil
 }
 
-func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName string) ([]string, []runner.EnvRequirement, map[string][]byte, error) {
+func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName string) ([]string, map[string][]byte, error) {
+	if !intent.benchmarkSet {
+		if intent.splitSet {
+			return nil, nil, errors.New("--split requires clawscan benchmark <benchmark-id>")
+		}
+		if intent.limitSet {
+			return nil, nil, errors.New("--limit requires clawscan benchmark <benchmark-id>")
+		}
+		if intent.offsetSet {
+			return nil, nil, errors.New("--offset requires clawscan benchmark <benchmark-id>")
+		}
+		if intent.predictionsOutputSet {
+			return nil, nil, errors.New("--predictions-output requires clawscan benchmark <benchmark-id>")
+		}
+	}
+
 	profile := selected.profile
 	scanners := append([]string{}, profile.Scanners...)
 	if len(intent.scanners) > 0 {
@@ -460,9 +489,9 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	}
 	if len(scanners) == 0 {
 		if profileName == "" {
-			return nil, nil, nil, errors.New("At least one --scanner is required")
+			return nil, nil, errors.New("At least one --scanner is required")
 		}
-		return nil, nil, nil, fmt.Errorf("Profile %s must include at least one scanner or use --scanner", profileName)
+		return nil, nil, fmt.Errorf("Profile %s must include at least one scanner or use --scanner", profileName)
 	}
 
 	scannerResults := map[string]string{}
@@ -477,24 +506,6 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	target := intent.target
 	if target != "" {
 		args = append(args, target)
-	}
-	if intent.benchmarkSet {
-		args = append(args, "--benchmark")
-		if intent.benchmark != "" {
-			args = append(args, intent.benchmark)
-		}
-	}
-	if intent.splitSet {
-		args = append(args, "--split", intent.split)
-	}
-	if intent.limitSet {
-		args = append(args, "--limit", strconv.Itoa(intent.limit))
-	}
-	if intent.offsetSet {
-		args = append(args, "--offset", strconv.Itoa(intent.offset))
-	}
-	if intent.predictionsOutputSet {
-		args = append(args, "--predictions-output", intent.predictionsOutput)
 	}
 	for _, scanner := range scanners {
 		args = append(args, "--scanner", scanner)
@@ -513,22 +524,17 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 		args = append(args, "--json")
 	}
 
-	var extraEnv []runner.EnvRequirement
 	judgeCommand := ""
 	if profile.Judge != nil && shouldUseProfileJudge(intent) {
 		judgeCommand = resolveJudgePaths(profile.Judge.Command, selected.configDir)
-		for _, envVar := range profile.Judge.RequiredEnv {
-			extraEnv = append(extraEnv, runner.EnvRequirement{EnvVar: envVar, Reason: "judge " + profileName})
-		}
 	}
 	if intent.judgeSet {
 		judgeCommand = intent.judge
-		extraEnv = nil
 	}
 	if judgeCommand != "" {
 		args = append(args, "--judge", judgeCommand)
 	}
-	return args, extraEnv, selected.files, nil
+	return args, selected.files, nil
 }
 
 func shouldUseProfileJudge(intent cliIntent) bool {

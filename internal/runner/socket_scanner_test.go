@@ -31,7 +31,7 @@ func TestValidateRequirementsRequiresSocketToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing env error")
 	}
-	if !strings.Contains(err.Error(), "- SOCKET_TOKEN required by scanner socket") {
+	if !strings.Contains(err.Error(), "- SOCKET_CLI_API_TOKEN required by scanner socket") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -49,7 +49,7 @@ func TestRunExecutesSocketScannerWithPreciseSkillTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:           map[string]string{"SOCKET_TOKEN": "test-socket-secret"},
+		Env:           map[string]string{"SOCKET_CLI_API_TOKEN": "test-socket-secret"},
 		CommandRunner: runner,
 	})
 	if err != nil {
@@ -81,7 +81,7 @@ func TestRunExecutesSocketScannerWithPreciseSkillTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if bytes.Contains(rawArtifact, []byte("test-socket-secret")) {
-		t.Fatalf("artifact leaked SOCKET_TOKEN: %s", rawArtifact)
+		t.Fatalf("artifact leaked SOCKET_CLI_API_TOKEN: %s", rawArtifact)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestSocketScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:           map[string]string{"SOCKET_TOKEN": "test-socket-secret"},
+		Env:           map[string]string{"SOCKET_CLI_API_TOKEN": "test-socket-secret"},
 		CommandRunner: runner,
 	})
 	if err != nil {
@@ -136,7 +136,7 @@ func TestSocketScannerFailsNonZeroExitWithoutJSONStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:           map[string]string{"SOCKET_TOKEN": "test-socket-secret"},
+		Env:           map[string]string{"SOCKET_CLI_API_TOKEN": "test-socket-secret"},
 		CommandRunner: runner,
 	})
 	if err != nil {
@@ -150,7 +150,7 @@ func TestSocketScannerFailsNonZeroExitWithoutJSONStdout(t *testing.T) {
 		t.Fatalf("error = %q", result.Error)
 	}
 	if strings.Contains(result.Error, "test-socket-secret") {
-		t.Fatalf("error leaked SOCKET_TOKEN: %q", result.Error)
+		t.Fatalf("error leaked SOCKET_CLI_API_TOKEN: %q", result.Error)
 	}
 	if result.Raw != nil {
 		t.Fatalf("raw = %s", result.Raw)
@@ -169,7 +169,7 @@ func TestSocketScannerFailsSuccessWithoutJSONStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:           map[string]string{"SOCKET_TOKEN": "test-socket-secret"},
+		Env:           map[string]string{"SOCKET_CLI_API_TOKEN": "test-socket-secret"},
 		CommandRunner: runner,
 	})
 	if err != nil {
@@ -196,7 +196,7 @@ func TestSocketScannerFailsSuccessWithInvalidJSONStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:           map[string]string{"SOCKET_TOKEN": "test-socket-secret"},
+		Env:           map[string]string{"SOCKET_CLI_API_TOKEN": "test-socket-secret"},
 		CommandRunner: runner,
 	})
 	if err != nil {
@@ -233,7 +233,7 @@ func TestSocketScannerResultFixtureSkipsTokenRequirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := ValidateRequirements(opts, map[string]string{}); err != nil {
-		t.Fatalf("expected fixture-backed Socket result to avoid SOCKET_TOKEN, got %v", err)
+		t.Fatalf("expected fixture-backed Socket result to avoid SOCKET_CLI_API_TOKEN, got %v", err)
 	}
 	artifact, err := Run(opts, RunContext{
 		Env:           map[string]string{},

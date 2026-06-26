@@ -41,14 +41,17 @@ func run(args []string, environ []string) error {
 	if len(args) > 0 && args[0] == "scanners" {
 		return runScanners(args[1:])
 	}
-	if len(args) > 0 && args[0] == "datasets" {
-		return runDatasets(args[1:])
+	if len(args) > 0 && args[0] == "benchmark" {
+		return runBenchmarkCommand(args[1:], environ)
 	}
 	if len(args) > 0 && args[0] == "profiles" {
 		return runProfiles(args[1:])
 	}
 	if len(args) > 0 && args[0] == "install" {
 		return runInstall(args[1:], environ)
+	}
+	if len(args) > 0 && looksLikeCommand(args[0]) {
+		return fmt.Errorf("Unknown command: %s", args[0])
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -102,6 +105,54 @@ func run(args []string, environ []string) error {
 	return nil
 }
 
+func runBenchmarkCommand(args []string, environ []string) error {
+	switch {
+	case len(args) == 1 && args[0] == "list":
+		printBenchmarkCatalog(os.Stdout, runner.DefaultBenchmarkRegistry())
+		return nil
+	case len(args) == 0:
+		return errors.New("Usage: clawscan benchmark <benchmark-id> [flags]\n       clawscan benchmark list")
+	case args[0] == "list":
+		return errors.New("Usage: clawscan benchmark list")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	resolved, err := profiles.ResolveBenchmarkRunSet(args[0], args[1:], cwd)
+	if err != nil {
+		return err
+	}
+	if resolved.AllProfiles {
+		return errors.New("clawscan benchmark does not support --config without --profile")
+	}
+	opts := resolved.Options[0]
+	if !opts.JSON && opts.OutputPath == "" {
+		opts.OutputPath = defaultOutputPath
+	}
+	artifact, err := runner.RunBenchmark(opts, runner.RunContext{Env: runner.EnvMap(environ)})
+	if err != nil {
+		return err
+	}
+	if opts.JSON {
+		return runner.WriteJSON(os.Stdout, artifact)
+	}
+	if opts.OutputPath != "" {
+		printBenchmarkSummary(os.Stdout, artifact, opts.OutputPath)
+		if predictionsPath := runner.BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
+			fmt.Fprintf(os.Stdout, "predictions_results: %s\n", displayOutputPath(predictionsPath))
+		}
+		return nil
+	}
+	if predictionsPath := runner.BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
+		fmt.Fprintf(os.Stdout, "predictions_results: %s\n", displayOutputPath(predictionsPath))
+		return nil
+	}
+	printBenchmarkSummary(os.Stdout, artifact, "")
+	return nil
+}
+
 func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd string) error {
 	if !resolved.JSON && resolved.OutputPath == "" {
 		resolved.OutputPath = defaultOutputPath
@@ -124,49 +175,13 @@ func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd stri
 	return nil
 }
 
-func runDatasets(args []string) error {
-	registry := runner.DefaultBenchmarkRegistry()
-	if len(args) == 0 || (len(args) == 1 && args[0] == "list") {
-		printDatasetCatalog(os.Stdout, registry)
-		return nil
-	}
-	if len(args) == 1 {
-		info, err := registry.ResolveInfo(args[0])
-		if err != nil {
-			return err
-		}
-		printDatasetDetail(os.Stdout, info)
-		return nil
-	}
-	return errors.New("Usage: clawscan datasets [list|<dataset>]")
-}
-
-func printDatasetCatalog(w io.Writer, registry runner.BenchmarkRegistry) {
+func printBenchmarkCatalog(w io.Writer, registry runner.BenchmarkRegistry) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tName\tDefault split\tSplits\tRequired env")
 	for _, info := range registry.Infos() {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", info.ID, info.DisplayName, info.DefaultSplit, strings.Join(info.Splits, ", "), info.RequiredEnv)
 	}
 	_ = tw.Flush()
-}
-
-func printDatasetDetail(w io.Writer, info runner.DatasetInfo) {
-	fmt.Fprintf(w, "%s\n", info.DisplayName)
-	fmt.Fprintf(w, "ID: %s\n", info.ID)
-	if len(info.Aliases) > 0 {
-		fmt.Fprintf(w, "Aliases: %s\n", strings.Join(info.Aliases, ", "))
-	}
-	fmt.Fprintf(w, "Source: %s\n", info.Source)
-	fmt.Fprintf(w, "Link: %s\n", info.SourceURL)
-	fmt.Fprintf(w, "Description: %s\n", info.Description)
-	fmt.Fprintf(w, "Supported splits: %s\n", strings.Join(info.Splits, ", "))
-	fmt.Fprintf(w, "Default split: %s\n", info.DefaultSplit)
-	fmt.Fprintf(w, "Required env vars: %s\n", info.RequiredEnv)
-	if info.SupportsPredictionsOutput {
-		fmt.Fprintln(w, "Predictions output: supported")
-	} else {
-		fmt.Fprintln(w, "Predictions output: not supported")
-	}
 }
 
 func runScanners(args []string) error {
@@ -528,6 +543,10 @@ func displayOutputPath(path string) string {
 	return "./" + path
 }
 
+func looksLikeCommand(arg string) bool {
+	return arg != "" && !strings.HasPrefix(arg, "--") && !strings.ContainsAny(arg, `/\.`)
+}
+
 func helpText() string {
 	return fmt.Sprintf(`ClawScan runs agent-skill scanners, preserves raw evidence, and can hand results to an external judge.
 
@@ -535,14 +554,13 @@ Usage:
   clawscan install <scanner-id> [scanner-id ...]
   clawscan scanners [list|<scanner-id>]
   clawscan profiles [-v]
-  clawscan datasets [list|<dataset>]
+  clawscan benchmark list
+  clawscan benchmark <benchmark-id> --scanner <scanner-id> [flags]
+  clawscan benchmark <benchmark-id> --profile <profile-name> [flags]
   clawscan <target> --scanner <scanner-id> [flags]
   clawscan --scanner <scanner-id> [flags]
   clawscan --profile clawhub [flags]
   clawscan --profile skills-sh [flags]
-  clawscan --benchmark --scanner <scanner-id> [flags]
-  clawscan --benchmark SkillTrustBench --scanner <scanner-id> [flags]
-  clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]
   clawscan --version
   clawscan --help
 
@@ -556,11 +574,12 @@ Core flags:
                               Explicit .json paths keep the artifact file and write scanner JSON beside it.
   --json                      Print the full artifact JSON to stdout and skip default file writes unless --output is passed.
   --judge <cmd>               Optional external judge harness command.
-  --benchmark [id]            Run a supported benchmark dataset instead of one target. Defaults to SkillTrustBench.
-  --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for OpenClaw.
+
+Benchmark command flags:
+  --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for clawhub-security-signals.
   --limit <n>                 Maximum benchmark rows to run. 0 means all rows.
   --offset <n>                Benchmark row offset. Defaults to 0.
-  --predictions-output <path> Write benchmark predictions JSONL. Defaults next to --output for OpenClaw benchmarks.
+  --predictions-output <path> Write benchmark predictions JSONL. Defaults next to --output for clawhub-security-signals.
   --version                   Print build metadata.
   -h, --help                  Print this help.
 
@@ -575,13 +594,11 @@ Catalog commands:
   clawscan scanners <id>      Show scanner repository, description, env vars, and install guidance.
   clawscan profiles           List built-in plus nearest project .clawscan.yml/.clawscan.yaml profiles.
   clawscan profiles -v        Print the resolved profile catalog as pasteable YAML.
-  clawscan datasets           List supported benchmark datasets with splits.
-  clawscan datasets list      Alias for clawscan datasets.
-  clawscan datasets <id>      Show dataset source, description, splits, and env requirements.
+  clawscan benchmark list     List supported benchmarks with source datasets and splits.
 
 Supported benchmarks:
-  cuhk-zhuque/SkillTrustBench (alias: SkillTrustBench, default)
-  OpenClaw/clawhub-security-signals
+  cuhk-zhuque/SkillTrustBench (alias: SkillTrustBench)
+  clawhub-security-signals
 
 Accepted scanner IDs:
   %s
@@ -590,16 +607,17 @@ Built-in profiles:
   %s
 
 Required environment variables:
-  clawhub judge: OPENAI_API_KEY
-  socket: SOCKET_TOKEN
+  aig: no ClawScan-required env vars; AIG_BASE_URL defaults to http://localhost:8088. Use "clawscan scanners aig" for optional service/model vars and the private-network warning.
+  socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
-  skillspector: no ClawScan-required env vars; provider env vars enable LLM mode, otherwise --no-llm is used.
+  skillspector: no ClawScan-required env vars; provider env vars enable LLM mode, otherwise --no-llm is used. Use "clawscan scanners skillspector" for provider vars.
+  cisco: no ClawScan-required env vars; optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers.
   judge: provider credentials belong to the command passed to --judge.
 
 Target notes:
   No target with --scanner, --profile, or --config scans child skill directories under ./skills.
-  Plain clawscan without --scanner, --profile, --config, or --benchmark is invalid.
+  Plain clawscan without --scanner, --profile, or --config is invalid.
   Most scanners use a local skill file or directory target.
   Socket runs the public Socket CLI full-scan path over local dependency manifests.
 

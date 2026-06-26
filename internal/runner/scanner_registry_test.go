@@ -75,7 +75,7 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,cisco,clawscan-static,skillspector,snyk,socket,virustotal"
+	want := "agentverus,aig,cisco,clawscan-static,skillspector,snyk,socket,virustotal"
 	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
 	}
@@ -155,7 +155,28 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	}
 
 	skillspector, _ := registry.Info("skillspector")
-	if got := strings.Join(skillspector.OptionalEnv, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY,NVIDIA_INFERENCE_KEY,SKILLSPECTOR_PROVIDER" {
+	if got := strings.Join(skillspector.OptionalEnv, ","); got != "SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_MODEL_REGISTRY,SKILLSPECTOR_LOG_LEVEL,SKILLSPECTOR_SSL_VERIFY,NVIDIA_INFERENCE_KEY,OPENAI_API_KEY,OPENAI_BASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_PROXY_ENDPOINT_URL,ANTHROPIC_PROXY_API_KEY,ANTHROPIC_PROXY_API_VERSION" {
 		t.Fatalf("skillspector optional env = %q", got)
+	}
+
+	cisco, _ := registry.Info("cisco")
+	if got := strings.Join(cisco.OptionalEnv, ","); got != "SKILL_SCANNER_LLM_API_KEY,SKILL_SCANNER_LLM_PROVIDER,SKILL_SCANNER_LLM_MODEL,SKILL_SCANNER_LLM_BASE_URL,SKILL_SCANNER_LLM_USER,SKILL_SCANNER_LLM_API_VERSION,SKILL_SCANNER_LLM_FORCE_JSON_OBJECT,SKILL_SCANNER_META_LLM_API_KEY,SKILL_SCANNER_META_LLM_MODEL,SKILL_SCANNER_META_LLM_BASE_URL,SKILL_SCANNER_META_LLM_API_VERSION,AWS_PROFILE,AWS_REGION,GOOGLE_APPLICATION_CREDENTIALS,VIRUSTOTAL_API_KEY,AI_DEFENSE_API_KEY,AI_DEFENSE_API_URL" {
+		t.Fatalf("cisco optional env = %q", got)
+	}
+
+	socket, _ := registry.Info("socket")
+	if got := strings.Join(socket.RequiredEnv, ","); got != "SOCKET_CLI_API_TOKEN" {
+		t.Fatalf("socket required env = %q", got)
+	}
+
+	aig, _ := registry.Info("aig")
+	if got := strings.Join(aig.RequiredEnv, ","); got != "" {
+		t.Fatalf("aig required env = %q", got)
+	}
+	if got := strings.Join(aig.OptionalEnv, ","); got != "AIG_BASE_URL,AIG_API_KEY,AIG_MODEL,AIG_MODEL_API_KEY,AIG_MODEL_BASE_URL,AIG_USERNAME,AIG_SCAN_LANGUAGE,AIG_SCAN_PROMPT,AIG_SCAN_THREAD_COUNT,AIG_POLL_INTERVAL_MS,AIG_POLL_MAX_ATTEMPTS" {
+		t.Fatalf("aig optional env = %q", got)
+	}
+	if !strings.Contains(aig.InstallHint, "Run the A.I.G Docker/API service separately") {
+		t.Fatalf("aig install hint = %q", aig.InstallHint)
 	}
 }

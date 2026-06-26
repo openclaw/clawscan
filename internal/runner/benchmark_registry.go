@@ -161,14 +161,14 @@ func (openClawBenchmarkAdapter) ID() string {
 }
 
 func (openClawBenchmarkAdapter) Aliases() []string {
-	return nil
+	return []string{openClawBenchmarkDataset}
 }
 
 func (openClawBenchmarkAdapter) Info() DatasetInfo {
 	return DatasetInfo{
-		DisplayName: "OpenClaw ClawHub Security Signals",
+		DisplayName: "ClawHub Security Signals",
 		SourceURL:   "https://huggingface.co/datasets/OpenClaw/clawhub-security-signals",
-		Description: "Weekly refreshed ClawHub security-signals dataset for evaluating clean, suspicious, and malicious skill predictions.",
+		Description: "Weekly refreshed ClawHub production security signals for reproducing current behavior and checking regressions; not a human-validated ground-truth benchmark.",
 		RequiredEnv: "none",
 	}
 }
@@ -194,7 +194,7 @@ func (openClawBenchmarkAdapter) SupportsPredictionsOutput() bool {
 }
 
 func (adapter openClawBenchmarkAdapter) RunCases(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient) ([]BenchmarkCase, error) {
-	rows, err := client.FetchOpenClawRows(opts.Benchmark.ID, opts.Benchmark.Split, opts.Benchmark.Offset, opts.Benchmark.Limit)
+	rows, err := client.FetchOpenClawRows(openClawBenchmarkDataset, opts.Benchmark.Split, opts.Benchmark.Offset, opts.Benchmark.Limit)
 	if err != nil {
 		return nil, err
 	}

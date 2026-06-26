@@ -158,8 +158,6 @@ profiles:
     output: ./clawscan-results/skills-sh-review.json
     judge:
       command: judge --out {{ output }}
-      requiredEnv:
-        - OPENAI_API_KEY
 ```
 
 Run a project profile:
@@ -190,10 +188,10 @@ clawscan ./my-skill --profile skills-sh --scanner clawscan-static
 Passing `--scanner` without `--profile` creates an ad hoc scanner-only run, so
 profile judges are not invoked accidentally.
 
-Config files may declare env var names that a judge needs, but they must not
-store secret values. Scanner and judge credentials stay in environment
-variables, such as `OPENAI_API_KEY` for the example judge command.
-The built-in `skills-sh` profile needs `SOCKET_TOKEN` and `SNYK_TOKEN`
+Config files must not store secret values. Scanner and judge credentials stay
+in environment variables, such as `OPENAI_API_KEY` for the example judge
+command.
+The built-in `skills-sh` profile needs `SOCKET_CLI_API_TOKEN` and `SNYK_TOKEN`
 unless those scanners are supplied through `--scanner-result` fixtures or
 overridden with `--scanner`.
 
@@ -223,7 +221,7 @@ Secrets must be set with environment variables, not CLI flags:
 export VIRUSTOTAL_API_KEY=...
 export OPENAI_API_KEY=...
 export SNYK_TOKEN=...
-export SOCKET_TOKEN=...
+export SOCKET_CLI_API_TOKEN=...
 ```
 
 ClawScan validates required env vars before starting a run and records only
@@ -238,14 +236,14 @@ whether each value was present:
 
 Actual secret values are never written to run artifacts.
 
-## Dataset Catalog
+## Benchmark Catalog
 
-Inspect supported benchmark datasets before choosing `--benchmark` and
-`--split` values:
+Inspect supported benchmarks before choosing a benchmark ID and `--split`
+value:
 
 ```bash
-clawscan datasets
-clawscan datasets SkillTrustBench
+clawscan benchmark list
+clawscan benchmark SkillTrustBench --limit 1 --scanner clawscan-static --json
 ```
 
 ## Common Flags
@@ -259,8 +257,8 @@ clawscan datasets SkillTrustBench
 | `--output <path>` | Write the full artifact JSON to a specific file. Defaults to `./clawscan-results/artifact.json` when `--json` is not passed. Explicit `.json` paths keep that artifact file and write scanner JSON beside it. |
 | `--json` | Print the full artifact JSON to stdout and skip default file writes unless `--output` is also passed. |
 | `--judge <cmd>` | Run an optional external judge harness. |
-| `--benchmark [id]` | Run a supported benchmark instead of one target. Defaults to SkillTrustBench. |
-| `--split <name>` | Benchmark split. Defaults to `benchmark` for SkillTrustBench and `eval_holdout` for OpenClaw. |
+| `clawscan benchmark <id>` | Run a supported benchmark instead of one target. |
+| `--split <name>` | Benchmark split. Defaults to `benchmark` for SkillTrustBench and `eval_holdout` for ClawHub Security Signals. |
 | `--limit <n>` | Maximum benchmark rows to run. `0` means all rows. |
 | `--offset <n>` | Benchmark row offset. Defaults to `0`. |
 

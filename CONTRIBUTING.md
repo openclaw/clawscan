@@ -90,6 +90,5 @@ scripts/validate-security-signals-submissions.sh leaderboard/submissions/<run-id
 ## Security Reports
 
 Report vulnerabilities privately through this repository's GitHub private
-vulnerability reporting flow. If you are unsure where to route a report, email
-security@openclaw.ai. See [SECURITY.md](SECURITY.md) for the full policy and
-what to include.
+vulnerability reporting flow. See [SECURITY.md](SECURITY.md) for the full
+policy and what to include.

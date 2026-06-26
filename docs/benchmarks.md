@@ -9,23 +9,21 @@ Supported benchmarks:
 
 ```text
 cuhk-zhuque/SkillTrustBench
-OpenClaw/clawhub-security-signals
+clawhub-security-signals
 ```
 
-Use the dataset catalog commands to inspect supported benchmarks, source links,
-split names, defaults, and env requirements:
+Use the benchmark catalog command to inspect supported benchmarks, source
+links, split names, defaults, and env requirements:
 
 ```bash
-clawscan datasets
-clawscan datasets SkillTrustBench
+clawscan benchmark list
 ```
 
-SkillTrustBench is the default benchmark. Use the canonical Hugging Face ID or
-the short alias `SkillTrustBench`, or omit the value after `--benchmark`.
+Run SkillTrustBench with the canonical Hugging Face ID or the short alias
+`SkillTrustBench`.
 
 ```bash
-clawscan \
-  --benchmark \
+clawscan benchmark SkillTrustBench \
   --limit 10 \
   --scanner clawscan-static \
   --output ./clawscan-benchmark.json
@@ -35,26 +33,26 @@ The first SkillTrustBench run downloads the versioned
 `benchmark_full_v1.0.zip` archive into the user cache. ClawScan then extracts
 only the requested case directory into a temporary skill target for scanning.
 
-## Run the OpenClaw Benchmark
+## Run the ClawHub Security Signals Benchmark
 
 ```bash
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --limit 10 \
   --scanner clawscan-static \
   --output ./clawscan-benchmark.json
 ```
 
-For the OpenClaw benchmark, `--output ./clawscan-benchmark.json` also writes a
-submission-friendly `./predictions.jsonl` file. Treat this JSONL as a derived
-leaderboard/CI input; use the benchmark artifact when you need to understand
-why a scanner or judge behaved a certain way. Use `--predictions-output` to
-choose a different path:
+`clawhub-security-signals` records current ClawHub production signals for
+reproduction and regression checks. It is not a human-validated ground-truth
+benchmark. For this benchmark, `--output ./clawscan-benchmark.json` also writes
+a submission-friendly `./predictions.jsonl` file. Treat this JSONL as a derived
+leaderboard/CI input; use the benchmark artifact when you need to understand why
+a scanner or judge behaved a certain way. Use `--predictions-output` to choose a
+different path:
 
 ```bash
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --limit 10 \
   --scanner clawscan-static \
@@ -66,7 +64,7 @@ clawscan \
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--split <name>` | `benchmark` for SkillTrustBench, `eval_holdout` for OpenClaw | Hugging Face split to run. SkillTrustBench accepts `benchmark`; OpenClaw accepts `train`, `validation`, `test`, and `eval_holdout`. |
+| `--split <name>` | `benchmark` for SkillTrustBench, `eval_holdout` for ClawHub Security Signals | Hugging Face split to run. SkillTrustBench accepts `benchmark`; ClawHub Security Signals accepts `train`, `validation`, `test`, and `eval_holdout`. |
 | `--limit <n>` | `0` | Maximum rows to run. `0` means all rows in the selected split. |
 | `--offset <n>` | `0` | Row offset for reproducible chunks. |
 | `--predictions-output <path>` | Next to `--output` for OpenClaw only | Write the lightweight leaderboard submission JSONL file. |
@@ -89,7 +87,7 @@ For SkillTrustBench:
   ClawScan safely extracts that one directory and requires it to contain
   `SKILL.md`.
 
-For `OpenClaw/clawhub-security-signals`:
+For `clawhub-security-signals`:
 
 - `skill_md_content` becomes `SKILL.md`.
 - `skill_bundle_content` restores any additional files.
@@ -146,8 +144,7 @@ Then inspect individual cases:
 Use `--limit` and descriptive output paths to compare candidate changes:
 
 ```bash
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --limit 25 \
   --scanner clawscan-static \
@@ -160,7 +157,7 @@ The v1 Security Signals leaderboard submission path is GitHub PRs to this repo.
 The Hugging Face Space is a display and convenience preview surface only; it
 does not publish official rows.
 
-1. Run ClawScan locally against the full OpenClaw benchmark split.
+1. Run ClawScan locally against the full ClawHub Security Signals split.
 2. Put `metadata.json` and `predictions.jsonl` in a new
    `leaderboard/submissions/<run-id>/` directory.
 3. Optionally include a full `artifact.json` from the benchmark run.
@@ -174,8 +171,7 @@ does not publish official rows.
 Full benchmark run:
 
 ```bash
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --scanner clawscan-static \
   --output ./clawscan-benchmark.json
@@ -196,7 +192,7 @@ Minimal `metadata.json`:
 {
   "schemaVersion": "clawscan-security-signals-submission-v1",
   "benchmark": {
-    "dataset": "OpenClaw/clawhub-security-signals",
+    "dataset": "clawhub-security-signals",
     "split": "eval_holdout",
     "revision": "<hugging-face-dataset-sha>"
   },
@@ -235,6 +231,32 @@ Verification statuses:
 The Gradio Space upload flow can validate and preview a `predictions.jsonl`
 file before you open a PR. That upload does not publish results. Official
 leaderboard rows come from reviewed and merged PR submissions.
+
+## ClawHub Profile Proposals
+
+Sensitive malicious ClawHub skill reports should go through GitHub private
+vulnerability reporting. The public PR should contain only the candidate
+profile config:
+
+```text
+proposals/<GHSA-ID>/clawscan.yml
+```
+
+That file must define a `clawhub` profile. Maintainers run the official
+SkillTrustBench gate with:
+
+```bash
+clawscan benchmark SkillTrustBench \
+  --config proposals/<GHSA-ID>/clawscan.yml \
+  --profile clawhub \
+  --output ./artifacts/skilltrustbench-candidate.json
+```
+
+The proposal profile shadows the built-in `clawhub` profile for that validation
+run. Researchers should not edit `internal/profiles/builtin.yml`,
+`internal/profiles/clawhub/prompt.md`, or
+`internal/profiles/clawhub/output.schema.json` in the proposal PR. Maintainers
+port accepted behavior into the built-in profile after validation.
 
 Operational source files:
 

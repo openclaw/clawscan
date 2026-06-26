@@ -1,0 +1,59 @@
+name: Scanner request
+description: Request a new scanner adapter or improvement to an existing one.
+title: "[Scanner]: "
+labels:
+  - enhancement
+body:
+  - type: input
+    id: scanner_name
+    attributes:
+      label: Scanner name
+      placeholder: "Example Scanner"
+    validations:
+      required: true
+  - type: input
+    id: scanner_url
+    attributes:
+      label: Upstream URL
+      placeholder: "https://github.com/org/scanner"
+    validations:
+      required: true
+  - type: dropdown
+    id: request_type
+    attributes:
+      label: Request type
+      options:
+        - New built-in scanner adapter
+        - Improve an existing adapter
+        - Add install support
+        - Add richer artifact/report capture
+    validations:
+      required: true
+  - type: textarea
+    id: cli_shape
+    attributes:
+      label: CLI/API shape
+      description: How should ClawScan invoke the scanner? Include JSON-output flags if known.
+      placeholder: |
+        scanner scan ./skill --format json --output report.json
+    validations:
+      required: true
+  - type: textarea
+    id: credentials
+    attributes:
+      label: Credentials and setup
+      description: List required env var names and install requirements. Do not include secret values.
+      placeholder: |
+        Env vars: SCANNER_API_KEY
+        Install: npm install -g scanner-cli
+  - type: textarea
+    id: artifact
+    attributes:
+      label: Expected artifact
+      description: Describe the scanner's JSON/SARIF/HTML outputs and what ClawScan should preserve.
+  - type: textarea
+    id: proof
+    attributes:
+      label: Example proof
+      description: Link to safe fixtures, docs, or sample output.
+

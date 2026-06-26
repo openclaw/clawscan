@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	openClawBenchmarkID           = "OpenClaw/clawhub-security-signals"
+	openClawBenchmarkID           = "clawhub-security-signals"
+	openClawBenchmarkDataset      = "OpenClaw/clawhub-security-signals"
 	openClawBenchmarkConfig       = "default"
 	openClawBenchmarkSource       = "huggingface"
 	defaultOpenClawBenchmarkSplit = "eval_holdout"
@@ -473,12 +474,13 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 	caseOpts.Benchmark = nil
 	caseOpts.OutputPath = ""
 	return Run(caseOpts, RunContext{
-		Env:                  env,
-		Now:                  now,
-		CommandRunner:        ctx.CommandRunner,
-		ScannerRunner:        ctx.ScannerRunner,
-		SkillSpectorCommand:  ctx.SkillSpectorCommand,
-		VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
+		Env:                    env,
+		Now:                    now,
+		CommandRunner:          ctx.CommandRunner,
+		ScannerRunner:          ctx.ScannerRunner,
+		SkillSpectorCommand:    ctx.SkillSpectorCommand,
+		VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
+		AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
 	})
 }
 
@@ -572,10 +574,6 @@ func validateBenchmarkSplit(id string, split string) error {
 		}
 	}
 	return fmt.Errorf("Unsupported split for %s: %s (valid: %s)", adapter.ID(), split, strings.Join(validSplits, ", "))
-}
-
-func defaultBenchmarkID() string {
-	return skillTrustBenchID
 }
 
 func defaultBenchmarkSplit(id string) string {

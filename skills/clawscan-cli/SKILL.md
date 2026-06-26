@@ -1,6 +1,6 @@
 ---
 name: clawscan-cli
-description: Use when running or explaining the ClawScan CLI, including one-off agent-skill scans, OpenClaw benchmark runs, scanner fixtures, judge harness commands, env var validation, or interpreting clawscan-run-v1 and clawscan-benchmark-v1 artifacts.
+description: Use when running or explaining the ClawScan CLI, including one-off agent-skill scans, benchmark runs, scanner fixtures, judge harness commands, env var validation, or interpreting clawscan-run-v1 and clawscan-benchmark-v1 artifacts.
 ---
 
 # ClawScan CLI
@@ -43,10 +43,9 @@ Choose the run mode:
 | Inspect one scanner | `clawscan scanners skillspector` |
 | List resolved profiles | `clawscan profiles` |
 | Print resolved profile YAML | `clawscan profiles -v` |
-| List dataset catalog | `clawscan datasets` |
-| Inspect one dataset | `clawscan datasets SkillTrustBench` |
-| Run the default benchmark | `clawscan --benchmark --limit 10 --scanner clawscan-static --output run.json` |
-| Run the OpenClaw benchmark | `clawscan --benchmark OpenClaw/clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
+| List benchmark catalog | `clawscan benchmark list` |
+| Run SkillTrustBench | `clawscan benchmark SkillTrustBench --limit 10 --scanner clawscan-static --output run.json` |
+| Run ClawHub Security Signals | `clawscan benchmark clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
 | Add or override a judge harness | Add `--judge '<command with placeholders>'`. |
 
@@ -58,7 +57,7 @@ clawscan -h
 clawscan --version
 clawscan scanners
 clawscan profiles
-clawscan datasets
+clawscan benchmark list
 ```
 
 Unless `--json` is passed, ClawScan writes the full artifact to
@@ -73,8 +72,9 @@ keep that artifact file and write scanner JSON beside it.
 If no target is passed with `--scanner`, `--profile`, or `--config`, ClawScan
 scans child skill directories under `./skills`. If `./skills` is missing or
 contains no children with `SKILL.md`, it fails with a target-discovery error.
-Plain `clawscan` without `--scanner`, `--profile`, `--config`, or `--benchmark`
-is invalid. Benchmark runs do not accept scan targets.
+Plain `clawscan` without `--scanner`, `--profile`, or `--config` is invalid.
+Benchmark runs use `clawscan benchmark <benchmark-id>` and do not accept scan
+targets.
 
 Built-in profiles:
 
@@ -108,8 +108,6 @@ profiles:
     json: true
     judge:
       command: judge --out {{ output }}
-      requiredEnv:
-        - OPENAI_API_KEY
 ```
 
 ## Scanners
@@ -121,17 +119,19 @@ env vars, and install guidance.
 Accepted scanner IDs:
 
 ```text
-agentverus, cisco, clawscan-static, skillspector, snyk, socket, virustotal
+agentverus, aig, cisco, clawscan-static, skillspector, snyk, socket, virustotal
 ```
 
 Credential rules:
 
-| Scanner | Required env vars |
+| Scanner | Env vars |
 | --- | --- |
-| `socket` | `SOCKET_TOKEN` |
-| `snyk` | `SNYK_TOKEN` |
-| `virustotal` | `VIRUSTOTAL_API_KEY` |
-| `skillspector` | none required by ClawScan; provider env vars enable LLM mode, otherwise `--no-llm` is used |
+| `aig` | optional service/model config: `AIG_BASE_URL`, `AIG_API_KEY`, `AIG_MODEL`, `AIG_MODEL_API_KEY`, `AIG_MODEL_BASE_URL`, `AIG_USERNAME`, `AIG_SCAN_LANGUAGE`, `AIG_SCAN_PROMPT`, `AIG_SCAN_THREAD_COUNT`, `AIG_POLL_INTERVAL_MS`, `AIG_POLL_MAX_ATTEMPTS`; `AIG_BASE_URL` defaults to `http://localhost:8088` |
+| `socket` | required: `SOCKET_CLI_API_TOKEN` |
+| `snyk` | required: `SNYK_TOKEN` |
+| `virustotal` | required: `VIRUSTOTAL_API_KEY` |
+| `skillspector` | optional provider config: `SKILLSPECTOR_PROVIDER`, `SKILLSPECTOR_MODEL`, `NVIDIA_INFERENCE_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_PROXY_ENDPOINT_URL`, `ANTHROPIC_PROXY_API_KEY` |
+| `cisco` | optional upstream analyzers: `SKILL_SCANNER_LLM_*`, `SKILL_SCANNER_META_LLM_*`, `VIRUSTOTAL_API_KEY`, `AI_DEFENSE_API_KEY`, `AI_DEFENSE_API_URL` |
 
 Artifact env fields record only `present` or `missing`; they must never contain
 secret values. GenDigital/Gen Agent Trust Hub is not a built-in scanner because
@@ -149,7 +149,10 @@ install docs where they publish an install command, including Cisco's
 `uv tool install git+https://github.com/NVIDIA/skillspector.git`, Socket's
 `npm install -g socket`, and AgentVerus'
 `npm install --save-dev agentverus-scanner`. Snyk is launcher-based, so
-ClawScan verifies `uvx`; built-in and API-backed scanners are skipped.
+ClawScan verifies `uvx`; built-in and simple API-backed scanners are skipped.
+`aig` is API-backed but not auto-started: run the A.I.G Docker/API service
+separately on localhost or a private network because upstream currently lacks
+built-in authentication.
 
 Use `--scanner-result` when a test or fixture should supply stable scanner JSON:
 
@@ -165,24 +168,20 @@ profile.
 
 ## Benchmarks
 
-Use `clawscan datasets` for the registry-backed dataset catalog and
-`clawscan datasets <dataset>` for one dataset's source link, description,
-supported splits, default split, env requirements, and predictions-output
-support.
+Use `clawscan benchmark list` for the registry-backed benchmark catalog.
 
 Supported benchmarks:
 
 ```text
 cuhk-zhuque/SkillTrustBench
-OpenClaw/clawhub-security-signals
+clawhub-security-signals
 ```
 
-SkillTrustBench is the default benchmark. Use either `--benchmark` with no
-value or the alias `--benchmark SkillTrustBench`:
+Run SkillTrustBench with the canonical Hugging Face ID or the short alias
+`SkillTrustBench`:
 
 ```bash
-clawscan \
-  --benchmark \
+clawscan benchmark SkillTrustBench \
   --limit 10 \
   --scanner clawscan-static \
   --output /tmp/clawscan-benchmark.json
@@ -192,14 +191,14 @@ SkillTrustBench uses split `benchmark`. The first live run downloads and caches
 `benchmark_full_v1.0.zip`, then extracts only the requested case directories
 into temporary scan targets.
 
-OpenClaw splits: `train`, `validation`, `test`, `eval_holdout`. `--limit 0`
-means run the full selected split. Use `--offset` with `--limit` for
-reproducible chunks.
+ClawHub Security Signals splits: `train`, `validation`, `test`,
+`eval_holdout`. `--limit 0` means run the full selected split. Use `--offset`
+with `--limit` for reproducible chunks.
 
-For the OpenClaw benchmark, `--output ./clawscan-benchmark.json` also writes
-`./predictions.jsonl`. Use `--predictions-output <path>` to choose another path.
-`--predictions-output` is only supported for
-`OpenClaw/clawhub-security-signals`.
+For `clawhub-security-signals`, `--output ./clawscan-benchmark.json` also
+writes `./predictions.jsonl`. Use `--predictions-output <path>` to choose
+another path. `--predictions-output` is only supported for
+`clawhub-security-signals`.
 
 Benchmark artifacts use `clawscan-benchmark-v1`. Each case embeds the normal
 `clawscan-run-v1` artifact, expected verdict metadata, and evaluation status.
@@ -238,7 +237,7 @@ Use static scanner smokes for local proof because they do not need secrets:
 
 ```bash
 go run ./cmd/clawscan ./README.md --scanner clawscan-static --output /tmp/clawscan-smoke.json
-go run ./cmd/clawscan --benchmark --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json
+go run ./cmd/clawscan benchmark SkillTrustBench --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json
 go run ./cmd/clawscan --help
 go test -count=1 ./...
 go vet ./...
@@ -248,15 +247,15 @@ go vet ./...
 
 - Do not pass API keys as CLI flags.
 - Do not run plain `clawscan`; choose `--scanner`, `--profile`, `--config`, or
-  `--benchmark`.
+  `clawscan benchmark <benchmark-id>`.
 - Do not assume `clawscan` scans `.`; no target means discover `./skills`.
 - Do not expect a profile judge when passing explicit `--scanner` flags without
   `--profile`.
 - Do not use benchmark flags such as `--split`, `--limit`, or `--offset`
-  without `--benchmark`.
+  outside `clawscan benchmark <benchmark-id>`.
 - Do not use `--config` without `--profile` for benchmark runs; all-profile
   config runs are target scans only.
 - Do not add unsupported dataset names; built-ins are SkillTrustBench and
-  `OpenClaw/clawhub-security-signals`.
+  `clawhub-security-signals`.
 - Do not assume scanner failures are final policy verdicts; scanner output is
   raw evidence for comparison or judging.

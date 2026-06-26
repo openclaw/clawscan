@@ -21,18 +21,18 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"clawscan install <scanner-id> [scanner-id ...]",
 		"clawscan scanners [list|<scanner-id>]",
 		"clawscan profiles [-v]",
-		"clawscan datasets [list|<dataset>]",
+		"clawscan benchmark list",
+		"clawscan benchmark <benchmark-id> --scanner <scanner-id> [flags]",
+		"clawscan benchmark <benchmark-id> --profile <profile-name> [flags]",
 		"clawscan <target> --scanner <scanner-id> [flags]",
 		"clawscan --scanner <scanner-id> [flags]",
 		"clawscan --profile clawhub [flags]",
 		"clawscan --profile skills-sh [flags]",
-		"clawscan --benchmark --scanner <scanner-id> [flags]",
-		"clawscan --benchmark OpenClaw/clawhub-security-signals --scanner <scanner-id> [flags]",
 		"--scanner <id>",
 		"Install scanner dependencies without running scans.",
 		"--profile <name>",
 		"--config <path>",
-		"--benchmark [id]",
+		"Benchmark command flags:",
 		"--split <name>",
 		"--limit <n>",
 		"--offset <n>",
@@ -41,19 +41,20 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"Catalog commands:",
 		"List supported scanners with required env vars.",
 		"Print the resolved profile catalog as pasteable YAML.",
-		"List supported benchmark datasets with splits.",
+		"List supported benchmarks with source datasets and splits.",
 		"Supported benchmarks:",
 		"cuhk-zhuque/SkillTrustBench",
 		"SkillTrustBench",
-		"OpenClaw/clawhub-security-signals",
+		"clawhub-security-signals",
 		"Accepted scanner IDs:",
-		"agentverus, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
+		"agentverus, aig, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
 		"Required environment variables:",
-		"OPENAI_API_KEY",
-		"SOCKET_TOKEN",
+		"aig: no ClawScan-required env vars",
+		"SOCKET_CLI_API_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
 		"skillspector: no ClawScan-required env vars",
+		"cisco: no ClawScan-required env vars",
 		"No target with --scanner, --profile, or --config scans child skill directories under ./skills",
 		"--judge <cmd>",
 		"{{ workspace }}",
@@ -68,6 +69,9 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 
 	if strings.Contains(stdout, "validate-submission") {
 		t.Fatalf("help should not expose repository-only submission validation:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "clawhub judge: OPENAI_API_KEY") {
+		t.Fatalf("help should not document profile judge env validation:\n%s", stdout)
 	}
 }
 
@@ -118,20 +122,20 @@ func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
 
 func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 	stdout := captureStdout(t, func() {
-		if err := run([]string{"scanners", "skillspector"}, []string{}); err != nil {
+		if err := run([]string{"scanners", "aig"}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	for _, want := range []string{
-		"NVIDIA SkillSpector",
-		"ID: skillspector",
-		"Repository: https://github.com/NVIDIA/skillspector",
-		"Description:",
+		"Tencent AI-Infra-Guard",
+		"ID: aig",
+		"Repository: https://github.com/Tencent/AI-Infra-Guard",
+		"Description: API-backed MCP Server & Agent Skills scan",
 		"Required env vars: none",
-		"Optional env vars: OPENAI_API_KEY, ANTHROPIC_API_KEY, NVIDIA_INFERENCE_KEY, SKILLSPECTOR_PROVIDER",
+		"Optional env vars: AIG_BASE_URL, AIG_API_KEY, AIG_MODEL, AIG_MODEL_API_KEY, AIG_MODEL_BASE_URL, AIG_USERNAME, AIG_SCAN_LANGUAGE, AIG_SCAN_PROMPT, AIG_SCAN_THREAD_COUNT, AIG_POLL_INTERVAL_MS, AIG_POLL_MAX_ATTEMPTS",
 		"Install:",
-		"uv tool install git+https://github.com/NVIDIA/skillspector.git",
+		"Run the A.I.G Docker/API service separately",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("scanner detail missing %q:\n%s", want, stdout)
@@ -151,8 +155,6 @@ profiles:
       - snyk
     judge:
       command: judge --out {{ output }}
-      requiredEnv:
-        - OPENAI_API_KEY
 `)
 	t.Chdir(dir)
 
@@ -213,27 +215,19 @@ profiles:
 	}
 }
 
-func TestRunCommandDatasetsPrintsCatalogTable(t *testing.T) {
+func TestRunCommandBenchmarkListPrintsCatalogTable(t *testing.T) {
 	stdout := captureStdout(t, func() {
-		if err := run([]string{"datasets"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	aliasStdout := captureStdout(t, func() {
-		if err := run([]string{"datasets", "list"}, []string{}); err != nil {
+		if err := run([]string{"benchmark", "list"}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})
 
-	if stdout != aliasStdout {
-		t.Fatalf("datasets and datasets list differ:\n--- datasets ---\n%s\n--- datasets list ---\n%s", stdout, aliasStdout)
-	}
 	for _, want := range []string{
 		"ID",
 		"Name",
 		"Default split",
 		"Required env",
-		"OpenClaw/clawhub-security-signals",
+		"clawhub-security-signals",
 		"eval_holdout",
 		"eval_holdout, test, train, validation",
 		"cuhk-zhuque/SkillTrustBench",
@@ -241,32 +235,16 @@ func TestRunCommandDatasetsPrintsCatalogTable(t *testing.T) {
 		"none",
 	} {
 		if !strings.Contains(stdout, want) {
-			t.Fatalf("dataset catalog missing %q:\n%s", want, stdout)
+			t.Fatalf("benchmark catalog missing %q:\n%s", want, stdout)
 		}
 	}
 }
 
-func TestRunCommandDatasetDetailPrintsHumanReadableInfo(t *testing.T) {
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"datasets", "SkillTrustBench"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	for _, want := range []string{
-		"SkillTrustBench",
-		"ID: cuhk-zhuque/SkillTrustBench",
-		"Aliases: SkillTrustBench",
-		"Source: huggingface",
-		"Link: https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench",
-		"Description:",
-		"Supported splits: benchmark",
-		"Default split: benchmark",
-		"Required env vars: none",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("dataset detail missing %q:\n%s", want, stdout)
-		}
+func TestRunCommandRejectsUnknownCommand(t *testing.T) {
+	t.Chdir(t.TempDir())
+	err := run([]string{"datasets"}, []string{})
+	if err == nil || err.Error() != "Unknown command: datasets" {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -293,7 +271,7 @@ func TestRunCommandRequiresExplicitSelection(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "Pass --scanner, --profile, --config, or --benchmark") {
+	if !strings.Contains(err.Error(), "Pass --scanner, --profile, or --config") {
 		t.Fatalf("err = %q", err.Error())
 	}
 }

@@ -1,0 +1,45 @@
+name: Stale
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  stale:
+    name: Mark stale issues and pull requests
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mark stale items
+        uses: actions/stale@v10
+        with:
+          repo-token: ${{ github.token }}
+          days-before-issue-stale: 30
+          days-before-issue-close: 14
+          days-before-pr-stale: 14
+          days-before-pr-close: 7
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: security,pinned,no-stale
+          exempt-pr-labels: security,pinned,no-stale
+          exempt-all-assignees: true
+          remove-stale-when-updated: true
+          operations-per-run: 200
+          ascending: true
+          stale-issue-message: |
+            This issue has been marked stale because it has not had recent activity.
+            If it still affects ClawScan, please add current reproduction steps, scanner versions, and redacted artifact evidence.
+          close-issue-message: |
+            Closing due to inactivity. If this still affects ClawScan, please open a new issue with current evidence.
+          close-issue-reason: not_planned
+          stale-pr-message: |
+            This pull request has been marked stale because it has not had recent activity.
+            Please update the branch, add current validation, or explain what remains.
+          close-pr-message: |
+            Closing due to inactivity. If this should be revived, please reopen with current context and validation.
+

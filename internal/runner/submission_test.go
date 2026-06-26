@@ -15,7 +15,7 @@ func TestValidateSecuritySignalsSubmissionComputesLooseNonCleanMetrics(t *testin
 	dir := writeSecuritySignalsSubmission(t, SecuritySignalsSubmissionMetadata{
 		SchemaVersion: "clawscan-security-signals-submission-v1",
 		Benchmark: SecuritySignalsSubmissionBenchmark{
-			Dataset:  "OpenClaw/clawhub-security-signals",
+			Dataset:  "clawhub-security-signals",
 			Split:    "eval_holdout",
 			Revision: "fixture-sha",
 		},
@@ -46,7 +46,7 @@ func TestValidateSecuritySignalsSubmissionComputesLooseNonCleanMetrics(t *testin
 	if result.SchemaVersion != "clawscan-security-signals-score-v1" {
 		t.Fatalf("schema version = %q", result.SchemaVersion)
 	}
-	if result.Benchmark.Dataset != "OpenClaw/clawhub-security-signals" || result.Benchmark.Split != "eval_holdout" || result.Benchmark.Revision != "fixture-sha" {
+	if result.Benchmark.Dataset != "clawhub-security-signals" || result.Benchmark.Split != "eval_holdout" || result.Benchmark.Revision != "fixture-sha" {
 		t.Fatalf("benchmark = %#v", result.Benchmark)
 	}
 	metrics := result.Metrics
@@ -76,27 +76,27 @@ func TestValidateSecuritySignalsSubmissionRejectsInvalidInputs(t *testing.T) {
 				},
 			},
 			predictions: []BenchmarkPrediction{{ID: "case-1", Prediction: "clean"}},
-			wantErr:     []string{"metadata benchmark.dataset must be OpenClaw/clawhub-security-signals"},
+			wantErr:     []string{"metadata benchmark.dataset must be clawhub-security-signals"},
 		},
 		{
 			name: "mismatched split",
 			metadata: SecuritySignalsSubmissionMetadata{
 				SchemaVersion: "clawscan-security-signals-submission-v1",
 				Benchmark: SecuritySignalsSubmissionBenchmark{
-					Dataset:  "OpenClaw/clawhub-security-signals",
+					Dataset:  "clawhub-security-signals",
 					Split:    "benchmark",
 					Revision: "fixture-sha",
 				},
 			},
 			predictions: []BenchmarkPrediction{{ID: "case-1", Prediction: "clean"}},
-			wantErr:     []string{"Unsupported split for OpenClaw/clawhub-security-signals: benchmark"},
+			wantErr:     []string{"Unsupported split for clawhub-security-signals: benchmark"},
 		},
 		{
 			name: "bad predictions",
 			metadata: SecuritySignalsSubmissionMetadata{
 				SchemaVersion: "clawscan-security-signals-submission-v1",
 				Benchmark: SecuritySignalsSubmissionBenchmark{
-					Dataset:  "OpenClaw/clawhub-security-signals",
+					Dataset:  "clawhub-security-signals",
 					Split:    "eval_holdout",
 					Revision: "fixture-sha",
 				},
@@ -119,7 +119,7 @@ func TestValidateSecuritySignalsSubmissionRejectsInvalidInputs(t *testing.T) {
 			metadata: SecuritySignalsSubmissionMetadata{
 				SchemaVersion: "clawscan-security-signals-submission-v1",
 				Benchmark: SecuritySignalsSubmissionBenchmark{
-					Dataset: "OpenClaw/clawhub-security-signals",
+					Dataset: "clawhub-security-signals",
 					Split:   "eval_holdout",
 				},
 			},
@@ -160,7 +160,7 @@ func TestHuggingFaceBenchmarkClientReportsNonJSONHTTPError(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := HuggingFaceBenchmarkClient{Endpoint: server.URL}
-	_, err := client.FetchOpenClawRows("OpenClaw/clawhub-security-signals", "eval_holdout", 0, 1)
+	_, err := client.FetchOpenClawRows("clawhub-security-signals", "eval_holdout", 0, 1)
 	if err == nil || !strings.Contains(err.Error(), "fetch benchmark rows: HTTP 502") {
 		t.Fatalf("err = %v", err)
 	}

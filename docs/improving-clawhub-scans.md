@@ -2,9 +2,9 @@
 
 ClawScan exists partly so ClawHub's skill-scanning setup can be inspected and
 improved in public. The improvement loop should still use the general-purpose
-`clawscan` command: run the ClawHub-style profile, evaluate it on the OpenClaw
-Security Signals benchmark, compare the `clawscan-benchmark.json` evidence, and
-propose a targeted change.
+`clawscan` command: run the ClawHub-style profile, evaluate it on the
+`clawhub-security-signals` or SkillTrustBench benchmark, compare the
+`clawscan-benchmark.json` evidence, and propose a targeted change.
 
 Do not add ClawHub-specific flags to the public CLI. If exact ClawHub parity
 needs a maintainer helper, keep that helper outside `cmd/clawscan`.
@@ -37,8 +37,7 @@ can inspect and improve the same scan setup ClawHub runs.
 Start small while iterating:
 
 ```bash
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --limit 10 \
   --profile clawhub \
@@ -48,18 +47,20 @@ clawscan \
 Use `--limit 0` when you intentionally want the full split:
 
 ```bash
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --limit 0 \
   --profile clawhub \
   --output ./clawscan-benchmark.json
 ```
 
-The benchmark artifact is the primary result to inspect. For the OpenClaw
-benchmark, ClawScan may also write `predictions.jsonl` for leaderboard and CI
-submission plumbing, but that file is derived from the richer benchmark
-artifact.
+The benchmark artifact is the primary result to inspect. For the ClawHub
+Security Signals benchmark, ClawScan may also write `predictions.jsonl` for
+leaderboard and CI submission plumbing, but that file is derived from the
+richer benchmark artifact.
+
+`clawhub-security-signals` records current ClawHub production signals for
+reproduction and regression checks. It is not human-validated ground truth.
 
 ## 3. Compare Results
 
@@ -81,15 +82,13 @@ Then inspect individual cases:
 For quick local comparison, save artifacts with descriptive names:
 
 ```bash
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --limit 50 \
   --profile clawhub \
   --output ./baseline-clawscan-benchmark.json
 
-clawscan \
-  --benchmark OpenClaw/clawhub-security-signals \
+clawscan benchmark clawhub-security-signals \
   --split eval_holdout \
   --limit 50 \
   --scanner clawscan-static \
@@ -108,9 +107,35 @@ Good ClawHub scan improvements usually fit one of these buckets:
 - benchmark fixture improvements that make a missed malicious skill or false
   positive reproducible
 
-Keep the proposal narrow. Include the before/after benchmark artifacts, the
-command lines used to produce them, and the specific cases that improved or
-regressed.
+Keep ordinary non-sensitive proposals narrow. Include the before/after benchmark
+artifacts, the command lines used to produce them, and the specific public cases
+that improved or regressed.
+
+For sensitive malicious ClawHub skill findings, use the private report plus
+proposal flow instead:
+
+1. Submit the malicious skill details through GitHub private vulnerability
+   reporting.
+2. Open a PR containing only `proposals/<GHSA-ID>/clawscan.yml`.
+3. Define a candidate `clawhub` profile in that file.
+4. Do not edit `internal/profiles/builtin.yml`,
+   `internal/profiles/clawhub/prompt.md`, or
+   `internal/profiles/clawhub/output.schema.json`.
+5. Wait for maintainers to run the official validation workflow.
+
+Maintainers validate the proposal with:
+
+```bash
+clawscan benchmark SkillTrustBench \
+  --config proposals/<GHSA-ID>/clawscan.yml \
+  --profile clawhub \
+  --output ./artifacts/skilltrustbench-candidate.json
+```
+
+The provided `clawhub` profile in the proposal shadows the built-in `clawhub`
+profile for that run. The workflow uploads the full JSON artifact, extracts the
+summary metrics, updates the marked README benchmark block, and commits the
+README update back to the PR branch when the branch is writable.
 
 ## 5. Flow Back Into ClawHub
 
@@ -119,8 +144,8 @@ Accepted changes can reach ClawHub through different paths:
 - general scanner adapter improvements land in this repo and become available
   to any ClawScan user
 - built-in profile changes land here only when they remain general-purpose
-- ClawHub profile prompt, schema, scanner, and judge-harness changes land in
-  ClawScan so ClawHub can consume them by running the baked-in profile
+- ClawHub profile prompt, schema, scanner, and judge-harness changes are ported
+  by maintainers after a candidate proposal passes validation
 - ClawHub deployment wiring stays in ClawHub
 - benchmark updates land in the Security Signals dataset/submission workflow
   when they are about evaluation coverage rather than scanner runtime behavior

@@ -1,0 +1,85 @@
+name: Bug report
+description: Report a ClawScan defect, regression, or confusing scanner result.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please keep this grounded in observed behavior.
+        Do not include API keys, tokens, secrets, or private skill contents.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence describing what is broken.
+      placeholder: "`clawscan --scanner cisco` reports success but omits Cisco findings from the artifact."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact command and the smallest safe target or fixture.
+      placeholder: |
+        1. Clone or create this minimal skill fixture...
+        2. Run `clawscan ./fixture --scanner ...`
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include redacted output or artifact snippets.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ClawScan version or commit
+      placeholder: "v0.1.0 or git SHA"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.5 / Ubuntu 24.04 / Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: install_method
+    attributes:
+      label: Install method
+      placeholder: "GitHub Release / Homebrew / go install / npm / local build"
+  - type: textarea
+    id: scanners
+    attributes:
+      label: Scanner setup
+      description: Scanner IDs, versions, install method, and env var names only. Do not include values.
+      placeholder: |
+        Scanners: skillspector, cisco
+        Env var names present: OPENAI_API_KEY
+        Scanner versions: skill-scanner 2.0.12
+  - type: textarea
+    id: artifact
+    attributes:
+      label: Redacted artifact or logs
+      description: Include a minimal redacted artifact snippet, command output, or links to safe public fixtures.
+      render: json
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected and why does it matter?
+

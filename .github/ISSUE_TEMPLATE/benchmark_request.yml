@@ -1,0 +1,35 @@
+name: Benchmark or dataset request
+description: Request support for a benchmark dataset or scoring workflow.
+title: "[Benchmark]: "
+labels:
+  - enhancement
+body:
+  - type: input
+    id: dataset
+    attributes:
+      label: Dataset or benchmark
+      placeholder: "owner/dataset or paper/repo URL"
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Dataset shape
+      description: Describe rows, labels, splits, target materialization, and expected output.
+      placeholder: |
+        Rows include: id, label, skill files...
+        Labels map to: clean/suspicious/malicious
+        Splits: benchmark, test
+    validations:
+      required: true
+  - type: textarea
+    id: scoring
+    attributes:
+      label: Scoring and leaderboard expectations
+      description: Metrics, prediction fields, and output artifacts expected.
+  - type: textarea
+    id: access
+    attributes:
+      label: Access and safety notes
+      description: Public/private dataset, license, malicious content warnings, or network requirements.
+

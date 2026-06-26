@@ -1,0 +1,19 @@
+# GitHub CODEOWNERS uses last-match-wins semantics.
+
+# Default maintainership for ClawScan.
+* @Patrick-Erichsen
+
+# Security-sensitive repo automation and release surfaces.
+/.github/ @openclaw/openclaw-secops @Patrick-Erichsen
+/scripts/ @openclaw/openclaw-secops @Patrick-Erichsen
+/Makefile @openclaw/openclaw-secops @Patrick-Erichsen
+/SECURITY.md @openclaw/openclaw-secops @Patrick-Erichsen
+
+# Scanner, judge, benchmark, and artifact contracts.
+/cmd/clawscan/ @openclaw/openclaw-secops @Patrick-Erichsen
+/cmd/verify-clawhub-prompt/ @openclaw/openclaw-secops @Patrick-Erichsen
+/internal/runner/ @openclaw/openclaw-secops @Patrick-Erichsen
+/internal/profiles/ @openclaw/openclaw-secops @Patrick-Erichsen
+/internal/clawhubprompt/ @openclaw/openclaw-secops @Patrick-Erichsen
+/leaderboard/ @openclaw/openclaw-secops @Patrick-Erichsen
+

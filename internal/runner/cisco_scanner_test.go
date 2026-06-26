@@ -58,6 +58,47 @@ func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
 	}
 }
 
+func TestCiscoScannerEnablesUpstreamAnalyzersFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &ciscoRecordingCommandRunner{output: `{"scanner":"cisco","findings":[]}`}
+	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{
+			"SKILL_SCANNER_LLM_API_KEY":           "present",
+			"SKILL_SCANNER_META_LLM_MODEL":        "present",
+			"VIRUSTOTAL_API_KEY":                  "present",
+			"AI_DEFENSE_API_KEY":                  "present",
+			"SKILL_SCANNER_LLM_MODEL":             "claude-3-5-sonnet-20241022",
+			"SKILL_SCANNER_LLM_PROVIDER":          "anthropic",
+			"SKILL_SCANNER_LLM_API_VERSION":       "2025-01-01-preview",
+			"SKILL_SCANNER_LLM_FORCE_JSON_OBJECT": "true",
+		},
+		CommandRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Scanners["cisco"].Status != "completed" {
+		t.Fatalf("scanner = %#v", artifact.Scanners["cisco"])
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("calls = %#v", runner.calls)
+	}
+	call := runner.calls[0]
+	for _, want := range []string{"--use-llm", "--enable-meta", "--use-virustotal", "--use-aidefense"} {
+		if !containsArg(call.args, want) {
+			t.Fatalf("missing %s in args: %#v", want, call.args)
+		}
+	}
+}
+
 func TestCiscoScannerOutputFileIsPreservedInArtifactBundle(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")

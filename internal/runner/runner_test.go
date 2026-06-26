@@ -121,153 +121,98 @@ func TestParseArgsSupportsJudgeCommand(t *testing.T) {
 	}
 }
 
-func TestParseArgsSupportsOpenClawBenchmark(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark", "OpenClaw/clawhub-security-signals",
-		"--split", "eval_holdout",
-		"--limit", "2",
-		"--offset", "10",
-		"--scanner", "clawscan-static",
-	})
+func TestNewBenchmarkOptionsSupportsOpenClawBenchmark(t *testing.T) {
+	benchmark, err := NewBenchmarkOptions("clawhub-security-signals", "eval_holdout", 2, 10, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Target != "" {
-		t.Fatalf("target = %q", opts.Target)
+	if benchmark.ID != "clawhub-security-signals" {
+		t.Fatalf("benchmark id = %q", benchmark.ID)
 	}
-	if opts.Benchmark == nil {
-		t.Fatal("missing benchmark options")
+	if benchmark.Split != "eval_holdout" {
+		t.Fatalf("split = %q", benchmark.Split)
 	}
-	if opts.Benchmark.ID != "OpenClaw/clawhub-security-signals" {
-		t.Fatalf("benchmark id = %q", opts.Benchmark.ID)
-	}
-	if opts.Benchmark.Split != "eval_holdout" {
-		t.Fatalf("split = %q", opts.Benchmark.Split)
-	}
-	if opts.Benchmark.Limit != 2 || opts.Benchmark.Offset != 10 {
-		t.Fatalf("benchmark bounds = %#v", opts.Benchmark)
+	if benchmark.Limit != 2 || benchmark.Offset != 10 {
+		t.Fatalf("benchmark bounds = %#v", benchmark)
 	}
 }
 
-func TestParseArgsSupportsBenchmarkPredictionsOutput(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark", "OpenClaw/clawhub-security-signals",
-		"--scanner", "clawscan-static",
-		"--predictions-output", "./predictions.jsonl",
-	})
+func TestNewBenchmarkOptionsSupportsPredictionsOutput(t *testing.T) {
+	benchmark, err := NewBenchmarkOptions("clawhub-security-signals", "", 0, 0, "./predictions.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Benchmark == nil {
-		t.Fatal("missing benchmark options")
-	}
-	if opts.Benchmark.PredictionsOutputPath != "./predictions.jsonl" {
-		t.Fatalf("predictions output = %q", opts.Benchmark.PredictionsOutputPath)
+	if benchmark.PredictionsOutputPath != "./predictions.jsonl" {
+		t.Fatalf("predictions output = %q", benchmark.PredictionsOutputPath)
 	}
 }
 
-func TestParseArgsRejectsPredictionsOutputWithoutBenchmark(t *testing.T) {
+func TestParseArgsRejectsBenchmarkSubcommandOnlyFlags(t *testing.T) {
 	_, err := ParseArgs([]string{
 		"./my-skill",
 		"--scanner", "clawscan-static",
 		"--predictions-output", "./predictions.jsonl",
 	})
-	if err == nil || err.Error() != "--predictions-output requires --benchmark" {
+	if err == nil || err.Error() != "Unknown argument: --predictions-output" {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestParseArgsSupportsSkillTrustBenchBenchmark(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark", "SkillTrustBench",
-		"--limit", "2",
-		"--scanner", "clawscan-static",
-	})
+func TestNewBenchmarkOptionsSupportsSkillTrustBenchBenchmark(t *testing.T) {
+	benchmark, err := NewBenchmarkOptions("SkillTrustBench", "", 2, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Benchmark == nil {
-		t.Fatal("missing benchmark options")
+	if benchmark.ID != "cuhk-zhuque/SkillTrustBench" {
+		t.Fatalf("benchmark id = %q", benchmark.ID)
 	}
-	if opts.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" {
-		t.Fatalf("benchmark id = %q", opts.Benchmark.ID)
+	if benchmark.Split != "benchmark" {
+		t.Fatalf("split = %q", benchmark.Split)
 	}
-	if opts.Benchmark.Split != "benchmark" {
-		t.Fatalf("split = %q", opts.Benchmark.Split)
-	}
-	if opts.Benchmark.Limit != 2 {
-		t.Fatalf("limit = %d", opts.Benchmark.Limit)
+	if benchmark.Limit != 2 {
+		t.Fatalf("limit = %d", benchmark.Limit)
 	}
 }
 
-func TestParseArgsDefaultsBareBenchmarkToSkillTrustBench(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark",
-		"--scanner", "clawscan-static",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opts.Benchmark == nil {
-		t.Fatal("missing benchmark options")
-	}
-	if opts.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" || opts.Benchmark.Split != "benchmark" {
-		t.Fatalf("benchmark = %#v", opts.Benchmark)
-	}
-}
-
-func TestParseArgsRejectsTargetWithBenchmark(t *testing.T) {
-	_, err := ParseArgs([]string{
-		"./my-skill",
-		"--benchmark", "OpenClaw/clawhub-security-signals",
-		"--scanner", "clawscan-static",
-	})
-	if err == nil || err.Error() != "--benchmark runs do not accept a scan target" {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestParseArgsRejectsUnsupportedBenchmark(t *testing.T) {
-	_, err := ParseArgs([]string{
-		"--benchmark", "skillscan-paper",
-		"--scanner", "clawscan-static",
-	})
+func TestNewBenchmarkOptionsRejectsUnsupportedBenchmark(t *testing.T) {
+	_, err := NewBenchmarkOptions("skillscan-paper", "", 0, 0, "")
 	if err == nil || err.Error() != "Unsupported benchmark: skillscan-paper" {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestParseArgsRejectsUnsupportedSkillTrustBenchSplit(t *testing.T) {
-	_, err := ParseArgs([]string{
-		"--benchmark", "SkillTrustBench",
-		"--split", "eval_holdout",
-		"--scanner", "clawscan-static",
-	})
+func TestNewBenchmarkOptionsRejectsUnsupportedSkillTrustBenchSplit(t *testing.T) {
+	_, err := NewBenchmarkOptions("SkillTrustBench", "eval_holdout", 0, 0, "")
 	if err == nil || err.Error() != "Unsupported split for cuhk-zhuque/SkillTrustBench: eval_holdout (valid: benchmark)" {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestParseArgsRejectsBenchmarkBoundsWithoutBenchmark(t *testing.T) {
+func TestParseArgsRejectsBenchmarkFlag(t *testing.T) {
 	_, err := ParseArgs([]string{
-		"./my-skill",
-		"--split", "eval_holdout",
+		"--benchmark", "SkillTrustBench",
 		"--scanner", "clawscan-static",
 	})
-	if err == nil || err.Error() != "--split requires --benchmark" {
+	if err == nil || err.Error() != "Unknown argument: --benchmark" {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark", "OpenClaw/clawhub-security-signals",
-		"--split", "eval_holdout",
-		"--scanner", "clawscan-static",
-	})
+func benchmarkTestOptions(t *testing.T, id string, split string, limit int, offset int, predictionsOutputPath string) Options {
+	t.Helper()
+	benchmark, err := NewBenchmarkOptions(id, split, limit, offset, predictionsOutputPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return Options{
+		Benchmark:          benchmark,
+		Scanners:           []string{"clawscan-static"},
+		ScannerResultPaths: map[string]string{},
+	}
+}
+
+func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
+	opts := benchmarkTestOptions(t, "clawhub-security-signals", "eval_holdout", 0, 0, "")
 	scanners := &recordingScannerRunner{}
 	artifact, err := RunBenchmark(opts, RunContext{
 		Env:           map[string]string{},
@@ -297,7 +242,7 @@ func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
 	if artifact.SchemaVersion != "clawscan-benchmark-v1" {
 		t.Fatalf("schema = %q", artifact.SchemaVersion)
 	}
-	if artifact.Benchmark.ID != "OpenClaw/clawhub-security-signals" || artifact.Benchmark.Split != "eval_holdout" {
+	if artifact.Benchmark.ID != "clawhub-security-signals" || artifact.Benchmark.Split != "eval_holdout" {
 		t.Fatalf("benchmark = %#v", artifact.Benchmark)
 	}
 	if len(artifact.Cases) != 1 {
@@ -330,15 +275,9 @@ func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
 func TestRunOpenClawBenchmarkWritesPredictionsNextToArtifact(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "clawscan-benchmark.json")
-	opts, err := ParseArgs([]string{
-		"--benchmark", "OpenClaw/clawhub-security-signals",
-		"--scanner", "clawscan-static",
-		"--output", artifactPath,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = RunBenchmark(opts, RunContext{
+	opts := benchmarkTestOptions(t, "clawhub-security-signals", "", 0, 0, "")
+	opts.OutputPath = artifactPath
+	_, err := RunBenchmark(opts, RunContext{
 		Env: map[string]string{},
 		Now: fixedClock(
 			"2026-06-12T12:00:00Z",
@@ -371,15 +310,8 @@ func TestRunOpenClawBenchmarkWritesPredictionsNextToArtifact(t *testing.T) {
 func TestRunOpenClawBenchmarkUsesExplicitPredictionsOutput(t *testing.T) {
 	dir := t.TempDir()
 	predictionsPath := filepath.Join(dir, "submission", "predictions.jsonl")
-	opts, err := ParseArgs([]string{
-		"--benchmark", "OpenClaw/clawhub-security-signals",
-		"--scanner", "clawscan-static",
-		"--predictions-output", predictionsPath,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = RunBenchmark(opts, RunContext{
+	opts := benchmarkTestOptions(t, "clawhub-security-signals", "", 0, 0, predictionsPath)
+	_, err := RunBenchmark(opts, RunContext{
 		Env: map[string]string{},
 		Now: fixedClock("2026-06-12T12:00:00Z", "2026-06-12T12:00:01Z", "2026-06-12T12:00:02Z"),
 		BenchmarkClient: staticBenchmarkClient{
@@ -397,15 +329,8 @@ func TestRunOpenClawBenchmarkUsesExplicitPredictionsOutput(t *testing.T) {
 }
 
 func TestRunBenchmarkRejectsPredictionsOutputForSkillTrustBench(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark", "SkillTrustBench",
-		"--scanner", "clawscan-static",
-		"--predictions-output", filepath.Join(t.TempDir(), "predictions.jsonl"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = RunBenchmark(opts, RunContext{
+	opts := benchmarkTestOptions(t, "SkillTrustBench", "", 0, 0, filepath.Join(t.TempDir(), "predictions.jsonl"))
+	_, err := RunBenchmark(opts, RunContext{
 		Env: map[string]string{},
 		BenchmarkClient: staticBenchmarkClient{
 			skillTrustBenchRows: []SkillTrustBenchRow{
@@ -416,7 +341,7 @@ func TestRunBenchmarkRejectsPredictionsOutputForSkillTrustBench(t *testing.T) {
 			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "predictions output is only supported for OpenClaw/clawhub-security-signals") {
+	if err == nil || !strings.Contains(err.Error(), "predictions output is only supported for clawhub-security-signals") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -468,13 +393,7 @@ func TestBenchmarkPredictionsRejectMissingPrediction(t *testing.T) {
 }
 
 func TestRunSkillTrustBenchBenchmarkMaterializesArchiveCaseAndRunsScanners(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark", "SkillTrustBench",
-		"--scanner", "clawscan-static",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	opts := benchmarkTestOptions(t, "SkillTrustBench", "", 0, 0, "")
 	scanners := &recordingScannerRunner{}
 	artifact, err := RunBenchmark(opts, RunContext{
 		Env:           map[string]string{},
@@ -532,13 +451,7 @@ func TestRunSkillTrustBenchBenchmarkMaterializesArchiveCaseAndRunsScanners(t *te
 }
 
 func TestRunSkillTrustBenchBenchmarkAddsCanonicalEvaluation(t *testing.T) {
-	opts, err := ParseArgs([]string{
-		"--benchmark", "SkillTrustBench",
-		"--scanner", "clawscan-static",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	opts := benchmarkTestOptions(t, "SkillTrustBench", "", 0, 0, "")
 	artifact, err := RunBenchmark(opts, RunContext{
 		Env: map[string]string{},
 		Now: fixedClock(
@@ -1106,6 +1019,44 @@ func TestRunUsesSkillSpectorNoLLMWhenProviderKeyMissing(t *testing.T) {
 	}
 	if !containsArg(runner.calls[0].args, "--no-llm") {
 		t.Fatalf("missing --no-llm without provider key: %#v", runner.calls[0].args)
+	}
+}
+
+func TestRunSkillSpectorEnablesLLMForProviderEnvVars(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "nvidia build", env: map[string]string{"SKILLSPECTOR_PROVIDER": "nv_build", "NVIDIA_INFERENCE_KEY": "present"}},
+		{name: "nvidia default provider key", env: map[string]string{"NVIDIA_INFERENCE_KEY": "present"}},
+		{name: "anthropic proxy", env: map[string]string{"SKILLSPECTOR_PROVIDER": "anthropic_proxy", "ANTHROPIC_PROXY_API_KEY": "present", "ANTHROPIC_PROXY_ENDPOINT_URL": "https://example.invalid"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &recordingCommandRunner{writeOutput: `{"status":"clean","findings":[]}`}
+			opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := Run(opts, RunContext{
+				Env:                 tc.env,
+				CommandRunner:       runner,
+				SkillSpectorCommand: []string{"skillspector"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Scanners["skillspector"].Status != "completed" {
+				t.Fatalf("scanner = %#v", artifact.Scanners["skillspector"])
+			}
+			if containsArg(runner.calls[0].args, "--no-llm") {
+				t.Fatalf("unexpected --no-llm with provider env: %#v", runner.calls[0].args)
+			}
+		})
 	}
 }
 

@@ -34,7 +34,7 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - `go run ./cmd/clawscan --help` - inspect the public help output.
 - `go run ./cmd/clawscan ./README.md --scanner clawscan-static --json` -
   secretless smoke test.
-- `go run ./cmd/clawscan --benchmark --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json`
+- `go run ./cmd/clawscan benchmark SkillTrustBench --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json`
   - benchmark smoke test.
 - `make docs-site` - rebuild the generated docs site under `dist/docs-site`.
 - `make release VERSION=v0.0.0-test` - build local release archives under

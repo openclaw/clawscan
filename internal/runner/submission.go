@@ -80,7 +80,7 @@ func ValidateSecuritySignalsSubmission(dir string, client BenchmarkClient) (Secu
 	if client == nil {
 		client = HuggingFaceBenchmarkClient{}
 	}
-	rows, err := client.FetchOpenClawRows(openClawBenchmarkID, metadata.Benchmark.Split, 0, 0)
+	rows, err := client.FetchOpenClawRows(openClawBenchmarkDataset, metadata.Benchmark.Split, 0, 0)
 	if err != nil {
 		return SecuritySignalsSubmissionResult{}, err
 	}

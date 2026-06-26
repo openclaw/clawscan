@@ -23,15 +23,14 @@ import (
 )
 
 type Options struct {
-	Target                string
-	Profile               string
-	Benchmark             *BenchmarkOptions
-	Scanners              []string
-	ScannerResultPaths    map[string]string
-	OutputPath            string
-	JSON                  bool
-	Judge                 *JudgeOptions
-	AdditionalRequiredEnv []EnvRequirement
+	Target             string
+	Profile            string
+	Benchmark          *BenchmarkOptions
+	Scanners           []string
+	ScannerResultPaths map[string]string
+	OutputPath         string
+	JSON               bool
+	Judge              *JudgeOptions
 }
 
 type BenchmarkOptions struct {
@@ -53,13 +52,14 @@ type EnvRequirement struct {
 }
 
 type RunContext struct {
-	Env                  map[string]string
-	Now                  func() time.Time
-	CommandRunner        CommandRunner
-	ScannerRunner        ScannerRunner
-	SkillSpectorCommand  []string
-	VirusTotalHTTPClient VirusTotalHTTPClient
-	BenchmarkClient      BenchmarkClient
+	Env                    map[string]string
+	Now                    func() time.Time
+	CommandRunner          CommandRunner
+	ScannerRunner          ScannerRunner
+	SkillSpectorCommand    []string
+	VirusTotalHTTPClient   VirusTotalHTTPClient
+	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
+	BenchmarkClient        BenchmarkClient
 }
 
 type ScannerRunner interface {
@@ -181,6 +181,29 @@ func ScannerIDs() []string {
 	return DefaultScannerRegistry().IDs()
 }
 
+func NewBenchmarkOptions(id string, split string, limit int, offset int, predictionsOutputPath string) (*BenchmarkOptions, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, errors.New("Benchmark id is required")
+	}
+	canonicalID, err := canonicalBenchmarkID(id)
+	if err != nil {
+		return nil, err
+	}
+	if split == "" {
+		split = defaultBenchmarkSplit(canonicalID)
+	}
+	if err := validateBenchmarkSplit(canonicalID, split); err != nil {
+		return nil, err
+	}
+	return &BenchmarkOptions{
+		ID:                    canonicalID,
+		Split:                 split,
+		Limit:                 limit,
+		Offset:                offset,
+		PredictionsOutputPath: predictionsOutputPath,
+	}, nil
+}
+
 func ParseArgs(args []string) (Options, error) {
 	opts := Options{ScannerResultPaths: map[string]string{}}
 	start := 0
@@ -189,70 +212,9 @@ func ParseArgs(args []string) (Options, error) {
 		start = 1
 	}
 	var judge string
-	var benchmarkID string
-	var benchmarkSplit string
-	var benchmarkLimit int
-	var benchmarkOffset int
-	var benchmarkOnlyFlag string
-	var predictionsOutputPath string
-	var predictionsOnlyFlag string
 	for i := start; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
-		case "--benchmark":
-			next := i + 1
-			if next < len(args) && args[next] != "" && !strings.HasPrefix(args[next], "--") {
-				benchmarkID = args[next]
-				i = next
-			} else {
-				benchmarkID = defaultBenchmarkID()
-			}
-		case "--split":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			benchmarkSplit = value
-			if benchmarkOnlyFlag == "" {
-				benchmarkOnlyFlag = arg
-			}
-			i = next
-		case "--limit":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			parsed, err := strconv.Atoi(value)
-			if err != nil || parsed < 0 {
-				return Options{}, errors.New("Expected --limit value as a non-negative integer")
-			}
-			benchmarkLimit = parsed
-			if benchmarkOnlyFlag == "" {
-				benchmarkOnlyFlag = arg
-			}
-			i = next
-		case "--offset":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			parsed, err := strconv.Atoi(value)
-			if err != nil || parsed < 0 {
-				return Options{}, errors.New("Expected --offset value as a non-negative integer")
-			}
-			benchmarkOffset = parsed
-			if benchmarkOnlyFlag == "" {
-				benchmarkOnlyFlag = arg
-			}
-			i = next
-		case "--predictions-output":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			predictionsOutputPath = value
-			predictionsOnlyFlag = arg
-			i = next
 		case "--scanner":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -303,32 +265,6 @@ func ParseArgs(args []string) (Options, error) {
 		default:
 			return Options{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
-	}
-	if benchmarkID != "" {
-		if opts.Target != "" {
-			return Options{}, errors.New("--benchmark runs do not accept a scan target")
-		}
-		id, err := canonicalBenchmarkID(benchmarkID)
-		if err != nil {
-			return Options{}, err
-		}
-		if benchmarkSplit == "" {
-			benchmarkSplit = defaultBenchmarkSplit(id)
-		}
-		if err := validateBenchmarkSplit(id, benchmarkSplit); err != nil {
-			return Options{}, err
-		}
-		opts.Benchmark = &BenchmarkOptions{
-			ID:                    id,
-			Split:                 benchmarkSplit,
-			Limit:                 benchmarkLimit,
-			Offset:                benchmarkOffset,
-			PredictionsOutputPath: predictionsOutputPath,
-		}
-	} else if predictionsOnlyFlag != "" {
-		return Options{}, fmt.Errorf("%s requires --benchmark", predictionsOnlyFlag)
-	} else if benchmarkOnlyFlag != "" {
-		return Options{}, fmt.Errorf("%s requires --benchmark", benchmarkOnlyFlag)
 	}
 	if len(opts.Scanners) == 0 {
 		return Options{}, errors.New("At least one --scanner is required")
@@ -389,11 +325,12 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
 		scannerRunner = ExternalScannerRunner{
-			CommandRunner:        commandRunner,
-			Env:                  env,
-			SkillSpectorCommand:  ctx.SkillSpectorCommand,
-			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
-			Timeout:              20 * time.Minute,
+			CommandRunner:          commandRunner,
+			Env:                    env,
+			SkillSpectorCommand:    ctx.SkillSpectorCommand,
+			VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
+			AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
+			Timeout:                20 * time.Minute,
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -1530,12 +1467,13 @@ func isSourceReadError(err error, source string) bool {
 }
 
 type ExternalScannerRunner struct {
-	CommandRunner        CommandRunner
-	Env                  map[string]string
-	Registry             ScannerRegistry
-	SkillSpectorCommand  []string
-	VirusTotalHTTPClient VirusTotalHTTPClient
-	Timeout              time.Duration
+	CommandRunner          CommandRunner
+	Env                    map[string]string
+	Registry               ScannerRegistry
+	SkillSpectorCommand    []string
+	VirusTotalHTTPClient   VirusTotalHTTPClient
+	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
+	Timeout                time.Duration
 }
 
 type OpenAIRequestOptions struct {
@@ -1923,9 +1861,6 @@ func requirements(opts Options, env map[string]string) []EnvRequirement {
 			reqs = append(reqs, adapter.Requirements(env)...)
 		}
 	}
-	for _, req := range opts.AdditionalRequiredEnv {
-		reqs = append(reqs, req)
-	}
 	return dedupe(reqs)
 }
 
@@ -1954,10 +1889,18 @@ func skillSpectorLLMEnabled(env map[string]string) bool {
 
 func skillSpectorProviderKeyPresent(env map[string]string) bool {
 	switch strings.TrimSpace(strings.ToLower(env["SKILLSPECTOR_PROVIDER"])) {
-	case "", "openai":
+	case "":
+		return strings.TrimSpace(env["NVIDIA_INFERENCE_KEY"]) != "" ||
+			strings.TrimSpace(env["OPENAI_API_KEY"]) != "" ||
+			strings.TrimSpace(env["ANTHROPIC_API_KEY"]) != "" ||
+			strings.TrimSpace(env["ANTHROPIC_PROXY_API_KEY"]) != ""
+	case "openai":
 		return strings.TrimSpace(env["OPENAI_API_KEY"]) != ""
 	case "anthropic":
 		return strings.TrimSpace(env["ANTHROPIC_API_KEY"]) != ""
+	case "anthropic_proxy":
+		return strings.TrimSpace(env["ANTHROPIC_PROXY_API_KEY"]) != "" &&
+			strings.TrimSpace(env["ANTHROPIC_PROXY_ENDPOINT_URL"]) != ""
 	case "nv_inference", "nv_build", "nvidia":
 		return strings.TrimSpace(env["NVIDIA_INFERENCE_KEY"]) != ""
 	default:
