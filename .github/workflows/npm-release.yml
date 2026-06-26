@@ -126,7 +126,7 @@ jobs:
 
       - name: Ensure npm supports trusted publishing
         run: |
-          npm install -g npm@^11.5.1
+          npm install -g npm@^11.15.0
           node --version
           npm --version
 
