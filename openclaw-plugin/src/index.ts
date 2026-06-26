@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { Type, type Static } from "typebox";
@@ -7,6 +7,7 @@ import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_OUTPUT_DIR = path.join(homedir(), ".openclaw", "clawscan");
+const MAX_CAPTURED_STDIO_BYTES = 256 * 1024;
 
 const ClawScanPluginConfigSchema = Type.Object(
   {
@@ -123,6 +124,8 @@ type CommandResult = {
   exitCode: number;
   stdout: string;
   stderr: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
 };
 
 type ScanSummary = {
@@ -161,6 +164,25 @@ function assertEnvNames(names: readonly string[]): void {
   if (invalid) {
     throw new Error(`Invalid sandbox env var name: ${invalid}`);
   }
+}
+
+function resolveSandboxEnv(params: {
+  configured: readonly string[];
+  requested: readonly string[];
+}): string[] {
+  assertEnvNames(params.configured);
+  assertEnvNames(params.requested);
+  if (params.requested.length === 0) {
+    return [...params.configured];
+  }
+  const allowed = new Set(params.configured);
+  const denied = params.requested.filter((name) => !allowed.has(name));
+  if (denied.length > 0) {
+    throw new Error(
+      `sandboxEnv may only select names already allowed by plugin config: ${denied.join(", ")}`,
+    );
+  }
+  return [...params.requested];
 }
 
 function slugForPath(value: string | undefined): string {
@@ -203,11 +225,10 @@ export function buildClawScanInvocation(
     (requestedProfile === undefined ? cleanStringList(config.defaultScanners) : []);
   const sandbox = params.sandbox ?? config.sandbox;
   const sandboxImage = cleanOptionalString(params.sandboxImage) ?? cleanOptionalString(config.sandboxImage);
-  const sandboxEnv = [
-    ...cleanStringList(config.sandboxEnv),
-    ...cleanStringList(params.sandboxEnv),
-  ];
-  assertEnvNames(sandboxEnv);
+  const sandboxEnv = resolveSandboxEnv({
+    configured: cleanStringList(config.sandboxEnv),
+    requested: cleanStringList(params.sandboxEnv),
+  });
 
   if (!target && !profile && !configPath && scanners.length === 0) {
     throw new Error(
@@ -241,7 +262,7 @@ export function buildClawScanInvocation(
     args.push("--scanner", scanner);
   }
   args.push("--output", outputPath);
-  if (params.json ?? config.json ?? true) {
+  if (params.json ?? config.json ?? false) {
     args.push("--json");
   }
   if (sandbox) {
@@ -270,6 +291,29 @@ function runCommand(
     });
     let stdout = "";
     let stderr = "";
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    const appendBounded = (current: string, chunk: string, stream: "stdout" | "stderr") => {
+      const remaining = MAX_CAPTURED_STDIO_BYTES - Buffer.byteLength(current);
+      if (remaining <= 0) {
+        if (stream === "stdout") {
+          stdoutTruncated = true;
+        } else {
+          stderrTruncated = true;
+        }
+        return current;
+      }
+      const chunkBytes = Buffer.byteLength(chunk);
+      if (chunkBytes <= remaining) {
+        return current + chunk;
+      }
+      if (stream === "stdout") {
+        stdoutTruncated = true;
+      } else {
+        stderrTruncated = true;
+      }
+      return current + Buffer.from(chunk).subarray(0, remaining).toString("utf8");
+    };
     const timeout = setTimeout(() => {
       child.kill("SIGTERM");
       reject(new Error(`clawscan timed out after ${invocation.timeoutMs}ms`));
@@ -278,10 +322,10 @@ function runCommand(
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      stdout = appendBounded(stdout, chunk, "stdout");
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk;
+      stderr = appendBounded(stderr, chunk, "stderr");
     });
     child.on("error", (error) => {
       clearTimeout(timeout);
@@ -293,6 +337,8 @@ function runCommand(
         exitCode: code ?? 1,
         stdout,
         stderr,
+        stdoutTruncated,
+        stderrTruncated,
       });
     });
   });
@@ -350,6 +396,14 @@ export function summarizeClawScanJson(stdout: string): ScanSummary | undefined {
   }
 }
 
+async function summarizeArtifactFile(outputPath: string): Promise<ScanSummary | undefined> {
+  try {
+    return summarizeArtifact(JSON.parse(await readFile(outputPath, "utf8")));
+  } catch {
+    return undefined;
+  }
+}
+
 export default defineToolPlugin({
   id: "clawscan",
   name: "ClawScan",
@@ -374,7 +428,8 @@ export default defineToolPlugin({
           },
         });
         const result = await runCommand(invocation, { signal: context.signal });
-        const summary = summarizeClawScanJson(result.stdout);
+        const summary =
+          (await summarizeArtifactFile(invocation.outputPath)) ?? summarizeClawScanJson(result.stdout);
         return {
           ok: result.exitCode === 0,
           exitCode: result.exitCode,
@@ -382,6 +437,8 @@ export default defineToolPlugin({
           command: invocation.command,
           args: invocation.args,
           summary,
+          stdoutTruncated: result.stdoutTruncated,
+          stderrTruncated: result.stderrTruncated,
           stderrPresent: result.stderr.trim().length > 0,
         };
       },

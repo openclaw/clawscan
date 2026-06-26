@@ -33,7 +33,6 @@ Example:
           "binary": "clawscan",
           "defaultProfile": "clawhub",
           "defaultOutputDir": "~/.openclaw/clawscan",
-          "json": true,
           "sandbox": "docker",
           "sandboxEnv": ["OPENAI_API_KEY"]
         }
@@ -50,13 +49,13 @@ Config fields:
 - `defaultConfig`: default `.clawscan.yml` path.
 - `defaultScanners`: scanner ids used when a tool call does not specify `profile` or `scanners`.
 - `defaultOutputDir`: artifact directory. Defaults to `~/.openclaw/clawscan`.
-- `json`: pass `--json` by default. Defaults to `true`.
+- `json`: pass `--json` when you also want ClawScan to print the full artifact to stdout. Defaults to `false`; the plugin reads summaries from the artifact file.
 - `sandbox`: `docker` or `off`.
 - `sandboxImage`: Docker runtime image for ClawScan sandboxed execution.
 - `sandboxEnv`: environment variable names to allow through ClawScan's sandbox. This is names only, never secret values.
 - `timeoutMs`: maximum scan runtime in milliseconds. Defaults to 10 minutes.
 
-Secrets stay outside plugin config. Set scanner credentials in the OpenClaw process environment, such as `SNYK_TOKEN`, `SOCKET_CLI_API_TOKEN`, or model provider keys. If ClawScan runs scanner commands in Docker, list only the required env var names in `sandboxEnv`.
+Secrets stay outside plugin config. Set scanner credentials in the OpenClaw process environment, such as `SNYK_TOKEN`, `SOCKET_CLI_API_TOKEN`, or model provider keys. If ClawScan runs scanner commands in Docker, list only the required env var names in `sandboxEnv`. Tool calls may select a subset of those configured names, but cannot add new env vars.
 
 ## Tool Input
 

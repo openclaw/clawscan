@@ -22,7 +22,6 @@ describe("clawscan plugin", () => {
         binary: "/opt/clawscan/bin/clawscan",
         defaultProfile: "clawhub",
         defaultOutputDir: "/tmp/openclaw-clawscan",
-        json: true,
         sandboxEnv: ["OPENAI_API_KEY"],
       },
       { now: new Date("2026-06-26T12:00:00.000Z") },
@@ -38,7 +37,6 @@ describe("clawscan plugin", () => {
       "clawhub",
       "--output",
       invocation.outputPath,
-      "--json",
       "--sandbox-env",
       "OPENAI_API_KEY",
     ]);
@@ -65,10 +63,32 @@ describe("clawscan plugin", () => {
       "skillspector",
       "--output",
       "/tmp/result.json",
-      "--json",
       "--sandbox",
       "docker",
     ]);
+  });
+
+  it("lets tool-call sandbox env select a configured subset", () => {
+    const invocation = buildClawScanInvocation(
+      {
+        target: "./skills/csv-summarizer",
+        scanners: ["skillspector"],
+        sandboxEnv: ["OPENAI_API_KEY"],
+      },
+      { sandboxEnv: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"] },
+    );
+
+    expect(invocation.args).toContain("OPENAI_API_KEY");
+    expect(invocation.args).not.toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("rejects sandbox env entries that are not allowed by plugin config", () => {
+    expect(() =>
+      buildClawScanInvocation(
+        { target: "./skills/csv-summarizer", scanners: ["skillspector"], sandboxEnv: ["GITHUB_TOKEN"] },
+        { sandboxEnv: ["OPENAI_API_KEY"] },
+      ),
+    ).toThrow("sandboxEnv may only select names already allowed by plugin config");
   });
 
   it("rejects sandbox env entries that look like assignments or shell input", () => {
