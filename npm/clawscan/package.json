@@ -1,9 +1,17 @@
 {
   "name": "@openclaw/clawscan",
   "version": "0.0.0-dev",
-  "description": "Agent-skill security scanner harness for ClawHub and OpenClaw workflows.",
+  "description": "Benchmarkable security scanner harness for agent skills.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openclaw/clawscan.git"
+  },
+  "homepage": "https://github.com/openclaw/clawscan#readme",
+  "bugs": {
+    "url": "https://github.com/openclaw/clawscan/issues"
+  },
   "bin": {
     "clawscan": "./bin/clawscan.js"
   },
@@ -16,6 +24,10 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "engines": {
     "node": ">=18"

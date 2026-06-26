@@ -124,6 +124,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
 
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
+
       - name: Verify preflight run metadata
         env:
           GH_TOKEN: ${{ github.token }}
@@ -201,7 +207,7 @@ jobs:
           echo "Publishing @openclaw/clawscan@${PACKAGE_VERSION}"
 
       - name: Publish
-        run: npm publish "${{ steps.publish_tarball.outputs.path }}" --access public
+        run: npm publish "${{ steps.publish_tarball.outputs.path }}" --access public --provenance
 
       - name: Verify npm release metadata
         run: |
