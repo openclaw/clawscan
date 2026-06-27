@@ -39,6 +39,7 @@ profiles:
     sandbox:
       env:
         - OPENAI_API_KEY
+        - CODEX_API_KEY
     judge:
       command: >
         codex exec --cd {{ workspace }}

@@ -47,7 +47,7 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if string(opts.Judge.Files["clawhub/output.schema.json"]) == "" {
 		t.Fatal("expected embedded clawhub output schema file")
 	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
@@ -390,7 +390,7 @@ func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 	if opts.Sandbox.Image != "ghcr.io/acme/runtime:v1" {
 		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
 	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,ANTHROPIC_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }

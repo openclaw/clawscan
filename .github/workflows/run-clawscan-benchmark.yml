@@ -125,6 +125,8 @@ on:
         required: false
       ANTHROPIC_API_KEY:
         required: false
+      CODEX_API_KEY:
+        required: false
       OPENAI_API_KEY:
         required: false
       SNYK_TOKEN:
@@ -189,6 +191,7 @@ jobs:
           AIG_MODEL_API_KEY: ${{ secrets.AIG_MODEL_API_KEY }}
           AIG_MODEL_BASE_URL: ${{ secrets.AIG_MODEL_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
           SOCKET_CLI_API_TOKEN: ${{ secrets.SOCKET_CLI_API_TOKEN }}

@@ -106,6 +106,7 @@ sandbox:
   mode: docker
   env:
     - OPENAI_API_KEY
+    - CODEX_API_KEY
 profiles:
   review:
     scanners:
