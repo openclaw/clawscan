@@ -61,6 +61,45 @@
         "type": "number",
         "description": "Maximum scan runtime in milliseconds.",
         "minimum": 1000
+      },
+      "beforeInstall": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Run ClawScan from the before_install hook for skill installs."
+          },
+          "blockSeverity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "never"
+              },
+              {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "low"
+                  },
+                  {
+                    "type": "string",
+                    "const": "medium"
+                  },
+                  {
+                    "type": "string",
+                    "const": "high"
+                  },
+                  {
+                    "type": "string",
+                    "const": "critical"
+                  }
+                ]
+              }
+            ],
+            "description": "Minimum ClawScan finding severity that blocks a skill install. Defaults to high."
+          }
+        },
+        "additionalProperties": false
       }
     },
     "additionalProperties": false
