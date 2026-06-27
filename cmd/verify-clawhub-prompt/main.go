@@ -67,9 +67,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	promptTemplate := strings.Replace(actual, vtFixture, "{{ scanners.virustotal }}", 1)
-	promptTemplate = strings.Replace(promptTemplate, skillSpectorFixture, "{{ scanners.skillspector }}", 1)
-	if !strings.Contains(promptTemplate, "{{ scanners.virustotal }}") || !strings.Contains(promptTemplate, "{{ scanners.skillspector }}") {
+	promptTemplate := strings.Replace(actual, skillSpectorFixture, "{{ scanners.skillspector }}", 1)
+	if !strings.Contains(promptTemplate, "{{ scanners.skillspector }}") {
 		return fmt.Errorf("failed to build exported prompt template with scanner placeholders")
 	}
 	schema, err := os.ReadFile(filepath.Join(resolvedClawHubDir, "scripts/security/codex-scan-output.schema.json"))

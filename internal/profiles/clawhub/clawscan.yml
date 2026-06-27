@@ -4,7 +4,6 @@ profiles:
   clawhub:
     scanners:
       - skillspector
-      - virustotal
       - clawscan-static
     sandbox:
       env:

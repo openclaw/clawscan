@@ -81,7 +81,7 @@ Built-in profiles:
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | bundled Codex judge with ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `clawscan-static` | bundled Codex judge with ClawHub prompt/schema |
 | `skills-sh` | `socket`, `snyk` | none |
 
 Profiles are loaded from embedded built-ins plus the nearest `.clawscan.yml` or

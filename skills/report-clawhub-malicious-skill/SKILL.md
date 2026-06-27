@@ -59,10 +59,9 @@ Separate private evidence from public contribution material:
    version: 1
    profiles:
      clawhub:
-       scanners:
-         - skillspector
-         - virustotal
-         - clawscan-static
+      scanners:
+        - skillspector
+        - clawscan-static
        judge:
          command: >
            # candidate judge command, if changed

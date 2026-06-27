@@ -20,7 +20,7 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if opts.Target != "./skill" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
 	if opts.Judge == nil {
@@ -125,23 +125,14 @@ func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
 	}
 }
 
-func TestResolveArgsValidatesClawHubScannerEnv(t *testing.T) {
+func TestResolveArgsDoesNotRequireVirusTotalForClawHubProfile(t *testing.T) {
 	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = runner.ValidateRequirements(opts, map[string]string{
-		"VIRUSTOTAL_API_KEY": "",
-		"OPENAI_API_KEY":     "",
-	})
-	if err == nil {
-		t.Fatal("expected missing env error")
-	}
-	if !strings.Contains(err.Error(), "- VIRUSTOTAL_API_KEY required by scanner virustotal") {
-		t.Fatalf("err = %v", err)
-	}
-	if strings.Contains(err.Error(), "OPENAI_API_KEY") {
+	err = runner.ValidateRequirements(opts, map[string]string{})
+	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
 }
