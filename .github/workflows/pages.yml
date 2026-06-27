@@ -41,14 +41,29 @@ jobs:
       - name: Build docs site
         run: make docs-site
 
+      - name: Check Pages site
+        id: pages-site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages is not enabled for this repository; skipping deploy."
+          fi
+
       - name: Configure Pages
+        if: steps.pages-site.outputs.enabled == 'true'
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
+        if: steps.pages-site.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist/docs-site
 
       - name: Deploy to GitHub Pages
+        if: steps.pages-site.outputs.enabled == 'true'
         id: deployment
         uses: actions/deploy-pages@v4

@@ -2,6 +2,13 @@ name: Dependency Review
 
 on:
   pull_request:
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+      - 'leaderboard/space/requirements.txt'
+      - 'npm/clawscan/package.json'
+      - 'openclaw-plugin/package.json'
+      - 'openclaw-plugin/package-lock.json'
 
 permissions:
   contents: read
@@ -22,4 +29,3 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
-
