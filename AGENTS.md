@@ -62,8 +62,9 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
   as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`, and `SOCKET_CLI_API_TOKEN`.
 - Run artifacts must record only secret-safe env presence, such as `present` or
   `missing`, never secret values.
-- Command-backed scanners and judges run through the Docker sandbox by default.
-  Add host-install assumptions only for explicit `--sandbox off` paths.
+- Command-backed scanners and judges run through the Docker sandbox by default,
+  including SkillSpector. Do not assume host scanner binaries are needed unless
+  the user explicitly chooses `--sandbox off`.
 - Sandbox env passthrough is an allowlist of variable names, never values. Use
   `--sandbox-env` or profile `sandbox.env` for judge-specific credentials.
 - `--judge` is an external harness command. Do not add a model-provider
