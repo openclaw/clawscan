@@ -349,6 +349,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	if env == nil {
 		env = EnvMap(os.Environ())
 	}
+	applyRuntimeEnvDefaults(opts, env)
 	if err := ValidateRequirements(opts, env); err != nil {
 		return Artifact{}, err
 	}
@@ -1677,6 +1678,7 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 }
 
 func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt string) (ScannerResult, error) {
+	defaultSkillSpectorOpenAIProvider(runner.Env)
 	commandParts := runner.SkillSpectorCommand
 	if len(commandParts) == 0 {
 		if runner.SandboxMode == SandboxModeDocker {
@@ -1764,6 +1766,25 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		Error:       "",
 		Raw:         json.RawMessage(raw),
 	}, nil
+}
+
+func defaultSkillSpectorOpenAIProvider(env map[string]string) {
+	if env == nil {
+		return
+	}
+	if strings.TrimSpace(env["SKILLSPECTOR_PROVIDER"]) != "" {
+		return
+	}
+	if strings.TrimSpace(env["OPENAI_API_KEY"]) == "" {
+		return
+	}
+	env["SKILLSPECTOR_PROVIDER"] = "openai"
+}
+
+func applyRuntimeEnvDefaults(opts Options, env map[string]string) {
+	if scannerRequested(opts, "skillspector") {
+		defaultSkillSpectorOpenAIProvider(env)
+	}
 }
 
 func discoverSkillSpectorCommand() []string {
@@ -1917,6 +1938,9 @@ func isSecretEnvKey(key string) bool {
 func requirements(opts Options, env map[string]string) []EnvRequirement {
 	var reqs []EnvRequirement
 	for _, scanner := range opts.Scanners {
+		if opts.Benchmark != nil && opts.Benchmark.ID == openClawBenchmarkID && scanner == "virustotal" {
+			continue
+		}
 		if opts.ScannerResultPaths[scanner] != "" {
 			continue
 		}

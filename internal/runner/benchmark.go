@@ -135,17 +135,22 @@ type BenchmarkIDSelection struct {
 }
 
 type OpenClawBenchmarkRow struct {
-	ID                 string               `json:"id"`
-	SkillSlug          string               `json:"skill_slug"`
-	SkillVersion       string               `json:"skill_version"`
-	SkillMDContent     string               `json:"skill_md_content"`
-	SkillBundleContent []OpenClawBundleFile `json:"skill_bundle_content"`
-	ClawScanVerdict    string               `json:"clawscan_verdict"`
-	ClawScanConfidence string               `json:"clawscan_confidence"`
-	ClawScanModel      string               `json:"clawscan_model"`
-	ClawScanSummary    string               `json:"clawscan_summary"`
-	ClawScanContext    json.RawMessage      `json:"clawscan_context"`
-	Split              string               `json:"split"`
+	ID                        string               `json:"id"`
+	SkillSlug                 string               `json:"skill_slug"`
+	SkillVersion              string               `json:"skill_version"`
+	SkillMDContent            string               `json:"skill_md_content"`
+	SkillBundleContent        []OpenClawBundleFile `json:"skill_bundle_content"`
+	ClawScanVerdict           string               `json:"clawscan_verdict"`
+	ClawScanConfidence        string               `json:"clawscan_confidence"`
+	ClawScanModel             string               `json:"clawscan_model"`
+	ClawScanSummary           string               `json:"clawscan_summary"`
+	ClawScanContext           json.RawMessage      `json:"clawscan_context"`
+	VirusTotalStatus          string               `json:"virustotal_status"`
+	VirusTotalMaliciousCount  int                  `json:"virustotal_malicious_count"`
+	VirusTotalSuspiciousCount int                  `json:"virustotal_suspicious_count"`
+	VirusTotalHarmlessCount   int                  `json:"virustotal_harmless_count"`
+	VirusTotalUndetectedCount int                  `json:"virustotal_undetected_count"`
+	Split                     string               `json:"split"`
 }
 
 type OpenClawBundleFile struct {
@@ -209,6 +214,7 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if env == nil {
 		env = EnvMap(os.Environ())
 	}
+	applyRuntimeEnvDefaults(opts, env)
 	if err := ValidateRequirements(opts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
@@ -513,7 +519,7 @@ func normalizePredictionLabel(value interface{}) (string, bool) {
 		return "", false
 	}
 	switch strings.ToLower(strings.TrimSpace(label)) {
-	case "clean", "normal":
+	case "benign", "clean", "normal":
 		return "clean", true
 	case "suspicious", "malicious":
 		return strings.ToLower(strings.TrimSpace(label)), true

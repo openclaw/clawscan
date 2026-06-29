@@ -304,6 +304,45 @@ func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
 	}
 }
 
+func TestRunOpenClawBenchmarkReplaysRecordedVirusTotalEvidence(t *testing.T) {
+	opts := benchmarkTestOptions(t, "clawhub-security-signals", "eval_holdout", 0, 0, "")
+	opts.Scanners = []string{"virustotal"}
+	artifact, err := RunBenchmark(opts, RunContext{
+		Env: map[string]string{},
+		Now: fixedClock("2026-06-12T12:00:00Z", "2026-06-12T12:00:01Z", "2026-06-12T12:00:02Z"),
+		BenchmarkClient: staticBenchmarkClient{
+			rows: []OpenClawBenchmarkRow{
+				{
+					ID:             "row-1",
+					SkillSlug:      "owner/demo",
+					SkillVersion:   "1.2.3",
+					SkillMDContent: "# Demo\n",
+					ClawScanContext: json.RawMessage(`{
+						"virustotal": {
+							"status": "clean",
+							"verdict": "benign",
+							"engine_stats": {"harmless": 0, "malicious": 0, "suspicious": 0, "undetected": 64}
+						}
+					}`),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Cases[0].Run.Scanners["virustotal"]
+	if result.Status != "completed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.HasPrefix(strings.Join(result.Command, " "), "scanner-result virustotal=") {
+		t.Fatalf("command = %#v", result.Command)
+	}
+	if !strings.Contains(string(result.Raw), `"undetected": 64`) {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+}
+
 func TestRunOpenClawBenchmarkWritesPredictionsNextToArtifact(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "clawscan-benchmark.json")
@@ -402,6 +441,30 @@ func TestBenchmarkPredictionsPreferJudgeVerdict(t *testing.T) {
 	want := []BenchmarkPrediction{{ID: "case-1", Prediction: "malicious"}}
 	if fmt.Sprintf("%#v", predictions) != fmt.Sprintf("%#v", want) {
 		t.Fatalf("predictions = %#v, want %#v", predictions, want)
+	}
+}
+
+func TestBenchmarkPredictionsNormalizesClawHubBenignVerdict(t *testing.T) {
+	predictions, err := BenchmarkPredictions(BenchmarkArtifact{
+		Benchmark: BenchmarkMetadata{ID: openClawBenchmarkID},
+		Cases: []BenchmarkCase{
+			{
+				ID: "case-1",
+				Run: Artifact{
+					Judge: &JudgeResult{
+						Status: "completed",
+						Result: map[string]interface{}{"verdict": "benign"},
+					},
+					Scanners: map[string]ScannerResult{},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(predictions) != 1 || predictions[0].Prediction != "clean" {
+		t.Fatalf("predictions = %#v", predictions)
 	}
 }
 
@@ -1522,6 +1585,26 @@ func TestRunRecordsDefaultSkillSpectorProviderEnv(t *testing.T) {
 	}
 	if containsArg(runner.calls[0].args, "--no-llm") {
 		t.Fatalf("unexpected --no-llm by default: %#v", runner.calls[0].args)
+	}
+}
+
+func TestSkillSpectorDefaultsProviderToOpenAIWhenOpenAIKeyIsPresent(t *testing.T) {
+	env := map[string]string{"OPENAI_API_KEY": "present"}
+	defaultSkillSpectorOpenAIProvider(env)
+	if env["SKILLSPECTOR_PROVIDER"] != "openai" {
+		t.Fatalf("SKILLSPECTOR_PROVIDER = %q", env["SKILLSPECTOR_PROVIDER"])
+	}
+
+	explicit := map[string]string{"OPENAI_API_KEY": "present", "SKILLSPECTOR_PROVIDER": "anthropic"}
+	defaultSkillSpectorOpenAIProvider(explicit)
+	if explicit["SKILLSPECTOR_PROVIDER"] != "anthropic" {
+		t.Fatalf("explicit provider was overwritten: %#v", explicit)
+	}
+
+	withoutKey := map[string]string{}
+	defaultSkillSpectorOpenAIProvider(withoutKey)
+	if withoutKey["SKILLSPECTOR_PROVIDER"] != "" {
+		t.Fatalf("provider defaulted without OpenAI key: %#v", withoutKey)
 	}
 }
 

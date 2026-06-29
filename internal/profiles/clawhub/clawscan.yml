@@ -10,6 +10,7 @@ profiles:
       env:
         - OPENAI_API_KEY
         - CODEX_API_KEY
+        - SKILLSPECTOR_PROVIDER
         - VIRUSTOTAL_API_KEY
     judge:
       command: >-
