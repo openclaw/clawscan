@@ -28,7 +28,7 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	if !ok {
 		t.Fatal("missing clawhub profile")
 	}
-	if got := strings.Join(clawhub.profile.Scanners, ","); got != "skillspector,clawscan-static" {
+	if got := strings.Join(clawhub.profile.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("clawhub scanners = %q", got)
 	}
 	if clawhub.configDir != "clawhub" {

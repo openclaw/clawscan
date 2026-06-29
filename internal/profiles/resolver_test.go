@@ -20,7 +20,7 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if opts.Target != "./skill" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
 	if opts.Judge == nil {
@@ -47,7 +47,7 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if string(opts.Judge.Files["clawhub/output.schema.json"]) == "" {
 		t.Fatal("expected embedded clawhub output schema file")
 	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,VIRUSTOTAL_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
@@ -125,14 +125,14 @@ func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
 	}
 }
 
-func TestResolveArgsDoesNotRequireVirusTotalForClawHubProfile(t *testing.T) {
+func TestResolveArgsRequiresVirusTotalForClawHubProfile(t *testing.T) {
 	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	err = runner.ValidateRequirements(opts, map[string]string{})
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "- VIRUSTOTAL_API_KEY required by scanner virustotal") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -390,7 +390,7 @@ func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 	if opts.Sandbox.Image != "ghcr.io/acme/runtime:v1" {
 		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
 	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,ANTHROPIC_API_KEY" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,VIRUSTOTAL_API_KEY,ANTHROPIC_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
