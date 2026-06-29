@@ -84,6 +84,8 @@ type cliIntent struct {
 	offsetSet            bool
 	predictionsOutput    string
 	predictionsOutputSet bool
+	idsSource            string
+	idsSourceSet         bool
 }
 
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
@@ -170,7 +172,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		opts.Judge.Files = files
 	}
 	if intent.benchmarkSet {
-		opts.Benchmark, err = runner.NewBenchmarkOptions(intent.benchmark, intent.split, intent.limit, intent.offset, intent.predictionsOutput)
+		opts.Benchmark, err = runner.NewBenchmarkOptions(intent.benchmark, intent.split, intent.limit, intent.offset, intent.predictionsOutput, intent.idsSource)
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
@@ -531,6 +533,14 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			intent.predictionsOutput = value
 			intent.predictionsOutputSet = true
 			i = next
+		case "--ids":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.idsSource = value
+			intent.idsSourceSet = true
+			i = next
 		default:
 			return cliIntent{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
@@ -552,6 +562,12 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 		if intent.predictionsOutputSet {
 			return nil, nil, errors.New("--predictions-output requires clawscan benchmark <benchmark-id>")
 		}
+		if intent.idsSourceSet {
+			return nil, nil, errors.New("--ids requires clawscan benchmark <benchmark-id>")
+		}
+	}
+	if intent.idsSourceSet && (intent.limitSet || intent.offsetSet) {
+		return nil, nil, errors.New("--ids is mutually exclusive with --limit and --offset")
 	}
 
 	profile := selected.profile

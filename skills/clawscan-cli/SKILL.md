@@ -205,6 +205,11 @@ SkillTrustBench uses split `benchmark`. The first live run downloads and caches
 `benchmark_full_v1.0.zip`, then extracts only the requested case directories
 into temporary scan targets.
 
+Use `--ids <path-or-url>` with SkillTrustBench to run a fixed subset from a
+plain text file with one ID per line or JSONL rows with an `id` field. `--ids`
+preserves source order, records `idsSource`, `idsCount`, and `idsSha256` in the
+artifact, and is mutually exclusive with `--limit` and `--offset`.
+
 ClawHub Security Signals splits: `train`, `validation`, `test`,
 `eval_holdout`. `--limit 0` means run the full selected split. Use `--offset`
 with `--limit` for reproducible chunks.

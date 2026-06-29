@@ -5,8 +5,8 @@ description: >-
   malicious skill on ClawHub and needs a private reporting workflow: opening a
   GitHub private vulnerability report, preparing a proposal-only PR, creating
   `proposals/<GHSA-ID>/clawscan.yml`, running ClawScan against the malicious
-  skill and SkillTrustBench, and explaining what evidence belongs in private
-  versus public channels.
+  skill, and explaining what evidence belongs in private versus public
+  channels.
 ---
 
 # Report ClawHub Malicious Skill
@@ -95,20 +95,7 @@ Separate private evidence from public contribution material:
    The public PR should not include the private artifacts unless maintainers say
    the contents are safe to publish. Reference them in the private report.
 
-4. Run a local benchmark smoke when practical.
-
-   This does not replace maintainer validation, but it helps catch obvious
-   regressions before opening the PR:
-
-   ```bash
-   clawscan benchmark SkillTrustBench \
-     --config proposals/<GHSA-ID>/clawscan.yml \
-     --profile clawhub \
-     --limit 10 \
-     --output ./artifacts/skilltrustbench-candidate-smoke.json
-   ```
-
-5. Open the public PR.
+4. Open the public PR.
 
    Keep the PR text minimal:
 
@@ -117,12 +104,13 @@ Separate private evidence from public contribution material:
    - do not include sensitive skill details
    - say maintainers should run the official `SkillTrustBench Profile Gate`
 
-6. Explain maintainer validation.
+5. Explain maintainer validation.
 
    Maintainers run the official gate against the proposal:
 
    ```bash
    clawscan benchmark SkillTrustBench \
+     --ids https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench-results/resolve/main/data/evaluation_subset_10pct.jsonl \
      --config proposals/<GHSA-ID>/clawscan.yml \
      --profile clawhub \
      --output ./artifacts/skilltrustbench-candidate.json
@@ -130,8 +118,9 @@ Separate private evidence from public contribution material:
 
    The proposal's `clawhub` profile shadows the built-in profile for that run.
    Maintainers review the private report, upload/preserve the benchmark
-   artifact, update the README benchmark block, and port accepted behavior into
-   the bundled `clawhub` profile in a follow-up change.
+   artifact, update
+   `benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json`, and
+   port accepted behavior into the bundled `clawhub` profile.
 
 ## Output Shape
 

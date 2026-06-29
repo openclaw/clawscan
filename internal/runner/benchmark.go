@@ -2,6 +2,8 @@ package runner
 
 import (
 	"archive/zip"
+	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,13 +68,16 @@ type BenchmarkArtifact struct {
 }
 
 type BenchmarkMetadata struct {
-	ID     string `json:"id"`
-	Source string `json:"source"`
-	Config string `json:"config"`
-	Split  string `json:"split"`
-	Offset int    `json:"offset"`
-	Limit  int    `json:"limit"`
-	Rows   int    `json:"rows"`
+	ID        string `json:"id"`
+	Source    string `json:"source"`
+	Config    string `json:"config"`
+	Split     string `json:"split"`
+	Offset    int    `json:"offset"`
+	Limit     int    `json:"limit"`
+	Rows      int    `json:"rows"`
+	IDsSource string `json:"idsSource,omitempty"`
+	IDsCount  int    `json:"idsCount,omitempty"`
+	IDsSHA256 string `json:"idsSha256,omitempty"`
 }
 
 type BenchmarkCase struct {
@@ -121,6 +126,12 @@ type BenchmarkEvaluationSummary struct {
 type BenchmarkPrediction struct {
 	ID         string `json:"id"`
 	Prediction string `json:"prediction"`
+}
+
+type BenchmarkIDSelection struct {
+	Source string
+	IDs    []string
+	SHA256 string
 }
 
 type OpenClawBenchmarkRow struct {
@@ -201,6 +212,16 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if err := ValidateRequirements(opts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
+	if opts.Benchmark.IDsSource != "" {
+		selection, err := LoadBenchmarkIDSelection(opts.Benchmark.IDsSource)
+		if err != nil {
+			return BenchmarkArtifact{}, err
+		}
+		benchmarkOpts.IDsSource = selection.Source
+		benchmarkOpts.IDs = selection.IDs
+		benchmarkOpts.IDsSHA256 = selection.SHA256
+		opts.Benchmark = &benchmarkOpts
+	}
 	now := ctx.Now
 	if now == nil {
 		now = time.Now
@@ -213,12 +234,15 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	artifact := BenchmarkArtifact{
 		SchemaVersion: "clawscan-benchmark-v1",
 		Benchmark: BenchmarkMetadata{
-			ID:     opts.Benchmark.ID,
-			Source: adapter.Source(),
-			Config: adapter.Config(),
-			Split:  opts.Benchmark.Split,
-			Offset: opts.Benchmark.Offset,
-			Limit:  opts.Benchmark.Limit,
+			ID:        opts.Benchmark.ID,
+			Source:    adapter.Source(),
+			Config:    adapter.Config(),
+			Split:     opts.Benchmark.Split,
+			Offset:    opts.Benchmark.Offset,
+			Limit:     opts.Benchmark.Limit,
+			IDsSource: opts.Benchmark.IDsSource,
+			IDsCount:  len(opts.Benchmark.IDs),
+			IDsSHA256: opts.Benchmark.IDsSHA256,
 		},
 		StartedAt: startedAt,
 		Env:       envPresence(opts, env),
@@ -259,6 +283,100 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 		}
 	}
 	return artifact, nil
+}
+
+func LoadBenchmarkIDSelection(source string) (BenchmarkIDSelection, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return BenchmarkIDSelection{}, errors.New("--ids source is required")
+	}
+	data, err := readBenchmarkIDSource(source)
+	if err != nil {
+		return BenchmarkIDSelection{}, err
+	}
+	ids, err := parseBenchmarkIDs(source, data)
+	if err != nil {
+		return BenchmarkIDSelection{}, err
+	}
+	hashInput := strings.Join(ids, "\n") + "\n"
+	sum := sha256.Sum256([]byte(hashInput))
+	return BenchmarkIDSelection{
+		Source: source,
+		IDs:    ids,
+		SHA256: fmt.Sprintf("%x", sum[:]),
+	}, nil
+}
+
+func readBenchmarkIDSource(source string) ([]byte, error) {
+	if parsed, err := url.Parse(source); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+		client := &http.Client{Timeout: 60 * time.Second}
+		resp, err := client.Get(source)
+		if err != nil {
+			return nil, fmt.Errorf("read --ids source %s: %w", source, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			return nil, fmt.Errorf("read --ids source %s: HTTP %d", source, resp.StatusCode)
+		}
+		return io.ReadAll(resp.Body)
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return nil, fmt.Errorf("read --ids source %s: %w", source, err)
+	}
+	return data, nil
+}
+
+func parseBenchmarkIDs(source string, data []byte) ([]string, error) {
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	var ids []string
+	seen := map[string]bool{}
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			return nil, fmt.Errorf("--ids source %s line %d is blank", source, lineNumber)
+		}
+		id, err := parseBenchmarkIDLine(line)
+		if err != nil {
+			return nil, fmt.Errorf("--ids source %s line %d: %w", source, lineNumber, err)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("--ids source %s line %d duplicates benchmark id %s", source, lineNumber, id)
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read --ids source %s: %w", source, err)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("--ids source %s contains no benchmark ids", source)
+	}
+	return ids, nil
+}
+
+func parseBenchmarkIDLine(line string) (string, error) {
+	id := line
+	if strings.HasPrefix(line, "{") {
+		var row struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			return "", fmt.Errorf("malformed JSONL row: %w", err)
+		}
+		id = row.ID
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", errors.New("benchmark id is blank")
+	}
+	if strings.ContainsAny(id, " \t\r\n") {
+		return "", fmt.Errorf("benchmark id %q is malformed", id)
+	}
+	return id, nil
 }
 
 func BenchmarkPredictionsOutputPath(opts Options) string {

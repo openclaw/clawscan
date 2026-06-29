@@ -40,6 +40,9 @@ type BenchmarkOptions struct {
 	Limit                 int
 	Offset                int
 	PredictionsOutputPath string
+	IDsSource             string
+	IDs                   []string
+	IDsSHA256             string
 }
 
 type JudgeOptions struct {
@@ -187,7 +190,7 @@ func ScannerIDs() []string {
 	return DefaultScannerRegistry().IDs()
 }
 
-func NewBenchmarkOptions(id string, split string, limit int, offset int, predictionsOutputPath string) (*BenchmarkOptions, error) {
+func NewBenchmarkOptions(id string, split string, limit int, offset int, predictionsOutputPath string, idsSource string) (*BenchmarkOptions, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, errors.New("Benchmark id is required")
 	}
@@ -201,12 +204,21 @@ func NewBenchmarkOptions(id string, split string, limit int, offset int, predict
 	if err := validateBenchmarkSplit(canonicalID, split); err != nil {
 		return nil, err
 	}
+	if idsSource != "" {
+		if canonicalID != skillTrustBenchID {
+			return nil, errors.New("--ids is currently supported for SkillTrustBench only")
+		}
+		if limit != 0 || offset != 0 {
+			return nil, errors.New("--ids is mutually exclusive with --limit and --offset")
+		}
+	}
 	return &BenchmarkOptions{
 		ID:                    canonicalID,
 		Split:                 split,
 		Limit:                 limit,
 		Offset:                offset,
 		PredictionsOutputPath: predictionsOutputPath,
+		IDsSource:             idsSource,
 	}, nil
 }
 

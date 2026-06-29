@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,7 +154,7 @@ func TestParseArgsRejectsUnsupportedSandboxMode(t *testing.T) {
 }
 
 func TestNewBenchmarkOptionsSupportsOpenClawBenchmark(t *testing.T) {
-	benchmark, err := NewBenchmarkOptions("clawhub-security-signals", "eval_holdout", 2, 10, "")
+	benchmark, err := NewBenchmarkOptions("clawhub-security-signals", "eval_holdout", 2, 10, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +170,7 @@ func TestNewBenchmarkOptionsSupportsOpenClawBenchmark(t *testing.T) {
 }
 
 func TestNewBenchmarkOptionsSupportsPredictionsOutput(t *testing.T) {
-	benchmark, err := NewBenchmarkOptions("clawhub-security-signals", "", 0, 0, "./predictions.jsonl")
+	benchmark, err := NewBenchmarkOptions("clawhub-security-signals", "", 0, 0, "./predictions.jsonl", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +191,7 @@ func TestParseArgsRejectsBenchmarkSubcommandOnlyFlags(t *testing.T) {
 }
 
 func TestNewBenchmarkOptionsSupportsSkillTrustBenchBenchmark(t *testing.T) {
-	benchmark, err := NewBenchmarkOptions("SkillTrustBench", "", 2, 0, "")
+	benchmark, err := NewBenchmarkOptions("SkillTrustBench", "", 2, 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,14 +207,14 @@ func TestNewBenchmarkOptionsSupportsSkillTrustBenchBenchmark(t *testing.T) {
 }
 
 func TestNewBenchmarkOptionsRejectsUnsupportedBenchmark(t *testing.T) {
-	_, err := NewBenchmarkOptions("skillscan-paper", "", 0, 0, "")
+	_, err := NewBenchmarkOptions("skillscan-paper", "", 0, 0, "", "")
 	if err == nil || err.Error() != "Unsupported benchmark: skillscan-paper" {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestNewBenchmarkOptionsRejectsUnsupportedSkillTrustBenchSplit(t *testing.T) {
-	_, err := NewBenchmarkOptions("SkillTrustBench", "eval_holdout", 0, 0, "")
+	_, err := NewBenchmarkOptions("SkillTrustBench", "eval_holdout", 0, 0, "", "")
 	if err == nil || err.Error() != "Unsupported split for cuhk-zhuque/SkillTrustBench: eval_holdout (valid: benchmark)" {
 		t.Fatalf("err = %v", err)
 	}
@@ -230,7 +232,7 @@ func TestParseArgsRejectsBenchmarkFlag(t *testing.T) {
 
 func benchmarkTestOptions(t *testing.T, id string, split string, limit int, offset int, predictionsOutputPath string) Options {
 	t.Helper()
-	benchmark, err := NewBenchmarkOptions(id, split, limit, offset, predictionsOutputPath)
+	benchmark, err := NewBenchmarkOptions(id, split, limit, offset, predictionsOutputPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,6 +479,171 @@ func TestRunSkillTrustBenchBenchmarkMaterializesArchiveCaseAndRunsScanners(t *te
 	}
 	if scanners.bundleContent != "echo skilltrustbench\n" {
 		t.Fatalf("bundle file = %q", scanners.bundleContent)
+	}
+}
+
+func TestRunSkillTrustBenchBenchmarkSelectsIDsInSourceOrder(t *testing.T) {
+	dir := t.TempDir()
+	idsPath := filepath.Join(dir, "ids.jsonl")
+	if err := os.WriteFile(idsPath, []byte(strings.Join([]string{
+		`{"id":"case_00003","judgment":"normal"}`,
+		`{"id":"case_00001","judgment":"malicious"}`,
+	}, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	benchmark, err := NewBenchmarkOptions("SkillTrustBench", "", 0, 0, "", idsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		Benchmark:          benchmark,
+		Scanners:           []string{"clawscan-static"},
+		ScannerResultPaths: map[string]string{},
+	}
+
+	artifact, err := RunBenchmark(opts, RunContext{
+		Env: map[string]string{},
+		Now: fixedClock(
+			"2026-06-12T12:00:00Z",
+			"2026-06-12T12:00:01Z",
+			"2026-06-12T12:00:02Z",
+			"2026-06-12T12:00:03Z",
+			"2026-06-12T12:00:04Z",
+			"2026-06-12T12:00:05Z",
+			"2026-06-12T12:00:06Z",
+		),
+		BenchmarkClient: staticBenchmarkClient{
+			skillTrustBenchRows: []SkillTrustBenchRow{
+				{ID: "case_00001", Judgment: "malicious", SkillPath: "benchmark_full_v1.0/case_00001"},
+				{ID: "case_00002", Judgment: "suspicious", SkillPath: "benchmark_full_v1.0/case_00002"},
+				{ID: "case_00003", Judgment: "normal", SkillPath: "benchmark_full_v1.0/case_00003"},
+			},
+			materializedSkillTrustBench: map[string]map[string]string{
+				"case_00001": {"SKILL.md": "# Malicious\nSteal credentials.\n"},
+				"case_00003": {"SKILL.md": "# Normal\nUse tools carefully.\n"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := artifact.Cases[0].ID + "," + artifact.Cases[1].ID; got != "case_00003,case_00001" {
+		t.Fatalf("case order = %q", got)
+	}
+	if artifact.Benchmark.IDsSource != idsPath {
+		t.Fatalf("ids source = %q", artifact.Benchmark.IDsSource)
+	}
+	if artifact.Benchmark.IDsCount != 2 {
+		t.Fatalf("ids count = %d", artifact.Benchmark.IDsCount)
+	}
+	if artifact.Benchmark.IDsSHA256 != "0b66f4b6178d11130d38351c8517e9116296363c572978c9fbb7176c38562a3d" {
+		t.Fatalf("ids sha256 = %q", artifact.Benchmark.IDsSHA256)
+	}
+}
+
+func TestLoadBenchmarkIDSelectionAcceptsTextAndHTTPJSONL(t *testing.T) {
+	dir := t.TempDir()
+	textPath := filepath.Join(dir, "ids.txt")
+	if err := os.WriteFile(textPath, []byte("case_00003\ncase_00001\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	textSelection, err := LoadBenchmarkIDSelection(textPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(textSelection.IDs, ","); got != "case_00003,case_00001" {
+		t.Fatalf("text ids = %q", got)
+	}
+	if textSelection.SHA256 != "0b66f4b6178d11130d38351c8517e9116296363c572978c9fbb7176c38562a3d" {
+		t.Fatalf("text ids sha256 = %q", textSelection.SHA256)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, `{"id":"case_00002","judgment":"suspicious"}`)
+		fmt.Fprintln(w, `{"id":"case_00001","judgment":"malicious"}`)
+	}))
+	defer server.Close()
+
+	httpSelection, err := LoadBenchmarkIDSelection(server.URL + "/subset.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(httpSelection.IDs, ","); got != "case_00002,case_00001" {
+		t.Fatalf("http ids = %q", got)
+	}
+}
+
+func TestLoadBenchmarkIDSelectionRejectsBadSources(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{
+			name:    "blank line",
+			content: "case_00001\n\n",
+			wantErr: "line 2 is blank",
+		},
+		{
+			name:    "duplicate id",
+			content: "case_00001\ncase_00001\n",
+			wantErr: "duplicates benchmark id case_00001",
+		},
+		{
+			name:    "malformed jsonl",
+			content: `{"id":` + "\n",
+			wantErr: "malformed JSONL row",
+		},
+		{
+			name:    "missing jsonl id",
+			content: `{"judgment":"normal"}` + "\n",
+			wantErr: "benchmark id is blank",
+		},
+		{
+			name:    "malformed text id",
+			content: "case 00001\n",
+			wantErr: "benchmark id \"case 00001\" is malformed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ids")
+			if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadBenchmarkIDSelection(path)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunSkillTrustBenchBenchmarkRejectsMissingSelectedID(t *testing.T) {
+	dir := t.TempDir()
+	idsPath := filepath.Join(dir, "ids.txt")
+	if err := os.WriteFile(idsPath, []byte("case_00002\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	benchmark, err := NewBenchmarkOptions("SkillTrustBench", "", 0, 0, "", idsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = RunBenchmark(Options{
+		Benchmark:          benchmark,
+		Scanners:           []string{"clawscan-static"},
+		ScannerResultPaths: map[string]string{},
+	}, RunContext{
+		Env: map[string]string{},
+		BenchmarkClient: staticBenchmarkClient{
+			skillTrustBenchRows: []SkillTrustBenchRow{
+				{ID: "case_00001", Judgment: "normal", SkillPath: "benchmark_full_v1.0/case_00001"},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing from SkillTrustBench split benchmark") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

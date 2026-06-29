@@ -278,9 +278,21 @@ func (skillTrustBenchBenchmarkAdapter) SupportsPredictionsOutput() bool {
 }
 
 func (adapter skillTrustBenchBenchmarkAdapter) RunCases(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient) ([]BenchmarkCase, error) {
-	rows, err := client.FetchSkillTrustBenchRows(opts.Benchmark.ID, opts.Benchmark.Split, opts.Benchmark.Offset, opts.Benchmark.Limit)
+	offset := opts.Benchmark.Offset
+	limit := opts.Benchmark.Limit
+	if len(opts.Benchmark.IDs) > 0 {
+		offset = 0
+		limit = 0
+	}
+	rows, err := client.FetchSkillTrustBenchRows(opts.Benchmark.ID, opts.Benchmark.Split, offset, limit)
 	if err != nil {
 		return nil, err
+	}
+	if len(opts.Benchmark.IDs) > 0 {
+		rows, err = selectSkillTrustBenchRows(rows, opts.Benchmark.IDs, opts.Benchmark.Split)
+		if err != nil {
+			return nil, err
+		}
 	}
 	cases := make([]BenchmarkCase, 0, len(rows))
 	for _, row := range rows {
@@ -291,6 +303,22 @@ func (adapter skillTrustBenchBenchmarkAdapter) RunCases(opts Options, ctx RunCon
 		cases = append(cases, benchmarkCase)
 	}
 	return cases, nil
+}
+
+func selectSkillTrustBenchRows(rows []SkillTrustBenchRow, ids []string, split string) ([]SkillTrustBenchRow, error) {
+	byID := make(map[string]SkillTrustBenchRow, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	selected := make([]SkillTrustBenchRow, 0, len(ids))
+	for _, id := range ids {
+		row, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("--ids requested benchmark id %s, but it is missing from SkillTrustBench split %s", id, split)
+		}
+		selected = append(selected, row)
+	}
+	return selected, nil
 }
 
 func (adapter skillTrustBenchBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient, row SkillTrustBenchRow) (BenchmarkCase, error) {

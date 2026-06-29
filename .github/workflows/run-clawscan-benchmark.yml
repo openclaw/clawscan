@@ -23,6 +23,10 @@ on:
         description: Optional benchmark split. Empty uses the benchmark default.
         required: false
         default: ""
+      ids:
+        description: Optional benchmark ID source. Accepts a local text/JSONL path or HTTP(S) JSONL URL.
+        required: false
+        default: ""
       limit:
         description: Row limit. Use 0 for the full split.
         required: false
@@ -77,6 +81,10 @@ on:
         required: false
         default: ""
       split:
+        type: string
+        required: false
+        default: ""
+      ids:
         type: string
         required: false
         default: ""
@@ -179,6 +187,7 @@ jobs:
           CONFIG_PATH: ${{ inputs.config_path }}
           SCANNERS: ${{ inputs.scanners }}
           SPLIT: ${{ inputs.split }}
+          IDS: ${{ inputs.ids }}
           LIMIT: ${{ inputs.limit }}
           OFFSET: ${{ inputs.offset }}
           PREDICTIONS_OUTPUT: ${{ inputs.predictions_output }}
@@ -200,9 +209,14 @@ jobs:
           set -euo pipefail
           mkdir -p "$(dirname "$OUTPUT_PATH")"
 
-          args=(benchmark "$BENCHMARK_ID" --limit "$LIMIT" --offset "$OFFSET" --output "$OUTPUT_PATH")
+          args=(benchmark "$BENCHMARK_ID" --output "$OUTPUT_PATH")
           if [ -n "$SPLIT" ]; then
             args+=(--split "$SPLIT")
+          fi
+          if [ -n "$IDS" ]; then
+            args+=(--ids "$IDS")
+          else
+            args+=(--limit "$LIMIT" --offset "$OFFSET")
           fi
           if [ -n "$PREDICTIONS_OUTPUT" ]; then
             mkdir -p "$(dirname "$PREDICTIONS_OUTPUT")"
@@ -242,6 +256,7 @@ jobs:
               echo "### Summary"
               jq -r '
                 "- benchmark: \(.benchmark.id) (\(.benchmark.split) split)",
+                "- ids: \(.benchmark.idsCount // 0) from \(.benchmark.idsSource // "not set")",
                 "- cases: \(.summary.caseCount // 0)",
                 "- correct: \(.summary.evaluation.correct // 0)",
                 "- incorrect: \(.summary.evaluation.incorrect // 0)",

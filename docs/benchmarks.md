@@ -11,6 +11,9 @@ clawscan benchmark SkillTrustBench \
   --output ./artifacts/skilltrustbench-clawhub.json
 ```
 
+Use `--ids <path-or-url>` with SkillTrustBench to run a fixed subset from a
+plain text ID list or JSONL rows with an `id` field.
+
 ## Available benchmarks
 
 | Benchmark | ID | Source |
@@ -30,10 +33,9 @@ ask Codex:
 Use $report-clawhub-malicious-skill to walk me through reporting a malicious ClawHub skill.
 ```
 
-## ClawHub Profile Benchmark
+## ClawHub Profile Baseline
 
-<!-- clawscan-benchmark:clawhub:start -->
-Profile: `clawhub`
-Benchmark: pending maintainer `SkillTrustBench Profile Gate` run.
-Artifact: uploaded by the workflow as `skilltrustbench-candidate`.
-<!-- clawscan-benchmark:clawhub:end -->
+Maintainers validate accepted `clawhub` profile proposals against the public
+SkillTrustBench leaderboard subset. The latest accepted compact baseline is
+written by the maintainer gate to
+`benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json`.

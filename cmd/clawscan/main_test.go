@@ -34,6 +34,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"--config <path>",
 		"Benchmark command flags:",
 		"--split <name>",
+		"--ids <path-or-url>",
 		"--limit <n>",
 		"--offset <n>",
 		"--predictions-output <path>",

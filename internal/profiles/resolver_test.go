@@ -170,6 +170,35 @@ func TestResolveBenchmarkRunSetForwardsPredictionsOutput(t *testing.T) {
 	}
 }
 
+func TestResolveBenchmarkRunSetForwardsIDsSource(t *testing.T) {
+	resolved, err := ResolveBenchmarkRunSet("SkillTrustBench", []string{
+		"--scanner", "clawscan-static",
+		"--ids", "./subset.jsonl",
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := resolved.Options[0]
+	if opts.Benchmark == nil {
+		t.Fatal("missing benchmark options")
+	}
+	if opts.Benchmark.IDsSource != "./subset.jsonl" {
+		t.Fatalf("ids source = %q", opts.Benchmark.IDsSource)
+	}
+}
+
+func TestResolveBenchmarkRunSetRejectsIDsWithLimitOrOffset(t *testing.T) {
+	for _, args := range [][]string{
+		{"--scanner", "clawscan-static", "--ids", "./subset.jsonl", "--limit", "1"},
+		{"--scanner", "clawscan-static", "--ids", "./subset.jsonl", "--offset", "1"},
+	} {
+		_, err := ResolveBenchmarkRunSet("SkillTrustBench", args, t.TempDir())
+		if err == nil || err.Error() != "--ids is mutually exclusive with --limit and --offset" {
+			t.Fatalf("args = %#v err = %v", args, err)
+		}
+	}
+}
+
 func TestResolveBenchmarkRunSetUsesProposalClawHubProfileBeforeBuiltIn(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "proposals", "GHSA-abcd-1234-5678", "clawscan.yml"), `version: 1
