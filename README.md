@@ -157,43 +157,6 @@ clawscan scanners skillspector
 | `socket` | Socket CLI | [repo](https://github.com/SocketDev/socket-cli) | Local file or directory scanner using Socket's public CLI full-scan path. | `SOCKET_CLI_API_TOKEN` | `npm install -g socket` |
 | `virustotal` | VirusTotal API | [docs](https://docs.virustotal.com/reference/file) | API-backed single local file hash lookup. Directories return a skipped result. | `VIRUSTOTAL_API_KEY` | skipped; API-backed |
 
-## Sandbox
-
-ClawScan runs command-backed scanners and judges in
-`ghcr.io/openclaw/clawscan-runtime:latest` by default:
-
-```bash
-clawscan ./my-skill --scanner skillspector
-```
-
-Use `--sandbox off` only in an already-isolated environment, or when you have
-installed scanner dependencies on the host with `clawscan install`. Use
-`--sandbox-env <NAME>` or a profile `sandbox.env` list to pass judge-specific
-environment variables into the container.
-
-## Judge Harness
-
-`--judge` hands scanner evidence to an external agent command so it can inspect
-the skill, do its own research in the scan workspace, and write a final JSON
-verdict:
-
-```bash
-clawscan ./my-skill \
-  --scanner skillspector \
-  --judge 'codex exec --cd {{ workspace }} --output-last-message {{ output }} - < {{ prompt:./prompt.md }}'
-```
-
-Supported `--judge` placeholders:
-
-| Placeholder | Meaning |
-| --- | --- |
-| `{{ workspace }}` | Temporary directory containing the copied skill, scanner JSON, and metadata. |
-| `{{ prompt }}` | Render `./prompt.md` and pass the rendered prompt file path. |
-| `{{ prompt:<path> }}` | Render a specific prompt template and pass that file path. |
-| `{{ output_schema }}` | Copy `./schema.json` into the workspace and pass that file path. |
-| `{{ output_schema:<path> }}` | Copy a specific schema file and pass that file path. |
-| `{{ output }}` | File path where the judge should write its final JSON object. |
-
 ## Profiles
 
 `--profile` runs a saved scanner and judge configuration, such as the built-in
@@ -242,6 +205,43 @@ profiles:
         --output-last-message {{ output }}
         - < {{ prompt:./prompt.md }}
 ```
+
+## Judge Harness
+
+`--judge` hands scanner evidence to an external agent command so it can inspect
+the skill, do its own research in the scan workspace, and write a final JSON
+verdict:
+
+```bash
+clawscan ./my-skill \
+  --scanner skillspector \
+  --judge 'codex exec --cd {{ workspace }} --output-last-message {{ output }} - < {{ prompt:./prompt.md }}'
+```
+
+Supported `--judge` placeholders:
+
+| Placeholder | Meaning |
+| --- | --- |
+| `{{ workspace }}` | Temporary directory containing the copied skill, scanner JSON, and metadata. |
+| `{{ prompt }}` | Render `./prompt.md` and pass the rendered prompt file path. |
+| `{{ prompt:<path> }}` | Render a specific prompt template and pass that file path. |
+| `{{ output_schema }}` | Copy `./schema.json` into the workspace and pass that file path. |
+| `{{ output_schema:<path> }}` | Copy a specific schema file and pass that file path. |
+| `{{ output }}` | File path where the judge should write its final JSON object. |
+
+## Sandbox
+
+ClawScan runs command-backed scanners and judges in
+`ghcr.io/openclaw/clawscan-runtime:latest` by default:
+
+```bash
+clawscan ./my-skill --scanner skillspector
+```
+
+Use `--sandbox off` only in an already-isolated environment, or when you have
+installed scanner dependencies on the host with `clawscan install`. Use
+`--sandbox-env <NAME>` or a profile `sandbox.env` list to pass judge-specific
+environment variables into the container.
 
 ## Benchmarks
 
