@@ -61,3 +61,54 @@ func TestBuildPromptTemplateReplacesScannerFixtures(t *testing.T) {
 		}
 	}
 }
+
+func TestClawHubWorkerOutputSchemaRelPath(t *testing.T) {
+	workerSource := `
+const root = resolve(new URL("../..", import.meta.url).pathname);
+const schemaPath = join(root, "scripts/security/codex-scan-output.schema.json");
+const args = [
+  "--output-schema",
+  schemaPath,
+];
+`
+	got, err := clawHubWorkerOutputSchemaRelPath(workerSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "scripts/security/codex-scan-output.schema.json"
+	if got != want {
+		t.Fatalf("schema path = %q, want %q", got, want)
+	}
+}
+
+func TestClawHubWorkerOutputSchemaRelPathRequiresWorkerSchemaArg(t *testing.T) {
+	workerSource := `
+const root = resolve(new URL("../..", import.meta.url).pathname);
+const schemaPath = join(root, "scripts/security/codex-scan-output.schema.json");
+const args = [];
+`
+	_, err := clawHubWorkerOutputSchemaRelPath(workerSource)
+	if err == nil {
+		t.Fatal("expected missing worker schema arg to fail")
+	}
+	if !strings.Contains(err.Error(), "schemaPath to --output-schema") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestClawHubWorkerOutputSchemaRelPathRequiresSchemaPathDeclaration(t *testing.T) {
+	workerSource := `
+const args = [
+  "--output-schema",
+  schemaPath,
+];
+`
+	_, err := clawHubWorkerOutputSchemaRelPath(workerSource)
+	if err == nil {
+		t.Fatal("expected missing schemaPath declaration to fail")
+	}
+	if !strings.Contains(err.Error(), "schemaPath declaration") {
+		t.Fatalf("error = %q", err)
+	}
+}

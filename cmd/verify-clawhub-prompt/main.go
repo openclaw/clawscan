@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/openclaw/clawscan/internal/clawhubprompt"
@@ -42,10 +43,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	systemPrompt, expected, err := renderClawHubPrompt(resolvedClawHubDir)
+	rendered, err := renderClawHubPrompt(resolvedClawHubDir)
 	if err != nil {
 		return err
 	}
+	systemPrompt := rendered.SystemPrompt
+	expected := rendered.Prompt
 	job := proofJob()
 	skillSpectorAnalysis := proofSkillSpectorAnalysis()
 	actual, err := clawhubprompt.Build(systemPrompt, job, []string{"html-comment-injection"}, skillSpectorAnalysis)
@@ -71,10 +74,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	schema, err := os.ReadFile(filepath.Join(resolvedClawHubDir, "scripts/security/codex-scan-output.schema.json"))
-	if err != nil {
-		return err
-	}
+	schema := rendered.OutputSchema
 	requestBody, err := runner.OpenAIRequestBody(runner.OpenAIRequestOptions{Model: *model, Reasoning: *reasoning}, systemPrompt, prompt, schema)
 	if err != nil {
 		return err
@@ -179,7 +179,22 @@ func resolveClawHubDir(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
-func renderClawHubPrompt(clawhubDir string) (string, string, error) {
+type clawHubPromptRender struct {
+	SystemPrompt string
+	Prompt       string
+	OutputSchema []byte
+}
+
+var (
+	workerSchemaPathPattern      = regexp.MustCompile(`(?m)^\s*const\s+schemaPath\s*=\s*join\(\s*root\s*,\s*"([^"]+)"\s*\)`)
+	workerOutputSchemaArgPattern = regexp.MustCompile(`(?s)"--output-schema"\s*,\s*schemaPath`)
+)
+
+func renderClawHubPrompt(clawhubDir string) (clawHubPromptRender, error) {
+	outputSchema, err := readClawHubWorkerOutputSchema(clawhubDir)
+	if err != nil {
+		return clawHubPromptRender{}, err
+	}
 	script := `
 const clawhubDir = process.argv[1];
 const worker = await import(clawhubDir + "/scripts/security/run-codex-scan-worker.ts");
@@ -222,16 +237,40 @@ console.log(JSON.stringify({
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", "", fmt.Errorf("render ClawHub prompt with bun: %w: %s", err, stderr.String())
+		return clawHubPromptRender{}, fmt.Errorf("render ClawHub prompt with bun: %w: %s", err, stderr.String())
 	}
 	var payload struct {
 		SystemPrompt string `json:"systemPrompt"`
 		Prompt       string `json:"prompt"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		return "", "", err
+		return clawHubPromptRender{}, err
 	}
-	return payload.SystemPrompt, payload.Prompt, nil
+	return clawHubPromptRender{SystemPrompt: payload.SystemPrompt, Prompt: payload.Prompt, OutputSchema: outputSchema}, nil
+}
+
+func readClawHubWorkerOutputSchema(clawhubDir string) ([]byte, error) {
+	workerPath := filepath.Join(clawhubDir, "scripts/security/run-codex-scan-worker.ts")
+	workerSource, err := os.ReadFile(workerPath)
+	if err != nil {
+		return nil, err
+	}
+	schemaRelPath, err := clawHubWorkerOutputSchemaRelPath(string(workerSource))
+	if err != nil {
+		return nil, fmt.Errorf("resolve ClawHub worker output schema: %w", err)
+	}
+	return os.ReadFile(filepath.Join(clawhubDir, filepath.FromSlash(schemaRelPath)))
+}
+
+func clawHubWorkerOutputSchemaRelPath(workerSource string) (string, error) {
+	if !workerOutputSchemaArgPattern.MatchString(workerSource) {
+		return "", fmt.Errorf("worker no longer passes schemaPath to --output-schema")
+	}
+	matches := workerSchemaPathPattern.FindStringSubmatch(workerSource)
+	if matches == nil {
+		return "", fmt.Errorf("worker schemaPath declaration not found")
+	}
+	return matches[1], nil
 }
 
 func proofJob() clawhubprompt.Job {
