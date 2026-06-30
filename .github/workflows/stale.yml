@@ -2,44 +2,41 @@ name: Stale
 
 on:
   schedule:
-    - cron: "23 4 * * *"
+    - cron: "17 4 * * 1"
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   stale:
-    name: Mark stale issues and pull requests
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: write
+    timeout-minutes: 10
     steps:
-      - name: Mark stale items
-        uses: actions/stale@v10
+      - name: Mark inactive issues and pull requests
+        uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10
         with:
-          repo-token: ${{ github.token }}
           days-before-issue-stale: 30
           days-before-issue-close: 14
-          days-before-pr-stale: 14
-          days-before-pr-close: 7
+          days-before-pr-stale: 30
+          days-before-pr-close: 14
           stale-issue-label: stale
           stale-pr-label: stale
-          exempt-issue-labels: security,pinned,no-stale
-          exempt-pr-labels: security,pinned,no-stale
+          exempt-issue-labels: security,pinned,no-stale,maintainer
+          exempt-pr-labels: security,pinned,no-stale,maintainer
           exempt-all-assignees: true
           remove-stale-when-updated: true
-          operations-per-run: 200
-          ascending: true
+          operations-per-run: 100
           stale-issue-message: |
-            This issue has been marked stale because it has not had recent activity.
-            If it still affects ClawScan, please add current reproduction steps, scanner versions, and redacted artifact evidence.
-          close-issue-message: |
-            Closing due to inactivity. If this still affects ClawScan, please open a new issue with current evidence.
-          close-issue-reason: not_planned
+            This issue has been marked stale after 30 days without activity.
+            Add current reproduction details or context to keep it open.
           stale-pr-message: |
-            This pull request has been marked stale because it has not had recent activity.
-            Please update the branch, add current validation, or explain what remains.
+            This pull request has been marked stale after 30 days without activity.
+            Rebase and add a current status update to keep it open.
+          close-issue-message: |
+            Closing due to inactivity. Open a new issue with fresh reproduction details if this still affects the latest release.
+          close-issue-reason: not_planned
           close-pr-message: |
-            Closing due to inactivity. If this should be revived, please reopen with current context and validation.
-
+            Closing due to inactivity. A focused replacement pull request is welcome when the work is ready to resume.
