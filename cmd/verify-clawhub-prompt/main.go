@@ -67,9 +67,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	promptTemplate := strings.Replace(actual, skillSpectorFixture, "{{ scanners.skillspector }}", 1)
-	if !strings.Contains(promptTemplate, "{{ scanners.skillspector }}") {
-		return fmt.Errorf("failed to build exported prompt template with scanner placeholders")
+	promptTemplate, err := buildPromptTemplate(actual, vtFixture, skillSpectorFixture)
+	if err != nil {
+		return err
 	}
 	schema, err := os.ReadFile(filepath.Join(resolvedClawHubDir, "scripts/security/codex-scan-output.schema.json"))
 	if err != nil {
@@ -148,6 +148,23 @@ func writeOptionalFile(path string, content []byte) error {
 		return err
 	}
 	return os.WriteFile(path, content, 0o644)
+}
+
+func buildPromptTemplate(prompt string, vtFixture string, skillSpectorFixture string) (string, error) {
+	replacements := []struct {
+		fixture     string
+		placeholder string
+	}{
+		{fixture: vtFixture, placeholder: "{{ scanners.virustotal }}"},
+		{fixture: skillSpectorFixture, placeholder: "{{ scanners.skillspector }}"},
+	}
+	for _, replacement := range replacements {
+		prompt = strings.Replace(prompt, replacement.fixture, replacement.placeholder, 1)
+		if !strings.Contains(prompt, replacement.placeholder) {
+			return "", fmt.Errorf("failed to build exported prompt template with scanner placeholder %s", replacement.placeholder)
+		}
+	}
+	return prompt, nil
 }
 
 func prettyJSON(value any) (string, error) {
