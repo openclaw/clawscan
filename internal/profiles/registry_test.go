@@ -9,14 +9,14 @@ import (
 
 func TestProfileRegistryReturnsSortedIDs(t *testing.T) {
 	registry, err := NewProfileRegistry(map[string]resolvedProfile{
-		"skills-sh": {profile: Profile{Scanners: []string{"snyk"}}},
-		"clawhub":   {profile: Profile{Scanners: []string{"skillspector"}}},
+		"review":  {profile: Profile{Scanners: []string{"snyk"}}},
+		"clawhub": {profile: Profile{Scanners: []string{"skillspector"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(registry.IDs(), ","); got != "clawhub,skills-sh" {
+	if got := strings.Join(registry.IDs(), ","); got != "clawhub,review" {
 		t.Fatalf("ids = %q", got)
 	}
 }
@@ -42,20 +42,6 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	}
 	if string(clawhub.files["clawhub/output.schema.json"]) == "" {
 		t.Fatal("missing clawhub embedded output schema")
-	}
-
-	skillsSH, ok := registry.Profile("skills-sh")
-	if !ok {
-		t.Fatal("missing skills-sh profile")
-	}
-	if got := strings.Join(skillsSH.profile.Scanners, ","); got != "socket,snyk" {
-		t.Fatalf("skills-sh scanners = %q", got)
-	}
-	if skillsSH.configDir != "skills-sh" {
-		t.Fatalf("skills-sh config dir = %q", skillsSH.configDir)
-	}
-	if skillsSH.source != "built-in" {
-		t.Fatalf("skills-sh source = %q", skillsSH.source)
 	}
 }
 
@@ -88,7 +74,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,local,skills-sh" {
+	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,local" {
 		t.Fatalf("profile ids = %q", got)
 	}
 
@@ -103,11 +89,4 @@ profiles:
 		t.Fatalf("clawhub source = %q", clawhub.Source)
 	}
 
-	skillsSH, ok := catalog.Profile("skills-sh")
-	if !ok {
-		t.Fatal("missing skills-sh profile")
-	}
-	if skillsSH.Source != "built-in" {
-		t.Fatalf("skills-sh source = %q", skillsSH.Source)
-	}
 }

@@ -21,7 +21,6 @@ clawscan profiles -v
 | Profile | Scanners | Judge |
 | --- | --- | --- |
 | `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
-| `skills-sh` | `socket`, `snyk` (Gen Agent Trust Hub also runs on skills.sh but does not offer a CLI) | none |
 
 ## Build a custom profile with `.clawscan.yml`
 

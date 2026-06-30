@@ -91,7 +91,7 @@ func TestResolveArgsTreatsScannerOnlyCommandAsAdHocWithoutDefaultJudge(t *testin
 func TestResolveArgsAllowsExplicitProfileWithoutTarget(t *testing.T) {
 	dir := t.TempDir()
 
-	opts, err := ResolveArgs([]string{"--profile", "skills-sh"}, dir)
+	opts, err := ResolveArgs([]string{"--profile", "clawhub"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,25 +99,22 @@ func TestResolveArgsAllowsExplicitProfileWithoutTarget(t *testing.T) {
 	if opts.Target != "" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "socket,snyk" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,virustotal,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
 
 func TestResolveArgsValidatesBuiltInProfileScannerEnv(t *testing.T) {
-	opts, err := ResolveArgs([]string{"./skill", "--profile", "skills-sh"}, t.TempDir())
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = runner.ValidateRequirements(opts, map[string]string{"SOCKET_CLI_API_TOKEN": "", "SNYK_TOKEN": ""})
+	err = runner.ValidateRequirements(opts, map[string]string{"VIRUSTOTAL_API_KEY": ""})
 	if err == nil {
 		t.Fatal("expected missing env error")
 	}
-	if !strings.Contains(err.Error(), "- SOCKET_CLI_API_TOKEN required by scanner socket") {
-		t.Fatalf("err = %v", err)
-	}
-	if !strings.Contains(err.Error(), "- SNYK_TOKEN required by scanner snyk") {
+	if !strings.Contains(err.Error(), "- VIRUSTOTAL_API_KEY required by scanner virustotal") {
 		t.Fatalf("err = %v", err)
 	}
 	if strings.Contains(err.Error(), "secret") {
@@ -372,7 +369,7 @@ func TestResolveArgsUnknownProfileListsAvailableProfiles(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Unknown profile: missing") {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(err.Error(), "available: clawhub, skills-sh") {
+	if !strings.Contains(err.Error(), "available: clawhub") {
 		t.Fatalf("err = %v", err)
 	}
 }

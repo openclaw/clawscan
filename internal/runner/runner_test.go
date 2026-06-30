@@ -79,11 +79,11 @@ func TestParseArgsLeavesArtifactProfileLabelEmptyWithoutProfile(t *testing.T) {
 }
 
 func TestParseArgsAcceptsProfileLabelWithExplicitScanners(t *testing.T) {
-	opts, err := ParseArgs([]string{"--profile", "skills-sh", "--scanner", "clawscan-static"})
+	opts, err := ParseArgs([]string{"--profile", "review", "--scanner", "clawscan-static"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Profile != "skills-sh" {
+	if opts.Profile != "review" {
 		t.Fatalf("profile = %q", opts.Profile)
 	}
 	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
@@ -92,7 +92,7 @@ func TestParseArgsAcceptsProfileLabelWithExplicitScanners(t *testing.T) {
 }
 
 func TestParseArgsDoesNotExpandProfileScanners(t *testing.T) {
-	_, err := ParseArgs([]string{"--profile", "skills-sh"})
+	_, err := ParseArgs([]string{"--profile", "review"})
 	if err == nil || err.Error() != "At least one --scanner is required" {
 		t.Fatalf("err = %v", err)
 	}
@@ -1016,7 +1016,7 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 	t.Chdir(dir)
 
 	opts, err := ParseArgs([]string{
-		"--profile", "skills-sh",
+		"--profile", "review",
 		"--scanner", "socket",
 		"--scanner-result", "socket=" + socketFixture,
 		"--scanner", "snyk",
@@ -1029,7 +1029,7 @@ func TestRunTargetsUsesSelectedProfileWithDiscoveredSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Batch == nil || result.Batch.Profile != "skills-sh" {
+	if result.Batch == nil || result.Batch.Profile != "review" {
 		t.Fatalf("batch = %#v", result.Batch)
 	}
 	for _, run := range result.Batch.Runs {

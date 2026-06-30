@@ -16,12 +16,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/output.schema.json skills-sh/clawscan.yml
+//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/output.schema.json
 var builtinFiles embed.FS
 
 var builtinProfileConfigPaths = []string{
 	"clawhub/clawscan.yml",
-	"skills-sh/clawscan.yml",
 }
 
 type Config struct {

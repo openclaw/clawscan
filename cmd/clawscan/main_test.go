@@ -27,7 +27,6 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"clawscan <target> --scanner <scanner-id> [flags]",
 		"clawscan --scanner <scanner-id> [flags]",
 		"clawscan --profile clawhub [flags]",
-		"clawscan --profile skills-sh [flags]",
 		"--scanner <id>",
 		"Install scanner dependencies without running scans.",
 		"--profile <name>",
@@ -152,6 +151,7 @@ func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 
 func TestRunCommandProfilesPrintsMergedDiscoveredProfiles(t *testing.T) {
 	dir := t.TempDir()
+	removedProfile := "skills" + "-sh"
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
 profiles:
   clawhub:
@@ -180,18 +180,19 @@ profiles:
 		"clawscan-static",
 		"local-review",
 		"snyk",
-		"skills-sh",
-		"built-in",
-		"socket, snyk",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("profiles output missing %q:\n%s", want, stdout)
 		}
 	}
+	if strings.Contains(stdout, removedProfile) {
+		t.Fatalf("profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
+	}
 }
 
 func TestRunCommandProfilesVerbosePrintsResolvedYAML(t *testing.T) {
 	dir := t.TempDir()
+	removedProfile := "skills" + "-sh"
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
 profiles:
   local-review:
@@ -211,7 +212,6 @@ profiles:
 		"version: 1",
 		"profiles:",
 		"clawhub:",
-		"skills-sh:",
 		"local-review:",
 		"- clawscan-static",
 		"json: true",
@@ -219,6 +219,9 @@ profiles:
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("verbose profiles output missing %q:\n%s", want, stdout)
 		}
+	}
+	if strings.Contains(stdout, removedProfile+":") {
+		t.Fatalf("verbose profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
 	}
 }
 
@@ -671,7 +674,7 @@ func TestRunCommandProfilePlusOverride(t *testing.T) {
 	writeSkill(t, target, "# Override\n")
 
 	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--profile", "skills-sh", "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
+		if err := run([]string{target, "--profile", "clawhub", "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -683,7 +686,7 @@ func TestRunCommandProfilePlusOverride(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Profile != "skills-sh" {
+	if artifact.Profile != "clawhub" {
 		t.Fatalf("profile = %q", artifact.Profile)
 	}
 	if len(artifact.Scanners) != 1 {

@@ -560,7 +560,6 @@ Usage:
   clawscan <target> --scanner <scanner-id> [flags]
   clawscan --scanner <scanner-id> [flags]
   clawscan --profile clawhub [flags]
-  clawscan --profile skills-sh [flags]
   clawscan --version
   clawscan --help
 
