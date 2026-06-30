@@ -17,7 +17,7 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
-    directory: /
+    directory: /npm/clawscan
     schedule:
       interval: daily
     cooldown:
