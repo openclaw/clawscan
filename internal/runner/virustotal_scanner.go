@@ -1,22 +1,67 @@
 package runner
 
 import (
+	"archive/zip"
+	"bytes"
+	"compress/flate"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
 
-const virusTotalFileReportEndpoint = "https://www.virustotal.com/api/v3/files/"
+const (
+	virusTotalFilesEndpoint     = "https://www.virustotal.com/api/v3/files"
+	virusTotalUploadURLEndpoint = "https://www.virustotal.com/api/v3/files/upload_url"
+	virusTotalDirectUploadLimit = 32 * 1024 * 1024
+)
+
+var virusTotalFixedZipDate = time.Date(1980, 1, 1, 0, 0, 0, 0, time.Local)
 
 type VirusTotalHTTPClient interface {
 	Do(request *http.Request) (*http.Response, error)
+}
+
+type virusTotalScanArtifact struct {
+	Bytes  []byte
+	SHA256 string
+	Kind   string
+}
+
+type virusTotalNormalizedAnalysis struct {
+	Status      string                `json:"status"`
+	Source      string                `json:"source,omitempty"`
+	EngineStats *virusTotalStats      `json:"engineStats,omitempty"`
+	CheckedAt   int64                 `json:"checkedAt"`
+	SHA256      string                `json:"sha256hash"`
+	Upload      *virusTotalUploadInfo `json:"upload,omitempty"`
+}
+
+type virusTotalUploadInfo struct {
+	Status string          `json:"status"`
+	Raw    json.RawMessage `json:"raw,omitempty"`
+}
+
+type virusTotalFileResponse struct {
+	Data struct {
+		Attributes struct {
+			LastAnalysisStats *virusTotalStats `json:"last_analysis_stats"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
+type virusTotalStats struct {
+	Malicious  int `json:"malicious"`
+	Suspicious int `json:"suspicious"`
+	Undetected int `json:"undetected"`
+	Harmless   int `json:"harmless"`
 }
 
 func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt string) (ScannerResult, error) {
@@ -30,46 +75,15 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			StartedAt:   startedAt,
 			CompletedAt: completedAt(),
 			Command:     command,
-			Error:       "VirusTotal scanner supports single-file local targets in v1; URL targets are unsupported.",
+			Error:       "VirusTotal scanner supports local file or directory targets in v1; URL targets are unsupported.",
 			Raw:         nil,
 		}, nil
 	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt(),
-			Command:     command,
-			Error:       fmt.Sprintf("stat target: %v", err),
-			Raw:         nil,
-		}, nil
-	}
-	if info.IsDir() {
-		return ScannerResult{
-			Status:      "skipped",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt(),
-			Command:     command,
-			Error:       "VirusTotal scanner supports single-file targets in v1; directory targets are unsupported.",
-			Raw:         nil,
-		}, nil
-	}
-	if !info.Mode().IsRegular() {
-		return ScannerResult{
-			Status:      "skipped",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt(),
-			Command:     command,
-			Error:       "VirusTotal scanner supports single-file targets in v1; non-regular files are unsupported.",
-			Raw:         nil,
-		}, nil
-	}
-	digest, err := fileSHA256Hex(target)
+	artifact, err := virusTotalArtifact(target)
 	if err != nil {
 		return ScannerResult{}, err
 	}
-	command = append(command, "sha256:"+digest)
+	command = append(command, artifact.Kind, "sha256:"+artifact.SHA256)
 	apiKey := strings.TrimSpace(runner.Env["VIRUSTOTAL_API_KEY"])
 	timeout := runner.Timeout
 	if timeout == 0 {
@@ -77,17 +91,11 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, virusTotalFileReportEndpoint+digest, nil)
-	if err != nil {
-		return ScannerResult{}, err
-	}
-	request.Header.Set("x-apikey", apiKey)
-	request.Header.Set("accept", "application/json")
 	client := runner.VirusTotalHTTPClient
 	if client == nil {
 		client = http.DefaultClient
 	}
-	response, err := client.Do(request)
+	raw, statusCode, err := virusTotalFileReport(ctx, client, apiKey, artifact.SHA256)
 	if err != nil {
 		return ScannerResult{
 			Status:      "failed",
@@ -98,24 +106,16 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			Raw:         nil,
 		}, nil
 	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return ScannerResult{}, err
-	}
-	raw := json.RawMessage(nil)
-	if json.Valid(body) {
-		raw = json.RawMessage(body)
-	}
 	switch {
-	case response.StatusCode >= 200 && response.StatusCode <= 299:
-		if raw == nil {
+	case statusCode >= 200 && statusCode <= 299:
+		analysis, err := normalizeVirusTotalFileReport(raw, artifact.SHA256, time.Now)
+		if err != nil {
 			return ScannerResult{
 				Status:      "failed",
 				StartedAt:   startedAt,
 				CompletedAt: completedAt(),
 				Command:     command,
-				Error:       "VirusTotal API returned non-JSON response.",
+				Error:       err.Error(),
 				Raw:         nil,
 			}, nil
 		}
@@ -125,21 +125,45 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			CompletedAt: completedAt(),
 			Command:     command,
 			Error:       "",
-			Raw:         raw,
+			Raw:         analysis,
 		}, nil
-	case response.StatusCode == http.StatusNotFound:
+	case statusCode == http.StatusNotFound:
+		uploadRaw, uploadErr := uploadVirusTotalArtifact(ctx, client, apiKey, artifact)
+		if uploadErr != nil {
+			return ScannerResult{
+				Status:      "failed",
+				StartedAt:   startedAt,
+				CompletedAt: completedAt(),
+				Command:     append(command, "upload"),
+				Error:       uploadErr.Error(),
+				Raw:         raw,
+			}, nil
+		}
+		analysis, err := json.Marshal(virusTotalNormalizedAnalysis{
+			Status:    "pending",
+			CheckedAt: time.Now().UnixMilli(),
+			SHA256:    artifact.SHA256,
+			Upload: &virusTotalUploadInfo{
+				Status: "submitted",
+				Raw:    uploadRaw,
+			},
+		})
+		if err != nil {
+			return ScannerResult{}, err
+		}
 		return ScannerResult{
-			Status:      "skipped",
+			Status:      "completed",
 			StartedAt:   startedAt,
 			CompletedAt: completedAt(),
-			Command:     command,
-			Error:       "VirusTotal has no file report for the target SHA-256 hash.",
-			Raw:         raw,
+			Command:     append(command, "upload"),
+			Error:       "",
+			Raw:         json.RawMessage(analysis),
 		}, nil
 	default:
-		errorMessage := fmt.Sprintf("VirusTotal API returned HTTP %d.", response.StatusCode)
-		if raw == nil {
-			errorMessage = fmt.Sprintf("VirusTotal API returned HTTP %d with non-JSON response.", response.StatusCode)
+		errorMessage := fmt.Sprintf("VirusTotal API returned HTTP %d.", statusCode)
+		if !json.Valid(raw) {
+			errorMessage = fmt.Sprintf("VirusTotal API returned HTTP %d with non-JSON response.", statusCode)
+			raw = nil
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -147,20 +171,267 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			CompletedAt: completedAt(),
 			Command:     command,
 			Error:       errorMessage,
-			Raw:         raw,
+			Raw:         json.RawMessage(raw),
 		}, nil
 	}
 }
 
+func virusTotalArtifact(target string) (virusTotalScanArtifact, error) {
+	info, err := os.Stat(target)
+	if err != nil {
+		return virusTotalScanArtifact{}, fmt.Errorf("stat target: %v", err)
+	}
+	if info.IsDir() {
+		bytes, err := buildVirusTotalSkillZip(target)
+		if err != nil {
+			return virusTotalScanArtifact{}, err
+		}
+		return virusTotalScanArtifact{Bytes: bytes, SHA256: sha256BytesHex(bytes), Kind: "skill-zip"}, nil
+	}
+	if !info.Mode().IsRegular() {
+		return virusTotalScanArtifact{}, fmt.Errorf("VirusTotal scanner supports local file or directory targets in v1; non-regular files are unsupported")
+	}
+	bytes, err := os.ReadFile(target)
+	if err != nil {
+		return virusTotalScanArtifact{}, err
+	}
+	return virusTotalScanArtifact{Bytes: bytes, SHA256: sha256BytesHex(bytes), Kind: "file"}, nil
+}
+
+func virusTotalFileReport(ctx context.Context, client VirusTotalHTTPClient, apiKey string, sha string) (json.RawMessage, int, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, virusTotalFilesEndpoint+"/"+sha, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	request.Header.Set("x-apikey", apiKey)
+	request.Header.Set("accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, 0, err
+	}
+	raw := json.RawMessage(nil)
+	if json.Valid(body) {
+		raw = json.RawMessage(body)
+	}
+	return raw, response.StatusCode, nil
+}
+
+func normalizeVirusTotalFileReport(raw json.RawMessage, sha string, now func() time.Time) (json.RawMessage, error) {
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("VirusTotal API returned non-JSON response.")
+	}
+	var parsed virusTotalFileResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, err
+	}
+	stats := parsed.Data.Attributes.LastAnalysisStats
+	status := statusFromVirusTotalStats(stats)
+	if status == "" {
+		status = "pending"
+	}
+	out, err := json.Marshal(virusTotalNormalizedAnalysis{
+		Status:      status,
+		Source:      "engines",
+		EngineStats: stats,
+		CheckedAt:   now().UnixMilli(),
+		SHA256:      sha,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(out), nil
+}
+
+func statusFromVirusTotalStats(stats *virusTotalStats) string {
+	if stats == nil {
+		return ""
+	}
+	if stats.Malicious > 0 {
+		return "malicious"
+	}
+	if stats.Suspicious > 0 {
+		return "suspicious"
+	}
+	if stats.Harmless > 0 || stats.Undetected > 0 {
+		return "clean"
+	}
+	return ""
+}
+
+func uploadVirusTotalArtifact(ctx context.Context, client VirusTotalHTTPClient, apiKey string, artifact virusTotalScanArtifact) (json.RawMessage, error) {
+	uploadURL := virusTotalFilesEndpoint
+	if len(artifact.Bytes) > virusTotalDirectUploadLimit {
+		raw, statusCode, err := virusTotalUploadURL(ctx, client, apiKey)
+		if err != nil {
+			return nil, err
+		}
+		if statusCode < 200 || statusCode > 299 {
+			return raw, fmt.Errorf("VirusTotal upload URL returned HTTP %d", statusCode)
+		}
+		var parsed struct {
+			Data string `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return raw, err
+		}
+		if strings.TrimSpace(parsed.Data) == "" {
+			return raw, fmt.Errorf("VirusTotal upload URL response did not include a usable URL")
+		}
+		uploadURL = parsed.Data
+	}
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "skill.zip")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := part.Write(artifact.Bytes); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("x-apikey", apiKey)
+	request.Header.Set("accept", "application/json")
+	request.Header.Set("content-type", writer.FormDataContentType())
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("VirusTotal upload request failed: %w", err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return json.RawMessage(raw), fmt.Errorf("VirusTotal upload returned HTTP %d", response.StatusCode)
+	}
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("VirusTotal upload returned non-JSON response")
+	}
+	return json.RawMessage(raw), nil
+}
+
+func virusTotalUploadURL(ctx context.Context, client VirusTotalHTTPClient, apiKey string) (json.RawMessage, int, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, virusTotalUploadURLEndpoint, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	request.Header.Set("x-apikey", apiKey)
+	request.Header.Set("accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, 0, err
+	}
+	return json.RawMessage(raw), response.StatusCode, nil
+}
+
+func buildVirusTotalSkillZip(root string) ([]byte, error) {
+	var files []string
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "node_modules", "clawscan-results":
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if entry.Type()&os.ModeType != 0 {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "" || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../") {
+			return fmt.Errorf("unsafe target path for VirusTotal ZIP: %s", path)
+		}
+		files = append(files, rel)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("VirusTotal scanner found no regular files to scan")
+	}
+	sort.Strings(files)
+	buffer := &bytes.Buffer{}
+	writer := zip.NewWriter(buffer)
+	writer.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
+		return newFlateWriter(w)
+	})
+	for _, rel := range files {
+		fullPath := filepath.Join(root, filepath.FromSlash(rel))
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeZipFile(writer, rel, content); err != nil {
+			return nil, err
+		}
+	}
+	meta, err := virusTotalSkillMeta(root)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeZipFile(writer, "_meta.json", meta); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+func writeZipFile(writer *zip.Writer, name string, content []byte) error {
+	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+	header.SetModTime(virusTotalFixedZipDate)
+	file, err := writer.CreateHeader(header)
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(content)
+	return err
+}
+
+func newFlateWriter(w io.Writer) (io.WriteCloser, error) {
+	return flate.NewWriter(w, 6)
+}
+
+func virusTotalSkillMeta(root string) ([]byte, error) {
+	meta := map[string]interface{}{
+		"ownerId":     "clawscan",
+		"slug":        filepath.Base(root),
+		"version":     "0.0.0",
+		"publishedAt": float64(0),
+	}
+	return json.MarshalIndent(meta, "", "  ")
+}
+
 func fileSHA256Hex(path string) (string, error) {
-	file, err := os.Open(path)
+	bytes, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return sha256BytesHex(bytes), nil
 }

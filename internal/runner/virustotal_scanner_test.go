@@ -44,8 +44,12 @@ func TestRunExecutesVirusTotalScannerForSingleFile(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
 	}
-	if !bytes.Equal(result.Raw, []byte(vtJSON)) {
-		t.Fatalf("raw = %s", result.Raw)
+	var analysis virusTotalNormalizedAnalysis
+	if err := json.Unmarshal(result.Raw, &analysis); err != nil {
+		t.Fatal(err)
+	}
+	if analysis.Status != "clean" || analysis.SHA256 != expectedSHA || analysis.EngineStats == nil || analysis.EngineStats.Undetected != 72 {
+		t.Fatalf("analysis = %#v raw = %s", analysis, result.Raw)
 	}
 	if len(client.requests) != 1 {
 		t.Fatalf("requests = %#v", client.requests)
@@ -60,6 +64,9 @@ func TestRunExecutesVirusTotalScannerForSingleFile(t *testing.T) {
 	if !containsArg(result.Command, "sha256:"+expectedSHA) {
 		t.Fatalf("command = %#v", result.Command)
 	}
+	if !containsArg(result.Command, "file") {
+		t.Fatalf("command = %#v", result.Command)
+	}
 	rawArtifact, err := marshalVirusTotalTestArtifact(artifact)
 	if err != nil {
 		t.Fatal(err)
@@ -69,13 +76,33 @@ func TestRunExecutesVirusTotalScannerForSingleFile(t *testing.T) {
 	}
 }
 
-func TestVirusTotalScannerSkipsDirectoryTargets(t *testing.T) {
+func TestVirusTotalScannerScansDirectoryTargetsAsSkillZip(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	client := &recordingHTTPClient{err: errUnexpectedHTTPRequest}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(target, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "scripts", "check.sh"), []byte("echo ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zipBytes, err := buildVirusTotalSkillZip(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSHA := sha256BytesHex(zipBytes)
+	vtJSON := `{"data":{"id":"` + expectedSHA + `","type":"file","attributes":{"last_analysis_stats":{"malicious":1,"suspicious":0,"harmless":3,"undetected":70}}}}`
+	client := &recordingHTTPClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(vtJSON)),
+		},
+	}
 	opts, err := ParseArgs([]string{target, "--scanner", "virustotal"})
 	if err != nil {
 		t.Fatal(err)
@@ -88,17 +115,24 @@ func TestVirusTotalScannerSkipsDirectoryTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := artifact.Scanners["virustotal"]
-	if result.Status != "skipped" {
+	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Error, "single-file targets") {
-		t.Fatalf("error = %q", result.Error)
+	var analysis virusTotalNormalizedAnalysis
+	if err := json.Unmarshal(result.Raw, &analysis); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(result.Error, "foundation slice") {
-		t.Fatalf("generic foundation skip leaked through: %q", result.Error)
+	if analysis.Status != "malicious" || analysis.SHA256 != expectedSHA || analysis.EngineStats == nil || analysis.EngineStats.Malicious != 1 {
+		t.Fatalf("analysis = %#v raw = %s", analysis, result.Raw)
 	}
-	if len(client.requests) != 0 {
-		t.Fatalf("unexpected HTTP requests: %#v", client.requests)
+	if len(client.requests) != 1 {
+		t.Fatalf("requests = %#v", client.requests)
+	}
+	if !strings.HasSuffix(client.requests[0].URL.Path, "/api/v3/files/"+expectedSHA) {
+		t.Fatalf("path = %s", client.requests[0].URL.Path)
+	}
+	if !containsArg(result.Command, "skill-zip") || !containsArg(result.Command, "sha256:"+expectedSHA) {
+		t.Fatalf("command = %#v", result.Command)
 	}
 }
 
@@ -128,17 +162,22 @@ func TestVirusTotalScannerSkipsURLTargets(t *testing.T) {
 	}
 }
 
-func TestVirusTotalScannerSkipsMissingReportsAndPreservesJSON(t *testing.T) {
+func TestVirusTotalScannerUploadsMissingReports(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "SKILL.md")
 	if err := os.WriteFile(target, []byte("# Demo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const vtJSON = `{"error":{"code":"NotFoundError","message":"File not found"}}`
 	client := &recordingHTTPClient{
-		response: &http.Response{
-			StatusCode: http.StatusNotFound,
-			Body:       io.NopCloser(strings.NewReader(vtJSON)),
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"NotFoundError","message":"File not found"}}`)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"id":"analysis-id","type":"analysis"}}`)),
+			},
 		},
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "virustotal"})
@@ -153,14 +192,27 @@ func TestVirusTotalScannerSkipsMissingReportsAndPreservesJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := artifact.Scanners["virustotal"]
-	if result.Status != "skipped" {
+	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Error, "no file report") {
-		t.Fatalf("error = %q", result.Error)
+	var analysis virusTotalNormalizedAnalysis
+	if err := json.Unmarshal(result.Raw, &analysis); err != nil {
+		t.Fatal(err)
 	}
-	if !bytes.Equal(result.Raw, []byte(vtJSON)) {
-		t.Fatalf("raw = %s", result.Raw)
+	if analysis.Status != "pending" || analysis.Upload == nil || analysis.Upload.Status != "submitted" {
+		t.Fatalf("analysis = %#v raw = %s", analysis, result.Raw)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("requests = %#v", client.requests)
+	}
+	if client.requests[0].Method != http.MethodGet || client.requests[1].Method != http.MethodPost {
+		t.Fatalf("methods = %s %s", client.requests[0].Method, client.requests[1].Method)
+	}
+	if client.requests[1].URL.String() != virusTotalFilesEndpoint {
+		t.Fatalf("upload url = %s", client.requests[1].URL.String())
+	}
+	if !containsArg(result.Command, "upload") {
+		t.Fatalf("command = %#v", result.Command)
 	}
 }
 
@@ -201,15 +253,26 @@ func TestVirusTotalScannerFailsAPIErrorsAndPreservesJSON(t *testing.T) {
 }
 
 type recordingHTTPClient struct {
-	requests []*http.Request
-	response *http.Response
-	err      error
+	requests  []*http.Request
+	response  *http.Response
+	responses []*http.Response
+	err       error
 }
 
 func (client *recordingHTTPClient) Do(request *http.Request) (*http.Response, error) {
+	index := len(client.requests)
 	client.requests = append(client.requests, request)
 	if client.err != nil {
 		return nil, client.err
+	}
+	if len(client.responses) > 0 {
+		if index >= len(client.responses) {
+			return nil, errUnexpectedHTTPRequest
+		}
+		return client.responses[index], nil
+	}
+	if client.response == nil {
+		return nil, errUnexpectedHTTPRequest
 	}
 	return client.response, nil
 }

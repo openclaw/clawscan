@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -220,11 +219,7 @@ func (openClawBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[st
 	if err != nil {
 		return BenchmarkCase{}, err
 	}
-	caseOpts, err := openClawBenchmarkCaseOptions(opts, dir, row)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	run, err := runBenchmarkTarget(caseOpts, ctx, env, now, target)
+	run, err := runBenchmarkTarget(opts, ctx, env, now, target)
 	if err != nil {
 		return BenchmarkCase{}, err
 	}
@@ -243,30 +238,6 @@ func (openClawBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[st
 	}, nil
 }
 
-func openClawBenchmarkCaseOptions(opts Options, dir string, row OpenClawBenchmarkRow) (Options, error) {
-	caseOpts := opts
-	caseOpts.ScannerResultPaths = map[string]string{}
-	for scanner, path := range opts.ScannerResultPaths {
-		caseOpts.ScannerResultPaths[scanner] = path
-	}
-	if !scannerRequested(caseOpts, "virustotal") || caseOpts.ScannerResultPaths["virustotal"] != "" {
-		return caseOpts, nil
-	}
-	raw, ok, err := openClawRecordedVirusTotal(row)
-	if err != nil {
-		return Options{}, err
-	}
-	if !ok {
-		return caseOpts, nil
-	}
-	path := filepath.Join(dir, "virustotal.json")
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		return Options{}, err
-	}
-	caseOpts.ScannerResultPaths["virustotal"] = path
-	return caseOpts, nil
-}
-
 func scannerRequested(opts Options, scanner string) bool {
 	for _, requested := range opts.Scanners {
 		if requested == scanner {
@@ -274,47 +245,6 @@ func scannerRequested(opts Options, scanner string) bool {
 		}
 	}
 	return false
-}
-
-func openClawRecordedVirusTotal(row OpenClawBenchmarkRow) (json.RawMessage, bool, error) {
-	if raw, ok, err := openClawContextScanner(row.ClawScanContext, "virustotal"); err != nil || ok {
-		return raw, ok, err
-	}
-	if strings.TrimSpace(row.VirusTotalStatus) == "" &&
-		row.VirusTotalMaliciousCount == 0 &&
-		row.VirusTotalSuspiciousCount == 0 &&
-		row.VirusTotalHarmlessCount == 0 &&
-		row.VirusTotalUndetectedCount == 0 {
-		return json.RawMessage("null"), true, nil
-	}
-	raw, err := json.Marshal(map[string]interface{}{
-		"status": row.VirusTotalStatus,
-		"engine_stats": map[string]int{
-			"harmless":   row.VirusTotalHarmlessCount,
-			"malicious":  row.VirusTotalMaliciousCount,
-			"suspicious": row.VirusTotalSuspiciousCount,
-			"undetected": row.VirusTotalUndetectedCount,
-		},
-	})
-	if err != nil {
-		return nil, false, err
-	}
-	return json.RawMessage(raw), true, nil
-}
-
-func openClawContextScanner(context json.RawMessage, scanner string) (json.RawMessage, bool, error) {
-	if len(context) == 0 || string(context) == "null" {
-		return nil, false, nil
-	}
-	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(context, &decoded); err != nil {
-		return nil, false, fmt.Errorf("parse clawscan_context: %w", err)
-	}
-	raw := decoded[scanner]
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil, false, nil
-	}
-	return raw, true, nil
 }
 
 type skillTrustBenchBenchmarkAdapter struct{}

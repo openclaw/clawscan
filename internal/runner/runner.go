@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/openclaw/clawscan/internal/clawhubprompt"
 )
 
 type Options struct {
@@ -1260,7 +1262,7 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 	if err != nil {
 		return "", err
 	}
-	prompt, err := RenderPromptTemplate(string(promptTemplate), artifact)
+	prompt, err := renderJudgePromptSource(source, string(promptTemplate), artifact)
 	if err != nil {
 		return "", err
 	}
@@ -1272,6 +1274,115 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 	state.promptPath = path
 	state.promptSHA = sha256Hex(prompt)
 	return path, nil
+}
+
+func renderJudgePromptSource(source string, template string, artifact Artifact) (string, error) {
+	if artifact.Profile == "clawhub" && judgeSourceKey(source) == "clawhub/prompt.md" {
+		return RenderClawHubPrompt(template, artifact)
+	}
+	return RenderPromptTemplate(template, artifact)
+}
+
+func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, error) {
+	systemPrompt := clawHubSystemPrompt(systemPromptSource)
+	return clawhubprompt.Build(systemPrompt, clawHubPromptJob(artifact), clawHubInjectionSignals(artifact), scannerRawOrNil(artifact, "skillspector"))
+}
+
+func clawHubSystemPrompt(source string) string {
+	marker := "\n\nAdditional ClawHub policy for this Codex run:"
+	if before, _, ok := strings.Cut(source, marker); ok {
+		return before
+	}
+	return source
+}
+
+func clawHubPromptJob(artifact Artifact) clawhubprompt.Job {
+	return clawhubprompt.Job{
+		Job: clawhubprompt.JobMetadata{
+			TargetKind:         "skillVersion",
+			Source:             "publish",
+			HasMaliciousSignal: clawHubHasNonVTMaliciousSignal(artifact),
+		},
+		Target: clawhubprompt.Target{
+			TrustedOpenClawPlugin: false,
+			Version: &clawhubprompt.Version{
+				VTAnalysis:           clawHubVirusTotalAnalysis(artifact),
+				SkillSpectorAnalysis: scannerRawOrNil(artifact, "skillspector"),
+			},
+		},
+	}
+}
+
+func clawHubVirusTotalAnalysis(artifact Artifact) any {
+	raw := scannerRawOrNil(artifact, "virustotal")
+	if raw == nil {
+		return nil
+	}
+	var analysis struct {
+		Status      string           `json:"status"`
+		Source      string           `json:"source,omitempty"`
+		EngineStats *virusTotalStats `json:"engineStats,omitempty"`
+		CheckedAt   int64            `json:"checkedAt,omitempty"`
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return raw
+	}
+	if err := json.Unmarshal(bytes, &analysis); err != nil {
+		return raw
+	}
+	if analysis.Status == "pending" || analysis.Status == "" {
+		return nil
+	}
+	return analysis
+}
+
+func scannerRawOrNil(artifact Artifact, scanner string) any {
+	result, ok := artifact.Scanners[scanner]
+	if !ok || len(result.Raw) == 0 {
+		return nil
+	}
+	return json.RawMessage(result.Raw)
+}
+
+func clawHubHasNonVTMaliciousSignal(artifact Artifact) bool {
+	staticResult, ok := artifact.Scanners["clawscan-static"]
+	if !ok || len(staticResult.Raw) == 0 {
+		return false
+	}
+	var report staticScannerReport
+	if err := json.Unmarshal(staticResult.Raw, &report); err != nil {
+		return false
+	}
+	for _, finding := range report.Findings {
+		if strings.EqualFold(finding.Severity, "high") {
+			return true
+		}
+	}
+	return false
+}
+
+func clawHubInjectionSignals(artifact Artifact) []string {
+	staticResult, ok := artifact.Scanners["clawscan-static"]
+	if !ok || len(staticResult.Raw) == 0 {
+		return nil
+	}
+	var report staticScannerReport
+	if err := json.Unmarshal(staticResult.Raw, &report); err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var signals []string
+	for _, finding := range report.Findings {
+		if finding.ID != "static.prompt_injection" {
+			continue
+		}
+		if !seen["html-comment-injection"] {
+			seen["html-comment-injection"] = true
+			signals = append(signals, "html-comment-injection")
+		}
+	}
+	return signals
 }
 
 func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, error) {
@@ -1938,9 +2049,6 @@ func isSecretEnvKey(key string) bool {
 func requirements(opts Options, env map[string]string) []EnvRequirement {
 	var reqs []EnvRequirement
 	for _, scanner := range opts.Scanners {
-		if opts.Benchmark != nil && opts.Benchmark.ID == openClawBenchmarkID && scanner == "virustotal" {
-			continue
-		}
 		if opts.ScannerResultPaths[scanner] != "" {
 			continue
 		}

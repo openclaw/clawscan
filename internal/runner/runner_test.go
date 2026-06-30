@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -304,26 +305,29 @@ func TestRunOpenClawBenchmarkMaterializesRowsAndRunsScanners(t *testing.T) {
 	}
 }
 
-func TestRunOpenClawBenchmarkReplaysRecordedVirusTotalEvidence(t *testing.T) {
+func TestRunOpenClawBenchmarkRunsVirusTotalAgainstMaterializedSkillZip(t *testing.T) {
 	opts := benchmarkTestOptions(t, "clawhub-security-signals", "eval_holdout", 0, 0, "")
 	opts.Scanners = []string{"virustotal"}
+	client := &recordingHTTPClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"data":{"type":"file","attributes":{"last_analysis_stats":{"malicious":0,"suspicious":0,"harmless":1,"undetected":64}}}}`)),
+		},
+	}
 	artifact, err := RunBenchmark(opts, RunContext{
-		Env: map[string]string{},
-		Now: fixedClock("2026-06-12T12:00:00Z", "2026-06-12T12:00:01Z", "2026-06-12T12:00:02Z"),
+		Env:                  map[string]string{"VIRUSTOTAL_API_KEY": "test-vt-secret"},
+		Now:                  fixedClock("2026-06-12T12:00:00Z", "2026-06-12T12:00:01Z", "2026-06-12T12:00:02Z"),
+		VirusTotalHTTPClient: client,
 		BenchmarkClient: staticBenchmarkClient{
 			rows: []OpenClawBenchmarkRow{
 				{
-					ID:             "row-1",
-					SkillSlug:      "owner/demo",
-					SkillVersion:   "1.2.3",
-					SkillMDContent: "# Demo\n",
-					ClawScanContext: json.RawMessage(`{
-						"virustotal": {
-							"status": "clean",
-							"verdict": "benign",
-							"engine_stats": {"harmless": 0, "malicious": 0, "suspicious": 0, "undetected": 64}
-						}
-					}`),
+					ID:                 "row-1",
+					SkillSlug:          "owner/demo",
+					SkillVersion:       "1.2.3",
+					SkillMDContent:     "# Demo\n",
+					VirusTotalStatus:   "malicious",
+					ClawScanContext:    json.RawMessage(`{"virustotal":{"status":"malicious"}}`),
+					SkillBundleContent: []OpenClawBundleFile{{Path: "scripts/check.sh", Content: "echo ok\n"}},
 				},
 			},
 		},
@@ -335,10 +339,16 @@ func TestRunOpenClawBenchmarkReplaysRecordedVirusTotalEvidence(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
 	}
-	if !strings.HasPrefix(strings.Join(result.Command, " "), "scanner-result virustotal=") {
+	if strings.HasPrefix(strings.Join(result.Command, " "), "scanner-result virustotal=") {
 		t.Fatalf("command = %#v", result.Command)
 	}
-	if !strings.Contains(string(result.Raw), `"undetected": 64`) {
+	if !containsArg(result.Command, "skill-zip") {
+		t.Fatalf("command = %#v", result.Command)
+	}
+	if len(client.requests) != 1 || !strings.Contains(client.requests[0].URL.Path, "/api/v3/files/") {
+		t.Fatalf("requests = %#v", client.requests)
+	}
+	if !strings.Contains(string(result.Raw), `"status":"clean"`) || !strings.Contains(string(result.Raw), `"undetected":64`) {
 		t.Fatalf("raw = %s", result.Raw)
 	}
 }
@@ -2608,7 +2618,7 @@ func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	promptTemplate := "ClawHub judge\n{{ scanners.skillspector }}"
+	promptTemplate := "ClawHub judge\n\nAdditional ClawHub policy for this Codex run:\nold generated block"
 	schema := `{"type":"object"}`
 	skillSpectorJSON := `{"status":"clean"}`
 	opts := Options{
@@ -2623,7 +2633,7 @@ func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
 			},
 		},
 	}
-	expectedPrompt, err := RenderPromptTemplate(promptTemplate, Artifact{
+	expectedPrompt, err := RenderClawHubPrompt(promptTemplate, Artifact{
 		Scanners: map[string]ScannerResult{
 			"skillspector": {Raw: json.RawMessage(skillSpectorJSON)},
 		},
@@ -2658,6 +2668,36 @@ func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
 	}
 	if artifact.Judge.OutputSchemaSHA != sha256Hex(schema) {
 		t.Fatalf("schema hash = %q, want %q", artifact.Judge.OutputSchemaSHA, sha256Hex(schema))
+	}
+}
+
+func TestRenderClawHubPromptUsesProductionScannerContextShape(t *testing.T) {
+	prompt, err := RenderClawHubPrompt("SYSTEM\n\nAdditional ClawHub policy for this Codex run:\nstale block", Artifact{
+		Scanners: map[string]ScannerResult{
+			"virustotal":      {Raw: json.RawMessage(`{"status":"malicious","source":"engines","engineStats":{"malicious":1,"suspicious":0,"harmless":2,"undetected":70},"checkedAt":123,"sha256hash":"abc123"}`)},
+			"skillspector":    {Raw: json.RawMessage(`{"status":"suspicious","score":55}`)},
+			"clawscan-static": {Raw: json.RawMessage(`{"schemaVersion":"clawscan-static-v1","findings":[{"id":"static.prompt_injection","severity":"medium"},{"id":"static.credential_exfiltration","severity":"high"}]}`)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"SYSTEM\n\nAdditional ClawHub policy for this Codex run:",
+		`"status": "malicious"`,
+		`"malicious": 1`,
+		`"status": "suspicious"`,
+		"- non-VT malicious signal present: yes",
+		"- pre-scan artifact injection signals: html-comment-injection",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{"stale block", "sha256hash", "abc123"} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt included %q:\n%s", forbidden, prompt)
+		}
 	}
 }
 
