@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -112,7 +113,7 @@ func run(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("update-skilltrustbench-baseline", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	artifactPath := flags.String("artifact", "", "benchmark artifact JSON path")
-	outputPath := flags.String("output", "benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json", "baseline JSON output path")
+	outputPath := flags.String("output", defaultBaselineOutputPath(time.Now().UTC()), "baseline JSON output path")
 	profile := flags.String("profile", "clawhub", "profile name")
 	profileSource := flags.String("profile-source", "", "profile config source path")
 	workflowURL := flags.String("workflow-url", "", "workflow run URL")
@@ -149,6 +150,14 @@ func run(args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote %s\n", opts.OutputPath)
 	return nil
+}
+
+func defaultBaselineOutputPath(now time.Time) string {
+	return filepath.ToSlash(filepath.Join(
+		"benchmarks",
+		"skilltrustbench-leaderboard-10pct",
+		now.Format("2006-01-02")+".json",
+	))
 }
 
 func buildBaseline(opts baselineOptions) (baseline, error) {

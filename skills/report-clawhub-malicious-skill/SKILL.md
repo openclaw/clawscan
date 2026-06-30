@@ -118,9 +118,10 @@ Separate private evidence from public contribution material:
 
    The proposal's `clawhub` profile shadows the built-in profile for that run.
    Maintainers review the private report, upload/preserve the benchmark
-   artifact, update
-   `benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json`, and
-   port accepted behavior into the bundled `clawhub` profile.
+   artifact, add a dated baseline under
+   `benchmarks/skilltrustbench-leaderboard-10pct/`, and port accepted behavior
+   into the bundled `clawhub` profile. The latest `YYYY-MM-DD.json` baseline is
+   the current accepted baseline.
 
 ## Output Shape
 

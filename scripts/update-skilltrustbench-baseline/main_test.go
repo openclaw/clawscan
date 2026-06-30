@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildBaselineUsesArtifactMetadataAndRegressionMetrics(t *testing.T) {
@@ -84,6 +85,14 @@ func TestBuildBaselineUsesArtifactMetadataAndRegressionMetrics(t *testing.T) {
 	}
 	if baseline.Metrics.FalseCleanCount != 1 {
 		t.Fatalf("false clean count = %#v", baseline.Metrics)
+	}
+}
+
+func TestDefaultBaselineOutputPathUsesUTCDateFilename(t *testing.T) {
+	got := defaultBaselineOutputPath(time.Date(2026, 6, 29, 23, 59, 0, 0, time.UTC))
+	want := "benchmarks/skilltrustbench-leaderboard-10pct/2026-06-29.json"
+	if got != want {
+		t.Fatalf("default output path = %q, want %q", got, want)
 	}
 }
 

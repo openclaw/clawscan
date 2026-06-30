@@ -26,6 +26,9 @@ jobs:
   validate-proposal:
     name: Validate proposal shape
     runs-on: ubuntu-latest
+    outputs:
+      baseline_date: ${{ steps.baseline.outputs.date }}
+      baseline_path: ${{ steps.baseline.outputs.path }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,12 +41,22 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: gh pr checkout "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
 
+      - name: Determine dated baseline path
+        id: baseline
+        run: |
+          set -euo pipefail
+          baseline_date="$(date -u +%F)"
+          baseline_path="benchmarks/skilltrustbench-leaderboard-10pct/${baseline_date}.json"
+          echo "date=$baseline_date" >>"$GITHUB_OUTPUT"
+          echo "path=$baseline_path" >>"$GITHUB_OUTPUT"
+
       - name: Validate proposal shape
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
           PROPOSAL_PATH: ${{ inputs.proposal_path }}
-          BASELINE_PATH: benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json
+          BASELINE_DATE: ${{ steps.baseline.outputs.date }}
+          BASELINE_PATH: ${{ steps.baseline.outputs.path }}
         run: |
           set -euo pipefail
           case "$PROPOSAL_PATH" in
@@ -59,14 +72,32 @@ jobs:
           git fetch --no-tags origin "$base_ref"
           unexpected="$(
             git diff --name-only "origin/$base_ref"...HEAD |
-              grep -Fxv "$PROPOSAL_PATH" |
-              grep -Fxv "$BASELINE_PATH" |
-              grep -Fxv "internal/profiles/clawhub/clawscan.yml" |
-              grep -Fxv "internal/profiles/clawhub/prompt.md" |
-              grep -Fxv "internal/profiles/clawhub/output.schema.json" || true
+              while IFS= read -r path; do
+                case "$path" in
+                  "$PROPOSAL_PATH" | \
+                  internal/profiles/clawhub/clawscan.yml | \
+                  internal/profiles/clawhub/prompt.md | \
+                  internal/profiles/clawhub/output.schema.json | \
+                  "$BASELINE_PATH")
+                    ;;
+                  benchmarks/skilltrustbench-leaderboard-10pct/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].json)
+                    baseline_file="${path##*/}"
+                    baseline_date="${baseline_file%.json}"
+                    if [[ "$baseline_date" > "$BASELINE_DATE" ]]; then
+                      printf '%s\n' "$path"
+                    fi
+                    ;;
+                  *)
+                    printf '%s\n' "$path"
+                    ;;
+                esac
+              done
           )"
           if [ -n "$unexpected" ]; then
-            echo "ClawHub profile proposal PRs should contain only the proposal, baseline, and maintainer-promoted bundled clawhub profile files." >&2
+            echo "ClawHub profile proposal PRs should contain only the proposal, non-future dated baselines, and maintainer-promoted bundled clawhub profile files." >&2
+            echo "Expected baseline path for this run: $BASELINE_PATH" >&2
+            echo "Stale dated baselines are removed by the update job before committing this run's baseline." >&2
+            echo "Future-dated baseline files are not allowed." >&2
             echo "$unexpected" >&2
             exit 1
           fi
@@ -88,8 +119,13 @@ jobs:
 
   update-baseline:
     name: Update accepted baseline summary
-    needs: run-benchmark
+    needs:
+      - validate-proposal
+      - run-benchmark
     runs-on: ubuntu-latest
+    env:
+      BASELINE_DATE: ${{ needs.validate-proposal.outputs.baseline_date }}
+      BASELINE_PATH: ${{ needs.validate-proposal.outputs.baseline_path }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -116,8 +152,9 @@ jobs:
 
       - name: Update baseline summary
         env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
           PROPOSAL_PATH: ${{ inputs.proposal_path }}
-          BASELINE_PATH: benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json
           WORKFLOW_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -130,6 +167,25 @@ jobs:
             find ./downloaded-artifact -type f >&2 || true
             exit 1
           fi
+
+          base_ref="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json baseRefName --jq .baseRefName)"
+          git fetch --no-tags origin "$base_ref"
+          git diff --name-only "origin/$base_ref"...HEAD -- 'benchmarks/skilltrustbench-leaderboard-10pct/*.json' |
+            while IFS= read -r path; do
+              if [ "$path" = "$BASELINE_PATH" ]; then
+                continue
+              fi
+              case "$path" in
+                benchmarks/skilltrustbench-leaderboard-10pct/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].json)
+                  if git cat-file -e "origin/$base_ref:$path" 2>/dev/null; then
+                    git checkout "origin/$base_ref" -- "$path"
+                  else
+                    git rm -f --ignore-unmatch "$path"
+                    rm -f "$path"
+                  fi
+                  ;;
+              esac
+            done
 
           go run ./scripts/update-skilltrustbench-baseline \
             --artifact "$artifact" \
@@ -148,13 +204,11 @@ jobs:
 
       - name: Commit baseline update
         if: ${{ inputs.commit_baseline == 'true' }}
-        env:
-          BASELINE_PATH: benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$BASELINE_PATH"
+          git add -A benchmarks/skilltrustbench-leaderboard-10pct
           if git diff --cached --quiet; then
             echo "SkillTrustBench baseline already up to date."
             exit 0

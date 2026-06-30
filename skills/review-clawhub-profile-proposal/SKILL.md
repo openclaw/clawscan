@@ -105,17 +105,18 @@ and, if accepted, promote the public profile behavior into the bundled
    ```bash
    go run ./scripts/update-skilltrustbench-baseline \
      --artifact ./artifacts/skilltrustbench-candidate.json \
-     --output benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json \
+     --output benchmarks/skilltrustbench-leaderboard-10pct/<YYYY-MM-DD>.json \
      --profile clawhub \
      --profile-source proposals/<GHSA-ID>/clawscan.yml \
      --subset-case-ids-sha256 903a036e4b7b16ee28e22d5d9db57a00b3764cfe41e43144acad67921e5196c2 \
      --workflow-url <workflow-url>
    ```
 
-   If the PR merges, that committed file is the latest accepted baseline for
-   the bundled `clawhub` profile. The script fails if the candidate artifact's
-   selected-ID hash does not match the planned subset. No post-merge rerun is
-   required.
+   If the PR merges, the newest dated JSON file in
+   `benchmarks/skilltrustbench-leaderboard-10pct/` is the latest accepted
+   baseline for the bundled `clawhub` profile. The script fails if the
+   candidate artifact's selected-ID hash does not match the planned subset. No
+   post-merge rerun is required.
 
 6. Decide.
 
@@ -129,8 +130,8 @@ and, if accepted, promote the public profile behavior into the bundled
 
    - promote the accepted public `clawhub` profile behavior into
      `internal/profiles/clawhub/clawscan.yml`
-   - keep `benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json`
-     updated from the candidate artifact in the same PR
+   - add a dated baseline under `benchmarks/skilltrustbench-leaderboard-10pct/`
+     from the candidate artifact in the same PR
    - preserve or remove `proposals/<GHSA-ID>/clawscan.yml` according to the
      issue/PR instruction; default to preserving it as public proposal trail
      unless the maintainer explicitly chooses to remove it
@@ -175,7 +176,7 @@ The maintainer promotion commit usually touches:
 
 ```text
 internal/profiles/clawhub/clawscan.yml
-benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json
+benchmarks/skilltrustbench-leaderboard-10pct/<YYYY-MM-DD>.json
 ```
 
 It may also touch:

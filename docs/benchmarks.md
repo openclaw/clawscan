@@ -36,6 +36,6 @@ Use $report-clawhub-malicious-skill to walk me through reporting a malicious Cla
 ## ClawHub Profile Baseline
 
 Maintainers validate accepted `clawhub` profile proposals against the public
-SkillTrustBench leaderboard subset. The latest accepted compact baseline is
-written by the maintainer gate to
-`benchmarks/skilltrustbench-leaderboard-10pct/clawhub-baseline.json`.
+SkillTrustBench leaderboard subset. The maintainer gate writes compact dated
+baselines under `benchmarks/skilltrustbench-leaderboard-10pct/`; the latest
+`YYYY-MM-DD.json` file is the current accepted baseline.
