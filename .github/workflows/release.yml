@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
@@ -19,11 +19,19 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 24
+
 jobs:
   build:
     name: Build release artifacts
     runs-on: ubuntu-latest
     outputs:
+      checkout_ref: ${{ steps.version.outputs.checkout_ref }}
       version: ${{ steps.version.outputs.value }}
     steps:
       - name: Resolve release version
@@ -46,12 +54,12 @@ jobs:
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ steps.version.outputs.checkout_ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
@@ -60,7 +68,7 @@ jobs:
         run: make release VERSION="${{ steps.version.outputs.value }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: clawscan-${{ steps.version.outputs.value }}-release
           path: |
@@ -76,7 +84,7 @@ jobs:
     if: github.event_name == 'push' || inputs.publish
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           merge-multiple: true
@@ -91,13 +99,129 @@ jobs:
             --title "$RELEASE_TAG" \
             --generate-notes
 
+  publish-npm:
+    name: Publish @openclaw/clawscan
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' || inputs.publish
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ needs.build.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+
+      - name: Validate package metadata
+        run: |
+          node <<'NODE'
+          const { readFileSync } = require("node:fs");
+
+          const pkg = JSON.parse(readFileSync("npm/clawscan/package.json", "utf8"));
+          const expectedName = "@openclaw/clawscan";
+          const expectedRepo = "https://github.com/openclaw/clawscan";
+          const repository = typeof pkg.repository === "string"
+            ? pkg.repository
+            : pkg.repository?.url;
+          const normalize = (value) =>
+            String(value ?? "")
+              .trim()
+              .replace(/^git\+/, "")
+              .replace(/\.git$/i, "")
+              .replace(/\/+$/, "");
+
+          const errors = [];
+          if (pkg.name !== expectedName) {
+            errors.push(`package name must be ${expectedName}; found ${pkg.name ?? "<missing>"}`);
+          }
+          if (normalize(repository) !== expectedRepo) {
+            errors.push(`repository URL must be ${expectedRepo}; found ${normalize(repository) || "<missing>"}`);
+          }
+          if (pkg.private === true) {
+            errors.push("package must not be private");
+          }
+          if (errors.length > 0) {
+            for (const error of errors) console.error(error);
+            process.exit(1);
+          }
+          NODE
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+
+          node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          const { normalizePackageVersion } = await import("./scripts/build-npm-package.mjs");
+
+          const releaseTag = process.env.RELEASE_TAG ?? "";
+          const releaseSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+
+          if (!/^v\d+\.\d+\.\d+$/.test(releaseTag)) {
+            throw new Error(`release tag must match vX.Y.Z; received ${releaseTag || "<missing>"}`);
+          }
+          normalizePackageVersion(releaseTag);
+          execFileSync("git", ["merge-base", "--is-ancestor", releaseSha, "origin/main"]);
+          NODE
+
+      - name: Ensure version is unpublished
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          package_name="$(node -p "require('./npm/clawscan/package.json').name")"
+          package_version="$(node --input-type=module -e 'import { normalizePackageVersion } from "./scripts/build-npm-package.mjs"; process.stdout.write(normalizePackageVersion(process.env.RELEASE_TAG));')"
+          set +e
+          output="$(npm view "${package_name}@${package_version}" version 2>&1)"
+          status=$?
+          set -e
+          if [ "${status}" -eq 0 ]; then
+            echo "${package_name}@${package_version} is already published."
+            exit 1
+          fi
+          if ! printf '%s\n' "${output}" | grep -q "E404"; then
+            printf '%s\n' "${output}" >&2
+            exit "${status}"
+          fi
+
+      - name: Check npm package
+        run: |
+          node --test npm/clawscan/test/*.test.mjs
+          node --test scripts/build-npm-package.test.mjs
+          node scripts/build-npm-package.mjs --version "${{ needs.build.outputs.version }}" --pack --smoke
+
+      - name: Stage npm package
+        run: node scripts/build-npm-package.mjs --version "${{ needs.build.outputs.version }}"
+
+      - name: Publish with npm trusted publishing
+        run: npm publish dist/npm/package --access public --provenance
+
   update-homebrew-tap:
     name: Update Homebrew tap
     runs-on: ubuntu-latest
     needs:
       - build
       - publish
-    if: always() && needs.publish.result == 'success' && startsWith(needs.build.outputs.version, 'v')
+      - publish-npm
+    if: always() && needs.publish.result == 'success' && needs.publish-npm.result == 'success' && startsWith(needs.build.outputs.version, 'v')
     env:
       TAP_REPO: openclaw/homebrew-tap
       FORMULA: clawscan
