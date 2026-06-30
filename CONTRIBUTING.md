@@ -22,6 +22,7 @@ go vet ./...
 make docs-site
 go run ./cmd/clawscan --help
 go run ./cmd/clawscan ./README.md --scanner clawscan-static --json
+node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke
 ```
 
 Use fixture-backed scanner results when credentials or live upstream services
@@ -69,6 +70,14 @@ go vet ./...
 go run ./cmd/clawscan --help
 ```
 
+For npm package, wrapper, or release workflow changes, run:
+
+```bash
+node --test npm/clawscan/test/*.test.mjs
+node --test scripts/build-npm-package.test.mjs
+node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke
+```
+
 For benchmark or leaderboard submission plumbing, CI validates changed
 submission directories. Maintainers can also run the repository validation
 script while debugging:
@@ -86,6 +95,8 @@ scripts/validate-security-signals-submissions.sh leaderboard/submissions/<run-id
   artifacts, issues, or pull requests.
 - Prefer small, reviewable changes with fixture-backed tests for scanner
   behavior.
+- For non-trivial changes, run `.agents/skills/autoreview/scripts/autoreview`
+  before handoff.
 
 ## Security Reports
 

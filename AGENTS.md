@@ -25,6 +25,8 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
   Space support.
 - `scripts/` - docs, release, and leaderboard helper scripts.
 - `skills/clawscan-cli/` - Codex skill for using this CLI.
+- `npm/clawscan/` - npm package wrapper, binary resolver, and package tests.
+- `.agents/skills/autoreview/` - structured review closeout helper.
 - `dist/` - generated release/docs artifacts. Do not hand-edit it.
 
 ## Development Commands
@@ -39,6 +41,8 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - `make docs-site` - rebuild the generated docs site under `dist/docs-site`.
 - `make release VERSION=v0.0.0-test` - build local release archives under
   `dist/`.
+- `node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke` -
+  build and smoke-test the npm package wrapper.
 
 ## Coding Style
 
@@ -88,6 +92,10 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - For Go behavior changes, run focused tests plus `go test -count=1 ./...` and
   `go vet ./...`.
 - For docs/help changes, run `make docs-site` when generated docs can change.
+- For npm wrapper or release changes, run
+  `node --test npm/clawscan/test/*.test.mjs`,
+  `node --test scripts/build-npm-package.test.mjs`, and
+  `node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke`.
 - For scanner adapters, add fixture-backed tests and use live API smoke tests
   only when credentials are already available. Do not print secrets.
 - For leaderboard/submission changes, validate the relevant shell/Python paths
@@ -99,5 +107,9 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - Use conventional commit messages.
 - Keep generated `dist/` changes out of ordinary feature commits unless the
   task is release-packaging proof.
+- For non-trivial changes, run `.agents/skills/autoreview/scripts/autoreview`
+  before final handoff.
 - Releases are tag-driven through the GitHub release workflow. Local release
   archives should match `make release VERSION=<version>`.
+- After the one-time npm registry bootstrap package, npm releases use trusted
+  publishing from GitHub Actions. Do not add long-lived npm tokens.

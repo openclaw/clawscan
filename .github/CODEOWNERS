@@ -5,7 +5,12 @@
 
 # Security-sensitive repo automation and release surfaces.
 /.github/ @openclaw/openclaw-secops @Patrick-Erichsen
+/.agents/skills/ @openclaw/openclaw-secops @Patrick-Erichsen
+/AGENTS.md @openclaw/openclaw-secops @Patrick-Erichsen
+/CLAUDE.md @openclaw/openclaw-secops @Patrick-Erichsen
+/CONTRIBUTING.md @openclaw/openclaw-secops @Patrick-Erichsen
 /scripts/ @openclaw/openclaw-secops @Patrick-Erichsen
+/npm/clawscan/ @openclaw/openclaw-secops @Patrick-Erichsen
 /Makefile @openclaw/openclaw-secops @Patrick-Erichsen
 /SECURITY.md @openclaw/openclaw-secops @Patrick-Erichsen
 
@@ -16,4 +21,3 @@
 /internal/profiles/ @openclaw/openclaw-secops @Patrick-Erichsen
 /internal/clawhubprompt/ @openclaw/openclaw-secops @Patrick-Erichsen
 /leaderboard/ @openclaw/openclaw-secops @Patrick-Erichsen
-
