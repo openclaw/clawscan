@@ -11,7 +11,7 @@ to a public interface or publish it through a tunnel.
 ## Minimum Local Setup
 
 1. Follow the upstream A.I.G Docker/API service instructions from
-   <https://github.com/Tencent/AI-Infra-Guard>.
+   [Tencent AI-Infra-Guard](https://github.com/Tencent/AI-Infra-Guard).
 2. Bind the service to `127.0.0.1` or another private interface.
 3. Confirm the API is reachable from the same environment where `clawscan` runs.
 4. Set `AIG_BASE_URL` when the service is not available at the default
