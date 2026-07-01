@@ -12,6 +12,7 @@ const assets = ['clawscan-logo.svg', 'clawscan-logo.png', 'clawscan-banner.svg',
 const pages = [
   ['index.md', 'Introduction'],
   ['scanners.md', 'Scanners'],
+  ['aig.md', 'A.I.G Service'],
   ['profiles.md', 'Profiles'],
   ['judge.md', 'Judge'],
   ['sandbox.md', 'Sandbox'],
@@ -20,7 +21,7 @@ const pages = [
 
 const navSections = [
   ['Start', ['index.md']],
-  ['Run', ['scanners.md', 'profiles.md', 'judge.md', 'sandbox.md', 'benchmarks.md']],
+  ['Run', ['scanners.md', 'aig.md', 'profiles.md', 'judge.md', 'sandbox.md', 'benchmarks.md']],
 ];
 
 let css = `
