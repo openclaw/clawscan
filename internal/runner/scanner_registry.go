@@ -22,6 +22,9 @@ type ScannerInfo struct {
 	RequiredEnv   []string
 	OptionalEnv   []string
 	InstallHint   string
+	ServiceBacked bool
+	SetupHint     string
+	SmokeHint     string
 	Installable   bool
 }
 
@@ -200,6 +203,9 @@ func defaultScannerAdapters() []ScannerAdapter {
 				DisplayName:   "Tencent AI-Infra-Guard",
 				RepositoryURL: "https://github.com/Tencent/AI-Infra-Guard",
 				Description:   "API-backed MCP Server & Agent Skills scan through a running local or private A.I.G service. The upstream service defaults to http://localhost:8088 and currently lacks built-in authentication, so do not expose it on public networks.",
+				ServiceBacked: true,
+				SetupHint:     "Start the upstream A.I.G Docker/API service on localhost or a private network, then set AIG_BASE_URL when it is not http://localhost:8088. Do not expose the service publicly.",
+				SmokeHint:     "AIG_BASE_URL=http://localhost:8088 clawscan ./README.md --scanner aig --sandbox off --json",
 				OptionalEnv: []string{
 					"AIG_BASE_URL",
 					"AIG_API_KEY",
@@ -217,7 +223,7 @@ func defaultScannerAdapters() []ScannerAdapter {
 			installPlan: InstallPlan{
 				ScannerID:                "aig",
 				Name:                     "Tencent AI-Infra-Guard",
-				InstallUnsupportedReason: "Run the A.I.G Docker/API service separately on localhost or a private network; ClawScan does not start or expose it.",
+				InstallUnsupportedReason: "Run the A.I.G Docker/API service separately on localhost or a private network; ClawScan does not start or expose it. See docs/aig.md for the service setup and smoke recipe.",
 			},
 			run: ExternalScannerRunner.runAIG,
 		},

@@ -54,6 +54,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"agentverus, aig, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
 		"Required environment variables:",
 		"aig: no ClawScan-required env vars",
+		"It is service-backed: start A.I.G separately",
 		"SOCKET_CLI_API_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
@@ -140,6 +141,9 @@ func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 		"Description: API-backed MCP Server & Agent Skills scan",
 		"Required env vars: none",
 		"Optional env vars: AIG_BASE_URL, AIG_API_KEY, AIG_MODEL, AIG_MODEL_API_KEY, AIG_MODEL_BASE_URL, AIG_USERNAME, AIG_SCAN_LANGUAGE, AIG_SCAN_PROMPT, AIG_SCAN_THREAD_COUNT, AIG_POLL_INTERVAL_MS, AIG_POLL_MAX_ATTEMPTS",
+		"Service-backed: yes",
+		"Setup: Start the upstream A.I.G Docker/API service on localhost or a private network",
+		"Smoke test: AIG_BASE_URL=http://localhost:8088 clawscan ./README.md --scanner aig --sandbox off --json",
 		"Install:",
 		"Run the A.I.G Docker/API service separately",
 	} {

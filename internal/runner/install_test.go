@@ -165,3 +165,19 @@ func TestInstallScannersRejectsUnknownScanner(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestInstallScannersExplainsAIGServiceRequirement(t *testing.T) {
+	_, err := InstallScanners([]string{"aig"}, InstallOptions{})
+	if err == nil {
+		t.Fatal("expected aig install to be unsupported")
+	}
+	for _, want := range []string{
+		"Scanner aig has no local scanner CLI to install",
+		"Run the A.I.G Docker/API service separately",
+		"docs/aig.md",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("aig install error missing %q: %v", want, err)
+		}
+	}
+}

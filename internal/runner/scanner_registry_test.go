@@ -179,4 +179,10 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	if !strings.Contains(aig.InstallHint, "Run the A.I.G Docker/API service separately") {
 		t.Fatalf("aig install hint = %q", aig.InstallHint)
 	}
+	if !aig.ServiceBacked {
+		t.Fatal("aig should be marked service-backed")
+	}
+	if !strings.Contains(aig.SetupHint, "localhost or a private network") || !strings.Contains(aig.SmokeHint, "--scanner aig") {
+		t.Fatalf("aig setup/smoke hints = %q / %q", aig.SetupHint, aig.SmokeHint)
+	}
 }
