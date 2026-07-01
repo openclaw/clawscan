@@ -219,6 +219,15 @@ func printScannerDetail(w io.Writer, info runner.ScannerInfo) {
 	if len(info.OptionalEnv) > 0 {
 		fmt.Fprintf(w, "Optional env vars: %s\n", strings.Join(info.OptionalEnv, ", "))
 	}
+	if info.ServiceBacked {
+		fmt.Fprintln(w, "Service-backed: yes")
+	}
+	if strings.TrimSpace(info.SetupHint) != "" {
+		fmt.Fprintf(w, "Setup: %s\n", info.SetupHint)
+	}
+	if strings.TrimSpace(info.SmokeHint) != "" {
+		fmt.Fprintf(w, "Smoke test: %s\n", info.SmokeHint)
+	}
 	fmt.Fprintf(w, "Install: %s\n", info.InstallHint)
 }
 
@@ -610,7 +619,7 @@ Built-in profiles:
   %s
 
 Required environment variables:
-  aig: no ClawScan-required env vars; AIG_BASE_URL defaults to http://localhost:8088. Use "clawscan scanners aig" for optional service/model vars and the private-network warning.
+  aig: no ClawScan-required env vars; AIG_BASE_URL defaults to http://localhost:8088. It is service-backed: start A.I.G separately on localhost/private network and use "clawscan scanners aig" for setup and smoke details.
   socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY
