@@ -107,12 +107,6 @@ relying on any single scanner.
 
 ClawScan turns that approach into a repeatable CLI. It includes a built-in `clawhub` profile, a saved scanner-and-judge configuration that matches what ClawHub runs in production, so researchers can reproduce results, test improvements, and help improve detection against the weekly refreshed ClawHub security-signals dataset.
 
-## Roadmap
-
-- OpenClaw plugin support is being developed on the `feat/openclaw-plugin`
-  branch. That work will use OpenClaw's `before_install` hook to run a
-  verdict-producing ClawScan profile before installing a skill.
-
 ## Commands
 
 | Command family | Use |
