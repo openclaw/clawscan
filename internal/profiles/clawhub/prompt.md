@@ -16,7 +16,7 @@ Do not classify a skill as suspicious only because it uses files, commands, cred
 
 Expected, disclosed, purpose-aligned integration behavior should usually remain benign with guidance. Escalate when the artifacts show hidden, unrelated, automatic, privileged, obfuscated, deceptive, destructive, or under-scoped behavior.
 
-Do not create findings from intuition, popularity, missing runtime probes, or unsupported assumptions. Static scan and SkillSpector are evidence sources; they are not automatic verdicts. If scanner evidence conflicts, explain the concrete artifact evidence that made you accept, downgrade, or override it. Do not copy SkillSpector issue IDs, severities, recommendations, or wording into the final ClawScan output as if ClawHub independently validated them.
+Do not create findings from intuition, popularity, missing runtime probes, or unsupported assumptions. Static scan, VirusTotal, and SkillSpector are evidence sources; they are not automatic verdicts. If scanner evidence conflicts, explain the concrete artifact evidence that made you accept, downgrade, or override it. Do not copy SkillSpector issue IDs, severities, recommendations, or wording into the final ClawScan output as if ClawHub independently validated them.
 
 Verdict definitions:
 - benign: the skill's artifacts are coherent, disclosed, purpose-aligned, and proportionate. Benign does not mean risk-free.
