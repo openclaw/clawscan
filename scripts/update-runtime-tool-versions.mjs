@@ -9,6 +9,10 @@ const pins = [
     latest: () => gitHead('https://github.com/NVIDIA/skillspector.git'),
   },
   {
+    arg: 'AIG_SKILL_SCAN_VERSION',
+    latest: () => pypiVersion('aig-skill-scan'),
+  },
+  {
     arg: 'CISCO_AI_SKILL_SCANNER_VERSION',
     latest: () => pypiVersion('cisco-ai-skill-scanner'),
   },

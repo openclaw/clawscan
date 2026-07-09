@@ -170,13 +170,16 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	}
 
 	aig, _ := registry.Info("aig")
-	if got := strings.Join(aig.RequiredEnv, ","); got != "" {
+	if got := strings.Join(aig.RequiredEnv, ","); got != "LLM_API_KEY" {
 		t.Fatalf("aig required env = %q", got)
 	}
-	if got := strings.Join(aig.OptionalEnv, ","); got != "AIG_BASE_URL,AIG_API_KEY,AIG_MODEL,AIG_MODEL_API_KEY,AIG_MODEL_BASE_URL,AIG_USERNAME,AIG_SCAN_LANGUAGE,AIG_SCAN_PROMPT,AIG_SCAN_THREAD_COUNT,AIG_POLL_INTERVAL_MS,AIG_POLL_MAX_ATTEMPTS" {
+	if got := strings.Join(aig.OptionalEnv, ","); got != "OPENAI_API_KEY,DEFAULT_MODEL,DEFAULT_BASE_URL,DEFAULT_MODEL_CONTEXT_WINDOW,LOG_LEVEL" {
 		t.Fatalf("aig optional env = %q", got)
 	}
-	if !strings.Contains(aig.InstallHint, "Run the A.I.G Docker/API service separately") {
+	if aig.InstallHint != "pip install aig-skill-scan" {
 		t.Fatalf("aig install hint = %q", aig.InstallHint)
+	}
+	if !aig.Installable {
+		t.Fatal("aig should be installable")
 	}
 }

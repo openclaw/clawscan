@@ -36,6 +36,9 @@ func (runner *recordingInstallRunner) Run(command string, args []string, cwd str
 	if command == "uv" && joinedArgs == "pip install cisco-ai-skill-scanner" {
 		runner.paths["skill-scanner"] = true
 	}
+	if command == "pip" && joinedArgs == "install aig-skill-scan" {
+		runner.paths["aig-skill-scan"] = true
+	}
 	if command == "uv" && joinedArgs == "tool install git+https://github.com/NVIDIA/skillspector.git" {
 		runner.paths["skillspector"] = true
 	}
@@ -77,6 +80,26 @@ func TestInstallScannersReturnsAlreadyAvailableWhenExecutableIsOnPath(t *testing
 	}
 	if len(fake.calls) != 0 {
 		t.Fatalf("commands = %#v", fake.calls)
+	}
+}
+
+func TestInstallScannersInstallsAIGFromPyPI(t *testing.T) {
+	fake := &recordingInstallRunner{paths: map[string]bool{"pip": true}}
+	results, err := InstallScanners([]string{"aig"}, InstallOptions{Runner: fake})
+	if err != nil {
+		t.Fatalf("InstallScanners returned error: %v", err)
+	}
+	if got := results[0].Status; got != InstallStatusInstalled {
+		t.Fatalf("status = %q", got)
+	}
+	if len(fake.calls) != 2 {
+		t.Fatalf("commands = %#v, want install and verify", fake.calls)
+	}
+	if fake.calls[0].command != "pip" || strings.Join(fake.calls[0].args, " ") != "install aig-skill-scan" {
+		t.Fatalf("install command = %#v", fake.calls[0])
+	}
+	if fake.calls[1].command != "aig-skill-scan" || strings.Join(fake.calls[1].args, " ") != "--help" {
+		t.Fatalf("verify command = %#v", fake.calls[1])
 	}
 }
 

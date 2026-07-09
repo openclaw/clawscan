@@ -463,6 +463,12 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 		if result.Status != "completed" || len(result.Raw) == 0 {
 			continue
 		}
+		if scanner == "aig" {
+			if prediction, ok := aigSARIFPrediction(result.Raw); ok {
+				scannerPredictions[prediction] = append(scannerPredictions[prediction], scanner)
+				continue
+			}
+		}
 		if prediction, ok := predictionFromObject(result.Raw); ok {
 			scannerPredictions[prediction] = append(scannerPredictions[prediction], scanner)
 		}
@@ -598,13 +604,12 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 	caseOpts.Benchmark = nil
 	caseOpts.OutputPath = ""
 	return Run(caseOpts, RunContext{
-		Env:                    env,
-		Now:                    now,
-		CommandRunner:          ctx.CommandRunner,
-		ScannerRunner:          ctx.ScannerRunner,
-		SkillSpectorCommand:    ctx.SkillSpectorCommand,
-		VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
-		AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
+		Env:                  env,
+		Now:                  now,
+		CommandRunner:        ctx.CommandRunner,
+		ScannerRunner:        ctx.ScannerRunner,
+		SkillSpectorCommand:  ctx.SkillSpectorCommand,
+		VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
 	})
 }
 

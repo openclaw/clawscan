@@ -38,7 +38,7 @@ Choose the run mode:
 | Print raw JSON to stdout | Add `--json`. |
 | Run all profiles from a config | `clawscan ./my-skill --config ./security/clawscan.yml` |
 | Run one config profile | `clawscan ./my-skill --config ./security/clawscan.yml --profile review` |
-| Install scanner dependencies | `clawscan install cisco skillspector` |
+| Install scanner dependencies | `clawscan install aig cisco skillspector` |
 | List scanner catalog | `clawscan scanners` |
 | Inspect one scanner | `clawscan scanners skillspector` |
 | List resolved profiles | `clawscan profiles` |
@@ -135,7 +135,7 @@ Credential rules:
 
 | Scanner | Env vars |
 | --- | --- |
-| `aig` | optional service/model config: `AIG_BASE_URL`, `AIG_API_KEY`, `AIG_MODEL`, `AIG_MODEL_API_KEY`, `AIG_MODEL_BASE_URL`, `AIG_USERNAME`, `AIG_SCAN_LANGUAGE`, `AIG_SCAN_PROMPT`, `AIG_SCAN_THREAD_COUNT`, `AIG_POLL_INTERVAL_MS`, `AIG_POLL_MAX_ATTEMPTS`; `AIG_BASE_URL` defaults to `http://localhost:8088` |
+| `aig` | required: `LLM_API_KEY` or `OPENAI_API_KEY`; optional local scanner config: `DEFAULT_MODEL`, `DEFAULT_BASE_URL`, `DEFAULT_MODEL_CONTEXT_WINDOW`, `LOG_LEVEL` |
 | `socket` | required: `SOCKET_CLI_API_TOKEN` |
 | `snyk` | required: `SNYK_TOKEN` |
 | `virustotal` | required: `VIRUSTOTAL_API_KEY` |
@@ -149,19 +149,25 @@ there is no local CLI for ClawScan to invoke.
 Dependency setup:
 
 ```bash
-clawscan install cisco skillspector
+clawscan install aig cisco skillspector
 ```
 
 `clawscan install` accepts one or more scanner IDs. It follows upstream scanner
-install docs where they publish an install command, including Cisco's
-`uv pip install cisco-ai-skill-scanner`, SkillSpector's
+install docs where they publish an install command, including A.I.G's
+`pip install aig-skill-scan`, Cisco's `uv pip install cisco-ai-skill-scanner`, SkillSpector's
 `uv tool install git+https://github.com/NVIDIA/skillspector.git`, Socket's
 `npm install -g socket`, and AgentVerus'
 `npm install --save-dev agentverus-scanner`. Snyk is launcher-based, so
 ClawScan verifies `uvx`; built-in and simple API-backed scanners are skipped.
-`aig` is API-backed but not auto-started: run the A.I.G Docker/API service
-separately on localhost or a private network because upstream currently lacks
-built-in authentication.
+The `aig` adapter runs `aig-skill-scan --repo <target> --language en -o
+<result.sarif.json>` and stores the SARIF 2.1.0 document as raw scanner
+evidence.
+
+Starting in ClawScan `v0.1.2`, `aig` no longer uses the legacy A.I.G Docker/API
+service. Replace `AIG_MODEL` with `DEFAULT_MODEL`, `AIG_MODEL_BASE_URL` with
+`DEFAULT_BASE_URL`, and `AIG_MODEL_API_KEY` with `LLM_API_KEY` or
+`OPENAI_API_KEY`; `AIG_BASE_URL` and `AIG_API_KEY` are retired. The local
+scanner accepts directory targets only.
 
 For normal runs, command-backed scanners and judges run in
 `ghcr.io/openclaw/clawscan-runtime:latest`. `clawscan install` is mainly for
