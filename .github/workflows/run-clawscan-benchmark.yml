@@ -123,6 +123,14 @@ on:
     secrets:
       LLM_API_KEY:
         required: false
+      DEFAULT_MODEL:
+        required: false
+      DEFAULT_BASE_URL:
+        required: false
+      DEFAULT_MODEL_CONTEXT_WINDOW:
+        required: false
+      LOG_LEVEL:
+        required: false
       ANTHROPIC_API_KEY:
         required: false
       CODEX_API_KEY:
@@ -187,6 +195,10 @@ jobs:
           CLAWSCAN_SANDBOX: ${{ inputs.sandbox }}
           CLAWSCAN_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          DEFAULT_MODEL: ${{ secrets.DEFAULT_MODEL }}
+          DEFAULT_BASE_URL: ${{ secrets.DEFAULT_BASE_URL }}
+          DEFAULT_MODEL_CONTEXT_WINDOW: ${{ secrets.DEFAULT_MODEL_CONTEXT_WINDOW }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CODEX_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
