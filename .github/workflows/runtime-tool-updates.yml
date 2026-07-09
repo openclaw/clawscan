@@ -43,6 +43,7 @@ jobs:
         run: |
           docker run --rm clawscan-runtime:candidate codex --help >/dev/null
           docker run --rm clawscan-runtime:candidate claude --help >/dev/null
+          docker run --rm clawscan-runtime:candidate aig-skill-scan --help >/dev/null
           docker run --rm clawscan-runtime:candidate skillspector --help >/dev/null
           docker run --rm clawscan-runtime:candidate snyk-agent-scan --help >/dev/null
           docker run --rm clawscan-runtime:candidate socket --help >/dev/null

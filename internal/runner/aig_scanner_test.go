@@ -1,20 +1,37 @@
 package runner
 
 import (
-	"archive/zip"
 	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
-	"mime"
-	"mime/multipart"
-	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+const aigSARIF = `{
+  "version": "2.1.0",
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/Schemata/sarif-schema-2.1.0.json",
+  "runs": [{
+    "tool": {
+      "driver": {
+        "name": "aig-skill-scan",
+        "version": "0.2.1",
+        "rules": [
+          {"id": "T04", "name": "Embedded Malicious Code"},
+          {"id": "T09", "name": "Insecure Skill Coding Practices"}
+        ]
+      }
+    },
+    "results": [{
+      "ruleId": "T04",
+      "level": "error",
+      "message": {"text": "Embedded payload"},
+      "properties": {"description": "Payload runs locally", "severity": "High"}
+    }]
+  }]
+}`
 
 func TestParseArgsAcceptsAIGScanner(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "aig"})
@@ -26,325 +43,326 @@ func TestParseArgsAcceptsAIGScanner(t *testing.T) {
 	}
 }
 
-func TestValidateRequirementsAllowsAIGWithoutEnv(t *testing.T) {
+func TestValidateRequirementsAcceptsEitherAIGAPIKey(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "aig"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateRequirements(opts, map[string]string{}); err != nil {
-		t.Fatalf("expected A.I.G to use upstream/default service configuration without required env vars, got %v", err)
+	for _, env := range []map[string]string{
+		{"LLM_API_KEY": "present"},
+		{"OPENAI_API_KEY": "present"},
+	} {
+		if err := ValidateRequirements(opts, env); err != nil {
+			t.Fatalf("env = %#v: %v", env, err)
+		}
 	}
 }
 
-func TestAIGScannerCompletesLocalArchiveFlow(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
+func TestValidateRequirementsRejectsAIGWithoutAPIKey(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "aig"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ValidateRequirements(opts, map[string]string{})
+	if err == nil {
+		t.Fatal("expected missing API key error")
+	}
+	if !strings.Contains(err.Error(), "LLM_API_KEY") || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestAIGScannerRunsLocalCLIAndPreservesSARIF(t *testing.T) {
+	target := createAIGTestSkill(t)
+	commandRunner := &aigRecordingCommandRunner{output: aigSARIF}
+	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{"LLM_API_KEY": "secret-aig-key"},
+		CommandRunner: commandRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := artifact.Scanners["aig"]
+	if result.Status != "completed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !bytes.Equal(result.Raw, []byte(aigSARIF)) {
+		t.Fatalf("raw SARIF changed:\n%s", result.Raw)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	call := commandRunner.calls[0]
+	if call.command != "aig-skill-scan" {
+		t.Fatalf("command = %q", call.command)
+	}
+	outputPath := argValue(call.args, "-o")
+	if outputPath == "" {
+		t.Fatalf("missing -o output path: %#v", call.args)
+	}
+	if call.cwd != filepath.Dir(outputPath) {
+		t.Fatalf("cwd = %q, want writable output directory %q", call.cwd, filepath.Dir(outputPath))
+	}
+	wantArgs := []string{"--repo", target, "--language", "en", "-o", outputPath}
+	if got := strings.Join(call.args, "\x00"); got != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", call.args, wantArgs)
+	}
+	if got := artifact.Env["LLM_API_KEY"]; got != "present" {
+		t.Fatalf("LLM_API_KEY presence = %q", got)
+	}
+	if strings.Contains(string(result.Raw), "secret-aig-key") {
+		t.Fatalf("raw leaked API key: %s", result.Raw)
+	}
+}
+
+func TestAIGScannerRecordsOpenAIKeyFallback(t *testing.T) {
+	target := createAIGTestSkill(t)
+	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{"OPENAI_API_KEY": "secret-openai-key"},
+		CommandRunner: &aigRecordingCommandRunner{output: aigSARIF},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := artifact.Env["OPENAI_API_KEY"]; got != "present" {
+		t.Fatalf("OPENAI_API_KEY presence = %q", got)
+	}
+	if _, ok := artifact.Env["LLM_API_KEY"]; ok {
+		t.Fatalf("unexpected LLM_API_KEY presence: %#v", artifact.Env)
+	}
+}
+
+func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
+	target := createAIGTestSkill(t)
+	hostRunner := &aigDockerRecordingCommandRunner{output: aigSARIF}
+	opts, err := ParseArgs([]string{target, "--scanner", "aig"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                map[string]string{"LLM_API_KEY": "present"},
+		HostCommandRunner:  hostRunner,
+		DockerAvailability: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Scanners["aig"].Status != "completed" {
+		t.Fatalf("scanner = %#v", artifact.Scanners["aig"])
+	}
+	if len(hostRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", hostRunner.calls)
+	}
+	call := hostRunner.calls[0]
+	if call.command != "docker" {
+		t.Fatalf("command = %q", call.command)
+	}
+	outputPath := argValue(call.args, "-o")
+	outputDir := filepath.Dir(outputPath)
+	if !containsArgPair(call.args, "-w", outputDir) {
+		t.Fatalf("docker args missing writable cwd %q: %#v", outputDir, call.args)
+	}
+	if !containsMount(call.args, target, true) {
+		t.Fatalf("docker args missing read-only target mount %q: %#v", target, call.args)
+	}
+	if !containsMount(call.args, outputDir, false) {
+		t.Fatalf("docker args missing writable output mount %q: %#v", outputDir, call.args)
+	}
+}
+
+func TestAIGScannerCompletesNonZeroExitWithValidSARIF(t *testing.T) {
+	target := createAIGTestSkill(t)
+	commandRunner := &aigRecordingCommandRunner{
+		output: aigSARIF,
+		stderr: "findings require review",
+		err:    errors.New("exit status 1"),
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{"LLM_API_KEY": "secret-aig-key"},
+		CommandRunner: commandRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["aig"]
+	if result.Status != "completed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "exit status 1") || !strings.Contains(result.Error, "findings require review") {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if !bytes.Equal(result.Raw, []byte(aigSARIF)) {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+}
+
+func TestAIGScannerFailsMissingOrInvalidSARIF(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{name: "missing", want: "did not write SARIF output"},
+		{name: "invalid json", output: "not json", want: "invalid SARIF 2.1.0 JSON"},
+		{name: "wrong version", output: `{"version":"2.0.0","runs":[]}`, want: "invalid SARIF 2.1.0 JSON"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := createAIGTestSkill(t)
+			opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := Run(opts, RunContext{
+				Env:           map[string]string{"LLM_API_KEY": "present"},
+				CommandRunner: &aigRecordingCommandRunner{output: test.output},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := artifact.Scanners["aig"]
+			if result.Status != "failed" {
+				t.Fatalf("status = %q error = %q", result.Status, result.Error)
+			}
+			if !strings.Contains(result.Error, test.want) {
+				t.Fatalf("error = %q, want %q", result.Error, test.want)
+			}
+			if result.Raw != nil {
+				t.Fatalf("raw = %s", result.Raw)
+			}
+		})
+	}
+}
+
+func TestAIGScannerSkipsUnsupportedTargets(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "SKILL.md")
+	if err := os.WriteFile(file, []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{file, "https://github.com/example/skill"} {
+		opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := Run(opts, RunContext{
+			Env:           map[string]string{"LLM_API_KEY": "present"},
+			CommandRunner: &aigRecordingCommandRunner{output: aigSARIF},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := artifact.Scanners["aig"]
+		if result.Status != "skipped" {
+			t.Fatalf("target %q status = %q error = %q", target, result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "directory targets") {
+			t.Fatalf("target %q error = %q", target, result.Error)
+		}
+	}
+}
+
+func TestAIGSARIFVerdictNormalizesForBenchmarks(t *testing.T) {
+	raw := []byte(`{
+	  "version": "2.1.0",
+	  "runs": [{
+	    "tool": {"driver": {"name": "aig-skill-scan"}},
+	    "results": [{"ruleId": "T09"}],
+	    "properties": {"verdict": "normal"}
+	  }]
+	}`)
+	prediction, source, err := benchmarkCasePrediction(BenchmarkCase{
+		ID: "case-1",
+		Run: Artifact{Scanners: map[string]ScannerResult{
+			"aig": {Status: "completed", Raw: raw},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prediction != "clean" || source != "scanner:aig" {
+		t.Fatalf("prediction = %q source = %q", prediction, source)
+	}
+}
+
+func createAIGTestSkill(t *testing.T) string {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	client := &aigRecordingHTTPClient{
-		responses: []*http.Response{
-			jsonResponse(http.StatusOK, `{"status":0,"message":"ok","data":{"fileUrl":"/uploads/demo.zip","filename":"demo.zip","size":123}}`),
-			jsonResponse(http.StatusOK, `{"status":0,"message":"task created successfully","data":{"session_id":"session-123"}}`),
-			jsonResponse(http.StatusOK, `{"status":0,"message":"ok","data":{"session_id":"session-123","status":"completed","title":"MCP Scan Task","log":"done"}}`),
-			jsonResponse(http.StatusOK, `{"status":0,"message":"ok","data":{"result":{"score":91,"results":[{"severity":"low","title":"demo"}]}}}`),
-		},
-	}
-	opts, err := ParseArgs([]string{target, "--scanner", "aig"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{
-			"AIG_BASE_URL":          "http://aig.local",
-			"AIG_API_KEY":           "secret-aig-api-key",
-			"AIG_MODEL":             "gpt-4.1",
-			"AIG_MODEL_API_KEY":     "secret-aig-model-key",
-			"AIG_MODEL_BASE_URL":    "https://api.openai.com/v1",
-			"AIG_USERNAME":          "openclaw-test",
-			"AIG_POLL_INTERVAL_MS":  "0",
-			"AIG_POLL_MAX_ATTEMPTS": "1",
-			"AIG_SCAN_LANGUAGE":     "en",
-			"AIG_SCAN_PROMPT":       "Audit this skill",
-			"AIG_SCAN_THREAD_COUNT": "2",
-		},
-		AIInfraGuardHTTPClient: client,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := artifact.Scanners["aig"]
-	if result.Status != "completed" {
-		t.Fatalf("status = %q error = %q", result.Status, result.Error)
-	}
-	if strings.Contains(string(result.Raw), "secret-aig-model-key") || strings.Contains(string(result.Raw), "secret-aig-api-key") {
-		t.Fatalf("raw leaked secret: %s", result.Raw)
-	}
-	if len(client.requests) != 4 {
-		t.Fatalf("requests = %d", len(client.requests))
-	}
-	upload := client.requests[0]
-	if upload.Method != http.MethodPost || upload.URL.String() != "http://aig.local/api/v1/app/taskapi/upload" {
-		t.Fatalf("upload request = %s %s", upload.Method, upload.URL.String())
-	}
-	if got := upload.Header.Get("API-KEY"); got != "secret-aig-api-key" {
-		t.Fatalf("API-KEY header = %q", got)
-	}
-	if got := upload.Header.Get("username"); got != "openclaw-test" {
-		t.Fatalf("username header = %q", got)
-	}
-	_, params, err := mime.ParseMediaType(upload.Header.Get("content-type"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	reader := multipartReader(t, client.bodies[0], params["boundary"])
-	file, err := reader.NextPart()
-	if err != nil {
-		t.Fatal(err)
-	}
-	archive, err := io.ReadAll(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zipReader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !zipArchiveContains(zipReader, "SKILL.md") {
-		t.Fatalf("zip did not contain SKILL.md")
-	}
-
-	create := client.requests[1]
-	if create.Method != http.MethodPost || create.URL.String() != "http://aig.local/api/v1/app/taskapi/tasks" {
-		t.Fatalf("create request = %s %s", create.Method, create.URL.String())
-	}
-	var task struct {
-		Type    string `json:"type"`
-		Content struct {
-			Prompt      string `json:"prompt"`
-			Attachments string `json:"attachments"`
-			Thread      int    `json:"thread"`
-			Language    string `json:"language"`
-			Model       struct {
-				Model   string `json:"model"`
-				Token   string `json:"token"`
-				BaseURL string `json:"base_url"`
-			} `json:"model"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(client.bodies[1], &task); err != nil {
-		t.Fatal(err)
-	}
-	if task.Type != "mcp_scan" {
-		t.Fatalf("task type = %q", task.Type)
-	}
-	if task.Content.Attachments != "/uploads/demo.zip" {
-		t.Fatalf("attachments = %q", task.Content.Attachments)
-	}
-	if task.Content.Prompt != "Audit this skill" || task.Content.Language != "en" || task.Content.Thread != 2 {
-		t.Fatalf("task content = %#v", task.Content)
-	}
-	if task.Content.Model.Model != "gpt-4.1" || task.Content.Model.Token != "secret-aig-model-key" || task.Content.Model.BaseURL != "https://api.openai.com/v1" {
-		t.Fatalf("model = %#v", task.Content.Model)
-	}
-
-	var raw struct {
-		Scanner string `json:"scanner"`
-		Task    struct {
-			SessionID string `json:"session_id"`
-		} `json:"task"`
-		Status struct {
-			Status string `json:"status"`
-		} `json:"status"`
-		Result map[string]any `json:"result"`
-	}
-	if err := json.Unmarshal(result.Raw, &raw); err != nil {
-		t.Fatal(err)
-	}
-	if raw.Scanner != "aig" || raw.Task.SessionID != "session-123" || raw.Status.Status != "completed" {
-		t.Fatalf("raw = %s", result.Raw)
-	}
-	if _, ok := raw.Result["result"]; !ok {
-		t.Fatalf("raw result missing scan payload: %s", result.Raw)
-	}
-	if len(artifact.Env) != 0 {
-		t.Fatalf("env presence = %#v", artifact.Env)
-	}
+	return target
 }
 
-func TestAIGScannerCompletesURLFlowWithDefaultBaseURLAndSystemModel(t *testing.T) {
-	target := "https://github.com/example/skill-repo"
-	client := &aigRecordingHTTPClient{
-		responses: []*http.Response{
-			jsonResponse(http.StatusOK, `{"status":0,"message":"task created successfully","data":{"session_id":"session-url"}}`),
-			jsonResponse(http.StatusOK, `{"status":0,"message":"ok","data":{"session_id":"session-url","status":"completed"}}`),
-			jsonResponse(http.StatusOK, `{"status":0,"message":"ok","data":{"result":{"score":100}}}`),
-		},
-	}
-	opts, err := ParseArgs([]string{target, "--scanner", "aig"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{
-			"AIG_POLL_INTERVAL_MS":  "0",
-			"AIG_POLL_MAX_ATTEMPTS": "1",
-		},
-		AIInfraGuardHTTPClient: client,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := artifact.Scanners["aig"]
-	if result.Status != "completed" {
-		t.Fatalf("status = %q error = %q", result.Status, result.Error)
-	}
-	if len(client.requests) != 3 {
-		t.Fatalf("requests = %d", len(client.requests))
-	}
-	if got := client.requests[0].URL.String(); got != "http://localhost:8088/api/v1/app/taskapi/tasks" {
-		t.Fatalf("task request URL = %q", got)
-	}
-	var task struct {
-		Type    string `json:"type"`
-		Content struct {
-			Prompt      string         `json:"prompt"`
-			Attachments string         `json:"attachments,omitempty"`
-			Model       map[string]any `json:"model,omitempty"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(client.bodies[0], &task); err != nil {
-		t.Fatal(err)
-	}
-	if task.Type != "mcp_scan" || task.Content.Prompt != target || task.Content.Attachments != "" || task.Content.Model != nil {
-		t.Fatalf("task = %#v", task)
-	}
+type aigRecordingCommandRunner struct {
+	calls  []commandCall
+	output string
+	stderr string
+	err    error
 }
 
-func TestAIGScannerFailsAPIErrorAndPreservesJSON(t *testing.T) {
-	target := "https://github.com/example/skill-repo"
-	const errorJSON = `{"status":1,"message":"invalid parameters","data":null}`
-	client := &aigRecordingHTTPClient{
-		responses: []*http.Response{jsonResponse(http.StatusOK, errorJSON)},
-	}
-	opts, err := ParseArgs([]string{target, "--scanner", "aig"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{
-			"AIG_BASE_URL": "http://aig.local",
-		},
-		AIInfraGuardHTTPClient: client,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := artifact.Scanners["aig"]
-	if result.Status != "failed" {
-		t.Fatalf("status = %q error = %q", result.Status, result.Error)
-	}
-	if !strings.Contains(result.Error, "invalid parameters") {
-		t.Fatalf("error = %q", result.Error)
-	}
-	if !jsonRawEqual(result.Raw, []byte(errorJSON)) {
-		t.Fatalf("raw = %s", result.Raw)
-	}
-}
-
-func TestAIGScannerReportsUnreachableService(t *testing.T) {
-	target := "https://github.com/example/skill-repo"
-	client := &aigRecordingHTTPClient{err: errors.New("connect: connection refused")}
-	opts, err := ParseArgs([]string{target, "--scanner", "aig"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{
-			"AIG_BASE_URL": "http://aig.local",
-		},
-		AIInfraGuardHTTPClient: client,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := artifact.Scanners["aig"]
-	if result.Status != "failed" {
-		t.Fatalf("status = %q error = %q", result.Status, result.Error)
-	}
-	if !strings.Contains(result.Error, "AI-Infra-Guard task creation failed") || !strings.Contains(result.Error, "connection refused") {
-		t.Fatalf("error = %q", result.Error)
-	}
-	if len(result.Raw) != 0 {
-		t.Fatalf("raw = %s", result.Raw)
-	}
-}
-
-type aigRecordingHTTPClient struct {
-	requests  []*http.Request
-	bodies    [][]byte
-	responses []*http.Response
-	err       error
-}
-
-func (client *aigRecordingHTTPClient) Do(request *http.Request) (*http.Response, error) {
-	client.requests = append(client.requests, request)
-	var body []byte
-	if request.Body != nil {
-		var err error
-		body, err = io.ReadAll(request.Body)
-		if err != nil {
-			return nil, err
+func (runner *aigRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	runner.calls = append(runner.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
+	if runner.output != "" {
+		outputPath := argValue(args, "-o")
+		if outputPath != "" {
+			if err := os.WriteFile(outputPath, []byte(runner.output), 0o644); err != nil {
+				return CommandOutput{Stderr: runner.stderr}, err
+			}
 		}
 	}
-	client.bodies = append(client.bodies, body)
-	if client.err != nil {
-		return nil, client.err
-	}
-	if len(client.responses) == 0 {
-		return nil, errUnexpectedHTTPRequest
-	}
-	response := client.responses[0]
-	client.responses = client.responses[1:]
-	return response, nil
+	return CommandOutput{Stderr: runner.stderr}, runner.err
 }
 
-func jsonResponse(status int, body string) *http.Response {
-	return &http.Response{
-		StatusCode: status,
-		Body:       io.NopCloser(strings.NewReader(body)),
-	}
+type aigDockerRecordingCommandRunner struct {
+	calls  []commandCall
+	output string
 }
 
-func multipartReader(t *testing.T, body []byte, boundary string) *multipart.Reader {
-	t.Helper()
-	if boundary == "" {
-		t.Fatal("missing multipart boundary")
+func (runner *aigDockerRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	runner.calls = append(runner.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
+	outputPath := argValue(args, "-o")
+	if outputPath != "" {
+		if err := os.WriteFile(outputPath, []byte(runner.output), 0o644); err != nil {
+			return CommandOutput{}, err
+		}
 	}
-	return multipart.NewReader(bytes.NewReader(body), boundary)
+	return CommandOutput{}, nil
 }
 
-func zipArchiveContains(reader *zip.Reader, name string) bool {
-	for _, file := range reader.File {
-		if file.Name == name || strings.HasSuffix(file.Name, "/"+name) {
+func containsArgPair(args []string, name string, value string) bool {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == name && args[index+1] == value {
 			return true
 		}
 	}
 	return false
 }
 
-func jsonRawEqual(left []byte, right []byte) bool {
-	var leftValue any
-	var rightValue any
-	if err := json.Unmarshal(left, &leftValue); err != nil {
-		return false
+func containsMount(args []string, source string, readOnly bool) bool {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] != "--mount" {
+			continue
+		}
+		mount := args[index+1]
+		if !strings.Contains(mount, "source="+source+",target="+source) {
+			continue
+		}
+		return strings.HasSuffix(mount, ",readonly") == readOnly
 	}
-	if err := json.Unmarshal(right, &rightValue); err != nil {
-		return false
-	}
-	return reflect.DeepEqual(leftValue, rightValue)
+	return false
 }

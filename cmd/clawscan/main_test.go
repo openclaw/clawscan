@@ -53,7 +53,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"Accepted scanner IDs:",
 		"agentverus, aig, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
 		"Required environment variables:",
-		"aig: no ClawScan-required env vars",
+		"aig: LLM_API_KEY or OPENAI_API_KEY",
 		"SOCKET_CLI_API_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
@@ -136,12 +136,12 @@ func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 	for _, want := range []string{
 		"Tencent AI-Infra-Guard",
 		"ID: aig",
-		"Repository: https://github.com/Tencent/AI-Infra-Guard",
-		"Description: API-backed MCP Server & Agent Skills scan",
-		"Required env vars: none",
-		"Optional env vars: AIG_BASE_URL, AIG_API_KEY, AIG_MODEL, AIG_MODEL_API_KEY, AIG_MODEL_BASE_URL, AIG_USERNAME, AIG_SCAN_LANGUAGE, AIG_SCAN_PROMPT, AIG_SCAN_THREAD_COUNT, AIG_POLL_INTERVAL_MS, AIG_POLL_MAX_ATTEMPTS",
+		"Repository: https://github.com/Tencent/AI-Infra-Guard/tree/main/skill-scan",
+		"Description: Tencent Zhuque Lab's local directory scanner invoked through aig-skill-scan",
+		"Required env vars: LLM_API_KEY",
+		"Optional env vars: OPENAI_API_KEY, DEFAULT_MODEL, DEFAULT_BASE_URL, DEFAULT_MODEL_CONTEXT_WINDOW, LOG_LEVEL",
 		"Install:",
-		"Run the A.I.G Docker/API service separately",
+		"pip install aig-skill-scan",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("scanner detail missing %q:\n%s", want, stdout)

@@ -610,7 +610,7 @@ Built-in profiles:
   %s
 
 Required environment variables:
-  aig: no ClawScan-required env vars; AIG_BASE_URL defaults to http://localhost:8088. Use "clawscan scanners aig" for optional service/model vars and the private-network warning.
+  aig: LLM_API_KEY or OPENAI_API_KEY. Use "clawscan scanners aig" for local scanner details and optional model configuration.
   socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY

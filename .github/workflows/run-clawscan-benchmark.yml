@@ -121,15 +121,7 @@ on:
         required: false
         default: ""
     secrets:
-      AIG_API_KEY:
-        required: false
-      AIG_BASE_URL:
-        required: false
-      AIG_MODEL:
-        required: false
-      AIG_MODEL_API_KEY:
-        required: false
-      AIG_MODEL_BASE_URL:
+      LLM_API_KEY:
         required: false
       ANTHROPIC_API_KEY:
         required: false
@@ -194,11 +186,7 @@ jobs:
           OUTPUT_PATH: ${{ inputs.output_path }}
           CLAWSCAN_SANDBOX: ${{ inputs.sandbox }}
           CLAWSCAN_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
-          AIG_API_KEY: ${{ secrets.AIG_API_KEY }}
-          AIG_BASE_URL: ${{ secrets.AIG_BASE_URL }}
-          AIG_MODEL: ${{ secrets.AIG_MODEL }}
-          AIG_MODEL_API_KEY: ${{ secrets.AIG_MODEL_API_KEY }}
-          AIG_MODEL_BASE_URL: ${{ secrets.AIG_MODEL_BASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CODEX_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

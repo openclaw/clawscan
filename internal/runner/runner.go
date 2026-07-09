@@ -58,16 +58,15 @@ type EnvRequirement struct {
 }
 
 type RunContext struct {
-	Env                    map[string]string
-	Now                    func() time.Time
-	CommandRunner          CommandRunner
-	HostCommandRunner      CommandRunner
-	DockerAvailability     func() error
-	ScannerRunner          ScannerRunner
-	SkillSpectorCommand    []string
-	VirusTotalHTTPClient   VirusTotalHTTPClient
-	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
-	BenchmarkClient        BenchmarkClient
+	Env                  map[string]string
+	Now                  func() time.Time
+	CommandRunner        CommandRunner
+	HostCommandRunner    CommandRunner
+	DockerAvailability   func() error
+	ScannerRunner        ScannerRunner
+	SkillSpectorCommand  []string
+	VirusTotalHTTPClient VirusTotalHTTPClient
+	BenchmarkClient      BenchmarkClient
 }
 
 type ScannerRunner interface {
@@ -375,13 +374,12 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			scannerSandboxMode = SandboxModeOff
 		}
 		scannerRunner = ExternalScannerRunner{
-			CommandRunner:          commandRunner,
-			Env:                    env,
-			SandboxMode:            scannerSandboxMode,
-			SkillSpectorCommand:    ctx.SkillSpectorCommand,
-			VirusTotalHTTPClient:   ctx.VirusTotalHTTPClient,
-			AIInfraGuardHTTPClient: ctx.AIInfraGuardHTTPClient,
-			Timeout:                20 * time.Minute,
+			CommandRunner:        commandRunner,
+			Env:                  env,
+			SandboxMode:          scannerSandboxMode,
+			SkillSpectorCommand:  ctx.SkillSpectorCommand,
+			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
+			Timeout:              20 * time.Minute,
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -1632,14 +1630,13 @@ func isSourceReadError(err error, source string) bool {
 }
 
 type ExternalScannerRunner struct {
-	CommandRunner          CommandRunner
-	Env                    map[string]string
-	Registry               ScannerRegistry
-	SandboxMode            string
-	SkillSpectorCommand    []string
-	VirusTotalHTTPClient   VirusTotalHTTPClient
-	AIInfraGuardHTTPClient AIInfraGuardHTTPClient
-	Timeout                time.Duration
+	CommandRunner        CommandRunner
+	Env                  map[string]string
+	Registry             ScannerRegistry
+	SandboxMode          string
+	SkillSpectorCommand  []string
+	VirusTotalHTTPClient VirusTotalHTTPClient
+	Timeout              time.Duration
 }
 
 type OpenAIRequestOptions struct {
