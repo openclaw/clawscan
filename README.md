@@ -151,6 +151,14 @@ clawscan scanners skillspector
 | `socket` | Socket CLI | [repo](https://github.com/SocketDev/socket-cli) | Local file or directory scanner using Socket's public CLI full-scan path. | `SOCKET_CLI_API_TOKEN` | `npm install -g socket` |
 | `virustotal` | VirusTotal API | [docs](https://docs.virustotal.com/reference/file) | API-backed single local file hash lookup. Directories return a skipped result. | `VIRUSTOTAL_API_KEY` | skipped; API-backed |
 
+Starting in `v0.1.2`, the built-in `aig` scanner uses Tencent's local
+`aig-skill-scan` package instead of the legacy A.I.G Docker/API service.
+Replace `AIG_MODEL` with `DEFAULT_MODEL`, `AIG_MODEL_BASE_URL` with
+`DEFAULT_BASE_URL`, and `AIG_MODEL_API_KEY` with `LLM_API_KEY` (or
+`OPENAI_API_KEY`). `AIG_BASE_URL` and `AIG_API_KEY` are no longer used.
+The local scanner accepts directory targets only; materialize URL or file inputs
+as a skill directory before scanning them with `aig`.
+
 ## Profiles
 
 `--profile` runs a saved scanner and judge configuration, such as the built-in

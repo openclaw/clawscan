@@ -163,6 +163,12 @@ The `aig` adapter runs `aig-skill-scan --repo <target> --language en -o
 <result.sarif.json>` and stores the SARIF 2.1.0 document as raw scanner
 evidence.
 
+Starting in ClawScan `v0.1.2`, `aig` no longer uses the legacy A.I.G Docker/API
+service. Replace `AIG_MODEL` with `DEFAULT_MODEL`, `AIG_MODEL_BASE_URL` with
+`DEFAULT_BASE_URL`, and `AIG_MODEL_API_KEY` with `LLM_API_KEY` or
+`OPENAI_API_KEY`; `AIG_BASE_URL` and `AIG_API_KEY` are retired. The local
+scanner accepts directory targets only.
+
 For normal runs, command-backed scanners and judges run in
 `ghcr.io/openclaw/clawscan-runtime:latest`. `clawscan install` is mainly for
 local development or `--sandbox off` environments.
