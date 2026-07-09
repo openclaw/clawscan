@@ -24,6 +24,7 @@ type aigSARIFRun struct {
 
 type aigSARIFResult struct {
 	Properties map[string]any `json:"properties,omitempty"`
+	Level      string         `json:"level,omitempty"`
 }
 
 func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (ScannerResult, error) {
@@ -155,7 +156,17 @@ func aigSARIFPrediction(raw json.RawMessage) (string, bool) {
 			}
 		}
 	}
-	return "", false
+
+	prediction := "clean"
+	for _, run := range document.Runs {
+		for _, result := range run.Results {
+			if strings.EqualFold(strings.TrimSpace(result.Level), "error") {
+				return "malicious", true
+			}
+			prediction = "suspicious"
+		}
+	}
+	return prediction, true
 }
 
 func predictionFromAIGProperties(properties map[string]any) (string, bool) {

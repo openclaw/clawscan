@@ -296,6 +296,40 @@ func TestAIGSARIFVerdictNormalizesForBenchmarks(t *testing.T) {
 	}
 }
 
+func TestAIGSARIFResultsNormalizeForBenchmarks(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		results    string
+		prediction string
+	}{
+		{name: "normal", results: "[]", prediction: "clean"},
+		{name: "suspicious", results: `[{"ruleId":"T09","level":"warning"}]`, prediction: "suspicious"},
+		{name: "malicious", results: `[{"ruleId":"T04","level":"error"}]`, prediction: "malicious"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := []byte(`{
+			  "version": "2.1.0",
+			  "runs": [{
+			    "tool": {"driver": {"name": "aig-skill-scan"}},
+			    "results": ` + test.results + `
+			  }]
+			}`)
+			prediction, source, err := benchmarkCasePrediction(BenchmarkCase{
+				ID: "case-1",
+				Run: Artifact{Scanners: map[string]ScannerResult{
+					"aig": {Status: "completed", Raw: raw},
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prediction != test.prediction || source != "scanner:aig" {
+				t.Fatalf("prediction = %q source = %q", prediction, source)
+			}
+		})
+	}
+}
+
 func createAIGTestSkill(t *testing.T) string {
 	t.Helper()
 	target := filepath.Join(t.TempDir(), "skill")
