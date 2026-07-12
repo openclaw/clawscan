@@ -272,7 +272,8 @@ func (files *staticScannerFiles) recordWalkError(root string, path string, entry
 }
 
 func staticFilePriority(path string) int {
-	if strings.EqualFold(filepath.ToSlash(path), "SKILL.md") {
+	normalized := filepath.ToSlash(path)
+	if strings.EqualFold(normalized, "SKILL.md") || strings.EqualFold(normalized, "openclaw.plugin.json") {
 		return 0
 	}
 	return 1

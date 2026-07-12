@@ -11,6 +11,10 @@ type ScannerAdapter interface {
 	Requirements(env map[string]string) []EnvRequirement
 	Info() ScannerInfo
 	InstallPlan() InstallPlan
+	// SupportsTargetKind reports whether the adapter can analyze a target of the
+	// given kind. Adapters support skill and URL targets by default; only
+	// plugin-aware adapters accept OpenClaw plugin targets.
+	SupportsTargetKind(kind string) bool
 	Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
 
@@ -108,7 +112,10 @@ type scannerAdapter struct {
 	info          ScannerInfo
 	installPlan   InstallPlan
 	commandBacked bool
-	run           func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
+	// supportsPlugins marks adapters that can analyze OpenClaw plugin
+	// targets. Skill and URL kinds are always supported.
+	supportsPlugins bool
+	run             func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
 
 func (adapter scannerAdapter) ID() string {
@@ -154,6 +161,13 @@ func (adapter scannerAdapter) InstallPlan() InstallPlan {
 		plan.ScannerID = adapter.id
 	}
 	return plan
+}
+
+func (adapter scannerAdapter) SupportsTargetKind(kind string) bool {
+	if kind == targetKindPlugin {
+		return adapter.supportsPlugins
+	}
+	return true
 }
 
 func (adapter scannerAdapter) Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
@@ -260,11 +274,12 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runCisco,
 		},
 		scannerAdapter{
-			id: "clawscan-static",
+			id:              "clawscan-static",
+			supportsPlugins: true,
 			info: ScannerInfo{
 				DisplayName:   "ClawScan Static",
 				RepositoryURL: "https://github.com/openclaw/clawscan",
-				Description:   "Built-in deterministic text scanner for high-signal risky skill patterns.",
+				Description:   "Built-in deterministic text scanner for high-signal risky skill and plugin patterns.",
 			},
 			installPlan: InstallPlan{
 				ScannerID:       "clawscan-static",

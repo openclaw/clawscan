@@ -17,6 +17,33 @@ clawscan scanners
 clawscan scanners skillspector
 ```
 
+## Target kinds
+
+Clawscan classifies each explicit target before dispatching scanners and records
+the result in the artifact `target.kind` field:
+
+| Kind | Detected when | Notes |
+| --- | --- | --- |
+| `skill` | default for local files and directories | Historical behavior; a directory usually holds `SKILL.md`. |
+| `plugin` | directory (or manifest file) holds `openclaw.plugin.json` | OpenClaw plugin. The stable manifest `id` is recorded in `target.id`; host paths are never used as identity. |
+| `url` | `http`/`https` input | API-backed and static scanners skip URLs. |
+
+The built-in `clawscan-static` scanner analyzes `plugin` targets; scanners that
+assume skill layouts return an explicit `skipped` result naming the unsupported
+kind, and adapters can opt in per kind as upstream tools add plugin support. A
+directory carrying both `SKILL.md` and `openclaw.plugin.json` is rejected as
+ambiguous rather than guessed.
+
+Plugin targets are never auto-discovered. Zero-target discovery still scans only
+child skill directories under `./skills`; pass a plugin directory explicitly to
+avoid silently scanning arbitrary package directories. Pointing Clawscan at an
+`openclaw.plugin.json` file scans the surrounding plugin directory.
+
+Plugin ids follow OpenClaw's install grammar, including `@scope/name` ids. The
+manifest must parse as strict JSON in this version; JSON5-only manifests
+(comments, trailing commas) are rejected with an explicit error rather than
+guessed at.
+
 ## Available scanners
 
 > **Want to add your scanner to the list?** Follow the guide in [docs/scanners.md](docs/scanners.md#adding-a-built-in-scanner-adapter)
