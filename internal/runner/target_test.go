@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,29 +261,70 @@ func TestResolveTargetRejectsInvalidPluginID(t *testing.T) {
 	}
 }
 
-func TestRunSkipsSkillOnlyScannerForPluginTarget(t *testing.T) {
+func TestRunDispatchesClawHubScannersForPluginTarget(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "probe-plugin")
 	writeProbePlugin(t, dir)
-	opts, err := ParseArgs([]string{dir, "--scanner", "skillspector"})
+	opts, err := ParseArgs([]string{
+		dir,
+		"--scanner", "skillspector",
+		"--scanner", "virustotal",
+		"--scanner", "clawscan-static",
+		"--sandbox", "off",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := Run(opts, RunContext{Env: map[string]string{}})
+	scannerRunner := &recordingPluginScannerRunner{}
+	artifact, err := Run(opts, RunContext{
+		Env:           map[string]string{"VIRUSTOTAL_API_KEY": "present"},
+		ScannerRunner: scannerRunner,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if artifact.Target.Kind != targetKindPlugin || artifact.Target.ID != "probe-plugin" {
 		t.Fatalf("target = %#v", artifact.Target)
 	}
-	result := artifact.Scanners["skillspector"]
-	if result.Status != "skipped" {
-		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	wantScanners := "skillspector,virustotal,clawscan-static"
+	if got := strings.Join(scannerRunner.scanners, ","); got != wantScanners {
+		t.Fatalf("dispatched scanners = %q, want %q", got, wantScanners)
 	}
-	if !strings.Contains(result.Error, "does not support plugin targets") {
-		t.Fatalf("error = %q", result.Error)
+	for _, scanner := range opts.Scanners {
+		result := artifact.Scanners[scanner]
+		if result.Status != "completed" {
+			t.Fatalf("%s result = %#v", scanner, result)
+		}
 	}
-	if len(result.Raw) != 0 {
-		t.Fatalf("raw = %s", result.Raw)
+}
+
+func TestRunPluginTargetRequiresVirusTotalCredential(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, dir)
+	opts, err := ParseArgs([]string{dir, "--scanner", "virustotal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Run(opts, RunContext{Env: map[string]string{}})
+	if err == nil || !strings.Contains(err.Error(), "VIRUSTOTAL_API_KEY required by scanner virustotal") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunPluginTargetRequiresDockerForSkillSpectorByDefault(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, dir)
+	opts, err := ParseArgs([]string{dir, "--scanner", "skillspector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Run(opts, RunContext{
+		Env: map[string]string{},
+		DockerAvailability: func() error {
+			return errors.New("sandbox-probe")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Docker sandbox is required") || !strings.Contains(err.Error(), "sandbox-probe") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -323,4 +366,21 @@ func TestRunFailsForInvalidPluginManifest(t *testing.T) {
 	if _, err := Run(opts, RunContext{Env: map[string]string{}}); err == nil || !strings.Contains(err.Error(), "not a valid plugin") {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+type recordingPluginScannerRunner struct {
+	scanners []string
+}
+
+func (runner *recordingPluginScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
+	runner.scanners = append(runner.scanners, name)
+	if _, err := os.Stat(filepath.Join(target, pluginManifestName)); err != nil {
+		return ScannerResult{}, err
+	}
+	return ScannerResult{
+		Status:      "completed",
+		StartedAt:   startedAt,
+		CompletedAt: startedAt,
+		Raw:         json.RawMessage(`{"ok":true}`),
+	}, nil
 }

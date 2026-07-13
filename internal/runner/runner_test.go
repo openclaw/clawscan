@@ -1474,6 +1474,39 @@ func TestRunUsesSkillSpectorNoLLMWhenProviderKeyMissing(t *testing.T) {
 	}
 }
 
+func TestRunUsesSkillSpectorForPluginDirectory(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, target)
+	commandRunner := &recordingCommandRunner{
+		writeOutput: `{"status":"clean","findings":[]}`,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                 map[string]string{},
+		CommandRunner:       commandRunner,
+		SkillSpectorCommand: []string{"skillspector"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := artifact.Scanners["skillspector"]; result.Status != "completed" {
+		t.Fatalf("scanner = %#v", result)
+	}
+	if artifact.Target.Kind != targetKindPlugin || artifact.Target.ID != "probe-plugin" {
+		t.Fatalf("target = %#v", artifact.Target)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	call := commandRunner.calls[0]
+	if !containsArg(call.args, target) || !containsArg(call.args, "--no-llm") {
+		t.Fatalf("SkillSpector args = %#v", call.args)
+	}
+}
+
 func TestRunSkillSpectorEnablesLLMForProviderEnvVars(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -3217,6 +3250,40 @@ func TestNormalizeClawHubSkillSpectorUsesJavaScriptUTF16Truncation(t *testing.T)
 	}
 }
 
+func TestClawHubPromptUsesPackageReleaseContextForPluginTarget(t *testing.T) {
+	artifact := Artifact{
+		Target: Target{Kind: targetKindPlugin, ID: "probe-plugin"},
+		Scanners: map[string]ScannerResult{
+			"virustotal":   {Raw: json.RawMessage(`{"status":"clean","source":"engines","engineStats":{"malicious":0,"suspicious":0,"harmless":3,"undetected":70}}`)},
+			"skillspector": {Raw: json.RawMessage(`{"status":"clean","score":0}`)},
+		},
+	}
+	job := clawHubPromptJob(artifact, clawHubContext{})
+	if job.Job.TargetKind != "packageRelease" {
+		t.Fatalf("target kind = %q", job.Job.TargetKind)
+	}
+	if job.Target.Version != nil || job.Target.Release == nil {
+		t.Fatalf("target evidence slots = %#v", job.Target)
+	}
+	prompt, err := RenderClawHubPrompt("SYSTEM", artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "- target kind: packageRelease") {
+		t.Fatalf("plugin prompt missing packageRelease context:\n%s", prompt)
+	}
+}
+
+func TestClawHubPromptPreservesSkillVersionContext(t *testing.T) {
+	job := clawHubPromptJob(Artifact{Target: Target{Kind: targetKindSkill}}, clawHubContext{})
+	if job.Job.TargetKind != "skillVersion" {
+		t.Fatalf("target kind = %q", job.Job.TargetKind)
+	}
+	if job.Target.Version == nil || job.Target.Release != nil {
+		t.Fatalf("target evidence slots = %#v", job.Target)
+	}
+}
+
 func TestRunJudgeWorkspaceIncludesDependencyAndLargeTargetFiles(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -3539,6 +3606,28 @@ func TestPrepareJudgeWorkspacePrioritizesSkillFileWithinBudget(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
 		t.Fatalf("SKILL.md was not copied into judge workspace: %v", err)
+	}
+}
+
+func TestPrepareJudgeWorkspacePrioritizesPluginManifestWithinBudget(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, target)
+	for i := 0; i < 4; i++ {
+		path := filepath.Join(target, fmt.Sprintf("00%d-before-manifest.txt", i))
+		if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxTargetFileBytes), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
+	artifact.Target.Kind = targetKindPlugin
+	artifact.Target.ID = "probe-plugin"
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "artifact", pluginManifestName)); err != nil {
+		t.Fatalf("%s was not copied into judge workspace: %v", pluginManifestName, err)
 	}
 }
 

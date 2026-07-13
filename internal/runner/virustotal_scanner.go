@@ -30,9 +30,10 @@ type VirusTotalHTTPClient interface {
 }
 
 type virusTotalScanArtifact struct {
-	Bytes  []byte
-	SHA256 string
-	Kind   string
+	Bytes          []byte
+	SHA256         string
+	Kind           string
+	UploadFilename string
 }
 
 type virusTotalNormalizedAnalysis struct {
@@ -188,7 +189,18 @@ func virusTotalArtifact(target string) (virusTotalScanArtifact, error) {
 		if err != nil {
 			return virusTotalScanArtifact{}, err
 		}
-		return virusTotalScanArtifact{Bytes: bytes, SHA256: sha256BytesHex(bytes), Kind: "skill-zip"}, nil
+		kind := "skill-zip"
+		filename := "skill.zip"
+		if regularManifestExists(filepath.Join(target, pluginManifestName)) {
+			kind = "plugin-zip"
+			filename = "plugin.zip"
+		}
+		return virusTotalScanArtifact{
+			Bytes:          bytes,
+			SHA256:         sha256BytesHex(bytes),
+			Kind:           kind,
+			UploadFilename: filename,
+		}, nil
 	}
 	if !info.Mode().IsRegular() {
 		return virusTotalScanArtifact{}, fmt.Errorf("VirusTotal scanner supports local file or directory targets in v1; non-regular files are unsupported")
@@ -287,7 +299,11 @@ func uploadVirusTotalArtifact(ctx context.Context, client VirusTotalHTTPClient, 
 	}
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "skill.zip")
+	filename := strings.TrimSpace(artifact.UploadFilename)
+	if filename == "" {
+		filename = "skill.zip"
+	}
+	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		return nil, err
 	}

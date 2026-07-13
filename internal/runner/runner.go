@@ -1000,7 +1000,8 @@ func targetFilePriority(root string, path string) int {
 	if err != nil {
 		rel = path
 	}
-	if strings.EqualFold(filepath.ToSlash(rel), "SKILL.md") {
+	normalized := filepath.ToSlash(rel)
+	if strings.EqualFold(normalized, skillManifestName) || strings.EqualFold(normalized, pluginManifestName) {
 		return 0
 	}
 	return 1
@@ -1472,7 +1473,11 @@ func clawHubSystemPrompt(source string) string {
 func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.Job {
 	targetKind := context.TargetKind
 	if targetKind == "" {
-		targetKind = "skillVersion"
+		if artifact.Target.Kind == targetKindPlugin {
+			targetKind = "packageRelease"
+		} else {
+			targetKind = "skillVersion"
+		}
 	}
 	source := context.Source
 	if source == "" {
@@ -1482,7 +1487,7 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 	if context.HasMaliciousSignal != nil {
 		hasMaliciousSignal = *context.HasMaliciousSignal
 	}
-	return clawhubprompt.Job{
+	job := clawhubprompt.Job{
 		Job: clawhubprompt.JobMetadata{
 			TargetKind:         targetKind,
 			Source:             source,
@@ -1490,11 +1495,17 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 		},
 		Target: clawhubprompt.Target{
 			TrustedOpenClawPlugin: context.TrustedOpenClawPlugin,
-			Version: &clawhubprompt.Version{
-				SkillSpectorAnalysis: nil,
-			},
 		},
 	}
+	evidence := &clawhubprompt.Version{
+		SkillSpectorAnalysis: nil,
+	}
+	if targetKind == "packageRelease" {
+		job.Target.Release = evidence
+	} else {
+		job.Target.Version = evidence
+	}
+	return job
 }
 
 func clawHubAIGAnalysis(artifact Artifact) any {

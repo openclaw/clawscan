@@ -136,6 +136,51 @@ func TestVirusTotalScannerScansDirectoryTargetsAsSkillZip(t *testing.T) {
 	}
 }
 
+func TestVirusTotalScannerScansPluginDirectoryAsPluginZip(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, target)
+	scanArtifact, err := virusTotalArtifact(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scanArtifact.Kind != "plugin-zip" || scanArtifact.UploadFilename != "plugin.zip" {
+		t.Fatalf("scan artifact = %#v", scanArtifact)
+	}
+	expectedSHA := scanArtifact.SHA256
+	vtJSON := `{"data":{"id":"` + expectedSHA + `","type":"file","attributes":{"last_analysis_stats":{"malicious":0,"suspicious":0,"harmless":3,"undetected":70}}}}`
+	client := &recordingHTTPClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(vtJSON)),
+		},
+	}
+	manifestTarget := filepath.Join(target, pluginManifestName)
+	opts, err := ParseArgs([]string{manifestTarget, "--scanner", "virustotal", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                  map[string]string{"VIRUSTOTAL_API_KEY": "present"},
+		VirusTotalHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["virustotal"]
+	if result.Status != "completed" {
+		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if !containsArg(result.Command, "plugin-zip") || containsArg(result.Command, "skill-zip") {
+		t.Fatalf("command = %#v", result.Command)
+	}
+	if artifact.Target.Kind != targetKindPlugin || artifact.Target.ID != "probe-plugin" {
+		t.Fatalf("target = %#v", artifact.Target)
+	}
+	if artifact.Target.ResolvedPath != target {
+		t.Fatalf("resolved path = %q, want full plugin directory %q", artifact.Target.ResolvedPath, target)
+	}
+}
+
 func TestVirusTotalScannerSkipsURLTargets(t *testing.T) {
 	target := "https://clawhub.ai/author/skill"
 	client := &recordingHTTPClient{err: errUnexpectedHTTPRequest}

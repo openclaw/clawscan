@@ -387,22 +387,32 @@ func TestRunCommandWritesArtifact(t *testing.T) {
 	}
 }
 
-func TestRunCommandScansPluginTargetAndSkipsSkillOnlyScanner(t *testing.T) {
+func TestRunCommandScansPluginTargetWithClawHubScanners(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "probe-plugin")
 	writePlugin(t, target, "probe-plugin")
 	out := filepath.Join(dir, "run.json")
+	skillSpectorFixture := filepath.Join(dir, "skillspector.json")
+	writeFile(t, skillSpectorFixture, `{"status":"clean","findings":[]}`)
+	virusTotalFixture := filepath.Join(dir, "virustotal.json")
+	writeFile(t, virusTotalFixture, `{"status":"clean","source":"engines"}`)
 
 	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--scanner", "clawscan-static", "--scanner", "skillspector", "--output", out}, []string{}); err != nil {
+		if err := run([]string{
+			target,
+			"--scanner", "skillspector", "--scanner-result", "skillspector=" + skillSpectorFixture,
+			"--scanner", "virustotal", "--scanner-result", "virustotal=" + virusTotalFixture,
+			"--scanner", "clawscan-static",
+			"--output", out,
+		}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(stdout, "scanner_completed: 1") {
+	if !strings.Contains(stdout, "scanner_completed: 3") {
 		t.Fatalf("summary missing completed scanner:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "scanner_skipped: 1") {
-		t.Fatalf("summary missing skipped scanner:\n%s", stdout)
+	if !strings.Contains(stdout, "scanner_skipped: 0") {
+		t.Fatalf("summary has unexpected skipped count:\n%s", stdout)
 	}
 
 	data, err := os.ReadFile(out)
@@ -429,13 +439,10 @@ func TestRunCommandScansPluginTargetAndSkipsSkillOnlyScanner(t *testing.T) {
 	if artifact.Target.ID != "probe-plugin" {
 		t.Fatalf("target id = %q", artifact.Target.ID)
 	}
-	static := artifact.Scanners["clawscan-static"]
-	if static.Status != "completed" {
-		t.Fatalf("clawscan-static result = %#v", static)
-	}
-	spector := artifact.Scanners["skillspector"]
-	if spector.Status != "skipped" || !strings.Contains(spector.Error, "does not support plugin targets") {
-		t.Fatalf("skillspector result = %#v", spector)
+	for _, scanner := range []string{"skillspector", "virustotal", "clawscan-static"} {
+		if result := artifact.Scanners[scanner]; result.Status != "completed" {
+			t.Fatalf("%s result = %#v", scanner, result)
+		}
 	}
 }
 
