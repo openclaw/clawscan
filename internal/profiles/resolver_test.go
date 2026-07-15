@@ -52,6 +52,37 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	}
 }
 
+func TestResolveArgsUsesEmbeddedClawHubAIGCandidateProfile(t *testing.T) {
+	dir := t.TempDir()
+
+	clawhub, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := ResolveArgs([]string{"./skill", "--profile", "clawhub-aig"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := strings.Join(candidate.Scanners, ","); got != "skillspector,aig" {
+		t.Fatalf("scanners = %q", got)
+	}
+	if candidate.Judge == nil || clawhub.Judge == nil {
+		t.Fatal("missing embedded ClawHub judge")
+	}
+	if candidate.Judge.Command != clawhub.Judge.Command {
+		t.Fatalf("candidate judge command differs from clawhub:\n%s\n---\n%s", candidate.Judge.Command, clawhub.Judge.Command)
+	}
+	for _, path := range []string{"clawhub/prompt.md", "clawhub/output.schema.json"} {
+		if string(candidate.Judge.Files[path]) != string(clawhub.Judge.Files[path]) {
+			t.Fatalf("candidate judge file %s differs from clawhub", path)
+		}
+	}
+	if got := strings.Join(candidate.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,LLM_API_KEY" {
+		t.Fatalf("sandbox env = %q", got)
+	}
+}
+
 func TestResolveArgsPassesExplicitRunContext(t *testing.T) {
 	dir := t.TempDir()
 	contextPath := filepath.Join(dir, "clawhub-context.json")
@@ -199,6 +230,32 @@ func TestResolveBenchmarkRunSetForwardsIDsSource(t *testing.T) {
 	}
 	if opts.Benchmark.IDsSource != "./subset.jsonl" {
 		t.Fatalf("ids source = %q", opts.Benchmark.IDsSource)
+	}
+}
+
+func TestResolveBenchmarkRunSetUsesDocumentedClawHubAIGCandidateCommand(t *testing.T) {
+	const subset = "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench-results/resolve/main/data/evaluation_subset_10pct.jsonl"
+
+	resolved, err := ResolveBenchmarkRunSet("SkillTrustBench", []string{
+		"--profile", "clawhub-aig",
+		"--ids", subset,
+		"--output", "./artifacts/skilltrustbench-clawhub-aig.json",
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := resolved.Options[0]
+	if opts.Profile != "clawhub-aig" {
+		t.Fatalf("profile = %q", opts.Profile)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,aig" {
+		t.Fatalf("scanners = %q", got)
+	}
+	if opts.Benchmark == nil || opts.Benchmark.IDsSource != subset {
+		t.Fatalf("benchmark = %#v", opts.Benchmark)
+	}
+	if opts.OutputPath != "./artifacts/skilltrustbench-clawhub-aig.json" {
+		t.Fatalf("output path = %q", opts.OutputPath)
 	}
 }
 

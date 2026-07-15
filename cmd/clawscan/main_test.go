@@ -179,6 +179,8 @@ profiles:
 		"clawhub",
 		".clawscan.yml",
 		"clawscan-static",
+		"clawhub-aig",
+		"skillspector, aig",
 		"local-review",
 		"snyk",
 	} {
@@ -213,8 +215,10 @@ profiles:
 		"version: 1",
 		"profiles:",
 		"clawhub:",
+		"clawhub-aig:",
 		"local-review:",
 		"- clawscan-static",
+		"- aig",
 		"json: true",
 	} {
 		if !strings.Contains(stdout, want) {

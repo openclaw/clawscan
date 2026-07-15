@@ -31,7 +31,12 @@ type Version struct {
 
 type RawJSON []byte
 
-func Build(systemPrompt string, job Job, injectionSignals []string, skillSpectorAnalysis any) (string, error) {
+type ScannerEvidence struct {
+	Label string
+	Value any
+}
+
+func Build(systemPrompt string, job Job, injectionSignals []string, skillSpectorAnalysis any, supplementalEvidence ...ScannerEvidence) (string, error) {
 	vt, err := prettyJSON(firstNonNil(versionValue(job.Target.Version, "vt"), versionValue(job.Target.Release, "vt")))
 	if err != nil {
 		return "", err
@@ -59,7 +64,7 @@ func Build(systemPrompt string, job Job, injectionSignals []string, skillSpector
 	if len(injectionSignals) > 0 {
 		injectionText = strings.Join(injectionSignals, ", ")
 	}
-	return fmt.Sprintf(`%s
+	prompt := fmt.Sprintf(`%s
 
 Additional ClawHub policy for this Codex run:
 - Do your own security research before deciding. Use SkillSpector, VirusTotal, static scan
@@ -92,9 +97,19 @@ VirusTotal telemetry supplied to Codex:
 SkillSpector findings supplied to Codex:
 `+"```"+`json
 %s
-`+"```"+`
+`+"```"+``, systemPrompt, job.Job.TargetKind, job.Job.Source, hasMaliciousSignal, trusted, injectionText, vt, skillSpector)
 
-Return the required JSON object only.`, systemPrompt, job.Job.TargetKind, job.Job.Source, hasMaliciousSignal, trusted, injectionText, vt, skillSpector), nil
+	for _, evidence := range supplementalEvidence {
+		if evidence.Label == "" {
+			return "", fmt.Errorf("supplemental scanner evidence is missing a label")
+		}
+		formatted, err := prettyJSON(evidence.Value)
+		if err != nil {
+			return "", err
+		}
+		prompt += fmt.Sprintf("\n\n%s:\n```json\n%s\n```", evidence.Label, formatted)
+	}
+	return prompt + "\n\nReturn the required JSON object only.", nil
 }
 
 func versionValue(version *Version, key string) any {

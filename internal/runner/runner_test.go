@@ -1256,6 +1256,17 @@ func TestRunClawHubProfileMatchesProductionSkillSpectorWorkspace(t *testing.T) {
 	}
 }
 
+func TestClawHubParityProfiles(t *testing.T) {
+	for _, profile := range []string{"clawhub", "clawhub-aig"} {
+		if !isClawHubParityProfile(profile) {
+			t.Fatalf("%s should use ClawHub parity behavior", profile)
+		}
+	}
+	if isClawHubParityProfile("review") {
+		t.Fatal("non-ClawHub profile unexpectedly uses ClawHub parity behavior")
+	}
+}
+
 func TestRunUsesDockerSandboxForCommandBackedScannersByDefault(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -2819,6 +2830,29 @@ func TestRenderClawHubPromptUsesProductionScannerContextShape(t *testing.T) {
 	for _, forbidden := range []string{"stale block"} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("prompt included %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestRenderClawHubAIGPromptIncludesAIGEvidence(t *testing.T) {
+	prompt, err := RenderClawHubPrompt("SYSTEM", Artifact{
+		Profile: "clawhub-aig",
+		Scanners: map[string]ScannerResult{
+			"skillspector": {Raw: json.RawMessage(`{"status":"clean"}`)},
+			"aig":          {Raw: json.RawMessage(`{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04","level":"error"}]}]}`)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"SkillSpector findings supplied to Codex:",
+		"A.I.G SARIF evidence supplied to Codex:",
+		`"ruleId": "T04"`,
+		"- non-VT malicious signal present: yes",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
 	}
 }

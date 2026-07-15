@@ -43,6 +43,32 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	if string(clawhub.files["clawhub/output.schema.json"]) == "" {
 		t.Fatal("missing clawhub embedded output schema")
 	}
+
+	candidate, ok := registry.Profile("clawhub-aig")
+	if !ok {
+		t.Fatal("missing clawhub-aig profile")
+	}
+	if got := strings.Join(candidate.profile.Scanners, ","); got != "skillspector,aig" {
+		t.Fatalf("clawhub-aig scanners = %q", got)
+	}
+	if candidate.configDir != "clawhub" {
+		t.Fatalf("clawhub-aig config dir = %q", candidate.configDir)
+	}
+	if candidate.source != "built-in" {
+		t.Fatalf("clawhub-aig source = %q", candidate.source)
+	}
+	if candidate.profile.Judge == nil || clawhub.profile.Judge == nil {
+		t.Fatal("missing built-in judge")
+	}
+	if candidate.profile.Judge.Command != clawhub.profile.Judge.Command {
+		t.Fatalf("clawhub-aig judge command differs from clawhub")
+	}
+	if string(candidate.files["clawhub/prompt.md"]) != string(clawhub.files["clawhub/prompt.md"]) {
+		t.Fatal("clawhub-aig prompt differs from clawhub")
+	}
+	if string(candidate.files["clawhub/output.schema.json"]) != string(clawhub.files["clawhub/output.schema.json"]) {
+		t.Fatal("clawhub-aig output schema differs from clawhub")
+	}
 }
 
 func TestProfileRegistryRejectsUnknownScannerReferences(t *testing.T) {
@@ -74,7 +100,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,local" {
+	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,clawhub-aig,local" {
 		t.Fatalf("profile ids = %q", got)
 	}
 

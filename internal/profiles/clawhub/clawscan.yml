@@ -29,3 +29,30 @@ profiles:
         --ephemeral
         --json
         - < {{ prompt:prompt.md }}
+  clawhub-aig:
+    scanners:
+      - skillspector
+      - aig
+    sandbox:
+      env:
+        - OPENAI_API_KEY
+        - CODEX_API_KEY
+        - SKILLSPECTOR_PROVIDER
+        - LLM_API_KEY
+    judge:
+      command: >-
+        codex exec --cd {{ workspace }}
+        --model gpt-5.5
+        --sandbox read-only
+        --skip-git-repo-check
+        --ignore-user-config
+        -c approval_policy=never
+        -c model_reasoning_effort=high
+        -c service_tier=fast
+        -c 'shell_environment_policy.inherit="core"'
+        -c shell_environment_policy.ignore_default_excludes=false
+        --output-schema {{ output_schema:output.schema.json }}
+        --output-last-message {{ output }}
+        --ephemeral
+        --json
+        - < {{ prompt:prompt.md }}

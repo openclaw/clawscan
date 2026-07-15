@@ -91,6 +91,24 @@ func TestBuildFormatsEmptyRawJSONAsNull(t *testing.T) {
 	}
 }
 
+func TestBuildIncludesSupplementalScannerEvidence(t *testing.T) {
+	prompt, err := Build("SYSTEM", fixtureJob(), nil, nil, ScannerEvidence{
+		Label: "A.I.G SARIF evidence supplied to Codex",
+		Value: RawJSON(`{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04"}]}]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"A.I.G SARIF evidence supplied to Codex:",
+		`"ruleId": "T04"`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func fixtureJob() Job {
 	return Job{
 		Job: JobMetadata{

@@ -1110,7 +1110,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		outputPath: filepath.Join(workspace, "judge-output.json"),
 		files:      opts.Files,
 	}
-	if artifact.Profile == "clawhub" {
+	if isClawHubParityProfile(artifact.Profile) {
 		state.outputPath = filepath.Join(workspace, "codex-result.json")
 	}
 	shell := judgeShellForGOOS(runtime.GOOS)
@@ -1298,7 +1298,7 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 }
 
 func renderJudgePromptSource(source string, template string, artifact Artifact) (string, error) {
-	if artifact.Profile == "clawhub" && judgeSourceKey(source) == "clawhub/prompt.md" {
+	if isClawHubParityProfile(artifact.Profile) && judgeSourceKey(source) == "clawhub/prompt.md" {
 		return RenderClawHubPrompt(template, artifact)
 	}
 	return RenderPromptTemplate(template, artifact)
@@ -1314,11 +1314,19 @@ func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, 
 	if err != nil {
 		return "", err
 	}
+	var supplemental []clawhubprompt.ScannerEvidence
+	if artifact.Profile == clawHubAIGProfileID {
+		supplemental = append(supplemental, clawhubprompt.ScannerEvidence{
+			Label: "A.I.G SARIF evidence supplied to Codex",
+			Value: clawHubAIGAnalysis(artifact),
+		})
+	}
 	return clawhubprompt.Build(
 		systemPrompt,
 		clawHubPromptJob(artifact, context),
 		clawHubInjectionSignals(artifact, context),
 		skillSpector,
+		supplemental...,
 	)
 }
 
@@ -1376,7 +1384,23 @@ func clawHubVirusTotalAnalysis(artifact Artifact) any {
 	return clawhubprompt.RawJSON(result.Raw)
 }
 
+func clawHubAIGAnalysis(artifact Artifact) any {
+	result, ok := artifact.Scanners["aig"]
+	if !ok || len(result.Raw) == 0 {
+		return nil
+	}
+	return clawhubprompt.RawJSON(result.Raw)
+}
+
 func clawHubHasNonVTMaliciousSignal(artifact Artifact) bool {
+	if artifact.Profile == clawHubAIGProfileID {
+		result, ok := artifact.Scanners["aig"]
+		if !ok || len(result.Raw) == 0 {
+			return false
+		}
+		prediction, ok := aigSARIFPrediction(result.Raw)
+		return ok && prediction == "malicious"
+	}
 	staticResult, ok := artifact.Scanners["clawscan-static"]
 	if !ok || len(staticResult.Raw) == 0 {
 		return false
@@ -1465,7 +1489,7 @@ func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
 	if err != nil {
 		return err
 	}
-	if artifact.Profile == "clawhub" {
+	if isClawHubParityProfile(artifact.Profile) {
 		context, err := parseClawHubContext(artifact.Context)
 		if err != nil {
 			return err
@@ -1819,7 +1843,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	scanTarget := target
 	cwd := ""
 	resultName := "skillspector-report.json"
-	if runner.Profile == "clawhub" {
+	if isClawHubParityProfile(runner.Profile) {
 		if _, err := copyTargetToWorkspace(target, filepath.Join(resultDir, "artifact")); err != nil {
 			return ScannerResult{}, fmt.Errorf("prepare ClawHub SkillSpector workspace: %w", err)
 		}

@@ -139,7 +139,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			}, nil
 		}
 		var analysis json.RawMessage
-		if runner.Profile != "clawhub" {
+		if !isClawHubParityProfile(runner.Profile) {
 			encoded, err := json.Marshal(virusTotalNormalizedAnalysis{
 				Status:    "pending",
 				CheckedAt: time.Now().UnixMilli(),
