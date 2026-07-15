@@ -62,6 +62,37 @@ func TestBuildPromptTemplateReplacesScannerFixtures(t *testing.T) {
 	}
 }
 
+func TestBuildPromptTemplateFromRenderedReplacesScannerBlocks(t *testing.T) {
+	prompt := strings.Join([]string{
+		"Before",
+		"VirusTotal telemetry supplied to Codex:",
+		"```json",
+		`{"status":"clean"}`,
+		"```",
+		"Middle",
+		"SkillSpector findings supplied to Codex:",
+		"```json",
+		`{"status":"suspicious"}`,
+		"```",
+		"After",
+	}, "\n")
+
+	template, err := buildPromptTemplateFromRendered(prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, placeholder := range []string{"{{ scanners.virustotal }}", "{{ scanners.skillspector }}"} {
+		if !strings.Contains(template, placeholder) {
+			t.Fatalf("template missing placeholder %s:\n%s", placeholder, template)
+		}
+	}
+	for _, fixture := range []string{`{"status":"clean"}`, `{"status":"suspicious"}`} {
+		if strings.Contains(template, fixture) {
+			t.Fatalf("template still contains raw fixture %q:\n%s", fixture, template)
+		}
+	}
+}
+
 func TestClawHubWorkerOutputSchemaRelPath(t *testing.T) {
 	workerSource := `
 const root = resolve(new URL("../..", import.meta.url).pathname);
