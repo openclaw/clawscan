@@ -182,19 +182,6 @@ clawscan profiles -v
 | Profile | Scanners | Judge |
 | --- | --- | --- |
 | `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
-| `clawhub-aig` | `skillspector`, `aig` | Candidate evaluation profile; the same ClawHub Codex judge, prompt, schema, and sandbox configuration |
-
-`clawhub-aig` is not ClawHub production. It replaces the production profile's
-VirusTotal and static scanners with A.I.G for candidate evaluation while
-retaining the ClawHub judge behavior. Evaluate it against the fixed
-SkillTrustBench 10% manifest:
-
-```bash
-clawscan benchmark SkillTrustBench \
-  --profile clawhub-aig \
-  --ids https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench-results/resolve/main/data/evaluation_subset_10pct.jsonl \
-  --output ./artifacts/skilltrustbench-clawhub-aig.json
-```
 
 ### Build a custom profile with `.clawscan.yml`
 
