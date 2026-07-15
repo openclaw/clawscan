@@ -102,7 +102,7 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 		if !adapter.SupportsTargetKind(targetKindURL) {
 			t.Fatalf("%s should support url targets", id)
 		}
-		wantPlugin := id == "clawscan-static" || id == "skillspector" || id == "virustotal"
+		wantPlugin := id == "clawscan-static" || id == "skillspector" || id == "socket" || id == "virustotal"
 		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {
 			t.Fatalf("%s plugin support = %v, want %v", id, got, wantPlugin)
 		}
@@ -115,6 +115,9 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 	}
 	if !scannerSupportsTargetKind("virustotal", targetKindPlugin) {
 		t.Fatal("virustotal should support plugin targets")
+	}
+	if !scannerSupportsTargetKind("socket", targetKindPlugin) {
+		t.Fatal("socket should support plugin targets")
 	}
 	if !scannerSupportsTargetKind("unknown-scanner", targetKindPlugin) {
 		t.Fatal("unknown scanners should be permitted so the runner emits its own skipped result")

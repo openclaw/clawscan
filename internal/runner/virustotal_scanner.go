@@ -23,7 +23,7 @@ const (
 	virusTotalDirectUploadLimit = 32 * 1024 * 1024
 )
 
-var virusTotalFixedZipDate = time.Date(1980, 1, 1, 0, 0, 0, 0, time.Local)
+var virusTotalFixedZipDate = time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
 
 type VirusTotalHTTPClient interface {
 	Do(request *http.Request) (*http.Response, error)

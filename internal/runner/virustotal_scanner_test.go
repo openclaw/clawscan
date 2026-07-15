@@ -9,7 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestVirusTotalZipTimestampIsTimezoneIndependent(t *testing.T) {
+	if virusTotalFixedZipDate.Location() != time.UTC {
+		t.Fatalf("fixed ZIP timestamp location = %v, want UTC", virusTotalFixedZipDate.Location())
+	}
+}
 
 func TestRunExecutesVirusTotalScannerForSingleFile(t *testing.T) {
 	dir := t.TempDir()

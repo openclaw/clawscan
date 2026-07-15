@@ -339,9 +339,10 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runSnyk,
 		},
 		scannerAdapter{
-			id:            "socket",
-			requirements:  staticEnvRequirements("scanner socket", "SOCKET_CLI_API_TOKEN"),
-			commandBacked: true,
+			id:              "socket",
+			requirements:    staticEnvRequirements("scanner socket", "SOCKET_CLI_API_TOKEN"),
+			commandBacked:   true,
+			supportsPlugins: true,
 			info: ScannerInfo{
 				DisplayName:   "Socket CLI",
 				RepositoryURL: "https://github.com/SocketDev/socket-cli",
