@@ -61,6 +61,7 @@ type cliIntent struct {
 	profile              string
 	profileSet           bool
 	configPath           string
+	contextPath          string
 	scanners             []string
 	scannerResultPaths   map[string]string
 	outputPath           string
@@ -433,6 +434,13 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			}
 			intent.configPath = value
 			i = next
+		case "--context":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.contextPath = value
+			i = next
 		case "--scanner":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -593,6 +601,9 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	target := intent.target
 	if target != "" {
 		args = append(args, target)
+	}
+	if intent.contextPath != "" {
+		args = append(args, "--context", intent.contextPath)
 	}
 	for _, scanner := range scanners {
 		args = append(args, "--scanner", scanner)

@@ -61,7 +61,7 @@ func TestBuildUsesExplicitSkillSpectorAnalysis(t *testing.T) {
 
 func TestBuildPreservesRawJSONEvidenceOrder(t *testing.T) {
 	job := fixtureJob()
-	job.Target.Version.VTAnalysis = RawJSON(`{"z":1,"a":2}`)
+	job.Target.Version.VTAnalysis = RawJSON("{\"z\":1,\"a\":2}\n")
 	prompt, err := Build("SYSTEM", job, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +73,9 @@ func TestBuildPreservesRawJSONEvidenceOrder(t *testing.T) {
 	}
 	if zIndex > aIndex {
 		t.Fatalf("raw JSON key order was not preserved:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "\"a\": 2\n\n```") {
+		t.Fatalf("raw JSON trailing newline leaked into prompt:\n%s", prompt)
 	}
 }
 

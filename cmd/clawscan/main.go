@@ -568,6 +568,7 @@ Core flags:
   --config <path>             Load profiles from a specific .clawscan.yml file; omit --profile to run them all.
   --scanner <id>              Scanner to run. Repeat for multiple scanners.
   --scanner-result <id=path>  Use a JSON fixture instead of running that scanner.
+  --context <path>            Load profile runtime context from a JSON file.
   --output <path>             Write the full artifact JSON to a specific file.
                               Defaults to ./clawscan-results/artifact.json unless --json is passed.
                               Explicit .json paths keep the artifact file and write scanner JSON beside it.

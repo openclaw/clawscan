@@ -28,6 +28,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"clawscan --scanner <scanner-id> [flags]",
 		"clawscan --profile clawhub [flags]",
 		"--scanner <id>",
+		"--context <path>",
 		"Install scanner dependencies without running scans.",
 		"--profile <name>",
 		"--config <path>",

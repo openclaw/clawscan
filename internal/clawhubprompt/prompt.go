@@ -147,5 +147,5 @@ func prettyRawJSON(raw []byte) (string, error) {
 	if err := json.Indent(&buffer, raw, "", "  "); err != nil {
 		return "", err
 	}
-	return buffer.String(), nil
+	return strings.TrimSpace(buffer.String()), nil
 }

@@ -48,7 +48,7 @@ func TestRunExecutesVirusTotalScannerForSingleFile(t *testing.T) {
 	if err := json.Unmarshal(result.Raw, &analysis); err != nil {
 		t.Fatal(err)
 	}
-	if analysis.Status != "clean" || analysis.SHA256 != expectedSHA || analysis.EngineStats == nil || analysis.EngineStats.Undetected != 72 {
+	if analysis.Status != "clean" || analysis.EngineStats == nil || analysis.EngineStats.Undetected != 72 {
 		t.Fatalf("analysis = %#v raw = %s", analysis, result.Raw)
 	}
 	if len(client.requests) != 1 {
@@ -122,7 +122,7 @@ func TestVirusTotalScannerScansDirectoryTargetsAsSkillZip(t *testing.T) {
 	if err := json.Unmarshal(result.Raw, &analysis); err != nil {
 		t.Fatal(err)
 	}
-	if analysis.Status != "malicious" || analysis.SHA256 != expectedSHA || analysis.EngineStats == nil || analysis.EngineStats.Malicious != 1 {
+	if analysis.Status != "malicious" || analysis.EngineStats == nil || analysis.EngineStats.Malicious != 1 {
 		t.Fatalf("analysis = %#v raw = %s", analysis, result.Raw)
 	}
 	if len(client.requests) != 1 {
@@ -210,6 +210,45 @@ func TestVirusTotalScannerUploadsMissingReports(t *testing.T) {
 	}
 	if client.requests[1].URL.String() != virusTotalFilesEndpoint {
 		t.Fatalf("upload url = %s", client.requests[1].URL.String())
+	}
+	if !containsArg(result.Command, "upload") {
+		t.Fatalf("command = %#v", result.Command)
+	}
+}
+
+func TestClawHubVirusTotalUploadLeavesPromptEvidenceNullLikeProduction(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(target, []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingHTTPClient{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"NotFoundError"}}`)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"id":"analysis-id","type":"analysis"}}`)),
+			},
+		},
+	}
+	artifact, err := Run(Options{
+		Target:   target,
+		Profile:  "clawhub",
+		Scanners: []string{"virustotal"},
+		Sandbox:  SandboxOptions{Mode: SandboxModeOff},
+	}, RunContext{
+		Env:                  map[string]string{"VIRUSTOTAL_API_KEY": "test-vt-secret"},
+		VirusTotalHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["virustotal"]
+	if result.Status != "completed" || len(result.Raw) != 0 {
+		t.Fatalf("result = %#v", result)
 	}
 	if !containsArg(result.Command, "upload") {
 		t.Fatalf("command = %#v", result.Command)

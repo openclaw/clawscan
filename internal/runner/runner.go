@@ -27,6 +27,7 @@ import (
 type Options struct {
 	Target             string
 	Profile            string
+	ContextPath        string
 	Benchmark          *BenchmarkOptions
 	Scanners           []string
 	ScannerResultPaths map[string]string
@@ -85,6 +86,7 @@ type CommandOutput struct {
 type Artifact struct {
 	SchemaVersion string                   `json:"schemaVersion"`
 	Profile       string                   `json:"profile,omitempty"`
+	Context       json.RawMessage          `json:"context,omitempty"`
 	Target        Target                   `json:"target"`
 	StartedAt     string                   `json:"startedAt"`
 	CompletedAt   string                   `json:"completedAt"`
@@ -251,6 +253,13 @@ func ParseArgs(args []string) (Options, error) {
 			}
 			opts.Profile = value
 			i = next
+		case "--context":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			opts.ContextPath = value
+			i = next
 		case "--scanner-result":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -376,6 +385,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		scannerRunner = ExternalScannerRunner{
 			CommandRunner:        commandRunner,
 			Env:                  env,
+			Profile:              opts.Profile,
 			SandboxMode:          scannerSandboxMode,
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
@@ -385,6 +395,16 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
 	artifact.Sandbox = sandbox
 	artifact.Target.Kind = target.kind
+	if opts.ContextPath != "" {
+		context, err := os.ReadFile(opts.ContextPath)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("read context JSON: %w", err)
+		}
+		if !json.Valid(context) {
+			return Artifact{}, fmt.Errorf("context JSON is not valid: %s", opts.ContextPath)
+		}
+		artifact.Context = json.RawMessage(context)
+	}
 	for _, scanner := range opts.Scanners {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
@@ -1090,6 +1110,9 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		outputPath: filepath.Join(workspace, "judge-output.json"),
 		files:      opts.Files,
 	}
+	if artifact.Profile == "clawhub" {
+		state.outputPath = filepath.Join(workspace, "codex-result.json")
+	}
 	shell := judgeShellForGOOS(runtime.GOOS)
 	command, err := renderJudgeCommand(opts.Command, artifact, state, shell.quote)
 	if err != nil {
@@ -1283,7 +1306,20 @@ func renderJudgePromptSource(source string, template string, artifact Artifact) 
 
 func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, error) {
 	systemPrompt := clawHubSystemPrompt(systemPromptSource)
-	return clawhubprompt.Build(systemPrompt, clawHubPromptJob(artifact), clawHubInjectionSignals(artifact), scannerRawOrNil(artifact, "skillspector"))
+	context, err := parseClawHubContext(artifact.Context)
+	if err != nil {
+		return "", err
+	}
+	skillSpector, err := clawHubSkillSpectorAnalysis(artifact, context.SkillSpectorCheckedAt)
+	if err != nil {
+		return "", err
+	}
+	return clawhubprompt.Build(
+		systemPrompt,
+		clawHubPromptJob(artifact, context),
+		clawHubInjectionSignals(artifact, context),
+		skillSpector,
+	)
 }
 
 func clawHubSystemPrompt(source string) string {
@@ -1294,53 +1330,50 @@ func clawHubSystemPrompt(source string) string {
 	return source
 }
 
-func clawHubPromptJob(artifact Artifact) clawhubprompt.Job {
+func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.Job {
+	targetKind := context.TargetKind
+	if targetKind == "" {
+		targetKind = "skillVersion"
+	}
+	source := context.Source
+	if source == "" {
+		source = "publish"
+	}
+	hasMaliciousSignal := clawHubHasNonVTMaliciousSignal(artifact)
+	if context.HasMaliciousSignal != nil {
+		hasMaliciousSignal = *context.HasMaliciousSignal
+	}
 	return clawhubprompt.Job{
 		Job: clawhubprompt.JobMetadata{
-			TargetKind:         "skillVersion",
-			Source:             "publish",
-			HasMaliciousSignal: clawHubHasNonVTMaliciousSignal(artifact),
+			TargetKind:         targetKind,
+			Source:             source,
+			HasMaliciousSignal: hasMaliciousSignal,
 		},
 		Target: clawhubprompt.Target{
-			TrustedOpenClawPlugin: false,
+			TrustedOpenClawPlugin: context.TrustedOpenClawPlugin,
 			Version: &clawhubprompt.Version{
 				VTAnalysis:           clawHubVirusTotalAnalysis(artifact),
-				SkillSpectorAnalysis: scannerRawOrNil(artifact, "skillspector"),
+				SkillSpectorAnalysis: nil,
 			},
 		},
 	}
 }
 
 func clawHubVirusTotalAnalysis(artifact Artifact) any {
-	raw := scannerRawOrNil(artifact, "virustotal")
-	if raw == nil {
+	result, ok := artifact.Scanners["virustotal"]
+	if !ok || len(result.Raw) == 0 {
 		return nil
 	}
 	var analysis struct {
-		Status      string           `json:"status"`
-		Source      string           `json:"source,omitempty"`
-		EngineStats *virusTotalStats `json:"engineStats,omitempty"`
-		CheckedAt   int64            `json:"checkedAt,omitempty"`
+		Status string `json:"status"`
 	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return raw
-	}
-	if err := json.Unmarshal(bytes, &analysis); err != nil {
-		return raw
+	if err := json.Unmarshal(result.Raw, &analysis); err != nil {
+		return clawhubprompt.RawJSON(result.Raw)
 	}
 	if analysis.Status == "pending" || analysis.Status == "" {
 		return nil
 	}
-	return analysis
-}
-
-func scannerRawOrNil(artifact Artifact, scanner string) any {
-	result, ok := artifact.Scanners[scanner]
-	if !ok || len(result.Raw) == 0 {
-		return nil
-	}
-	return json.RawMessage(result.Raw)
+	return clawhubprompt.RawJSON(result.Raw)
 }
 
 func clawHubHasNonVTMaliciousSignal(artifact Artifact) bool {
@@ -1360,7 +1393,10 @@ func clawHubHasNonVTMaliciousSignal(artifact Artifact) bool {
 	return false
 }
 
-func clawHubInjectionSignals(artifact Artifact) []string {
+func clawHubInjectionSignals(artifact Artifact, context clawHubContext) []string {
+	if context.InjectionSignals != nil {
+		return append([]string(nil), context.InjectionSignals...)
+	}
 	staticResult, ok := artifact.Scanners["clawscan-static"]
 	if !ok || len(staticResult.Raw) == 0 {
 		return nil
@@ -1424,9 +1460,31 @@ func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
 	if artifact.Target.Kind == "url" {
 		return fmt.Errorf("judge workspace copying is unsupported for URL targets: %s", artifact.Target.Input)
 	}
+	// Every profile receives the complete artifact before its metadata layout is written.
 	manifest, err := copyTargetToWorkspace(artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
 	if err != nil {
 		return err
+	}
+	if artifact.Profile == "clawhub" {
+		context, err := parseClawHubContext(artifact.Context)
+		if err != nil {
+			return err
+		}
+		if result, ok := artifact.Scanners["skillspector"]; ok && len(result.Raw) > 0 {
+			if err := os.WriteFile(filepath.Join(workspace, "skillspector-report-0.json"), result.Raw, 0o644); err != nil {
+				return err
+			}
+		}
+		metadata := context.Metadata
+		if len(metadata) == 0 {
+			metadata = json.RawMessage(`{}`)
+		}
+		var formatted bytes.Buffer
+		if err := json.Indent(&formatted, metadata, "", "  "); err != nil {
+			return fmt.Errorf("format clawhub metadata JSON: %w", err)
+		}
+		formatted.WriteByte('\n')
+		return os.WriteFile(filepath.Join(workspace, "metadata.json"), formatted.Bytes(), 0o644)
 	}
 	scannersDir := filepath.Join(workspace, "scanners")
 	if err := os.MkdirAll(scannersDir, 0o755); err != nil {
@@ -1458,7 +1516,7 @@ func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
 
 func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManifest, error) {
 	manifest := TargetWorkspaceManifest{}
-	info, err := os.Stat(source)
+	info, err := os.Lstat(source)
 	if err != nil {
 		return manifest, err
 	}
@@ -1467,12 +1525,7 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 			return manifest, err
 		}
 		if !info.Mode().IsRegular() {
-			manifest.addOmitted(filepath.Base(source), "not regular file", 0)
-			return manifest, nil
-		}
-		if info.Size() > maxTargetFileBytes {
-			manifest.addOmitted(filepath.Base(source), "file exceeds size limit", info.Size())
-			return manifest, nil
+			return manifest, fmt.Errorf("refusing non-regular judge target: %s", source)
 		}
 		if err := copyFile(source, filepath.Join(destRoot, filepath.Base(source))); err != nil {
 			return manifest, err
@@ -1483,27 +1536,40 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 	if err := os.MkdirAll(destRoot, 0o755); err != nil {
 		return manifest, err
 	}
-	var totalBytes int64
 	type workspaceFileCandidate struct {
-		path string
-		rel  string
-		info os.FileInfo
+		path       string
+		rel        string
+		info       os.FileInfo
+		linkTarget string
 	}
 	var candidates []workspaceFileCandidate
 	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
-			return manifest.recordWalkError(source, path, entry)
+			return err
 		}
-		if shouldSkipTargetPath(source, path) {
-			rel := relativeManifestPath(source, path)
+		if shouldSkipWorkspacePath(source, path) {
 			if entry.IsDir() {
-				manifest.addOmitted(rel, "skipped path", 0)
 				return filepath.SkipDir
 			}
-			manifest.addOmitted(rel, "skipped path", 0)
 			return nil
 		}
 		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			linkTarget, err := safeWorkspaceSymlinkTarget(source, destRoot, path, rel)
+			if err != nil {
+				return err
+			}
+			candidates = append(candidates, workspaceFileCandidate{
+				path:       path,
+				rel:        rel,
+				linkTarget: linkTarget,
+			})
 			return nil
 		}
 		info, err := entry.Info()
@@ -1511,11 +1577,7 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 			return err
 		}
 		if !info.Mode().IsRegular() {
-			return nil
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
+			return fmt.Errorf("refusing non-regular artifact entry: %s", relativeManifestPath(source, path))
 		}
 		candidates = append(candidates, workspaceFileCandidate{
 			path: path,
@@ -1535,28 +1597,62 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 		}
 		return filepath.ToSlash(candidates[i].rel) < filepath.ToSlash(candidates[j].rel)
 	})
+	// Complete workspaces are a parity invariant: fail the run on copy errors
+	// instead of silently giving scanners or the judge a truncated artifact.
 	for _, candidate := range candidates {
+		if candidate.linkTarget != "" {
+			dest := filepath.Join(destRoot, candidate.rel)
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return manifest, err
+			}
+			if err := os.Symlink(candidate.linkTarget, dest); err != nil {
+				return manifest, err
+			}
+			manifest.addCopied(candidate.rel, 0)
+			continue
+		}
 		info := candidate.info
 		rel := candidate.rel
-		if info.Size() > maxTargetFileBytes {
-			manifest.addOmitted(rel, "file exceeds size limit", info.Size())
-			continue
-		}
-		if totalBytes+info.Size() > maxTargetFilesBytes {
-			manifest.addOmitted(rel, "total file budget exceeded", info.Size())
-			continue
-		}
 		if err := copyFile(candidate.path, filepath.Join(destRoot, rel)); err != nil {
-			if isSourceReadError(err, candidate.path) {
-				manifest.addOmitted(rel, "read failed", info.Size())
-				continue
-			}
 			return manifest, err
 		}
-		totalBytes += info.Size()
 		manifest.addCopied(rel, info.Size())
 	}
 	return manifest, nil
+}
+
+func shouldSkipWorkspacePath(root string, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return true
+	}
+	return rel == ".git" ||
+		strings.HasPrefix(rel, ".git"+string(filepath.Separator)) ||
+		rel == "clawscan-results" ||
+		strings.HasPrefix(rel, "clawscan-results"+string(filepath.Separator))
+}
+
+func safeWorkspaceSymlinkTarget(source string, destRoot string, linkPath string, linkRel string) (string, error) {
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		return "", err
+	}
+	resolved := target
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(filepath.Dir(linkPath), resolved)
+	}
+	resolved = filepath.Clean(resolved)
+	resolvedRel, err := filepath.Rel(source, resolved)
+	if err != nil || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("refusing artifact symlink outside target: %s", filepath.ToSlash(linkRel))
+	}
+	destLink := filepath.Join(destRoot, linkRel)
+	destTarget := filepath.Join(destRoot, resolvedRel)
+	relativeTarget, err := filepath.Rel(filepath.Dir(destLink), destTarget)
+	if err != nil {
+		return "", err
+	}
+	return relativeTarget, nil
 }
 
 func (manifest *TargetWorkspaceManifest) addCopied(path string, bytes int64) {
@@ -1569,28 +1665,6 @@ func (manifest *TargetWorkspaceManifest) addCopied(path string, bytes int64) {
 		Path:  filepath.ToSlash(path),
 		Bytes: bytes,
 	})
-}
-
-func (manifest *TargetWorkspaceManifest) addOmitted(path string, reason string, bytes int64) {
-	manifest.TotalOmittedBytes += bytes
-	if len(manifest.Omitted) >= maxOmittedTargetFileMarkers {
-		manifest.SuppressedOmitted++
-		return
-	}
-	manifest.Omitted = append(manifest.Omitted, TargetWorkspaceOmission{
-		Path:   filepath.ToSlash(path),
-		Reason: reason,
-		Bytes:  bytes,
-	})
-}
-
-func (manifest *TargetWorkspaceManifest) recordWalkError(root string, path string, entry os.DirEntry) error {
-	rel := relativeManifestPath(root, path)
-	manifest.addOmitted(rel, "read failed", 0)
-	if entry != nil && entry.IsDir() {
-		return filepath.SkipDir
-	}
-	return nil
 }
 
 func relativeManifestPath(root string, path string) string {
@@ -1632,72 +1706,12 @@ func isSourceReadError(err error, source string) bool {
 type ExternalScannerRunner struct {
 	CommandRunner        CommandRunner
 	Env                  map[string]string
+	Profile              string
 	Registry             ScannerRegistry
 	SandboxMode          string
 	SkillSpectorCommand  []string
 	VirusTotalHTTPClient VirusTotalHTTPClient
 	Timeout              time.Duration
-}
-
-type OpenAIRequestOptions struct {
-	Model     string
-	Reasoning string
-}
-
-type openAIRequest struct {
-	Model     string                 `json:"model"`
-	Input     []openAIRequestMessage `json:"input"`
-	Text      openAIRequestText      `json:"text"`
-	Reasoning *openAIReasoning       `json:"reasoning,omitempty"`
-}
-
-type openAIRequestMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type openAIRequestText struct {
-	Format openAIResponseFormat `json:"format"`
-}
-
-type openAIResponseFormat struct {
-	Type   string `json:"type"`
-	Name   string `json:"name"`
-	Schema any    `json:"schema"`
-	Strict bool   `json:"strict"`
-}
-
-type openAIReasoning struct {
-	Effort string `json:"effort"`
-}
-
-func OpenAIRequestBody(opts OpenAIRequestOptions, systemPrompt string, prompt string, schema json.RawMessage) ([]byte, error) {
-	if !strings.HasPrefix(opts.Model, "openai/") {
-		return nil, fmt.Errorf("unsupported OpenAI request model provider: %s", opts.Model)
-	}
-	var schemaValue any
-	if err := json.Unmarshal(schema, &schemaValue); err != nil {
-		return nil, fmt.Errorf("parse output schema: %w", err)
-	}
-	input := []openAIRequestMessage{}
-	if systemPrompt != "" {
-		input = append(input, openAIRequestMessage{Role: "system", Content: systemPrompt})
-	}
-	input = append(input, openAIRequestMessage{Role: "user", Content: prompt})
-	requestBody := openAIRequest{
-		Model: strings.TrimPrefix(opts.Model, "openai/"),
-		Input: input,
-		Text: openAIRequestText{Format: openAIResponseFormat{
-			Type:   "json_schema",
-			Name:   "clawscan_output",
-			Schema: schemaValue,
-			Strict: true,
-		}},
-	}
-	if opts.Reasoning != "" {
-		requestBody.Reasoning = &openAIReasoning{Effort: opts.Reasoning}
-	}
-	return json.Marshal(requestBody)
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
@@ -1802,8 +1816,19 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		return ScannerResult{}, err
 	}
 	defer os.RemoveAll(resultDir)
-	resultPath := filepath.Join(resultDir, "skillspector-report.json")
-	args = append(args, "scan", target, "--format", "json", "--output", resultPath)
+	scanTarget := target
+	cwd := ""
+	resultName := "skillspector-report.json"
+	if runner.Profile == "clawhub" {
+		if _, err := copyTargetToWorkspace(target, filepath.Join(resultDir, "artifact")); err != nil {
+			return ScannerResult{}, fmt.Errorf("prepare ClawHub SkillSpector workspace: %w", err)
+		}
+		scanTarget = "artifact"
+		cwd = resultDir
+		resultName = "skillspector-report-0.json"
+	}
+	resultPath := filepath.Join(resultDir, resultName)
+	args = append(args, "scan", scanTarget, "--format", "json", "--output", resultPath)
 	if !skillSpectorLLMEnabled(runner.Env) {
 		args = append(args, "--no-llm")
 	}
@@ -1812,7 +1837,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	output, runErr := runner.CommandRunner.Run(command, args, cwd, timeout)
 	raw, readErr := os.ReadFile(resultPath)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if runErr != nil {

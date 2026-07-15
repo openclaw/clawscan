@@ -40,7 +40,6 @@ type virusTotalNormalizedAnalysis struct {
 	Source      string                `json:"source,omitempty"`
 	EngineStats *virusTotalStats      `json:"engineStats,omitempty"`
 	CheckedAt   int64                 `json:"checkedAt"`
-	SHA256      string                `json:"sha256hash"`
 	Upload      *virusTotalUploadInfo `json:"upload,omitempty"`
 }
 
@@ -108,7 +107,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 	}
 	switch {
 	case statusCode >= 200 && statusCode <= 299:
-		analysis, err := normalizeVirusTotalFileReport(raw, artifact.SHA256, time.Now)
+		analysis, err := normalizeVirusTotalFileReport(raw, time.Now)
 		if err != nil {
 			return ScannerResult{
 				Status:      "failed",
@@ -139,17 +138,20 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 				Raw:         raw,
 			}, nil
 		}
-		analysis, err := json.Marshal(virusTotalNormalizedAnalysis{
-			Status:    "pending",
-			CheckedAt: time.Now().UnixMilli(),
-			SHA256:    artifact.SHA256,
-			Upload: &virusTotalUploadInfo{
-				Status: "submitted",
-				Raw:    uploadRaw,
-			},
-		})
-		if err != nil {
-			return ScannerResult{}, err
+		var analysis json.RawMessage
+		if runner.Profile != "clawhub" {
+			encoded, err := json.Marshal(virusTotalNormalizedAnalysis{
+				Status:    "pending",
+				CheckedAt: time.Now().UnixMilli(),
+				Upload: &virusTotalUploadInfo{
+					Status: "submitted",
+					Raw:    uploadRaw,
+				},
+			})
+			if err != nil {
+				return ScannerResult{}, err
+			}
+			analysis = json.RawMessage(encoded)
 		}
 		return ScannerResult{
 			Status:      "completed",
@@ -157,7 +159,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			CompletedAt: completedAt(),
 			Command:     append(command, "upload"),
 			Error:       "",
-			Raw:         json.RawMessage(analysis),
+			Raw:         analysis,
 		}, nil
 	default:
 		errorMessage := fmt.Sprintf("VirusTotal API returned HTTP %d.", statusCode)
@@ -221,7 +223,7 @@ func virusTotalFileReport(ctx context.Context, client VirusTotalHTTPClient, apiK
 	return raw, response.StatusCode, nil
 }
 
-func normalizeVirusTotalFileReport(raw json.RawMessage, sha string, now func() time.Time) (json.RawMessage, error) {
+func normalizeVirusTotalFileReport(raw json.RawMessage, now func() time.Time) (json.RawMessage, error) {
 	if !json.Valid(raw) {
 		return nil, fmt.Errorf("VirusTotal API returned non-JSON response.")
 	}
@@ -239,7 +241,6 @@ func normalizeVirusTotalFileReport(raw json.RawMessage, sha string, now func() t
 		Source:      "engines",
 		EngineStats: stats,
 		CheckedAt:   now().UnixMilli(),
-		SHA256:      sha,
 	})
 	if err != nil {
 		return nil, err

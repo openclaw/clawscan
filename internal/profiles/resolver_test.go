@@ -52,6 +52,24 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	}
 }
 
+func TestResolveArgsPassesExplicitRunContext(t *testing.T) {
+	dir := t.TempDir()
+	contextPath := filepath.Join(dir, "clawhub-context.json")
+	writeFile(t, contextPath, `{"source":"vt-update"}`)
+
+	opts, err := ResolveArgs([]string{
+		"./skill",
+		"--profile", "clawhub",
+		"--context", contextPath,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.ContextPath != contextPath {
+		t.Fatalf("context path = %q, want %q", opts.ContextPath, contextPath)
+	}
+}
+
 func TestResolveArgsRejectsMissingExplicitSelection(t *testing.T) {
 	dir := t.TempDir()
 
