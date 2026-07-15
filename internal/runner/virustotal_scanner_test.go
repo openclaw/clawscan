@@ -181,6 +181,23 @@ func TestVirusTotalScannerScansPluginDirectoryAsPluginZip(t *testing.T) {
 	}
 }
 
+func TestVirusTotalPluginZipUsesStableManifestIdentity(t *testing.T) {
+	root := t.TempDir()
+	var artifacts []virusTotalScanArtifact
+	for _, checkout := range []string{"checkout-a", "checkout-b"} {
+		target := filepath.Join(root, checkout)
+		writeProbePlugin(t, target)
+		artifact, err := virusTotalArtifact(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	if artifacts[0].SHA256 != artifacts[1].SHA256 {
+		t.Fatalf("plugin ZIP hash depends on checkout directory: %q != %q", artifacts[0].SHA256, artifacts[1].SHA256)
+	}
+}
+
 func TestVirusTotalScannerSkipsURLTargets(t *testing.T) {
 	target := "https://clawhub.ai/author/skill"
 	client := &recordingHTTPClient{err: errUnexpectedHTTPRequest}

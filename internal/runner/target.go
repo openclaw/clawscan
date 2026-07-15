@@ -111,17 +111,20 @@ func resolveTarget(input string) (resolvedTarget, error) {
 // OpenClaw plugin. It defaults to skill so existing skill scans, single-file
 // targets, and missing paths behave exactly as before; only an explicit plugin
 // manifest promotes the target to a plugin. A directory carrying both manifests
-// is rejected as ambiguous rather than silently guessed.
+// is rejected as ambiguous, but an explicitly selected manifest disambiguates
+// the package without guessing.
 func classifyLocalTarget(resolvedPath string, input string) (kind string, id string, err error) {
 	info, statErr := os.Stat(resolvedPath)
 	if statErr != nil {
 		return targetKindSkill, "", nil
 	}
 	dir := resolvedPath
+	explicitPluginManifest := false
 	if !info.IsDir() {
 		switch filepath.Base(resolvedPath) {
 		case pluginManifestName:
 			dir = filepath.Dir(resolvedPath)
+			explicitPluginManifest = true
 		default:
 			// SKILL.md or any other single file keeps the historical skill kind.
 			return targetKindSkill, "", nil
@@ -132,8 +135,8 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 	if !hasPlugin {
 		return targetKindSkill, "", nil
 	}
-	if hasSkill {
-		return "", "", fmt.Errorf("target %s contains both %s and %s; point Clawscan at a directory with exactly one manifest", displayTargetInput(input), skillManifestName, pluginManifestName)
+	if hasSkill && !explicitPluginManifest {
+		return "", "", fmt.Errorf("target %s contains both %s and %s; point Clawscan directly at the desired manifest", displayTargetInput(input), skillManifestName, pluginManifestName)
 	}
 	id, err = readPluginID(filepath.Join(dir, pluginManifestName))
 	if err != nil {

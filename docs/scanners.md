@@ -33,7 +33,8 @@ The built-in `clawhub` profile runs `skillspector`, `virustotal`, and
 that assume skill layouts return an explicit `skipped` result naming the
 unsupported kind, and adapters can opt in per kind as upstream tools add plugin
 support. A directory carrying both `SKILL.md` and `openclaw.plugin.json` is
-rejected as ambiguous rather than guessed.
+rejected as ambiguous rather than guessed; point Clawscan directly at the
+desired manifest to disambiguate a valid dual-layout package.
 
 Plugin targets are never auto-discovered. Zero-target discovery still scans only
 child skill directories under `./skills`; pass a plugin directory explicitly to

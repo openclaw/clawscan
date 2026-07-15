@@ -185,15 +185,21 @@ func virusTotalArtifact(target string) (virusTotalScanArtifact, error) {
 		return virusTotalScanArtifact{}, fmt.Errorf("stat target: %v", err)
 	}
 	if info.IsDir() {
-		bytes, err := buildVirusTotalSkillZip(target)
-		if err != nil {
-			return virusTotalScanArtifact{}, err
-		}
 		kind := "skill-zip"
 		filename := "skill.zip"
+		slug := filepath.Base(target)
 		if regularManifestExists(filepath.Join(target, pluginManifestName)) {
+			pluginID, err := readPluginID(filepath.Join(target, pluginManifestName))
+			if err != nil {
+				return virusTotalScanArtifact{}, fmt.Errorf("read plugin identity for VirusTotal ZIP: %w", err)
+			}
 			kind = "plugin-zip"
 			filename = "plugin.zip"
+			slug = pluginID
+		}
+		bytes, err := buildVirusTotalDirectoryZip(target, slug)
+		if err != nil {
+			return virusTotalScanArtifact{}, err
 		}
 		return virusTotalScanArtifact{
 			Bytes:          bytes,
@@ -358,6 +364,10 @@ func virusTotalUploadURL(ctx context.Context, client VirusTotalHTTPClient, apiKe
 }
 
 func buildVirusTotalSkillZip(root string) ([]byte, error) {
+	return buildVirusTotalDirectoryZip(root, filepath.Base(root))
+}
+
+func buildVirusTotalDirectoryZip(root string, slug string) ([]byte, error) {
 	var files []string
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -407,7 +417,7 @@ func buildVirusTotalSkillZip(root string) ([]byte, error) {
 			return nil, err
 		}
 	}
-	meta, err := virusTotalSkillMeta(root)
+	meta, err := virusTotalSkillMeta(slug)
 	if err != nil {
 		return nil, err
 	}
@@ -435,10 +445,10 @@ func newFlateWriter(w io.Writer) (io.WriteCloser, error) {
 	return flate.NewWriter(w, 6)
 }
 
-func virusTotalSkillMeta(root string) ([]byte, error) {
+func virusTotalSkillMeta(slug string) ([]byte, error) {
 	meta := map[string]interface{}{
 		"ownerId":     "clawscan",
-		"slug":        filepath.Base(root),
+		"slug":        slug,
 		"version":     "0.0.0",
 		"publishedAt": float64(0),
 	}

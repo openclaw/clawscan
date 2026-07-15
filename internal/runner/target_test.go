@@ -161,8 +161,23 @@ func TestResolveTargetRejectsAmbiguousManifests(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := resolveTarget(dir)
-	if err == nil || !strings.Contains(err.Error(), "exactly one manifest") {
+	if err == nil || !strings.Contains(err.Error(), "desired manifest") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveTargetExplicitPluginManifestDisambiguatesDualLayout(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dual-layout")
+	writeProbePlugin(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, skillManifestName), []byte("# Bundled skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveTarget(filepath.Join(dir, pluginManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.kind != targetKindPlugin || resolved.id != "probe-plugin" || resolved.resolvedPath != dir {
+		t.Fatalf("resolved = %#v", resolved)
 	}
 }
 
