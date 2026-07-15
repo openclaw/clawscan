@@ -3,6 +3,7 @@ package runner
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -29,10 +30,12 @@ const (
 	skillTrustBenchConfig         = "default"
 	skillTrustBenchSource         = "huggingface"
 	skillTrustBenchVersion        = "v1.0"
+	skillTrustBenchRevision       = "762d5388b3a047b26df9679582af868a0e5b2c8f"
 	defaultSkillTrustBenchSplit   = "benchmark"
 	skillTrustBenchArchiveRoot    = "benchmark_full_v1.0"
-	skillTrustBenchArchiveName    = "benchmark_full_v1.0.zip"
-	skillTrustBenchArchiveURL     = "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench/resolve/main/benchmark_full_v1.0.zip"
+	skillTrustBenchArchiveName    = "benchmark_full_v1.0-" + skillTrustBenchRevision + ".zip"
+	skillTrustBenchArchiveURL     = "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench/resolve/" + skillTrustBenchRevision + "/benchmark_full_v1.0.zip"
+	skillTrustBenchRowsURL        = "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench/resolve/" + skillTrustBenchRevision + "/data/test_cases.jsonl"
 	huggingFaceRowsEndpoint       = "https://datasets-server.huggingface.co/rows"
 	huggingFaceRowsPageSize       = 100
 	huggingFaceRowsMaxAttempts    = 6
@@ -176,6 +179,7 @@ type HuggingFaceBenchmarkClient struct {
 	Endpoint                   string
 	SkillTrustBenchArchiveURL  string
 	SkillTrustBenchArchivePath string
+	SkillTrustBenchRowsURL     string
 }
 
 type huggingFaceRowsResponse struct {
@@ -185,15 +189,6 @@ type huggingFaceRowsResponse struct {
 
 type huggingFaceRow struct {
 	Row OpenClawBenchmarkRow `json:"row"`
-}
-
-type skillTrustBenchRowsResponse struct {
-	Rows  []skillTrustBenchHuggingFaceRow `json:"rows"`
-	Error string                          `json:"error"`
-}
-
-type skillTrustBenchHuggingFaceRow struct {
-	Row SkillTrustBenchRow `json:"row"`
 }
 
 func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
@@ -759,41 +754,62 @@ func (client HuggingFaceBenchmarkClient) FetchOpenClawRows(dataset string, split
 }
 
 func (client HuggingFaceBenchmarkClient) FetchSkillTrustBenchRows(dataset string, split string, offset int, limit int) ([]SkillTrustBenchRow, error) {
+	if dataset != skillTrustBenchID {
+		return nil, fmt.Errorf("unsupported SkillTrustBench dataset: %s", dataset)
+	}
+	if split != defaultSkillTrustBenchSplit {
+		return nil, fmt.Errorf("unsupported SkillTrustBench split: %s", split)
+	}
+	if offset < 0 {
+		return nil, errors.New("benchmark offset cannot be negative")
+	}
+	if limit < 0 {
+		return nil, errors.New("benchmark limit cannot be negative")
+	}
 	httpClient := client.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
-	endpoint := client.Endpoint
-	if endpoint == "" {
-		endpoint = huggingFaceRowsEndpoint
+	rowsURL := client.SkillTrustBenchRowsURL
+	if rowsURL == "" {
+		rowsURL = skillTrustBenchRowsURL
 	}
+	raw, statusCode, err := fetchHuggingFaceRowsPage(httpClient, rowsURL)
+	if err != nil {
+		return nil, err
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", statusCode)
+	}
+
 	var rows []SkillTrustBenchRow
-	nextOffset := offset
-	for {
-		length := huggingFaceRowsPageSize
-		if limit > 0 {
-			remaining := limit - len(rows)
-			if remaining <= 0 {
-				break
-			}
-			if remaining < length {
-				length = remaining
-			}
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			return nil, fmt.Errorf("fetch benchmark rows: line %d is blank", lineNumber)
 		}
-		page, err := client.fetchSkillTrustBenchRowsPage(httpClient, endpoint, dataset, split, nextOffset, length)
-		if err != nil {
-			return nil, err
+		var row SkillTrustBenchRow
+		if err := json.Unmarshal(line, &row); err != nil {
+			return nil, fmt.Errorf("fetch benchmark rows: parse line %d: %w", lineNumber, err)
 		}
-		if len(page) == 0 {
-			break
+		if row.ID == "" {
+			return nil, fmt.Errorf("fetch benchmark rows: line %d has blank id", lineNumber)
 		}
-		rows = append(rows, page...)
-		nextOffset += len(page)
-		if len(page) < length {
-			break
-		}
+		rows = append(rows, row)
 	}
-	return rows, nil
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("fetch benchmark rows: %w", err)
+	}
+
+	if offset >= len(rows) {
+		return []SkillTrustBenchRow{}, nil
+	}
+	end := len(rows)
+	if remaining := len(rows) - offset; limit > 0 && limit < remaining {
+		end = offset + limit
+	}
+	return rows[offset:end], nil
 }
 
 func (client HuggingFaceBenchmarkClient) fetchOpenClawRowsPage(httpClient *http.Client, endpoint string, dataset string, split string, offset int, length int) ([]OpenClawBenchmarkRow, error) {
@@ -820,36 +836,6 @@ func (client HuggingFaceBenchmarkClient) fetchOpenClawRowsPage(httpClient *http.
 		return nil, err
 	}
 	rows := make([]OpenClawBenchmarkRow, 0, len(parsed.Rows))
-	for _, row := range parsed.Rows {
-		rows = append(rows, row.Row)
-	}
-	return rows, nil
-}
-
-func (client HuggingFaceBenchmarkClient) fetchSkillTrustBenchRowsPage(httpClient *http.Client, endpoint string, dataset string, split string, offset int, length int) ([]SkillTrustBenchRow, error) {
-	values := url.Values{}
-	values.Set("dataset", dataset)
-	values.Set("config", skillTrustBenchConfig)
-	values.Set("split", split)
-	values.Set("offset", fmt.Sprintf("%d", offset))
-	values.Set("length", fmt.Sprintf("%d", length))
-	requestURL := endpoint + "?" + values.Encode()
-	raw, statusCode, err := fetchHuggingFaceRowsPage(httpClient, requestURL)
-	if err != nil {
-		return nil, err
-	}
-	var parsed skillTrustBenchRowsResponse
-	if statusCode < 200 || statusCode >= 300 {
-		_ = json.Unmarshal(raw, &parsed)
-		if parsed.Error != "" {
-			return nil, fmt.Errorf("fetch benchmark rows: %s", parsed.Error)
-		}
-		return nil, fmt.Errorf("fetch benchmark rows: HTTP %d", statusCode)
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, err
-	}
-	rows := make([]SkillTrustBenchRow, 0, len(parsed.Rows))
 	for _, row := range parsed.Rows {
 		rows = append(rows, row.Row)
 	}

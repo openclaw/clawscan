@@ -207,6 +207,15 @@ func TestNewBenchmarkOptionsSupportsSkillTrustBenchBenchmark(t *testing.T) {
 	}
 }
 
+func TestNewBenchmarkOptionsRejectsNegativeBounds(t *testing.T) {
+	if _, err := NewBenchmarkOptions("SkillTrustBench", "", -1, 0, "", ""); err == nil || err.Error() != "Benchmark limit cannot be negative" {
+		t.Fatalf("limit err = %v", err)
+	}
+	if _, err := NewBenchmarkOptions("SkillTrustBench", "", 0, -1, "", ""); err == nil || err.Error() != "Benchmark offset cannot be negative" {
+		t.Fatalf("offset err = %v", err)
+	}
+}
+
 func TestNewBenchmarkOptionsRejectsUnsupportedBenchmark(t *testing.T) {
 	_, err := NewBenchmarkOptions("skillscan-paper", "", 0, 0, "", "")
 	if err == nil || err.Error() != "Unsupported benchmark: skillscan-paper" {

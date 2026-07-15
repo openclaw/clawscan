@@ -197,6 +197,12 @@ func NewBenchmarkOptions(id string, split string, limit int, offset int, predict
 	if strings.TrimSpace(id) == "" {
 		return nil, errors.New("Benchmark id is required")
 	}
+	if limit < 0 {
+		return nil, errors.New("Benchmark limit cannot be negative")
+	}
+	if offset < 0 {
+		return nil, errors.New("Benchmark offset cannot be negative")
+	}
 	canonicalID, err := canonicalBenchmarkID(id)
 	if err != nil {
 		return nil, err
