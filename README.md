@@ -225,6 +225,7 @@ Supported `--judge` placeholders:
 | Placeholder | Meaning |
 | --- | --- |
 | `{{ workspace }}` | Temporary directory containing the copied skill, scanner JSON, and metadata. |
+| `{{ judge_sandbox }}` | `danger-full-access` inside ClawScan's Docker sandbox, otherwise `read-only`. |
 | `{{ prompt }}` | Render `./prompt.md` and pass the rendered prompt file path. |
 | `{{ prompt:<path> }}` | Render a specific prompt template and pass that file path. |
 | `{{ output_schema }}` | Copy `./schema.json` into the workspace and pass that file path. |

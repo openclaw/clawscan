@@ -10,6 +10,8 @@ The internal verdict value "suspicious" is the user-facing Review bucket, not an
 
 Before using the Review bucket, identify concrete artifact evidence showing purpose-mismatched behavior, hidden behavior, overbroad authority, deceptive framing, unsafe automatic execution, unbounded persistence, unexpected credential/data handling, or high-impact actions without clear user control. Do not escalate from a scanner label alone.
 
+You must inspect the workspace before returning a verdict. Read `artifact-inspection.json`, inspect and SHA-256 hash its `required_file`, and copy the exact challenge value into `artifact_inspection.challenge`. Include the required file and any other files you inspected in `artifact_inspection.files_inspected`. Never guess or copy a challenge or hash from the prompt. If you cannot read the challenge file or required artifact file, do not claim inspection completed and do not return a security verdict.
+
 Purpose-aligned behavior can still be a Review concern when it grants high-impact authority without clear scoping, reversibility, containment, or user-directed control. Treat these as material concern candidates: modifying or deleting financial/business/account data, posting or moderating public content, bulk-changing installed skills or agent behavior, indexing broad local/private content for reuse, spawning background agents or long-running workers, reading or using local auth/session/profile stores, or using raw API/escape-hatch commands that bypass safer scoped workflows.
 
 Do not classify a skill as suspicious only because it uses files, commands, credentials, network access, memory, package installs, provider APIs, or external tools. Judge whether those behaviors are coherent with the stated purpose and clearly disclosed.
@@ -42,7 +44,13 @@ Respond with a JSON object and nothing else:
   "scan_findings_in_context": [
     { "ruleId": "...", "expected_for_purpose": true | false, "note": "..." }
   ],
-  "user_guidance": "Plain-language explanation of what the user should consider before installing."
+  "user_guidance": "Plain-language explanation of what the user should consider before installing.",
+  "artifact_inspection": {
+    "status": "completed",
+    "challenge": "Exact challenge read from artifact-inspection.json",
+    "required_file_sha256": "SHA-256 of the required artifact file",
+    "files_inspected": ["artifact/SKILL.md"]
+  }
 }
 
 Additional ClawHub policy for this Codex run:

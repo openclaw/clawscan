@@ -16,7 +16,7 @@ profiles:
       command: >-
         codex exec --cd {{ workspace }}
         --model gpt-5.5
-        --sandbox read-only
+        --sandbox {{ judge_sandbox }}
         --skip-git-repo-check
         --ignore-user-config
         -c approval_policy=never
@@ -43,7 +43,7 @@ profiles:
       command: >-
         codex exec --cd {{ workspace }}
         --model gpt-5.5
-        --sandbox read-only
+        --sandbox {{ judge_sandbox }}
         --skip-git-repo-check
         --ignore-user-config
         -c approval_policy=never

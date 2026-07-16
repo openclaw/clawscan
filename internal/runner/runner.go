@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -422,7 +423,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		artifact.Scanners[scanner] = result
 	}
 	if opts.Judge != nil {
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env)
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode)
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -1082,6 +1083,7 @@ func sha256Hex(value string) string {
 
 type judgeCommandState struct {
 	workspace        string
+	judgeSandbox     string
 	outputPath       string
 	outputUsed       bool
 	promptSource     string
@@ -1091,6 +1093,7 @@ type judgeCommandState struct {
 	outputSchemaSHA  string
 	schemaSource     string
 	files            map[string][]byte
+	inspection       *artifactInspectionChallenge
 }
 
 type judgeShellSpec struct {
@@ -1099,7 +1102,7 @@ type judgeShellSpec struct {
 	quote   func(string) string
 }
 
-func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string) (*JudgeResult, error) {
+func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string) (*JudgeResult, error) {
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
 		return nil, err
@@ -1112,12 +1115,17 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		timeout = 20 * time.Minute
 	}
 	state := &judgeCommandState{
-		workspace:  workspace,
-		outputPath: filepath.Join(workspace, "judge-output.json"),
-		files:      opts.Files,
+		workspace:    workspace,
+		judgeSandbox: judgeSandboxMode(sandboxMode),
+		outputPath:   filepath.Join(workspace, "judge-output.json"),
+		files:        opts.Files,
 	}
 	if isClawHubParityProfile(artifact.Profile) {
 		state.outputPath = filepath.Join(workspace, "codex-result.json")
+		state.inspection, err = prepareArtifactInspectionChallenge(workspace)
+		if err != nil {
+			return nil, err
+		}
 	}
 	shell := judgeShellForGOOS(runtime.GOOS)
 	command, err := renderJudgeCommand(opts.Command, artifact, state, shell.quote)
@@ -1168,14 +1176,139 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		return result, nil
 	}
 	parsed = redactJudgeResult(parsed, env)
-	if _, ok := parsed.(map[string]any); !ok {
+	parsedObject, ok := parsed.(map[string]any)
+	if !ok {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced %s; expected JSON object.", judgeJSONType(parsed))
 		result.Result = parsed
 		return result, nil
 	}
 	result.Result = parsed
+	if state.inspection != nil {
+		if err := validateArtifactInspectionReceipt(parsedObject, *state.inspection); err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+		}
+	}
 	return result, nil
+}
+
+func judgeSandboxMode(outerSandboxMode string) string {
+	if outerSandboxMode == SandboxModeDocker {
+		return "danger-full-access"
+	}
+	return "read-only"
+}
+
+type artifactInspectionChallenge struct {
+	Challenge      string `json:"challenge"`
+	RequiredFile   string `json:"required_file"`
+	RequiredSHA256 string `json:"-"`
+}
+
+func prepareArtifactInspectionChallenge(workspace string) (*artifactInspectionChallenge, error) {
+	random := make([]byte, 32)
+	if _, err := rand.Read(random); err != nil {
+		return nil, fmt.Errorf("generate artifact inspection challenge: %w", err)
+	}
+	requiredFile, requiredSHA256, err := selectArtifactInspectionFile(workspace)
+	if err != nil {
+		return nil, err
+	}
+	challenge := &artifactInspectionChallenge{
+		Challenge:      hex.EncodeToString(random),
+		RequiredFile:   requiredFile,
+		RequiredSHA256: requiredSHA256,
+	}
+	raw, err := json.MarshalIndent(challenge, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	raw = append(raw, '\n')
+	if err := os.WriteFile(filepath.Join(workspace, "artifact-inspection.json"), raw, 0o600); err != nil {
+		return nil, fmt.Errorf("write artifact inspection challenge: %w", err)
+	}
+	return challenge, nil
+}
+
+func selectArtifactInspectionFile(workspace string) (string, string, error) {
+	artifactDir := filepath.Join(workspace, "artifact")
+	candidates := []string{}
+	for _, preferred := range []string{"SKILL.md", "package.json"} {
+		info, err := os.Stat(filepath.Join(artifactDir, preferred))
+		if err == nil && info.Mode().IsRegular() {
+			candidates = append(candidates, preferred)
+		}
+	}
+	if len(candidates) == 0 {
+		err := filepath.WalkDir(artifactDir, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type().IsRegular() {
+				relative, err := filepath.Rel(artifactDir, path)
+				if err != nil {
+					return err
+				}
+				candidates = append(candidates, relative)
+			}
+			return nil
+		})
+		if err != nil {
+			return "", "", fmt.Errorf("select artifact inspection file: %w", err)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", "", errors.New("artifact inspection requires at least one regular artifact file")
+	}
+	sort.Strings(candidates)
+	relative := candidates[0]
+	file, err := os.Open(filepath.Join(artifactDir, relative))
+	if err != nil {
+		return "", "", fmt.Errorf("open artifact inspection file: %w", err)
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", "", fmt.Errorf("hash artifact inspection file: %w", err)
+	}
+	return "artifact/" + filepath.ToSlash(relative), hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func validateArtifactInspectionReceipt(result map[string]any, expected artifactInspectionChallenge) error {
+	inspection, ok := result["artifact_inspection"].(map[string]any)
+	if !ok {
+		return errors.New("Judge did not provide the required artifact inspection receipt.")
+	}
+	if status, _ := inspection["status"].(string); status != "completed" {
+		return fmt.Errorf("Judge artifact inspection status was %q; expected completed.", status)
+	}
+	challenge, _ := inspection["challenge"].(string)
+	if challenge != expected.Challenge {
+		return errors.New("Judge artifact inspection challenge did not match the workspace challenge.")
+	}
+	requiredSHA256, _ := inspection["required_file_sha256"].(string)
+	if requiredSHA256 != expected.RequiredSHA256 {
+		return errors.New("Judge artifact inspection file hash did not match the required artifact file.")
+	}
+	files, ok := inspection["files_inspected"].([]any)
+	if !ok || len(files) == 0 {
+		return errors.New("Judge artifact inspection did not report any inspected artifact files.")
+	}
+	requiredFileInspected := false
+	for _, value := range files {
+		file, ok := value.(string)
+		if !ok || !strings.HasPrefix(filepath.ToSlash(filepath.Clean(file)), "artifact/") {
+			return fmt.Errorf("Judge artifact inspection reported invalid file path %q.", value)
+		}
+		if filepath.ToSlash(filepath.Clean(file)) == expected.RequiredFile {
+			requiredFileInspected = true
+		}
+	}
+	if !requiredFileInspected {
+		return fmt.Errorf("Judge artifact inspection did not include required file %s.", expected.RequiredFile)
+	}
+	return nil
 }
 
 func judgeJSONType(value any) string {
@@ -1214,6 +1347,12 @@ func renderJudgeCommand(command string, artifact Artifact, state *judgeCommandSt
 				return match
 			}
 			return quote(state.workspace)
+		case "judge_sandbox":
+			if value != "" {
+				renderErr = fmt.Errorf("{{ judge_sandbox }} does not accept a value")
+				return match
+			}
+			return quote(state.judgeSandbox)
 		case "output":
 			if value != "" {
 				renderErr = fmt.Errorf("{{ output }} does not accept a path")
