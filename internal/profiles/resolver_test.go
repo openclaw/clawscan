@@ -29,6 +29,9 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if !strings.Contains(opts.Judge.Command, "codex exec") {
 		t.Fatalf("judge command = %q", opts.Judge.Command)
 	}
+	if !strings.Contains(opts.Judge.Command, "--sandbox {{ judge_sandbox }}") {
+		t.Fatalf("judge command missing runtime-aware sandbox placeholder: %q", opts.Judge.Command)
+	}
 	if strings.Contains(opts.Judge.Command, "{{ prompt:prompt.md }}") {
 		t.Fatalf("judge command kept unresolved profile-local prompt placeholder: %q", opts.Judge.Command)
 	}

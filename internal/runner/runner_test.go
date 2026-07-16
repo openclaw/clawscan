@@ -2695,6 +2695,9 @@ func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	promptTemplate := "ClawHub judge\n\nAdditional ClawHub policy for this Codex run:\nold generated block"
 	schema := `{"type":"object"}`
 	skillSpectorJSON := `{"status":"clean"}`
@@ -2726,7 +2729,26 @@ func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	judgeRunner := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
+	judgeRunner := &recordingCommandRunner{}
+	judgeRunner.runHook = func(_ string, _ []string, cwd string) error {
+		raw, err := os.ReadFile(filepath.Join(cwd, "artifact-inspection.json"))
+		if err != nil {
+			return err
+		}
+		var receipt struct {
+			Challenge    string `json:"challenge"`
+			RequiredFile string `json:"required_file"`
+		}
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			return err
+		}
+		required, err := os.ReadFile(filepath.Join(cwd, filepath.FromSlash(receipt.RequiredFile)))
+		if err != nil {
+			return err
+		}
+		judgeRunner.writeOutput = fmt.Sprintf(`{"verdict":"benign","artifact_inspection":{"status":"completed","challenge":%q,"required_file_sha256":%q,"files_inspected":[%q]}}`, receipt.Challenge, sha256Hex(string(required)), receipt.RequiredFile)
+		return nil
+	}
 	artifact, err := Run(opts, RunContext{
 		Env: map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
@@ -2755,6 +2777,159 @@ func TestRunExecutesJudgeCommandWithVirtualPromptAndSchemaFiles(t *testing.T) {
 	}
 	if filepath.Base(artifact.Judge.OutputPath) != "codex-result.json" {
 		t.Fatalf("output path = %q", artifact.Judge.OutputPath)
+	}
+}
+
+func TestRunJudgeUsesDockerAsTheCodexSandboxBoundary(t *testing.T) {
+	tests := []struct {
+		name        string
+		sandboxMode string
+		want        string
+	}{
+		{name: "docker", sandboxMode: SandboxModeDocker, want: "danger-full-access"},
+		{name: "off", sandboxMode: SandboxModeOff, want: "read-only"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "skill")
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			runner := &recordingCommandRunner{writeOutput: `{"ok":true}`}
+			artifact, err := Run(Options{
+				Target:   target,
+				Scanners: []string{"clawscan-static"},
+				Sandbox:  SandboxOptions{Mode: test.sandboxMode},
+				Judge: &JudgeOptions{
+					Command: "judge --sandbox {{ judge_sandbox }} --output {{ output }}",
+				},
+			}, RunContext{
+				Env:           map[string]string{},
+				ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{}`)}}},
+				CommandRunner: runner,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+				t.Fatalf("judge = %#v", artifact.Judge)
+			}
+			command := strings.Join(runner.calls[0].args, " ")
+			if !strings.Contains(command, "--sandbox '"+test.want+"'") {
+				t.Fatalf("command = %q, want sandbox %q", command, test.want)
+			}
+		})
+	}
+}
+
+func TestRunClawHubJudgeRequiresArtifactInspectionReceipt(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{
+		writeOutput: `{
+			"verdict":"benign",
+			"confidence":"high",
+			"summary":"Safe.",
+			"dimensions":{},
+			"scan_findings_in_context":[],
+			"user_guidance":"Review before use.",
+			"artifact_inspection":{
+				"status":"completed",
+				"challenge":"wrong",
+				"required_file_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"files_inspected":["artifact/SKILL.md"]
+			}
+		}`,
+	}
+	artifact, err := Run(Options{
+		Target:   target,
+		Profile:  clawHubProfileID,
+		Scanners: []string{"clawscan-static"},
+		Judge: &JudgeOptions{
+			Command: "judge --output {{ output }}",
+		},
+	}, RunContext{
+		Env:           map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{}`)}}},
+		CommandRunner: commandRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "failed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	if !strings.Contains(artifact.Judge.Error, "artifact inspection challenge") {
+		t.Fatalf("judge error = %q", artifact.Judge.Error)
+	}
+}
+
+func TestRunClawHubJudgeAcceptsVerifiedArtifactInspectionReceipt(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{}
+	commandRunner.runHook = func(_ string, _ []string, cwd string) error {
+		raw, err := os.ReadFile(filepath.Join(cwd, "artifact-inspection.json"))
+		if err != nil {
+			return err
+		}
+		var receipt struct {
+			Challenge    string `json:"challenge"`
+			RequiredFile string `json:"required_file"`
+		}
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			return err
+		}
+		required, err := os.ReadFile(filepath.Join(cwd, filepath.FromSlash(receipt.RequiredFile)))
+		if err != nil {
+			return err
+		}
+		commandRunner.writeOutput = fmt.Sprintf(`{
+			"verdict":"benign",
+			"confidence":"high",
+			"summary":"Safe.",
+			"dimensions":{},
+			"scan_findings_in_context":[],
+			"user_guidance":"Review before use.",
+			"artifact_inspection":{
+				"status":"completed",
+				"challenge":%q,
+				"required_file_sha256":%q,
+				"files_inspected":[%q]
+			}
+		}`, receipt.Challenge, sha256Hex(string(required)), receipt.RequiredFile)
+		return nil
+	}
+	artifact, err := Run(Options{
+		Target:   target,
+		Profile:  clawHubProfileID,
+		Scanners: []string{"clawscan-static"},
+		Judge: &JudgeOptions{
+			Command: "judge --output {{ output }}",
+		},
+	}, RunContext{
+		Env:           map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{}`)}}},
+		CommandRunner: commandRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
 	}
 }
 

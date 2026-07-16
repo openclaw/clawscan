@@ -507,7 +507,7 @@ func TestRunCommandUsesBuiltInProfile(t *testing.T) {
 			"--profile", "clawhub",
 			"--scanner-result", "skillspector=" + skillSpectorFixture,
 			"--scanner-result", "virustotal=" + virusTotalFixture,
-			"--judge", "printf '{\"verdict\":\"benign\"}\\n' > {{ output }}",
+			"--judge", clawHubReceiptJudgeCommand(),
 			"--sandbox", "off",
 			"--json",
 		}, []string{}); err != nil {
@@ -551,7 +551,7 @@ func TestRunCommandDiscoversSkillsWithExplicitProfile(t *testing.T) {
 			"--profile", "clawhub",
 			"--scanner-result", "skillspector=" + skillSpectorFixture,
 			"--scanner-result", "virustotal=" + virusTotalFixture,
-			"--judge", "printf '{\"verdict\":\"benign\"}\\n' > {{ output }}",
+			"--judge", clawHubReceiptJudgeCommand(),
 			"--sandbox", "off",
 			"--json",
 		}, []string{}); err != nil {
@@ -589,6 +589,10 @@ func TestRunCommandDiscoversSkillsWithExplicitProfile(t *testing.T) {
 			t.Fatalf("missing clawscan-static scanner for %s: %#v", run.Target.Input, run.Scanners)
 		}
 	}
+}
+
+func clawHubReceiptJudgeCommand() string {
+	return `challenge=$(sed -n 's/.*"challenge": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json); required_file=$(sed -n 's/.*"required_file": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json); if command -v sha256sum >/dev/null 2>&1; then required_sha=$(sha256sum {{ workspace }}/"$required_file" | cut -d ' ' -f 1); else required_sha=$(shasum -a 256 {{ workspace }}/"$required_file" | cut -d ' ' -f 1); fi; printf '{"verdict":"benign","artifact_inspection":{"status":"completed","challenge":"%s","required_file_sha256":"%s","files_inspected":["%s"]}}\n' "$challenge" "$required_sha" "$required_file" > {{ output }}`
 }
 
 func TestRunCommandUsesProjectProfile(t *testing.T) {
