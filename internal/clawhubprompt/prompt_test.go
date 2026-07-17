@@ -12,8 +12,6 @@ func TestBuildPlacesScannerEvidenceInClawHubSlots(t *testing.T) {
 	}
 	for _, want := range []string{
 		"SYSTEM\n\nAdditional ClawHub policy for this Codex run:",
-		"VirusTotal telemetry supplied to Codex:",
-		`"malicious": 1`,
 		"SkillSpector findings supplied to Codex:",
 		"SDI-1",
 		"- pre-scan artifact injection signals: html-comment-injection",
@@ -24,6 +22,9 @@ func TestBuildPlacesScannerEvidenceInClawHubSlots(t *testing.T) {
 	}
 	if !strings.HasSuffix(prompt, "Return the required JSON object only.") {
 		t.Fatalf("unexpected suffix: %q", prompt[len(prompt)-80:])
+	}
+	if strings.Contains(prompt, "VirusTotal") || strings.Contains(prompt, `"malicious": 1`) {
+		t.Fatalf("prompt included legacy VirusTotal context:\n%s", prompt)
 	}
 }
 
@@ -59,35 +60,14 @@ func TestBuildUsesExplicitSkillSpectorAnalysis(t *testing.T) {
 	}
 }
 
-func TestBuildPreservesRawJSONEvidenceOrder(t *testing.T) {
+func TestBuildDoesNotMentionVirusTotal(t *testing.T) {
 	job := fixtureJob()
-	job.Target.Version.VTAnalysis = RawJSON("{\"z\":1,\"a\":2}\n")
 	prompt, err := Build("SYSTEM", job, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	zIndex := strings.Index(prompt, `"z": 1`)
-	aIndex := strings.Index(prompt, `"a": 2`)
-	if zIndex < 0 || aIndex < 0 {
-		t.Fatalf("prompt missing raw JSON fields:\n%s", prompt)
-	}
-	if zIndex > aIndex {
-		t.Fatalf("raw JSON key order was not preserved:\n%s", prompt)
-	}
-	if strings.Contains(prompt, "\"a\": 2\n\n```") {
-		t.Fatalf("raw JSON trailing newline leaked into prompt:\n%s", prompt)
-	}
-}
-
-func TestBuildFormatsEmptyRawJSONAsNull(t *testing.T) {
-	job := fixtureJob()
-	job.Target.Version.VTAnalysis = RawJSON(nil)
-	prompt, err := Build("SYSTEM", job, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(prompt, "VirusTotal telemetry supplied to Codex:\n```json\nnull\n```") {
-		t.Fatalf("prompt did not render empty raw JSON as null:\n%s", prompt)
+	if strings.Contains(prompt, "VirusTotal") || strings.Contains(prompt, `"z": 1`) {
+		t.Fatalf("prompt included legacy VirusTotal context:\n%s", prompt)
 	}
 }
 
@@ -119,15 +99,6 @@ func fixtureJob() Job {
 		Target: Target{
 			TrustedOpenClawPlugin: true,
 			Version: &Version{
-				VTAnalysis: vtAnalysis{
-					Status: "suspicious",
-					Source: "engines",
-					Metadata: vtMetadata{Stats: vtStats{
-						Malicious:  1,
-						Suspicious: 0,
-						Harmless:   12,
-					}},
-				},
 				SkillSpectorAnalysis: skillSpectorAnalysis{
 					Status:         "suspicious",
 					Score:          55,
@@ -143,22 +114,6 @@ func fixtureJob() Job {
 			},
 		},
 	}
-}
-
-type vtAnalysis struct {
-	Status   string     `json:"status"`
-	Source   string     `json:"source"`
-	Metadata vtMetadata `json:"metadata"`
-}
-
-type vtMetadata struct {
-	Stats vtStats `json:"stats"`
-}
-
-type vtStats struct {
-	Malicious  int `json:"malicious"`
-	Suspicious int `json:"suspicious"`
-	Harmless   int `json:"harmless"`
 }
 
 type skillSpectorAnalysis struct {

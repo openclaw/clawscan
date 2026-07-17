@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/openclaw/clawscan/internal/clawhubprompt"
 	"github.com/openclaw/clawscan/internal/profiles"
 	"github.com/openclaw/clawscan/internal/runner"
 )
@@ -34,7 +33,6 @@ func run() error {
 	outClawScanPrompt := flag.String("out-clawscan-prompt", "", "Optional exact ClawScan-rendered prompt path")
 	outOutputSchema := flag.String("out-output-schema", "", "Optional exported output schema path")
 	outSkillSpectorResult := flag.String("out-skillspector-result", "", "Optional exported SkillSpector fixture JSON path")
-	outVirusTotalResult := flag.String("out-virustotal-result", "", "Optional exported VirusTotal fixture JSON path")
 	fixturePath := flag.String("fixture", "", "Optional production context and scanner fixture JSON path")
 	flag.Parse()
 	if *clawhubDir == "" {
@@ -60,7 +58,7 @@ func run() error {
 		)
 	}
 	systemPrompt := rendered.SystemPrompt
-	expected, actual, vtInput, skillSpectorInput, fixtureLabel, err := renderParityInputs(
+	expected, actual, skillSpectorInput, fixtureLabel, err := renderParityInputs(
 		resolvedClawHubDir,
 		*fixturePath,
 		rendered,
@@ -87,15 +85,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	vtFixture, err := prettyJSON(vtInput)
-	if err != nil {
-		return err
-	}
 	skillSpectorFixture, err := prettyJSON(skillSpectorInput)
 	if err != nil {
 		return err
 	}
-	promptTemplate, err := buildPromptTemplate(actual, vtFixture, skillSpectorFixture)
+	promptTemplate, err := buildPromptTemplate(actual, skillSpectorFixture)
 	if err != nil {
 		promptTemplate, err = buildPromptTemplateFromRendered(actual)
 		if err != nil {
@@ -142,9 +136,6 @@ func run() error {
 	if err := writeOptionalFile(*outSkillSpectorResult, []byte(skillSpectorFixture)); err != nil {
 		return err
 	}
-	if err := writeOptionalFile(*outVirusTotalResult, []byte(vtFixture)); err != nil {
-		return err
-	}
 	if err := writeOptionalFile(*outOutputSchema, schema); err != nil {
 		return err
 	}
@@ -174,7 +165,6 @@ func firstPromptDifference(expected string, actual string) string {
 
 type parityFixture struct {
 	Context      json.RawMessage `json:"context"`
-	VirusTotal   json.RawMessage `json:"virustotal"`
 	SkillSpector json.RawMessage `json:"skillspector"`
 }
 
@@ -183,9 +173,8 @@ func renderParityInputs(
 	fixturePath string,
 	rendered clawHubPromptRender,
 	clawScanPromptSource string,
-) (expected string, actual string, vtInput any, skillSpectorInput any, fixtureLabel string, err error) {
+) (expected string, actual string, skillSpectorInput any, fixtureLabel string, err error) {
 	if fixturePath == "" {
-		job := proofJob()
 		skillSpectorAnalysis := proofSkillSpectorAnalysis()
 		actual, err := runner.RenderClawHubPrompt(clawScanPromptSource, runner.Artifact{
 			Profile: "clawhub",
@@ -198,10 +187,6 @@ func renderParityInputs(
 				"skillSpectorCheckedAt":123
 			}`),
 			Scanners: map[string]runner.ScannerResult{
-				"virustotal": {
-					Status: "completed",
-					Raw:    mustJSON(job.Target.Version.VTAnalysis),
-				},
 				"skillspector": {
 					Status: "completed",
 					Raw:    mustJSON(skillSpectorAnalysis),
@@ -209,53 +194,49 @@ func renderParityInputs(
 			},
 		})
 		if err != nil {
-			return "", "", nil, nil, "", err
+			return "", "", nil, "", err
 		}
-		return rendered.Prompt, actual, job.Target.Version.VTAnalysis, skillSpectorAnalysis, "synthetic", nil
+		return rendered.Prompt, actual, skillSpectorAnalysis, "synthetic", nil
 	}
 
 	resolvedFixturePath, err := filepath.Abs(fixturePath)
 	if err != nil {
-		return "", "", nil, nil, "", err
+		return "", "", nil, "", err
 	}
 	raw, err := os.ReadFile(resolvedFixturePath)
 	if err != nil {
-		return "", "", nil, nil, "", err
+		return "", "", nil, "", err
 	}
 	var fixture parityFixture
 	if err := json.Unmarshal(raw, &fixture); err != nil {
-		return "", "", nil, nil, "", fmt.Errorf("parse parity fixture: %w", err)
+		return "", "", nil, "", fmt.Errorf("parse parity fixture: %w", err)
 	}
 	if !json.Valid(fixture.Context) {
-		return "", "", nil, nil, "", fmt.Errorf("parity fixture context is not valid JSON")
+		return "", "", nil, "", fmt.Errorf("parity fixture context is not valid JSON")
 	}
 	context, err := parityFixtureContext(fixture)
 	if err != nil {
-		return "", "", nil, nil, "", err
+		return "", "", nil, "", err
 	}
 	expected, err = renderClawHubFixturePrompt(clawhubDir, resolvedFixturePath)
 	if err != nil {
-		return "", "", nil, nil, "", err
+		return "", "", nil, "", err
 	}
 	artifact := runner.Artifact{
 		Profile: "clawhub",
 		Context: context,
 		Scanners: map[string]runner.ScannerResult{
-			"virustotal":   {Status: "completed", Raw: fixture.VirusTotal},
 			"skillspector": {Status: "completed", Raw: fixture.SkillSpector},
 		},
 	}
 	actual, err = runner.RenderClawHubPrompt(clawScanPromptSource, artifact)
 	if err != nil {
-		return "", "", nil, nil, "", err
-	}
-	if err := json.Unmarshal(fixture.VirusTotal, &vtInput); err != nil {
-		return "", "", nil, nil, "", fmt.Errorf("parse VirusTotal fixture: %w", err)
+		return "", "", nil, "", err
 	}
 	if err := json.Unmarshal(fixture.SkillSpector, &skillSpectorInput); err != nil {
-		return "", "", nil, nil, "", fmt.Errorf("parse SkillSpector fixture: %w", err)
+		return "", "", nil, "", fmt.Errorf("parse SkillSpector fixture: %w", err)
 	}
-	return expected, actual, vtInput, skillSpectorInput, resolvedFixturePath, nil
+	return expected, actual, skillSpectorInput, resolvedFixturePath, nil
 }
 
 func parityFixtureContext(fixture parityFixture) (json.RawMessage, error) {
@@ -369,46 +350,32 @@ func writeOptionalFile(path string, content []byte) error {
 	return os.WriteFile(path, content, 0o644)
 }
 
-func buildPromptTemplate(prompt string, vtFixture string, skillSpectorFixture string) (string, error) {
-	replacements := []struct {
-		fixture     string
-		placeholder string
-	}{
-		{fixture: vtFixture, placeholder: "{{ scanners.virustotal }}"},
-		{fixture: skillSpectorFixture, placeholder: "{{ scanners.skillspector }}"},
-	}
-	for _, replacement := range replacements {
-		prompt = strings.Replace(prompt, replacement.fixture, replacement.placeholder, 1)
-		if !strings.Contains(prompt, replacement.placeholder) {
-			return "", fmt.Errorf("failed to build exported prompt template with scanner placeholder %s", replacement.placeholder)
-		}
+func buildPromptTemplate(prompt string, skillSpectorFixture string) (string, error) {
+	const placeholder = "{{ scanners.skillspector }}"
+	prompt = strings.Replace(prompt, skillSpectorFixture, placeholder, 1)
+	if !strings.Contains(prompt, placeholder) {
+		return "", fmt.Errorf("failed to build exported prompt template with scanner placeholder %s", placeholder)
 	}
 	return prompt, nil
 }
 
 func buildPromptTemplateFromRendered(prompt string) (string, error) {
-	replacements := []struct {
-		label       string
-		placeholder string
-	}{
-		{label: "VirusTotal telemetry supplied to Codex:", placeholder: "{{ scanners.virustotal }}"},
-		{label: "SkillSpector findings supplied to Codex:", placeholder: "{{ scanners.skillspector }}"},
+	const (
+		label       = "SkillSpector findings supplied to Codex:"
+		placeholder = "{{ scanners.skillspector }}"
+	)
+	prefix := label + "\n```json\n"
+	start := strings.Index(prompt, prefix)
+	if start == -1 {
+		return "", fmt.Errorf("rendered prompt missing %s block", label)
 	}
-	for _, replacement := range replacements {
-		prefix := replacement.label + "\n```json\n"
-		start := strings.Index(prompt, prefix)
-		if start == -1 {
-			return "", fmt.Errorf("rendered prompt missing %s block", replacement.label)
-		}
-		contentStart := start + len(prefix)
-		contentEndOffset := strings.Index(prompt[contentStart:], "\n```")
-		if contentEndOffset == -1 {
-			return "", fmt.Errorf("rendered prompt has unterminated %s block", replacement.label)
-		}
-		contentEnd := contentStart + contentEndOffset
-		prompt = prompt[:contentStart] + replacement.placeholder + prompt[contentEnd:]
+	contentStart := start + len(prefix)
+	contentEndOffset := strings.Index(prompt[contentStart:], "\n```")
+	if contentEndOffset == -1 {
+		return "", fmt.Errorf("rendered prompt has unterminated %s block", label)
 	}
-	return prompt, nil
+	contentEnd := contentStart + contentEndOffset
+	return prompt[:contentStart] + placeholder + prompt[contentEnd:], nil
 }
 
 func prettyJSON(value any) (string, error) {
@@ -516,28 +483,6 @@ func clawHubWorkerOutputSchemaRelPath(workerSource string) (string, error) {
 	return matches[1], nil
 }
 
-func proofJob() clawhubprompt.Job {
-	return clawhubprompt.Job{
-		Job: clawhubprompt.JobMetadata{
-			TargetKind:         "skillVersion",
-			Source:             "publish",
-			HasMaliciousSignal: true,
-		},
-		Target: clawhubprompt.Target{
-			TrustedOpenClawPlugin: true,
-			Version: &clawhubprompt.Version{
-				VTAnalysis: vtAnalysis{
-					Status: "suspicious",
-					Source: "engines",
-					Metadata: vtMetadata{
-						Stats: vtStats{Malicious: 1, Suspicious: 0, Harmless: 12},
-					},
-				},
-			},
-		},
-	}
-}
-
 func proofSkillSpectorAnalysis() skillSpectorAnalysis {
 	return skillSpectorAnalysis{
 		Status:         "suspicious",
@@ -551,22 +496,6 @@ func proofSkillSpectorAnalysis() skillSpectorAnalysis {
 			Explanation: "Mismatch",
 		}},
 	}
-}
-
-type vtAnalysis struct {
-	Status   string     `json:"status"`
-	Source   string     `json:"source"`
-	Metadata vtMetadata `json:"metadata"`
-}
-
-type vtMetadata struct {
-	Stats vtStats `json:"stats"`
-}
-
-type vtStats struct {
-	Malicious  int `json:"malicious"`
-	Suspicious int `json:"suspicious"`
-	Harmless   int `json:"harmless"`
 }
 
 type skillSpectorAnalysis struct {

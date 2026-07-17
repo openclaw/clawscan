@@ -181,7 +181,7 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `virustotal`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
 
 ### Build a custom profile with `.clawscan.yml`
 

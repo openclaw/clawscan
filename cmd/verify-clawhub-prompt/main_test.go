@@ -25,51 +25,34 @@ func TestResolveClawHubDirReturnsAbsolutePath(t *testing.T) {
 	}
 }
 
-func TestBuildPromptTemplateReplacesScannerFixtures(t *testing.T) {
-	vtFixture := `{
-  "status": "suspicious",
-  "source": "engines"
-}`
+func TestBuildPromptTemplateReplacesSkillSpectorFixture(t *testing.T) {
 	skillSpectorFixture := `{
   "status": "suspicious",
   "score": 55
 }`
 	prompt := strings.Join([]string{
-		"VirusTotal telemetry supplied to Codex:",
-		"```json",
-		vtFixture,
-		"```",
 		"SkillSpector findings supplied to Codex:",
 		"```json",
 		skillSpectorFixture,
 		"```",
 	}, "\n")
 
-	template, err := buildPromptTemplate(prompt, vtFixture, skillSpectorFixture)
+	template, err := buildPromptTemplate(prompt, skillSpectorFixture)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for _, placeholder := range []string{"{{ scanners.virustotal }}", "{{ scanners.skillspector }}"} {
-		if !strings.Contains(template, placeholder) {
-			t.Fatalf("template missing placeholder %s:\n%s", placeholder, template)
-		}
+	if !strings.Contains(template, "{{ scanners.skillspector }}") {
+		t.Fatalf("template missing SkillSpector placeholder:\n%s", template)
 	}
-	for _, fixture := range []string{vtFixture, skillSpectorFixture} {
-		if strings.Contains(template, fixture) {
-			t.Fatalf("template still contains raw fixture %q:\n%s", fixture, template)
-		}
+	if strings.Contains(template, skillSpectorFixture) {
+		t.Fatalf("template still contains raw fixture:\n%s", template)
 	}
 }
 
-func TestBuildPromptTemplateFromRenderedReplacesScannerBlocks(t *testing.T) {
+func TestBuildPromptTemplateFromRenderedReplacesSkillSpectorBlock(t *testing.T) {
 	prompt := strings.Join([]string{
 		"Before",
-		"VirusTotal telemetry supplied to Codex:",
-		"```json",
-		`{"status":"clean"}`,
-		"```",
-		"Middle",
 		"SkillSpector findings supplied to Codex:",
 		"```json",
 		`{"status":"suspicious"}`,
@@ -81,15 +64,11 @@ func TestBuildPromptTemplateFromRenderedReplacesScannerBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, placeholder := range []string{"{{ scanners.virustotal }}", "{{ scanners.skillspector }}"} {
-		if !strings.Contains(template, placeholder) {
-			t.Fatalf("template missing placeholder %s:\n%s", placeholder, template)
-		}
+	if !strings.Contains(template, "{{ scanners.skillspector }}") {
+		t.Fatalf("template missing SkillSpector placeholder:\n%s", template)
 	}
-	for _, fixture := range []string{`{"status":"clean"}`, `{"status":"suspicious"}`} {
-		if strings.Contains(template, fixture) {
-			t.Fatalf("template still contains raw fixture %q:\n%s", fixture, template)
-		}
+	if strings.Contains(template, `{"status":"suspicious"}`) {
+		t.Fatalf("template still contains raw fixture:\n%s", template)
 	}
 }
 
