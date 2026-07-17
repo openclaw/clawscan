@@ -1493,7 +1493,7 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 	if source == "" {
 		source = "publish"
 	}
-	hasMaliciousSignal := clawHubHasNonVTMaliciousSignal(artifact)
+	hasMaliciousSignal := clawHubHasMaliciousSignal(artifact)
 	if context.HasMaliciousSignal != nil {
 		hasMaliciousSignal = *context.HasMaliciousSignal
 	}
@@ -1506,28 +1506,10 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 		Target: clawhubprompt.Target{
 			TrustedOpenClawPlugin: context.TrustedOpenClawPlugin,
 			Version: &clawhubprompt.Version{
-				VTAnalysis:           clawHubVirusTotalAnalysis(artifact),
 				SkillSpectorAnalysis: nil,
 			},
 		},
 	}
-}
-
-func clawHubVirusTotalAnalysis(artifact Artifact) any {
-	result, ok := artifact.Scanners["virustotal"]
-	if !ok || len(result.Raw) == 0 {
-		return nil
-	}
-	var analysis struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(result.Raw, &analysis); err != nil {
-		return clawhubprompt.RawJSON(result.Raw)
-	}
-	if analysis.Status == "pending" || analysis.Status == "" {
-		return nil
-	}
-	return clawhubprompt.RawJSON(result.Raw)
 }
 
 func clawHubAIGAnalysis(artifact Artifact) any {
@@ -1538,7 +1520,7 @@ func clawHubAIGAnalysis(artifact Artifact) any {
 	return clawhubprompt.RawJSON(result.Raw)
 }
 
-func clawHubHasNonVTMaliciousSignal(artifact Artifact) bool {
+func clawHubHasMaliciousSignal(artifact Artifact) bool {
 	if artifact.Profile == clawHubAIGProfileID {
 		result, ok := artifact.Scanners["aig"]
 		if !ok || len(result.Raw) == 0 {

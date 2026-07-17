@@ -498,15 +498,12 @@ func TestRunCommandUsesBuiltInProfile(t *testing.T) {
 	writeSkill(t, target, "# Profile\n")
 	skillSpectorFixture := filepath.Join(dir, "skillspector.json")
 	writeFile(t, skillSpectorFixture, `{"status":"clean","findings":[]}`)
-	virusTotalFixture := filepath.Join(dir, "virustotal.json")
-	writeFile(t, virusTotalFixture, `{"status":"not_found","data":null}`)
 
 	stdout := captureStdout(t, func() {
 		if err := run([]string{
 			target,
 			"--profile", "clawhub",
 			"--scanner-result", "skillspector=" + skillSpectorFixture,
-			"--scanner-result", "virustotal=" + virusTotalFixture,
 			"--judge", clawHubReceiptJudgeCommand(),
 			"--sandbox", "off",
 			"--json",
@@ -542,15 +539,12 @@ func TestRunCommandDiscoversSkillsWithExplicitProfile(t *testing.T) {
 	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\n")
 	skillSpectorFixture := filepath.Join(dir, "skillspector.json")
 	writeFile(t, skillSpectorFixture, `{"status":"clean","findings":[]}`)
-	virusTotalFixture := filepath.Join(dir, "virustotal.json")
-	writeFile(t, virusTotalFixture, `{"status":"not_found","data":null}`)
 	t.Chdir(dir)
 
 	stdout := captureStdout(t, func() {
 		if err := run([]string{
 			"--profile", "clawhub",
 			"--scanner-result", "skillspector=" + skillSpectorFixture,
-			"--scanner-result", "virustotal=" + virusTotalFixture,
 			"--judge", clawHubReceiptJudgeCommand(),
 			"--sandbox", "off",
 			"--json",
