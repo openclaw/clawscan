@@ -396,6 +396,8 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			CommandRunner:        commandRunner,
 			Env:                  env,
 			Profile:              opts.Profile,
+			TargetKind:           target.kind,
+			TargetID:             target.id,
 			SandboxMode:          scannerSandboxMode,
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
@@ -778,7 +780,7 @@ func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
 			continue
 		}
 		skillFile := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-		if info, err := os.Stat(skillFile); err == nil && !info.IsDir() {
+		if regularManifestExists(skillFile) {
 			targets = append(targets, filepath.ToSlash(filepath.Join("skills", entry.Name())))
 		}
 	}
@@ -1855,6 +1857,8 @@ type ExternalScannerRunner struct {
 	CommandRunner        CommandRunner
 	Env                  map[string]string
 	Profile              string
+	TargetKind           string
+	TargetID             string
 	Registry             ScannerRegistry
 	SandboxMode          string
 	SkillSpectorCommand  []string

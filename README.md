@@ -170,7 +170,7 @@ clawscan ./my-skill --profile clawhub
 ```
 
 The same profile accepts an explicit OpenClaw plugin directory (or its
-`openclaw.plugin.json` manifest), runs all three scanners, and renders the
+`openclaw.plugin.json` manifest), runs both scanners, and renders the
 bundled judge prompt with `packageRelease` target context.
 
 Inspect the resolved profile catalog, including the nearest project

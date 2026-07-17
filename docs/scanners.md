@@ -28,8 +28,9 @@ the result in the artifact `target.kind` field:
 | `plugin` | directory (or manifest file) holds `openclaw.plugin.json` | OpenClaw plugin. The stable manifest `id` is recorded in `target.id`; host paths are never used as identity. |
 | `url` | `http`/`https` input | API-backed and static scanners skip URLs. |
 
-The built-in `clawhub` profile runs `skillspector`, `virustotal`, and
-`clawscan-static` for `plugin` targets as it does for skills. Other scanners
+The built-in `clawhub` profile runs `skillspector` and `clawscan-static` for
+`plugin` targets as it does for skills. VirusTotal and Socket also support
+plugins when selected explicitly or through a custom profile. Other scanners
 that assume skill layouts return an explicit `skipped` result naming the
 unsupported kind, and adapters can opt in per kind as upstream tools add plugin
 support. A directory carrying both `SKILL.md` and `openclaw.plugin.json` is
@@ -41,10 +42,9 @@ child skill directories under `./skills`; pass a plugin directory explicitly to
 avoid silently scanning arbitrary package directories. Pointing Clawscan at an
 `openclaw.plugin.json` file scans the surrounding plugin directory.
 
-Plugin ids follow OpenClaw's install grammar, including `@scope/name` ids. The
-manifest must parse as strict JSON in this version; JSON5-only manifests
-(comments, trailing commas) are rejected with an explicit error rather than
-guessed at.
+Plugin ids follow OpenClaw's install grammar, including `@scope/name` ids.
+Manifests accept the same JSON5 syntax as OpenClaw, including comments, trailing
+commas, single-quoted strings, and unquoted keys.
 
 ## Available scanners
 

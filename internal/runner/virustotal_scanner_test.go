@@ -146,7 +146,7 @@ func TestVirusTotalScannerScansDirectoryTargetsAsSkillZip(t *testing.T) {
 func TestVirusTotalScannerScansPluginDirectoryAsPluginZip(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "probe-plugin")
 	writeProbePlugin(t, target)
-	scanArtifact, err := virusTotalArtifact(target)
+	scanArtifact, err := virusTotalArtifact(target, targetKindPlugin, "probe-plugin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,13 +188,47 @@ func TestVirusTotalScannerScansPluginDirectoryAsPluginZip(t *testing.T) {
 	}
 }
 
+func TestVirusTotalRespectsExplicitSkillInDualLayoutPackage(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "dual-layout")
+	writeProbePlugin(t, target)
+	if err := os.WriteFile(filepath.Join(target, skillManifestName), []byte("# Bundled skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skillZip, err := buildVirusTotalDirectoryZip(target, filepath.Base(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSHA := sha256BytesHex(skillZip)
+	client := &recordingHTTPClient{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"last_analysis_stats":{"malicious":0}}}}`)),
+		},
+	}
+	opts, err := ParseArgs([]string{filepath.Join(target, skillManifestName), "--scanner", "virustotal", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                  map[string]string{"VIRUSTOTAL_API_KEY": "present"},
+		VirusTotalHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["virustotal"]
+	if artifact.Target.Kind != targetKindSkill || !containsArg(result.Command, "skill-zip") || containsArg(result.Command, "plugin-zip") || !containsArg(result.Command, "sha256:"+expectedSHA) {
+		t.Fatalf("target = %#v command = %#v", artifact.Target, result.Command)
+	}
+}
+
 func TestVirusTotalPluginZipUsesStableManifestIdentity(t *testing.T) {
 	root := t.TempDir()
 	var artifacts []virusTotalScanArtifact
 	for _, checkout := range []string{"checkout-a", "checkout-b"} {
 		target := filepath.Join(root, checkout)
 		writeProbePlugin(t, target)
-		artifact, err := virusTotalArtifact(target)
+		artifact, err := virusTotalArtifact(target, targetKindPlugin, "probe-plugin")
 		if err != nil {
 			t.Fatal(err)
 		}

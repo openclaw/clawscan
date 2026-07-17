@@ -884,6 +884,31 @@ func TestResolveTargetInputsDiscoversSkillChildren(t *testing.T) {
 	}
 }
 
+func TestResolveTargetInputsDoesNotFollowSymlinkedSkillManifest(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "SKILL.md")
+	if err := os.WriteFile(outside, []byte("# Outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "skills", "linked")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(target, "SKILL.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, pluginManifestName), []byte(`{"id":"linked-plugin"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{"--scanner", "clawscan-static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := ResolveTargetInputs(opts, dir); err == nil || targets != nil || !strings.Contains(err.Error(), "No valid skills found") {
+		t.Fatalf("targets = %#v err = %v", targets, err)
+	}
+}
+
 func TestResolveTargetInputsRejectsMissingSkillsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	opts, err := ParseArgs([]string{"--scanner", "clawscan-static"})

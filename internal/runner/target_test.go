@@ -69,6 +69,22 @@ func TestResolveTargetClassifiesPluginManifestFile(t *testing.T) {
 	}
 }
 
+func TestResolveTargetRecognizesManifestByFilesystemIdentity(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, dir)
+	alias := filepath.Join(dir, "OPENCLAW.PLUGIN.JSON")
+	if err := os.Link(filepath.Join(dir, pluginManifestName), alias); err != nil {
+		t.Skipf("hard links unsupported: %v", err)
+	}
+	resolved, err := resolveTarget(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.kind != targetKindPlugin || resolved.id != "probe-plugin" || resolved.resolvedPath != dir {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+}
+
 func TestValidPluginIDAcceptsHostGrammar(t *testing.T) {
 	valid := []string{"probe-plugin", "memory-lancedb-pro", "@scope/name", "@a/b", "Probe.Plugin_2", "has space", "caf\u00e9-plugin", strings.Repeat("a", 300)}
 	for _, id := range valid {
@@ -181,6 +197,21 @@ func TestResolveTargetExplicitPluginManifestDisambiguatesDualLayout(t *testing.T
 	}
 }
 
+func TestResolveTargetExplicitSkillManifestDisambiguatesDualLayout(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dual-layout")
+	writeProbePlugin(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, skillManifestName), []byte("# Bundled skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveTarget(filepath.Join(dir, skillManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.kind != targetKindSkill || resolved.id != "" || resolved.resolvedPath != dir {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+}
+
 func TestResolveTargetIgnoresSymlinkedPluginManifest(t *testing.T) {
 	// A hostile target must not be able to point openclaw.plugin.json at a host
 	// file outside the target and be classified/read as that plugin.
@@ -236,6 +267,58 @@ func TestReadPluginIDReadsRegularManifest(t *testing.T) {
 	}
 }
 
+func TestReadPluginIDAcceptsOpenClawJSON5Syntax(t *testing.T) {
+	tests := map[string]string{
+		"comment":            "{\"id\":\"probe-plugin\" // plugin identity\n}",
+		"trailing comma":     "{\"id\":\"probe-plugin\",}",
+		"unquoted key":       "{id:\"probe-plugin\"}",
+		"single quotes":      "{\"id\":'probe-plugin'}",
+		"BOM":                "\ufeff{id:'probe-plugin'}",
+		"Unicode whitespace": "{\u2003id:'probe-plugin'}",
+		"Unicode key":        "{π:true,id:'probe-plugin'}",
+		"escaped key":        `{\u0069d:'probe-plugin'}`,
+		"extended escape":    `{meta:'\v',id:'probe-plugin'}`,
+	}
+	for name, manifest := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, pluginManifestName)
+			if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			id, err := readPluginID(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id != "probe-plugin" {
+				t.Fatalf("id = %q", id)
+			}
+		})
+	}
+}
+
+func TestReadPluginIDRequiresExactLowercaseKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, pluginManifestName)
+	if err := os.WriteFile(path, []byte(`{"ID":"probe-plugin"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := readPluginID(path); err == nil || id != "" {
+		t.Fatalf("id = %q err = %v", id, err)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"id":"probe-plugin","ID":"../escape"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id, err := readPluginID(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "probe-plugin" {
+		t.Fatalf("id = %q", id)
+	}
+}
+
 func TestResolveTargetIgnoresSymlinkManifestNextToSkill(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "mixed")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -276,7 +359,7 @@ func TestResolveTargetRejectsInvalidPluginID(t *testing.T) {
 	}
 }
 
-func TestRunDispatchesClawHubScannersForPluginTarget(t *testing.T) {
+func TestRunDispatchesCompatibleScannersForPluginTarget(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "probe-plugin")
 	writeProbePlugin(t, dir)
 	opts, err := ParseArgs([]string{

@@ -625,7 +625,7 @@ Target notes:
   Plain clawscan without --scanner, --profile, or --config is invalid.
   Most scanners use a local skill file or directory target.
   A directory holding openclaw.plugin.json is scanned as an OpenClaw plugin.
-  The clawhub profile runs SkillSpector, VirusTotal, and clawscan-static for plugins as it does for skills.
+  The clawhub profile runs SkillSpector and clawscan-static for plugins as it does for skills.
   Other skill-only scanners return a skipped result for plugins.
   Plugins are never auto-discovered; pass the plugin directory explicitly.
   Socket runs the public Socket CLI full-scan path over local dependency manifests.

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alchemy/json5"
 )
 
 // skillManifestName and pluginManifestName are the manifest files that mark an
@@ -98,8 +100,12 @@ func resolveTarget(input string) (resolvedTarget, error) {
 		return resolvedTarget{}, err
 	}
 	// A plugin classified via its manifest file is scanned as its directory so
-	// scanners see the plugin code, not just the manifest.
-	if kind == targetKindPlugin {
+	// scanners see the plugin code, not just the manifest. In a dual-layout
+	// package, an explicit SKILL.md similarly disambiguates the target without
+	// narrowing the scan to that one file.
+	if kind == targetKindPlugin ||
+		(kind == targetKindSkill && sameManifestFile(resolved, skillManifestName) &&
+			regularManifestExists(filepath.Join(filepath.Dir(resolved), pluginManifestName))) {
 		if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
 			resolved = filepath.Dir(resolved)
 		}
@@ -121,11 +127,10 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 	dir := resolvedPath
 	explicitPluginManifest := false
 	if !info.IsDir() {
-		switch filepath.Base(resolvedPath) {
-		case pluginManifestName:
+		if sameManifestFile(resolvedPath, pluginManifestName) {
 			dir = filepath.Dir(resolvedPath)
 			explicitPluginManifest = true
-		default:
+		} else {
 			// SKILL.md or any other single file keeps the historical skill kind.
 			return targetKindSkill, "", nil
 		}
@@ -152,6 +157,19 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 func regularManifestExists(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// sameManifestFile recognizes an explicitly selected manifest by filesystem
+// identity, not spelling. This preserves manifest targeting on case-insensitive
+// filesystems while still requiring the canonical in-directory manifest to be
+// a real regular file.
+func sameManifestFile(path string, manifestName string) bool {
+	selected, err := os.Stat(path)
+	if err != nil || selected.IsDir() {
+		return false
+	}
+	canonical, err := os.Lstat(filepath.Join(filepath.Dir(path), manifestName))
+	return err == nil && canonical.Mode().IsRegular() && os.SameFile(selected, canonical)
 }
 
 // readPluginID parses the stable plugin identity from a plugin manifest and
@@ -193,13 +211,18 @@ func readPluginID(manifestPath string) (string, error) {
 	if int64(len(data)) > maxPluginManifestBytes {
 		return "", fmt.Errorf("%s exceeds the %d KiB manifest limit", pluginManifestName, maxPluginManifestBytes/1024)
 	}
-	var manifest struct {
-		ID string `json:"id"`
-	}
+	var manifest map[string]any
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return "", fmt.Errorf("parse %s (strict JSON; JSON5-only manifests are not supported yet): %w", pluginManifestName, err)
+		manifest = nil
+		if err := json5.Unmarshal(data, &manifest); err != nil {
+			return "", fmt.Errorf("parse %s: %w", pluginManifestName, err)
+		}
 	}
-	id := strings.TrimSpace(manifest.ID)
+	id, ok := manifest["id"].(string)
+	if !ok {
+		return "", fmt.Errorf("%s has an invalid plugin id", pluginManifestName)
+	}
+	id = strings.TrimSpace(id)
 	if !validPluginID(id) {
 		return "", fmt.Errorf("%s has an invalid plugin id %q", pluginManifestName, id)
 	}

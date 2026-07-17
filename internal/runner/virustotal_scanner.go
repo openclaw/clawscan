@@ -79,7 +79,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			Raw:         nil,
 		}, nil
 	}
-	artifact, err := virusTotalArtifact(target)
+	artifact, err := virusTotalArtifact(target, runner.TargetKind, runner.TargetID)
 	if err != nil {
 		return ScannerResult{}, err
 	}
@@ -179,7 +179,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 	}
 }
 
-func virusTotalArtifact(target string) (virusTotalScanArtifact, error) {
+func virusTotalArtifact(target string, targetKind string, targetID string) (virusTotalScanArtifact, error) {
 	info, err := os.Stat(target)
 	if err != nil {
 		return virusTotalScanArtifact{}, fmt.Errorf("stat target: %v", err)
@@ -188,10 +188,13 @@ func virusTotalArtifact(target string) (virusTotalScanArtifact, error) {
 		kind := "skill-zip"
 		filename := "skill.zip"
 		slug := filepath.Base(target)
-		if regularManifestExists(filepath.Join(target, pluginManifestName)) {
-			pluginID, err := readPluginID(filepath.Join(target, pluginManifestName))
-			if err != nil {
-				return virusTotalScanArtifact{}, fmt.Errorf("read plugin identity for VirusTotal ZIP: %w", err)
+		if targetKind == targetKindPlugin || (targetKind == "" && regularManifestExists(filepath.Join(target, pluginManifestName))) {
+			pluginID := targetID
+			if pluginID == "" {
+				pluginID, err = readPluginID(filepath.Join(target, pluginManifestName))
+				if err != nil {
+					return virusTotalScanArtifact{}, fmt.Errorf("read plugin identity for VirusTotal ZIP: %w", err)
+				}
 			}
 			kind = "plugin-zip"
 			filename = "plugin.zip"
