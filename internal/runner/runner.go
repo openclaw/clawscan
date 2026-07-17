@@ -1298,10 +1298,11 @@ func validateArtifactInspectionReceipt(result map[string]any, expected artifactI
 	requiredFileInspected := false
 	for _, value := range files {
 		file, ok := value.(string)
-		if !ok || !strings.HasPrefix(filepath.ToSlash(filepath.Clean(file)), "artifact/") {
-			return fmt.Errorf("Judge artifact inspection reported invalid file path %q.", value)
+		if !ok {
+			continue
 		}
-		if filepath.ToSlash(filepath.Clean(file)) == expected.RequiredFile {
+		clean := filepath.ToSlash(filepath.Clean(file))
+		if clean == expected.RequiredFile {
 			requiredFileInspected = true
 		}
 	}

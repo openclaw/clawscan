@@ -2933,6 +2933,54 @@ func TestRunClawHubJudgeAcceptsVerifiedArtifactInspectionReceipt(t *testing.T) {
 	}
 }
 
+func TestValidateArtifactInspectionReceiptIgnoresUnverifiableExtraPaths(t *testing.T) {
+	expected := artifactInspectionChallenge{
+		Challenge:      "challenge",
+		RequiredFile:   "artifact/SKILL.md",
+		RequiredSHA256: strings.Repeat("a", 64),
+	}
+	result := map[string]any{
+		"artifact_inspection": map[string]any{
+			"status":               "completed",
+			"challenge":            expected.Challenge,
+			"required_file_sha256": expected.RequiredSHA256,
+			"files_inspected": []any{
+				"artifact/",
+				"artifact/../artifact-inspection.json",
+				expected.RequiredFile,
+			},
+		},
+	}
+
+	if err := validateArtifactInspectionReceipt(result, expected); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateArtifactInspectionReceiptStillRequiresChallengedFile(t *testing.T) {
+	expected := artifactInspectionChallenge{
+		Challenge:      "challenge",
+		RequiredFile:   "artifact/SKILL.md",
+		RequiredSHA256: strings.Repeat("a", 64),
+	}
+	result := map[string]any{
+		"artifact_inspection": map[string]any{
+			"status":               "completed",
+			"challenge":            expected.Challenge,
+			"required_file_sha256": expected.RequiredSHA256,
+			"files_inspected": []any{
+				"artifact/",
+				"artifact/../artifact-inspection.json",
+			},
+		},
+	}
+
+	err := validateArtifactInspectionReceipt(result, expected)
+	if err == nil || !strings.Contains(err.Error(), "did not include required file") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRunLoadsExplicitContextJSON(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
