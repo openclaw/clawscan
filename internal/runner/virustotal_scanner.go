@@ -23,16 +23,17 @@ const (
 	virusTotalDirectUploadLimit = 32 * 1024 * 1024
 )
 
-var virusTotalFixedZipDate = time.Date(1980, 1, 1, 0, 0, 0, 0, time.Local)
+var virusTotalFixedZipDate = time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
 
 type VirusTotalHTTPClient interface {
 	Do(request *http.Request) (*http.Response, error)
 }
 
 type virusTotalScanArtifact struct {
-	Bytes  []byte
-	SHA256 string
-	Kind   string
+	Bytes          []byte
+	SHA256         string
+	Kind           string
+	UploadFilename string
 }
 
 type virusTotalNormalizedAnalysis struct {
@@ -78,7 +79,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			Raw:         nil,
 		}, nil
 	}
-	artifact, err := virusTotalArtifact(target)
+	artifact, err := virusTotalArtifact(target, runner.TargetKind, runner.TargetID)
 	if err != nil {
 		return ScannerResult{}, err
 	}
@@ -178,17 +179,37 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 	}
 }
 
-func virusTotalArtifact(target string) (virusTotalScanArtifact, error) {
+func virusTotalArtifact(target string, targetKind string, targetID string) (virusTotalScanArtifact, error) {
 	info, err := os.Stat(target)
 	if err != nil {
 		return virusTotalScanArtifact{}, fmt.Errorf("stat target: %v", err)
 	}
 	if info.IsDir() {
-		bytes, err := buildVirusTotalSkillZip(target)
+		kind := "skill-zip"
+		filename := "skill.zip"
+		slug := filepath.Base(target)
+		if targetKind == targetKindPlugin || (targetKind == "" && regularManifestExists(filepath.Join(target, pluginManifestName))) {
+			pluginID := targetID
+			if pluginID == "" {
+				pluginID, err = readPluginID(filepath.Join(target, pluginManifestName))
+				if err != nil {
+					return virusTotalScanArtifact{}, fmt.Errorf("read plugin identity for VirusTotal ZIP: %w", err)
+				}
+			}
+			kind = "plugin-zip"
+			filename = "plugin.zip"
+			slug = pluginID
+		}
+		bytes, err := buildVirusTotalDirectoryZip(target, slug)
 		if err != nil {
 			return virusTotalScanArtifact{}, err
 		}
-		return virusTotalScanArtifact{Bytes: bytes, SHA256: sha256BytesHex(bytes), Kind: "skill-zip"}, nil
+		return virusTotalScanArtifact{
+			Bytes:          bytes,
+			SHA256:         sha256BytesHex(bytes),
+			Kind:           kind,
+			UploadFilename: filename,
+		}, nil
 	}
 	if !info.Mode().IsRegular() {
 		return virusTotalScanArtifact{}, fmt.Errorf("VirusTotal scanner supports local file or directory targets in v1; non-regular files are unsupported")
@@ -287,7 +308,11 @@ func uploadVirusTotalArtifact(ctx context.Context, client VirusTotalHTTPClient, 
 	}
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "skill.zip")
+	filename := strings.TrimSpace(artifact.UploadFilename)
+	if filename == "" {
+		filename = "skill.zip"
+	}
+	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		return nil, err
 	}
@@ -342,6 +367,10 @@ func virusTotalUploadURL(ctx context.Context, client VirusTotalHTTPClient, apiKe
 }
 
 func buildVirusTotalSkillZip(root string) ([]byte, error) {
+	return buildVirusTotalDirectoryZip(root, filepath.Base(root))
+}
+
+func buildVirusTotalDirectoryZip(root string, slug string) ([]byte, error) {
 	var files []string
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -391,7 +420,7 @@ func buildVirusTotalSkillZip(root string) ([]byte, error) {
 			return nil, err
 		}
 	}
-	meta, err := virusTotalSkillMeta(root)
+	meta, err := virusTotalSkillMeta(slug)
 	if err != nil {
 		return nil, err
 	}
@@ -419,10 +448,10 @@ func newFlateWriter(w io.Writer) (io.WriteCloser, error) {
 	return flate.NewWriter(w, 6)
 }
 
-func virusTotalSkillMeta(root string) ([]byte, error) {
+func virusTotalSkillMeta(slug string) ([]byte, error) {
 	meta := map[string]interface{}{
 		"ownerId":     "clawscan",
-		"slug":        filepath.Base(root),
+		"slug":        slug,
 		"version":     "0.0.0",
 		"publishedAt": float64(0),
 	}

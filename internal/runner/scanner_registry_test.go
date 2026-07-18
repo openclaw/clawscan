@@ -8,11 +8,12 @@ import (
 )
 
 type stubScannerAdapter struct {
-	id           string
-	requirements []EnvRequirement
-	info         ScannerInfo
-	installPlan  InstallPlan
-	run          func(target string, startedAt string) (ScannerResult, error)
+	id              string
+	requirements    []EnvRequirement
+	info            ScannerInfo
+	installPlan     InstallPlan
+	supportsPlugins bool
+	run             func(target string, startedAt string) (ScannerResult, error)
 }
 
 func (adapter stubScannerAdapter) ID() string {
@@ -29,6 +30,13 @@ func (adapter stubScannerAdapter) Info() ScannerInfo {
 
 func (adapter stubScannerAdapter) InstallPlan() InstallPlan {
 	return adapter.installPlan
+}
+
+func (adapter stubScannerAdapter) SupportsTargetKind(kind string) bool {
+	if kind == targetKindPlugin {
+		return adapter.supportsPlugins
+	}
+	return true
 }
 
 func (adapter stubScannerAdapter) Run(_ ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
@@ -78,6 +86,41 @@ func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
 	want := "agentverus,aig,cisco,clawscan-static,skillspector,snyk,socket,virustotal"
 	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
+	}
+}
+
+func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
+	registry := DefaultScannerRegistry()
+	for _, id := range registry.IDs() {
+		adapter, ok := registry.Adapter(id)
+		if !ok {
+			t.Fatalf("missing adapter for %s", id)
+		}
+		if !adapter.SupportsTargetKind(targetKindSkill) {
+			t.Fatalf("%s should support skill targets", id)
+		}
+		if !adapter.SupportsTargetKind(targetKindURL) {
+			t.Fatalf("%s should support url targets", id)
+		}
+		wantPlugin := id == "clawscan-static" || id == "skillspector" || id == "socket" || id == "virustotal"
+		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {
+			t.Fatalf("%s plugin support = %v, want %v", id, got, wantPlugin)
+		}
+	}
+	if !scannerSupportsTargetKind("clawscan-static", targetKindPlugin) {
+		t.Fatal("clawscan-static should support plugin targets")
+	}
+	if !scannerSupportsTargetKind("skillspector", targetKindPlugin) {
+		t.Fatal("skillspector should support plugin targets")
+	}
+	if !scannerSupportsTargetKind("virustotal", targetKindPlugin) {
+		t.Fatal("virustotal should support plugin targets")
+	}
+	if !scannerSupportsTargetKind("socket", targetKindPlugin) {
+		t.Fatal("socket should support plugin targets")
+	}
+	if !scannerSupportsTargetKind("unknown-scanner", targetKindPlugin) {
+		t.Fatal("unknown scanners should be permitted so the runner emits its own skipped result")
 	}
 }
 

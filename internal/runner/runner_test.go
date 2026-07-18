@@ -884,6 +884,31 @@ func TestResolveTargetInputsDiscoversSkillChildren(t *testing.T) {
 	}
 }
 
+func TestResolveTargetInputsDoesNotFollowSymlinkedSkillManifest(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "SKILL.md")
+	if err := os.WriteFile(outside, []byte("# Outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "skills", "linked")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(target, "SKILL.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, pluginManifestName), []byte(`{"id":"linked-plugin"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{"--scanner", "clawscan-static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := ResolveTargetInputs(opts, dir); err == nil || targets != nil || !strings.Contains(err.Error(), "No valid skills found") {
+		t.Fatalf("targets = %#v err = %v", targets, err)
+	}
+}
+
 func TestResolveTargetInputsRejectsMissingSkillsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	opts, err := ParseArgs([]string{"--scanner", "clawscan-static"})
@@ -1471,6 +1496,39 @@ func TestRunUsesSkillSpectorNoLLMWhenProviderKeyMissing(t *testing.T) {
 	}
 	if !containsArg(runner.calls[0].args, "--no-llm") {
 		t.Fatalf("missing --no-llm without provider key: %#v", runner.calls[0].args)
+	}
+}
+
+func TestRunUsesSkillSpectorForPluginDirectory(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, target)
+	commandRunner := &recordingCommandRunner{
+		writeOutput: `{"status":"clean","findings":[]}`,
+	}
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env:                 map[string]string{},
+		CommandRunner:       commandRunner,
+		SkillSpectorCommand: []string{"skillspector"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := artifact.Scanners["skillspector"]; result.Status != "completed" {
+		t.Fatalf("scanner = %#v", result)
+	}
+	if artifact.Target.Kind != targetKindPlugin || artifact.Target.ID != "probe-plugin" {
+		t.Fatalf("target = %#v", artifact.Target)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	call := commandRunner.calls[0]
+	if !containsArg(call.args, target) || !containsArg(call.args, "--no-llm") {
+		t.Fatalf("SkillSpector args = %#v", call.args)
 	}
 }
 
@@ -3217,6 +3275,40 @@ func TestNormalizeClawHubSkillSpectorUsesJavaScriptUTF16Truncation(t *testing.T)
 	}
 }
 
+func TestClawHubPromptUsesPackageReleaseContextForPluginTarget(t *testing.T) {
+	artifact := Artifact{
+		Target: Target{Kind: targetKindPlugin, ID: "probe-plugin"},
+		Scanners: map[string]ScannerResult{
+			"virustotal":   {Raw: json.RawMessage(`{"status":"clean","source":"engines","engineStats":{"malicious":0,"suspicious":0,"harmless":3,"undetected":70}}`)},
+			"skillspector": {Raw: json.RawMessage(`{"status":"clean","score":0}`)},
+		},
+	}
+	job := clawHubPromptJob(artifact, clawHubContext{})
+	if job.Job.TargetKind != "packageRelease" {
+		t.Fatalf("target kind = %q", job.Job.TargetKind)
+	}
+	if job.Target.Version != nil || job.Target.Release == nil {
+		t.Fatalf("target evidence slots = %#v", job.Target)
+	}
+	prompt, err := RenderClawHubPrompt("SYSTEM", artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "- target kind: packageRelease") {
+		t.Fatalf("plugin prompt missing packageRelease context:\n%s", prompt)
+	}
+}
+
+func TestClawHubPromptPreservesSkillVersionContext(t *testing.T) {
+	job := clawHubPromptJob(Artifact{Target: Target{Kind: targetKindSkill}}, clawHubContext{})
+	if job.Job.TargetKind != "skillVersion" {
+		t.Fatalf("target kind = %q", job.Job.TargetKind)
+	}
+	if job.Target.Version == nil || job.Target.Release != nil {
+		t.Fatalf("target evidence slots = %#v", job.Target)
+	}
+}
+
 func TestRunJudgeWorkspaceIncludesDependencyAndLargeTargetFiles(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -3539,6 +3631,28 @@ func TestPrepareJudgeWorkspacePrioritizesSkillFileWithinBudget(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
 		t.Fatalf("SKILL.md was not copied into judge workspace: %v", err)
+	}
+}
+
+func TestPrepareJudgeWorkspacePrioritizesPluginManifestWithinBudget(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "probe-plugin")
+	writeProbePlugin(t, target)
+	for i := 0; i < 4; i++ {
+		path := filepath.Join(target, fmt.Sprintf("00%d-before-manifest.txt", i))
+		if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxTargetFileBytes), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
+	artifact.Target.Kind = targetKindPlugin
+	artifact.Target.ID = "probe-plugin"
+	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "artifact", pluginManifestName)); err != nil {
+		t.Fatalf("%s was not copied into judge workspace: %v", pluginManifestName, err)
 	}
 }
 

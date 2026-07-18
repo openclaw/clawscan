@@ -139,12 +139,10 @@ type Target struct {
 	Kind         string `json:"kind"`
 	Input        string `json:"input"`
 	ResolvedPath string `json:"resolvedPath"`
-}
-
-type resolvedTarget struct {
-	kind         string
-	input        string
-	resolvedPath string
+	// ID is a stable, host-path-free target identity. It is populated for
+	// plugin targets from their manifest and left empty for skills and
+	// URLs, which are already identified by their input.
+	ID string `json:"id,omitempty"`
 }
 
 type ScannerResult struct {
@@ -367,7 +365,16 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		env = EnvMap(os.Environ())
 	}
 	applyRuntimeEnvDefaults(opts, env)
-	if err := ValidateRequirements(opts, env); err != nil {
+	target, err := resolveTarget(opts.Target)
+	if err != nil {
+		return Artifact{}, err
+	}
+	// Requirement validation and sandbox gating only consider scanners that
+	// will run for this target kind; a scanner that can only skip must not
+	// demand credentials or Docker.
+	gatingOpts := opts
+	gatingOpts.Scanners = runnableScanners(opts, target.kind)
+	if err := ValidateRequirements(gatingOpts, env); err != nil {
 		return Artifact{}, err
 	}
 	now := ctx.Now
@@ -375,11 +382,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		now = time.Now
 	}
 	startedAt := now().UTC().Format(time.RFC3339Nano)
-	target, err := resolveTarget(opts.Target)
-	if err != nil {
-		return Artifact{}, err
-	}
-	commandRunner, sandbox, err := commandRunnerForOptions(opts, ctx, env)
+	commandRunner, sandbox, err := commandRunnerForOptions(gatingOpts, ctx, env)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -393,6 +396,8 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			CommandRunner:        commandRunner,
 			Env:                  env,
 			Profile:              opts.Profile,
+			TargetKind:           target.kind,
+			TargetID:             target.id,
 			SandboxMode:          scannerSandboxMode,
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
@@ -402,6 +407,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
 	artifact.Sandbox = sandbox
 	artifact.Target.Kind = target.kind
+	artifact.Target.ID = target.id
 	if opts.ContextPath != "" {
 		context, err := os.ReadFile(opts.ContextPath)
 		if err != nil {
@@ -415,7 +421,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	for _, scanner := range opts.Scanners {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
-		result, err := scannerResult(opts, scanner, target.resolvedPath, scannerStartedAt, scannerRunner)
+		result, err := scannerResult(opts, scanner, target, scannerStartedAt, scannerRunner)
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -774,7 +780,7 @@ func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
 			continue
 		}
 		skillFile := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-		if info, err := os.Stat(skillFile); err == nil && !info.IsDir() {
+		if regularManifestExists(skillFile) {
 			targets = append(targets, filepath.ToSlash(filepath.Join("skills", entry.Name())))
 		}
 	}
@@ -797,7 +803,7 @@ func writeJSONFile(path string, value interface{}) error {
 	return WriteJSON(file, value)
 }
 
-func scannerResult(opts Options, scanner string, target string, startedAt string, scannerRunner ScannerRunner) (ScannerResult, error) {
+func scannerResult(opts Options, scanner string, target resolvedTarget, startedAt string, scannerRunner ScannerRunner) (ScannerResult, error) {
 	if path := opts.ScannerResultPaths[scanner]; path != "" {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -815,29 +821,10 @@ func scannerResult(opts Options, scanner string, target string, startedAt string
 			Raw:         json.RawMessage(raw),
 		}, nil
 	}
-	return scannerRunner.RunScanner(scanner, target, startedAt)
-}
-
-func resolveTarget(input string) (resolvedTarget, error) {
-	if isURLTarget(input) {
-		return resolvedTarget{kind: "url", input: input, resolvedPath: input}, nil
+	if !scannerSupportsTargetKind(scanner, target.kind) {
+		return unsupportedTargetKindResult(scanner, target.kind, startedAt), nil
 	}
-	resolved, err := filepath.Abs(input)
-	if err != nil {
-		return resolvedTarget{}, err
-	}
-	if info, err := os.Lstat(resolved); err != nil || info.Mode()&os.ModeSymlink == 0 {
-		return resolvedTarget{kind: "skill", input: input, resolvedPath: resolved}, nil
-	}
-	if evaluated, err := filepath.EvalSymlinks(resolved); err == nil {
-		resolved = evaluated
-	}
-	return resolvedTarget{kind: "skill", input: input, resolvedPath: resolved}, nil
-}
-
-func isURLTarget(input string) bool {
-	parsed, err := url.Parse(input)
-	return err == nil && parsed.Scheme != "" && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")
+	return scannerRunner.RunScanner(scanner, target.resolvedPath, startedAt)
 }
 
 var promptPlaceholderPattern = regexp.MustCompile(`\{\{\s*(scanners\.([a-zA-Z0-9_-]+)|target\.files)\s*\}\}`)
@@ -1015,7 +1002,8 @@ func targetFilePriority(root string, path string) int {
 	if err != nil {
 		rel = path
 	}
-	if strings.EqualFold(filepath.ToSlash(rel), "SKILL.md") {
+	normalized := filepath.ToSlash(rel)
+	if strings.EqualFold(normalized, skillManifestName) || strings.EqualFold(normalized, pluginManifestName) {
 		return 0
 	}
 	return 1
@@ -1487,7 +1475,11 @@ func clawHubSystemPrompt(source string) string {
 func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.Job {
 	targetKind := context.TargetKind
 	if targetKind == "" {
-		targetKind = "skillVersion"
+		if artifact.Target.Kind == targetKindPlugin {
+			targetKind = "packageRelease"
+		} else {
+			targetKind = "skillVersion"
+		}
 	}
 	source := context.Source
 	if source == "" {
@@ -1497,7 +1489,7 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 	if context.HasMaliciousSignal != nil {
 		hasMaliciousSignal = *context.HasMaliciousSignal
 	}
-	return clawhubprompt.Job{
+	job := clawhubprompt.Job{
 		Job: clawhubprompt.JobMetadata{
 			TargetKind:         targetKind,
 			Source:             source,
@@ -1505,11 +1497,17 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 		},
 		Target: clawhubprompt.Target{
 			TrustedOpenClawPlugin: context.TrustedOpenClawPlugin,
-			Version: &clawhubprompt.Version{
-				SkillSpectorAnalysis: nil,
-			},
 		},
 	}
+	evidence := &clawhubprompt.Version{
+		SkillSpectorAnalysis: nil,
+	}
+	if targetKind == "packageRelease" {
+		job.Target.Release = evidence
+	} else {
+		job.Target.Version = evidence
+	}
+	return job
 }
 
 func clawHubAIGAnalysis(artifact Artifact) any {
@@ -1859,6 +1857,8 @@ type ExternalScannerRunner struct {
 	CommandRunner        CommandRunner
 	Env                  map[string]string
 	Profile              string
+	TargetKind           string
+	TargetID             string
 	Registry             ScannerRegistry
 	SandboxMode          string
 	SkillSpectorCommand  []string
