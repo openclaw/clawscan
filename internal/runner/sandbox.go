@@ -385,8 +385,26 @@ func collectEnvNames(opts Options, env map[string]string, forRedaction bool) []s
 		// process env reaches every host command, so a blandly named
 		// credential declared by an unselected profile scanner (--scanner
 		// subset) is still reachable by the scanners and judge that do run.
-		for _, info := range registryForOptions(opts).Infos() {
-			addInfo(info)
+		// Only credentials-by-declaration feed this sweep — scanner
+		// OptionalEnv is ordinary configuration (LOG_LEVEL, AWS_REGION)
+		// whose common values (info, true) would corrupt valid evidence if
+		// scrubbed. Built-in credentials are secret-named and caught by
+		// isSecretEnvKey value scanning; user-defined scanners declare
+		// theirs via env:, exposed here as DeclaredCredentialEnv.
+		type credentialDeclarer interface {
+			DeclaredCredentialEnv() []string
+		}
+		registry := registryForOptions(opts)
+		for _, id := range registry.IDs() {
+			adapter, ok := registry.Adapter(id)
+			if !ok {
+				continue
+			}
+			if declarer, ok := adapter.(credentialDeclarer); ok {
+				for _, name := range declarer.DeclaredCredentialEnv() {
+					add(name)
+				}
+			}
 		}
 	} else {
 		// Sandbox passthrough stays a narrow allowlist: only scanners that

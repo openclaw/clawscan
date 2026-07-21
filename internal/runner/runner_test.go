@@ -1453,6 +1453,46 @@ func TestRunHostRedactionCoversUnselectedRegistryScannersEnv(t *testing.T) {
 	}
 }
 
+func TestRunHostRedactionIgnoresNonCredentialOptionalEnv(t *testing.T) {
+	// Built-in scanners list ordinary configuration (LOG_LEVEL, model
+	// names, SSL toggles) in OptionalEnv. Their populated values must not
+	// feed redaction: LOG_LEVEL=info would rewrite every "info" string in
+	// valid scanner evidence.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	beta := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "beta", Command: "beta {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{stdout: `{"severity":"info","enabled":true}`}
+	artifact, err := Run(Options{
+		Target:             target,
+		Scanners:           []string{"beta"},
+		ScannerRegistry:    registry,
+		ScannerResultPaths: map[string]string{},
+		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
+	}, RunContext{
+		Env:               map[string]string{"LOG_LEVEL": "info", "SKILLSPECTOR_SSL_VERIFY": "true"},
+		HostCommandRunner: host,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(artifact.Scanners["beta"].Raw)
+	if strings.Contains(raw, "[redacted]") {
+		t.Fatalf("non-credential optional env value corrupted evidence: %s", raw)
+	}
+	if !strings.Contains(raw, `"severity":"info"`) {
+		t.Fatalf("evidence rewritten: %s", raw)
+	}
+}
+
 func TestRunProfileBatchRedactsSiblingProfileCredentials(t *testing.T) {
 	// A --config batch shares one host environment across profiles under
 	// --sandbox off, so profile B's scanner can emit the blandly named

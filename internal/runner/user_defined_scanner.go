@@ -58,6 +58,14 @@ func (adapter userDefinedScannerAdapter) SupportsTargetKind(kind string) bool {
 
 func (adapter userDefinedScannerAdapter) CommandBacked() bool { return true }
 
+// DeclaredCredentialEnv lists env vars that are credentials by declaration:
+// whatever their spelling, a user-defined scanner's env: entries exist to
+// hand the command secrets, so their values must always be redacted from
+// persisted output.
+func (adapter userDefinedScannerAdapter) DeclaredCredentialEnv() []string {
+	return append([]string(nil), adapter.config.Env...)
+}
+
 func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
 	// A missing local target must fail here, before mount inference: Docker
 	// mount fallback binds a missing path's parent read-write (so scanners
