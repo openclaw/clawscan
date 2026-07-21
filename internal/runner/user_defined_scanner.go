@@ -143,7 +143,12 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 }
 
 func gateEligibleExitCode(exitCode *int) *int {
-	if exitCode == nil || *exitCode < 0 {
+	// Shells and docker run report a signal-killed child as 128+N (137 for
+	// SIGKILL/OOM, 143 for SIGTERM) with a normal ProcessState, and reserve
+	// 126/127 for not-executable/not-found. None of these are scanner
+	// verdicts: treating them as gate-eligible would let partial output from
+	// a killed scan pass an exit-code gate.
+	if exitCode == nil || *exitCode < 0 || *exitCode >= 126 {
 		return nil
 	}
 	return exitCode
@@ -266,6 +271,13 @@ func redactJSONStrings(node any, secrets []string) (any, bool) {
 	case bool:
 		for _, secret := range secrets {
 			if strconv.FormatBool(typed) == secret {
+				return "[redacted]", true
+			}
+		}
+		return typed, false
+	case nil:
+		for _, secret := range secrets {
+			if secret == "null" {
 				return "[redacted]", true
 			}
 		}

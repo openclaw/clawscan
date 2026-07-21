@@ -401,6 +401,46 @@ func TestRedactScannerStdoutRedactsScalarEncodedSecrets(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerTreatsSignalStyleExitCodesAsFailed(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shells and docker report signal-killed children as 128+N (137 OOM/KILL,
+	// 143 TERM) and reserve 126/127; none are scanner verdicts, so partial
+	// valid JSON must not become completed evidence or satisfy a gate.
+	for _, code := range []int{126, 127, 137, 143} {
+		exitCode := code
+		commandRunner := &recordingCommandRunner{stdout: `{"findings":[]}`, stderr: "killed", err: errCommandFailed, exitCode: &exitCode}
+		result, err := (ExternalScannerRunner{
+			Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+		}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Status != "failed" {
+			t.Fatalf("exit %d: status = %q, want failed", code, result.Status)
+		}
+		if result.ExitCode != nil {
+			t.Fatalf("exit %d: gate-eligible exit code = %v, want nil", code, *result.ExitCode)
+		}
+	}
+}
+
+func TestRedactScannerStdoutRedactsNullScalarSecret(t *testing.T) {
+	env := map[string]string{"SCANNER_PIN": "null"}
+	redacted := redactScannerStdout(`{"token":null,"other":null}`, env, []string{"SCANNER_PIN"})
+	if strings.Contains(redacted, "null") {
+		t.Fatalf("null-valued secret survived: %s", redacted)
+	}
+	if !json.Valid([]byte(redacted)) {
+		t.Fatalf("redacted output is not valid JSON: %s", redacted)
+	}
+}
+
 func TestRedactScannerStdoutDoesNotCorruptNonStringTokens(t *testing.T) {
 	// A short secret such as "1" must never break JSON syntax the way byte
 	// replacement did (`{"count":[redacted]}` is invalid and flipped healthy
