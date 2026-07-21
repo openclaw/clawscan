@@ -171,6 +171,48 @@ func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
+	exitCode := 2
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`, err: errCommandFailed, exitCode: &exitCode}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 2 {
+		t.Fatalf("exit code = %#v", result.ExitCode)
+	}
+}
+
+func TestUserDefinedScannerOmitsAbnormalExitCode(t *testing.T) {
+	exitCode := -1
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`, err: errCommandFailed, exitCode: &exitCode}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != nil {
+		t.Fatalf("abnormal exit code recorded = %d", *result.ExitCode)
+	}
+}
+
 func TestUserDefinedScannerInterpolatesDollarTargetLiterally(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},

@@ -76,6 +76,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 		timeout = 20 * time.Minute
 	}
 	output, runErr := runner.CommandRunner.Run(shell.command, args, userDefinedScannerCWD(target), timeout)
+	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
@@ -83,24 +84,31 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
-				Error: message, Raw: json.RawMessage(raw),
+				Error: message, ExitCode: exitCode, Raw: json.RawMessage(raw),
 			}, nil
 		}
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
-			Error: message,
+			Error: message, ExitCode: exitCode,
 		}, nil
 	}
 	if !json.Valid([]byte(raw)) {
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
-			Error: fmt.Sprintf("User-defined scanner %s returned invalid JSON", adapter.config.ID),
+			Error: fmt.Sprintf("User-defined scanner %s returned invalid JSON", adapter.config.ID), ExitCode: exitCode,
 		}, nil
 	}
 	return ScannerResult{
 		Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
-		Raw: json.RawMessage(raw),
+		ExitCode: exitCode, Raw: json.RawMessage(raw),
 	}, nil
+}
+
+func gateEligibleExitCode(exitCode *int) *int {
+	if exitCode == nil || *exitCode < 0 {
+		return nil
+	}
+	return exitCode
 }
 
 func userDefinedScannerShell(goos string, sandboxMode string) judgeShellSpec {

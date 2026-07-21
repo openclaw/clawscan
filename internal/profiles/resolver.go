@@ -47,7 +47,83 @@ type ProfileScanner struct {
 	Command string
 	Env     []string
 	Targets []string
+	Gate    *ProfileScannerGate
 	custom  bool
+}
+
+type ProfileScannerGate struct {
+	BlockOnExitCode *profileExitCodeRule `yaml:"blockOnExitCode,omitempty"`
+	WarnOnExitCode  *profileExitCodeRule `yaml:"warnOnExitCode,omitempty"`
+}
+
+type profileExitCodeRule struct {
+	Codes   []int
+	Nonzero bool
+}
+
+func (rule *profileExitCodeRule) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Tag == "!!str" && node.Value == "nonzero" {
+			rule.Nonzero = true
+			return nil
+		}
+		if node.Tag == "!!int" {
+			var code int
+			if err := node.Decode(&code); err == nil && code >= 0 {
+				rule.Codes = []int{code}
+				return nil
+			}
+			return errors.New("exit-code gate rule must contain only non-negative integers")
+		}
+	case yaml.SequenceNode:
+		if len(node.Content) == 0 {
+			return errors.New("exit-code gate rule must not be an empty list")
+		}
+		codes := make([]int, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item.Kind != yaml.ScalarNode || item.Tag != "!!int" {
+				return errors.New("exit-code gate rule must contain only non-negative integers")
+			}
+			var code int
+			if err := item.Decode(&code); err != nil || code < 0 {
+				return errors.New("exit-code gate rule must contain only non-negative integers")
+			}
+			codes = append(codes, code)
+		}
+		rule.Codes = codes
+		return nil
+	}
+	return errors.New(`exit-code gate rule must be a non-negative integer, a list of non-negative integers, or "nonzero"`)
+}
+
+func (rule profileExitCodeRule) MarshalYAML() (interface{}, error) {
+	if rule.Nonzero {
+		return "nonzero", nil
+	}
+	switch len(rule.Codes) {
+	case 0:
+		return nil, errors.New("exit-code gate rule must include at least one exit code")
+	case 1:
+		return rule.Codes[0], nil
+	default:
+		return append([]int(nil), rule.Codes...), nil
+	}
+}
+
+func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return errors.New("scanner gate must be an object")
+	}
+	for index := 0; index < len(node.Content); index += 2 {
+		switch node.Content[index].Value {
+		case "blockOnExitCode", "warnOnExitCode":
+		default:
+			return fmt.Errorf("field %s not found in type profiles.ProfileScannerGate", node.Content[index].Value)
+		}
+	}
+	type plainGate ProfileScannerGate
+	return node.Decode((*plainGate)(gate))
 }
 
 func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
@@ -60,16 +136,17 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 	case yaml.MappingNode:
 		for index := 0; index < len(node.Content); index += 2 {
 			switch node.Content[index].Value {
-			case "id", "command", "env", "targets":
+			case "id", "command", "env", "targets", "gate":
 			default:
 				return fmt.Errorf("field %s not found in type profiles.ProfileScanner", node.Content[index].Value)
 			}
 		}
 		var value struct {
-			ID      string   `yaml:"id"`
-			Command string   `yaml:"command"`
-			Env     []string `yaml:"env,omitempty"`
-			Targets []string `yaml:"targets,omitempty"`
+			ID      string              `yaml:"id"`
+			Command string              `yaml:"command"`
+			Env     []string            `yaml:"env,omitempty"`
+			Targets []string            `yaml:"targets,omitempty"`
+			Gate    *ProfileScannerGate `yaml:"gate,omitempty"`
 		}
 		if err := node.Decode(&value); err != nil {
 			return err
@@ -78,6 +155,7 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 		scanner.Command = value.Command
 		scanner.Env = value.Env
 		scanner.Targets = value.Targets
+		scanner.Gate = value.Gate
 		scanner.custom = true
 		return nil
 	default:
@@ -90,11 +168,12 @@ func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
 		return scanner.ID, nil
 	}
 	return struct {
-		ID      string   `yaml:"id"`
-		Command string   `yaml:"command"`
-		Env     []string `yaml:"env,omitempty"`
-		Targets []string `yaml:"targets,omitempty"`
-	}{scanner.ID, scanner.Command, scanner.Env, scanner.Targets}, nil
+		ID      string              `yaml:"id"`
+		Command string              `yaml:"command"`
+		Env     []string            `yaml:"env,omitempty"`
+		Targets []string            `yaml:"targets,omitempty"`
+		Gate    *ProfileScannerGate `yaml:"gate,omitempty"`
+	}{scanner.ID, scanner.Command, scanner.Env, scanner.Targets, scanner.Gate}, nil
 }
 
 func profileScannerIDs(scanners []ProfileScanner) []string {
@@ -125,6 +204,31 @@ func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, 
 		}
 	}
 	return registry, nil
+}
+
+func profileGateRules(scanners []ProfileScanner) map[string]runner.ScannerGatePolicy {
+	rules := map[string]runner.ScannerGatePolicy{}
+	for _, scanner := range scanners {
+		if scanner.Gate == nil {
+			continue
+		}
+		policy := runner.ScannerGatePolicy{}
+		if scanner.Gate.BlockOnExitCode != nil {
+			policy.BlockOnExitCode = &runner.ExitCodeRule{
+				Codes: append([]int(nil), scanner.Gate.BlockOnExitCode.Codes...), Nonzero: scanner.Gate.BlockOnExitCode.Nonzero,
+			}
+		}
+		if scanner.Gate.WarnOnExitCode != nil {
+			policy.WarnOnExitCode = &runner.ExitCodeRule{
+				Codes: append([]int(nil), scanner.Gate.WarnOnExitCode.Codes...), Nonzero: scanner.Gate.WarnOnExitCode.Nonzero,
+			}
+		}
+		if policy.BlockOnExitCode == nil && policy.WarnOnExitCode == nil {
+			continue
+		}
+		rules[scanner.ID] = policy
+	}
+	return rules
 }
 
 type Sandbox struct {
@@ -282,6 +386,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		return ResolvedRunSet{}, err
 	}
 	opts.Profile = profileName
+	opts.GateRules = profileGateRules(selected.profile.Scanners)
 	opts.ConfigSource = configSource
 	opts.DiscoverConfig = intent.discoverConfig
 	if opts.Judge != nil {
@@ -383,6 +488,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 			return ResolvedRunSet{}, err
 		}
 		opts.Profile = profileName
+		opts.GateRules = profileGateRules(selected.profile.Scanners)
 		opts.ConfigSource = filepath.Clean(projectPath)
 		opts.OutputPath = ""
 		opts.JSON = false
@@ -830,6 +936,11 @@ func validateProfile(name string, profile Profile) error {
 		if scanner.custom && runner.DefaultScannerRegistry().Contains(scanner.ID) {
 			return fmt.Errorf("User-defined scanner %s collides with a built-in scanner ID", scanner.ID)
 		}
+		if scanner.Gate != nil {
+			if code, overlaps := overlappingExitCodeRules(scanner.Gate.BlockOnExitCode, scanner.Gate.WarnOnExitCode); overlaps {
+				return fmt.Errorf("User-defined scanner %s in profile %s gate blockOnExitCode and warnOnExitCode both claim exit code %d", scanner.ID, name, code)
+			}
+		}
 		for _, target := range scanner.Targets {
 			switch target {
 			case "skill", "plugin", "url":
@@ -843,6 +954,41 @@ func validateProfile(name string, profile Profile) error {
 		seen[scanner.ID] = true
 	}
 	return nil
+}
+
+func overlappingExitCodeRules(block *profileExitCodeRule, warn *profileExitCodeRule) (int, bool) {
+	if block == nil || warn == nil {
+		return 0, false
+	}
+	if block.Nonzero && warn.Nonzero {
+		return 1, true
+	}
+	if block.Nonzero {
+		for _, code := range warn.Codes {
+			if code != 0 {
+				return code, true
+			}
+		}
+		return 0, false
+	}
+	if warn.Nonzero {
+		for _, code := range block.Codes {
+			if code != 0 {
+				return code, true
+			}
+		}
+		return 0, false
+	}
+	warnCodes := make(map[int]bool, len(warn.Codes))
+	for _, code := range warn.Codes {
+		warnCodes[code] = true
+	}
+	for _, code := range block.Codes {
+		if warnCodes[code] {
+			return code, true
+		}
+	}
+	return 0, false
 }
 
 func scannerTargetPlaceholdersAreUnquoted(command string) bool {
