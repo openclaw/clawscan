@@ -4238,6 +4238,53 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
 	}
 }
 
+func TestRunJudgeRedactsDeclaredScannerEnvFromResult(t *testing.T) {
+	// The judge shares the command runner (and thus the env allowlist) with
+	// scanners. A custom scanner's declared credential whose name evades
+	// isSecretEnvKey (SCANNER_AUTH) must still be scrubbed from judge output.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	custom := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "custom", Command: "custom {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(Options{
+		Target: target, Scanners: []string{"custom"}, ScannerRegistry: registry,
+		Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		Judge:   &JudgeOptions{Command: "judge"},
+	}, RunContext{
+		Env: map[string]string{"SCANNER_AUTH": "bland-name-credential"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"custom": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		CommandRunner: &recordingCommandRunner{stdout: `{"verdict":"clean","note":"auth was bland-name-credential"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("bland-name-credential")) {
+		t.Fatalf("artifact leaked declared scanner credential via judge: %s", raw)
+	}
+	result, ok := artifact.Judge.Result.(map[string]any)
+	if !ok || result["note"] != "auth was [redacted]" {
+		t.Fatalf("judge result not scrubbed: %#v", artifact.Judge.Result)
+	}
+}
+
 func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

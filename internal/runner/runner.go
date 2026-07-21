@@ -483,7 +483,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode)
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, sandboxEnvNames(opts, env))
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -1144,7 +1144,11 @@ type judgeShellSpec struct {
 	quote   func(string) string
 }
 
-func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string) (*JudgeResult, error) {
+// exposedEnvNames lists every env var reachable by commands this run (sandbox
+// allowlist plus all scanners' declared env). The judge shares the command
+// runner with scanners, so its redaction must cover the same set: a declared
+// credential with a bland name (SCANNER_AUTH) evades isSecretEnvKey.
+func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string, exposedEnvNames []string) (*JudgeResult, error) {
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
 		return nil, err
@@ -1194,9 +1198,12 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		Error:            "",
 		Result:           nil,
 	}
+	scrub := func(value string) string {
+		return redactDeclaredEnvValues(value, env, exposedEnvNames)
+	}
 	if runErr != nil {
 		result.Status = "failed"
-		result.Error = commandError(runErr, output.Stderr, env)
+		result.Error = scrub(commandError(runErr, output.Stderr, env))
 	}
 	if raw == "" {
 		if result.Status == "failed" {
@@ -1209,15 +1216,15 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 	var parsed any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		if result.Status == "failed" {
-			result.Result = redactEnvValues(raw, env)
+			result.Result = scrub(raw)
 			return result, nil
 		}
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced invalid JSON: %v", err)
-		result.Result = redactEnvValues(raw, env)
+		result.Result = scrub(raw)
 		return result, nil
 	}
-	parsed = redactJudgeResult(parsed, env)
+	parsed = redactJudgeResult(parsed, scrub)
 	parsedObject, ok := parsed.(map[string]any)
 	if !ok {
 		result.Status = "failed"
@@ -2317,20 +2324,20 @@ func redactEnvValues(value string, env map[string]string) string {
 	return redacted
 }
 
-func redactJudgeResult(value any, env map[string]string) any {
+func redactJudgeResult(value any, scrub func(string) string) any {
 	switch typed := value.(type) {
 	case string:
-		return redactEnvValues(typed, env)
+		return scrub(typed)
 	case []any:
 		redacted := make([]any, len(typed))
 		for index, item := range typed {
-			redacted[index] = redactJudgeResult(item, env)
+			redacted[index] = redactJudgeResult(item, scrub)
 		}
 		return redacted
 	case map[string]any:
 		redacted := make(map[string]any, len(typed))
 		for key, item := range typed {
-			redacted[redactEnvValues(key, env)] = redactJudgeResult(item, env)
+			redacted[scrub(key)] = redactJudgeResult(item, scrub)
 		}
 		return redacted
 	default:
