@@ -159,7 +159,23 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 			dockerArgs = append(dockerArgs, "-e", name)
 		}
 	}
-	for _, mount := range dockerMounts(cwd, mountInferenceArgs(command, args)) {
+	inference := mountInferenceArgs(command, args)
+	// The scan target must never use the writable-parent fallback below:
+	// if it disappears between the scanner's own existence check and this
+	// stat (rename, deletion), falling back would bind the surrounding host
+	// directory read-write into the container. Fail closed instead — the
+	// scanner then fails on a missing path with no host exposure.
+	target := positionalScannerTarget(command, args)
+	if target != "" {
+		filtered := inference[:0:0]
+		for _, arg := range inference {
+			if arg != target {
+				filtered = append(filtered, arg)
+			}
+		}
+		inference = filtered
+	}
+	for _, mount := range dockerMounts(cwd, inference, target) {
 		dockerArgs = append(dockerArgs, "--mount", mount)
 	}
 	if cwd != "" {
@@ -189,7 +205,27 @@ func mountInferenceArgs(command string, args []string) []string {
 	return args
 }
 
-func dockerMounts(cwd string, args []string) []string {
+// positionalScannerTarget extracts the scan target from a user-defined
+// scanner invocation (`/bin/sh -c '<program>' clawscan-target <target>`).
+// Empty for every other command shape.
+func positionalScannerTarget(command string, args []string) string {
+	if command != "/bin/sh" {
+		return ""
+	}
+	for index, arg := range args {
+		if arg == "clawscan-target" && index+1 < len(args) {
+			return args[index+1]
+		}
+	}
+	return ""
+}
+
+// dockerMounts infers bind mounts from cwd and command args. Existing paths
+// mount directly (readonly for args); a missing arg is assumed to be a
+// not-yet-created output file, so its parent mounts writable. scanTargets
+// are exempt from that fallback: a scan target that no longer exists must
+// not expose its parent directory writable to the container.
+func dockerMounts(cwd string, args []string, scanTargets ...string) []string {
 	mounts := map[string]bool{}
 	add := func(path string, readOnly bool) {
 		if path == "" {
@@ -211,6 +247,19 @@ func dockerMounts(cwd string, args []string) []string {
 	add(cwd, false)
 	for _, arg := range args {
 		add(arg, true)
+	}
+	for _, target := range scanTargets {
+		if target == "" {
+			continue
+		}
+		clean := filepath.Clean(target)
+		if !filepath.IsAbs(clean) {
+			continue
+		}
+		// No writable-parent fallback: a missing scan target mounts nothing.
+		if _, err := os.Stat(clean); err == nil {
+			mounts[clean] = true
+		}
 	}
 	sources := make([]string, 0, len(mounts))
 	for source := range mounts {

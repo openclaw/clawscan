@@ -549,6 +549,35 @@ func TestUserDefinedScannerRedactsExposedEnvFromErrors(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRedactsEscapedUndeclaredSecretsFromErrors(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With --sandbox off the scanner inherits the whole host env. An
+	// undeclared, unexposed secret-named var (OPENAI_API_KEY) whose value
+	// appears JSON-escaped on stderr (pa\"ss for pa"ss) must still be
+	// scrubbed from ScannerResult.Error.
+	commandRunner := &recordingCommandRunner{stderr: `request body was {"auth":"pa\"ss"}`, err: errCommandFailed}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"OPENAI_API_KEY": `pa"ss`},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Error, `pa\"ss`) || strings.Contains(result.Error, `pa"ss`) {
+		t.Fatalf("escaped undeclared secret leaked into error: %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "[redacted]") {
+		t.Fatalf("expected redaction marker in error: %q", result.Error)
+	}
+}
+
 func TestRedactScannerStdoutRedactsNullScalarSecret(t *testing.T) {
 	env := map[string]string{"SCANNER_PIN": "null"}
 	redacted := redactScannerStdout(`{"token":null,"other":null}`, env, []string{"SCANNER_PIN"})

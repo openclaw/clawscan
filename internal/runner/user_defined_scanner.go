@@ -177,19 +177,18 @@ func gateEligibleExitCode(exitCode *int) *int {
 }
 
 func redactDeclaredEnvValues(value string, env map[string]string, declared []string) string {
-	if value == "" || len(env) == 0 || len(declared) == 0 {
+	if value == "" || len(env) == 0 {
 		return value
 	}
-	secrets := make([]string, 0, len(declared)*2)
-	for _, name := range declared {
-		secret := env[name]
-		if strings.TrimSpace(secret) == "" {
-			continue
-		}
+	// Failure text needs the same secret set as stdout — declared env plus
+	// every secret-named var the scanner may see undeclared (--sandbox off
+	// inherits the whole host environment) — and each secret's JSON-escaped
+	// form too: a value like pa"ss emitted inside JSON on stderr appears as
+	// pa\"ss, so the literal never occurs in the bytes.
+	base := scannerSecretValues(env, declared)
+	secrets := make([]string, 0, len(base)*2)
+	for _, secret := range base {
 		secrets = append(secrets, secret)
-		// A secret inside JSON string output appears in its escaped form
-		// ("pa\"ss" for pa"ss); the literal never occurs in the bytes, so
-		// redact the JSON encoding too.
 		if encoded, err := json.Marshal(secret); err == nil {
 			if escaped := strings.Trim(string(encoded), `"`); escaped != secret {
 				secrets = append(secrets, escaped)
