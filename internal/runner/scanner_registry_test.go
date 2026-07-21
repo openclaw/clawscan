@@ -675,6 +675,85 @@ func TestRedactScannerStdoutDoesNotCorruptNonStringTokens(t *testing.T) {
 	}
 }
 
+func TestRedactionMarkerNeverContainsASecret(t *testing.T) {
+	// A credential that is a substring of "[redacted]" ("act", "redacted",
+	// even "a") would be re-inserted by the replacement itself, so the marker
+	// must be swapped for one no secret can appear in.
+	for name, secrets := range map[string][]string{
+		"safe secrets keep preferred marker": {"hunter2", "s3cr3t"},
+		"single letter":                      {"a"},
+		"marker substring":                   {"act"},
+		"whole marker word":                  {"redacted"},
+		"marker with brackets":               {"[redacted]"},
+		"fallback rune collision":            {"act", "##########"[:1]},
+	} {
+		t.Run(name, func(t *testing.T) {
+			marker := redactionMarker(secrets)
+			if marker == "" {
+				t.Fatal("marker collapsed to empty for a realistic secret set")
+			}
+			for _, secret := range secrets {
+				if strings.Contains(marker, secret) {
+					t.Fatalf("marker %q contains secret %q", marker, secret)
+				}
+			}
+		})
+	}
+	if got := redactionMarker([]string{"hunter2"}); got != "[redacted]" {
+		t.Fatalf("safe secret set changed the preferred marker: %q", got)
+	}
+}
+
+func TestRedactScannerStdoutMarkerSubstringSecrets(t *testing.T) {
+	// Secrets that are substrings of the "[redacted]" sentinel must not
+	// survive inside the replacement marker (scanner JSON path).
+	for _, secret := range []string{"act", "redacted", "a"} {
+		env := map[string]string{"SCANNER_AUTH": secret}
+		raw := `{"token":"` + secret + `","note":"before ` + secret + ` after"}`
+		redacted := redactScannerStdout(raw, env, []string{"SCANNER_AUTH"})
+		if strings.Contains(redacted, secret) {
+			t.Fatalf("secret %q survived redaction: %s", secret, redacted)
+		}
+		if !json.Valid([]byte(redacted)) {
+			t.Fatalf("redacted output is not valid JSON: %s", redacted)
+		}
+	}
+}
+
+func TestUserDefinedScannerMarkerSubstringSecretInErrors(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Failure-text path: a declared credential equal to "redacted" must not
+	// ride back in inside the sentinel that replaces it.
+	commandRunner := &recordingCommandRunner{stderr: "auth redacted rejected", err: errCommandFailed}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"SCANNER_AUTH": "redacted"},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Error, "redacted") {
+		t.Fatalf("marker-substring secret survived in error: %q", result.Error)
+	}
+}
+
+func TestSecretScrubberReplacementCannotRebuildSecret(t *testing.T) {
+	// Replacement can splice marker bytes against surrounding text and
+	// synthesize a secret that was not there before; scrub must re-check
+	// until no secret remains.
+	scrubber := newSecretScrubber([]string{"X["})
+	if got := scrubber.scrub("XX[tail"); strings.Contains(got, "X[") {
+		t.Fatalf("replacement reintroduced the secret: %q", got)
+	}
+}
+
 func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
 	exitCode := 2
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{

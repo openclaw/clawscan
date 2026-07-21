@@ -168,6 +168,101 @@ func unsafeWindowsShellTarget(target string) bool {
 	return strings.ContainsAny(target, `%"!`)
 }
 
+const redactionMarkerPreferred = "[redacted]"
+
+var redactionMarkerRunes = []rune("#*~^@+=%&|:;")
+
+// secretScrubber replaces secret values with a redaction marker and verifies
+// the result no longer contains any secret. Naive replacement leaks twice
+// over: a credential that is a substring of the marker (such as "act" or
+// "redacted") survives inside the sentinel itself, and replacement can
+// synthesize a secret from marker bytes joined with surrounding text.
+type secretScrubber struct {
+	secrets []string
+	marker  string
+}
+
+func newSecretScrubber(secrets []string) secretScrubber {
+	return secretScrubber{secrets: secrets, marker: redactionMarker(secrets)}
+}
+
+func (scrubber secretScrubber) containsSecret(value string) bool {
+	for _, secret := range scrubber.secrets {
+		if secret != "" && strings.Contains(value, secret) {
+			return true
+		}
+	}
+	return false
+}
+
+// scrub replaces every secret occurrence, then re-checks the result because
+// a replacement can reintroduce a secret at marker/text boundaries. If
+// bounded marker passes do not converge, it deletes the secret bytes
+// outright, which always terminates because each pass strictly shrinks the
+// text.
+func (scrubber secretScrubber) scrub(value string) string {
+	const maxMarkerPasses = 4
+	redacted := value
+	for pass := 0; pass < maxMarkerPasses; pass++ {
+		if !scrubber.containsSecret(redacted) {
+			return redacted
+		}
+		for _, secret := range scrubber.secrets {
+			if secret == "" {
+				continue
+			}
+			redacted = strings.ReplaceAll(redacted, secret, scrubber.marker)
+		}
+	}
+	for scrubber.containsSecret(redacted) {
+		for _, secret := range scrubber.secrets {
+			if secret == "" {
+				continue
+			}
+			redacted = strings.ReplaceAll(redacted, secret, "")
+		}
+	}
+	return redacted
+}
+
+// redactionMarker picks the replacement sentinel. The preferred marker is
+// only used when no secret is a substring of it. Otherwise the marker is a
+// repeated rune absent from every secret, so the sentinel can neither
+// contain a credential nor combine with neighboring text to rebuild one.
+func redactionMarker(secrets []string) string {
+	preferredSafe := true
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(redactionMarkerPreferred, secret) {
+			preferredSafe = false
+			break
+		}
+	}
+	if preferredSafe {
+		return redactionMarkerPreferred
+	}
+	runeSafe := func(r rune) bool {
+		for _, secret := range secrets {
+			if strings.ContainsRune(secret, r) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, r := range redactionMarkerRunes {
+		if runeSafe(r) {
+			return strings.Repeat(string(r), 10)
+		}
+	}
+	for r := rune(0x2580); r <= 0x25ff; r++ {
+		if runeSafe(r) {
+			return strings.Repeat(string(r), 10)
+		}
+	}
+	// Unreachable for realistic secret sets (secrets would need to cover
+	// every candidate rune); scrub then deletes the bytes as a last resort.
+	return ""
+}
+
 func gateEligibleExitCode(exitCode *int) *int {
 	// Shells and docker run report a signal-killed child as 128+N (137 for
 	// SIGKILL/OOM, 143 for SIGTERM) with a normal ProcessState, and reserve
@@ -202,20 +297,14 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 	sort.Slice(secrets, func(i int, j int) bool {
 		return len(secrets[i]) > len(secrets[j])
 	})
-	redacted := value
-	for _, secret := range secrets {
-		redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
-	}
+	scrubber := newSecretScrubber(secrets)
+	redacted := scrubber.scrub(value)
 	// JSON permits alternate encodings of the same string (a\/b for a/b,
 	// \u escapes) that byte replacement cannot enumerate. Decode escape
 	// sequences and, if a secret surfaces, return the scrubbed decoded text
 	// instead — losing the original escaping is acceptable, leaking is not.
 	if decoded := decodeJSONStringEscapes(redacted); decoded != redacted {
-		scrubbed := decoded
-		for _, secret := range secrets {
-			scrubbed = strings.ReplaceAll(scrubbed, secret, "[redacted]")
-		}
-		if scrubbed != decoded {
+		if scrubbed := scrubber.scrub(decoded); scrubbed != decoded {
 			return scrubbed
 		}
 	}
@@ -300,7 +389,7 @@ func redactScannerStdout(value string, env map[string]string, declared []string)
 	if err := decoder.Decode(&document); err != nil {
 		return value
 	}
-	document, changed := redactJSONStrings(document, secrets)
+	document, changed := redactJSONStrings(document, newSecretScrubber(secrets))
 	if !changed {
 		return value
 	}
@@ -340,42 +429,39 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 	return secrets
 }
 
-func redactJSONStrings(node any, secrets []string) (any, bool) {
+func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {
 	switch typed := node.(type) {
 	case string:
-		redacted := typed
-		for _, secret := range secrets {
-			redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
-		}
+		redacted := scrubber.scrub(typed)
 		return redacted, redacted != typed
 	case json.Number:
 		// A numeric-looking secret (PIN=1234) may be emitted unquoted; the
 		// scalar's exact text matching a secret is a leak like any other.
-		for _, secret := range secrets {
+		for _, secret := range scrubber.secrets {
 			if string(typed) == secret {
-				return "[redacted]", true
+				return scrubber.marker, true
 			}
 		}
 		return typed, false
 	case bool:
-		for _, secret := range secrets {
+		for _, secret := range scrubber.secrets {
 			if strconv.FormatBool(typed) == secret {
-				return "[redacted]", true
+				return scrubber.marker, true
 			}
 		}
 		return typed, false
 	case nil:
-		for _, secret := range secrets {
+		for _, secret := range scrubber.secrets {
 			if secret == "null" {
-				return "[redacted]", true
+				return scrubber.marker, true
 			}
 		}
 		return typed, false
 	case map[string]any:
 		changed := false
 		for key, child := range typed {
-			redactedChild, childChanged := redactJSONStrings(child, secrets)
-			redactedKey, keyChanged := redactJSONStrings(key, secrets)
+			redactedChild, childChanged := redactJSONStrings(child, scrubber)
+			redactedKey, keyChanged := redactJSONStrings(key, scrubber)
 			if keyChanged {
 				delete(typed, key)
 				typed[redactedKey.(string)] = redactedChild
@@ -391,7 +477,7 @@ func redactJSONStrings(node any, secrets []string) (any, bool) {
 	case []any:
 		changed := false
 		for index, child := range typed {
-			redactedChild, childChanged := redactJSONStrings(child, secrets)
+			redactedChild, childChanged := redactJSONStrings(child, scrubber)
 			if childChanged {
 				typed[index] = redactedChild
 				changed = true

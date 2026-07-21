@@ -2324,11 +2324,7 @@ func redactEnvValues(value string, env map[string]string) string {
 	sort.Slice(secrets, func(i int, j int) bool {
 		return len(secrets[i]) > len(secrets[j])
 	})
-	redacted := value
-	for _, secret := range secrets {
-		redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
-	}
-	return redacted
+	return newSecretScrubber(secrets).scrub(value)
 }
 
 func redactJudgeResult(value any, scrub func(string) string) any {
