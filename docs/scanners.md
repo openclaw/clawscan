@@ -45,7 +45,7 @@ that config-backed run and accept these fields:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | Scanner ID using lowercase letters, digits, `_`, and `-`, starting with a letter or digit, at most 64 characters. It must not match a built-in scanner ID. |
+| `id` | yes | Scanner ID using lowercase letters, digits, `_`, and `-`, starting with a letter or digit, at most 64 characters. It must not match a built-in scanner ID or a reserved Windows device name such as `con`, `nul`, or `com1`. |
 | `command` | yes | Shell command to execute. Unquoted `{{target}}` is replaced with the safely passed resolved target; do not wrap the placeholder in shell quotes. |
 | `env` | no | Required environment variable names. Values stay in the process environment and are never stored in the config or artifact. |
 | `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
