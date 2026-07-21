@@ -505,6 +505,56 @@ func TestUserDefinedScannerRedactsOtherScannersExposedEnv(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerDockerRedactionIgnoresUnexposedHostSecrets(t *testing.T) {
+	// Under Docker only allowlisted names reach the container. A host-only
+	// secret value that coincides with legitimate output (CI_TOKEN=clean)
+	// must not rewrite scanner evidence — the container never saw it.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"verdict":"clean"}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:             map[string]string{"CI_TOKEN": "clean"},
+		ExposedEnvNames: nil,
+		SandboxMode:     SandboxModeDocker,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(result.Raw), `"verdict":"clean"`) {
+		t.Fatalf("unexposed host secret corrupted Docker evidence: %s", result.Raw)
+	}
+}
+
+func TestUserDefinedScannerHostRedactionStillCoversWholeEnv(t *testing.T) {
+	// --sandbox off inherits the whole host env, so the secret-named sweep
+	// must keep covering variables no scanner declared or allowlisted.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"echo":"host-secret-value"}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"CI_TOKEN": "host-secret-value"},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.Raw), "host-secret-value") {
+		t.Fatalf("host secret leaked on --sandbox off: %s", result.Raw)
+	}
+}
+
 func TestUnsafeWindowsShellTargetRejectsQuotesAndPercents(t *testing.T) {
 	// cmd.exe cannot safely receive quotes (backslash does not escape " for
 	// its parser, enabling breakout), percents (%VAR% expands inside double

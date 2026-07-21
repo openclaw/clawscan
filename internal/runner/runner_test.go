@@ -4465,10 +4465,15 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// --sandbox off: the judge inherits the whole host env, so the
+	// secret-named sweep must cover undeclared vars like SNYK_TOKEN. (Under
+	// Docker the judge never sees unexposed host vars, and scrubbing their
+	// values would corrupt evidence that matches by coincidence.)
 	opts, err := ParseArgs([]string{
 		target,
 		"--scanner", "skillspector",
 		"--judge", "judge",
+		"--sandbox", "off",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -4651,10 +4656,13 @@ func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// --sandbox off so the whole-host secret-named sweep applies (Docker
+	// runs only scrub env the container can actually see).
 	opts, err := ParseArgs([]string{
 		target,
 		"--scanner", "skillspector",
 		"--judge", "judge",
+		"--sandbox", "off",
 	})
 	if err != nil {
 		t.Fatal(err)

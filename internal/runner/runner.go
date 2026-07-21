@@ -891,8 +891,12 @@ func scannerResult(opts Options, scanner string, target resolvedTarget, startedA
 		}
 		// Fixture evidence bypasses RunScanner, so it must pass the same
 		// redaction boundary: a fixture captured from a live run can embed
-		// a currently present declared credential.
-		redacted := redactScannerStdout(string(raw), env, redactionEnvNames(opts, env))
+		// a currently present declared credential. No command ran, so only
+		// the declared/allowlisted names are in scope — sweeping the whole
+		// host env would let an unrelated secret's value (CI_TOKEN=clean)
+		// corrupt fixture verdicts.
+		names := redactionEnvNames(opts, env)
+		redacted := redactScannerStdout(string(raw), commandVisibleEnv(env, names, SandboxModeDocker), names)
 		return ScannerResult{
 			Status:      "completed",
 			StartedAt:   startedAt,
@@ -1225,8 +1229,11 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		Error:            "",
 		Result:           nil,
 	}
+	// Under Docker the judge only sees allowlisted env names; the full host
+	// env stays in scope for --sandbox off.
+	visibleEnv := commandVisibleEnv(env, exposedEnvNames, sandboxMode)
 	scrub := func(value string) string {
-		return redactDeclaredEnvValues(value, env, exposedEnvNames)
+		return redactDeclaredEnvValues(value, visibleEnv, exposedEnvNames)
 	}
 	if runErr != nil {
 		result.Status = "failed"
@@ -1245,7 +1252,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 	// appears as a string node, so the string-only walk below cannot catch
 	// it. redactScannerStdout compares scalars exactly, as the scanner
 	// output path does.
-	raw = redactScannerStdout(raw, env, exposedEnvNames)
+	raw = redactScannerStdout(raw, visibleEnv, exposedEnvNames)
 	var parsed any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		if result.Status == "failed" {
@@ -2013,11 +2020,12 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 	// stderr; adapters that already redact internally pass through
 	// unchanged because their output no longer contains any secret.
 	if len(runner.ExposedEnvNames) > 0 {
+		visibleEnv := commandVisibleEnv(runner.Env, runner.ExposedEnvNames, runner.SandboxMode)
 		if len(result.Raw) > 0 {
-			result.Raw = json.RawMessage(redactScannerStdout(string(result.Raw), runner.Env, runner.ExposedEnvNames))
+			result.Raw = json.RawMessage(redactScannerStdout(string(result.Raw), visibleEnv, runner.ExposedEnvNames))
 		}
 		if result.Error != "" {
-			result.Error = redactDeclaredEnvValues(result.Error, runner.Env, runner.ExposedEnvNames)
+			result.Error = redactDeclaredEnvValues(result.Error, visibleEnv, runner.ExposedEnvNames)
 		}
 	}
 	return result, nil

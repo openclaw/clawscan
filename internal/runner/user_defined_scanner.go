@@ -134,11 +134,15 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	// under Docker every scanner sees the whole passthrough set, and a name
 	// like BETA_CREDENTIAL evades the isSecretEnvKey heuristic.
 	scrubNames := append(append([]string(nil), adapter.config.Env...), runner.ExposedEnvNames...)
-	raw := redactScannerStdout(strings.TrimSpace(output.Stdout), runner.Env, scrubNames)
+	// Under Docker only allowlisted names reach the container; scrubbing an
+	// unrelated host secret's value (CI_TOKEN=clean) would corrupt evidence
+	// without preventing any leak. --sandbox off keeps the full host env.
+	visibleEnv := commandVisibleEnv(runner.Env, scrubNames, runner.SandboxMode)
+	raw := redactScannerStdout(strings.TrimSpace(output.Stdout), visibleEnv, scrubNames)
 	if runErr != nil {
 		// Failure text needs the same coverage as stdout: declared env plus
 		// everything exposed to scanners this run, whatever the spelling.
-		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, runner.Env), runner.Env, scrubNames)
+		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, runner.Env), visibleEnv, scrubNames)
 		// Valid JSON is completed evidence only for a normal nonzero exit
 		// (findings-mean-nonzero scanners). A nil gate-eligible exit code
 		// means timeout or signal: partial output must not report success
@@ -406,6 +410,25 @@ func redactScannerStdout(value string, env map[string]string, declared []string)
 		return value
 	}
 	return string(encoded)
+}
+
+// commandVisibleEnv returns the env whose values feed redaction for a
+// command that ran under the given sandbox mode. With --sandbox off the
+// command inherits the whole host environment, so every secret-named var is
+// in scope. Under Docker only the allowlisted names reach the container:
+// scrubbing an unrelated host value (CI_TOKEN=clean) would rewrite
+// legitimate evidence like "verdict":"clean" without preventing any leak.
+func commandVisibleEnv(env map[string]string, names []string, sandboxMode string) map[string]string {
+	if sandboxMode != SandboxModeDocker {
+		return env
+	}
+	visible := make(map[string]string, len(names))
+	for _, name := range names {
+		if value, ok := env[name]; ok {
+			visible[name] = value
+		}
+	}
+	return visible
 }
 
 // scannerSecretValues collects the env values to scrub from scanner output:
