@@ -482,7 +482,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	for _, scanner := range opts.Scanners {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
-		result, err := scannerResult(opts, scanner, target, scannerStartedAt, scannerRunner)
+		result, err := scannerResult(opts, scanner, target, scannerStartedAt, scannerRunner, env)
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -880,7 +880,7 @@ func writeJSONFile(path string, value interface{}) error {
 	return WriteJSON(file, value)
 }
 
-func scannerResult(opts Options, scanner string, target resolvedTarget, startedAt string, scannerRunner ScannerRunner) (ScannerResult, error) {
+func scannerResult(opts Options, scanner string, target resolvedTarget, startedAt string, scannerRunner ScannerRunner, env map[string]string) (ScannerResult, error) {
 	if path := opts.ScannerResultPaths[scanner]; path != "" {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -889,13 +889,17 @@ func scannerResult(opts Options, scanner string, target resolvedTarget, startedA
 		if !json.Valid(raw) {
 			return ScannerResult{}, fmt.Errorf("scanner result %s is not valid JSON: %s", scanner, path)
 		}
+		// Fixture evidence bypasses RunScanner, so it must pass the same
+		// redaction boundary: a fixture captured from a live run can embed
+		// a currently present declared credential.
+		redacted := redactScannerStdout(string(raw), env, redactionEnvNames(opts, env))
 		return ScannerResult{
 			Status:      "completed",
 			StartedAt:   startedAt,
 			CompletedAt: startedAt,
 			Command:     []string{"scanner-result", scanner + "=" + path},
 			Error:       "",
-			Raw:         json.RawMessage(raw),
+			Raw:         json.RawMessage(redacted),
 		}, nil
 	}
 	if !scannerSupportsTargetKindInRegistry(registryForOptions(opts), scanner, target.kind) {

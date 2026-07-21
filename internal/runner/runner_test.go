@@ -1453,6 +1453,47 @@ func TestRunHostRedactionCoversUnselectedRegistryScannersEnv(t *testing.T) {
 	}
 }
 
+func TestRunRedactsDeclaredCredentialsFromFixtureResults(t *testing.T) {
+	// --scanner-result fixtures bypass RunScanner; a fixture captured from
+	// a live run can embed a currently present declared credential, which
+	// must not be copied verbatim into the artifact.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(dir, "alpha.json")
+	if err := os.WriteFile(fixture, []byte(`{"token":"fixture-secret-value"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(Options{
+		Target:             target,
+		Scanners:           []string{"alpha"},
+		ScannerRegistry:    registry,
+		ScannerResultPaths: map[string]string{"alpha": fixture},
+		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
+	}, RunContext{
+		Env: map[string]string{"SCANNER_AUTH": "fixture-secret-value"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(artifact.Scanners["alpha"].Raw)
+	if strings.Contains(raw, "fixture-secret-value") {
+		t.Fatalf("declared credential leaked through fixture evidence: %s", raw)
+	}
+	if !strings.Contains(raw, "[redacted]") {
+		t.Fatalf("expected redaction marker in fixture evidence: %s", raw)
+	}
+}
+
 func TestRunScannerRedactsDeclaredCredentialsFromBuiltinAdapters(t *testing.T) {
 	// The redaction boundary is RunScanner, not each adapter: a profile
 	// mixing a user-defined scanner (declaring bland SCANNER_AUTH) with a
