@@ -507,9 +507,10 @@ func TestUserDefinedScannerRedactsOtherScannersExposedEnv(t *testing.T) {
 
 func TestUnsafeWindowsShellTargetRejectsQuotesAndPercents(t *testing.T) {
 	// cmd.exe cannot safely receive quotes (backslash does not escape " for
-	// its parser, enabling breakout) or percents (%VAR% expands inside double
-	// quotes). Both must be refused before interpolation.
-	for _, target := range []string{`https://host/" & calc & "`, `C:\skill%path`} {
+	// its parser, enabling breakout), percents (%VAR% expands inside double
+	// quotes), or exclamation marks (!VAR! expands when delayed expansion is
+	// enabled). All must be refused before interpolation.
+	for _, target := range []string{`https://host/" & calc & "`, `C:\skill%path`, `https://host/!TEMP!`} {
 		if !unsafeWindowsShellTarget(target) {
 			t.Fatalf("target %q should be refused on the Windows host shell", target)
 		}

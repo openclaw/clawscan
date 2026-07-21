@@ -79,7 +79,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	} else if unsafeWindowsShellTarget(target) {
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			Error: fmt.Sprintf(`User-defined scanner %s cannot receive targets containing %% or " on the Windows host shell; use the Docker sandbox or a target without those characters`, adapter.config.ID),
+			Error: fmt.Sprintf(`User-defined scanner %s cannot receive targets containing %%, !, or " on the Windows host shell; use the Docker sandbox or a target without those characters`, adapter.config.ID),
 		}, nil
 	}
 	rendered := targetPlaceholderPattern.ReplaceAllStringFunc(adapter.config.Command, func(string) string {
@@ -160,10 +160,12 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 
 // unsafeWindowsShellTarget reports whether a target cannot be interpolated
 // into a cmd.exe command line safely: %VAR% expands even inside double
-// quotes, and backslash does not escape " for cmd.exe's parser, so a quote
-// in a URL target could terminate the argument and inject host commands.
+// quotes, !VAR! does too when delayed expansion is enabled (a system-wide
+// or shell-level setting ClawScan cannot detect), and backslash does not
+// escape " for cmd.exe's parser, so a quote in a URL target could terminate
+// the argument and inject host commands.
 func unsafeWindowsShellTarget(target string) bool {
-	return strings.ContainsAny(target, `%"`)
+	return strings.ContainsAny(target, `%"!`)
 }
 
 func gateEligibleExitCode(exitCode *int) *int {
