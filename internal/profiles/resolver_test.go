@@ -174,29 +174,37 @@ profiles:
 	}
 }
 
-func TestResolveArgsBuiltInProfileProvenanceSurvivesDiscoveredConfig(t *testing.T) {
+func TestResolveArgsSingleProfileCarriesSiblingDeclaredEnvForRedaction(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
+	config := filepath.Join(dir, ".clawscan.yml")
+	// Selecting profile-b must still carry profile-a's declared credential
+	// into the redaction set: with --sandbox off the run inherits the whole
+	// host env, so SHARED_ACCESS is reachable by profile-b's scanner.
+	writeFile(t, config, `version: 1
 profiles:
-  unrelated:
+  profile-a:
     scanners:
-      - clawscan-static
+      - id: alpha
+        command: alpha {{target}}
+        env: [SHARED_ACCESS]
+  profile-b:
+    scanners:
+      - id: beta
+        command: beta {{target}}
 `)
 
-	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, dir)
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "profile-b"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.ConfigSource != "built-in" {
-		t.Fatalf("config source = %q, want built-in (unrelated discovered config must not claim provenance)", opts.ConfigSource)
+	found := false
+	for _, name := range opts.BatchRedactEnvNames {
+		if name == "SHARED_ACCESS" {
+			found = true
+		}
 	}
-
-	opts, err = ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opts.ConfigSource != "built-in" {
-		t.Fatalf("config source = %q, want built-in when discovery finds nothing", opts.ConfigSource)
+	if !found {
+		t.Fatalf("sibling profile's declared env missing from redaction names: %v", opts.BatchRedactEnvNames)
 	}
 }
 
@@ -255,6 +263,12 @@ func TestResolveArgsDiscoverConfigRequiresProfile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--discover-config requires --profile") {
 		t.Fatalf("err = %v", err)
+	}
+	// Bare --discover-config (no other selection) must get the same
+	// specific message, not the generic no-selection error.
+	_, err = ResolveArgs([]string{"./skill", "--discover-config"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "--discover-config requires --profile") {
+		t.Fatalf("bare --discover-config err = %v, want the discovery-specific error", err)
 	}
 }
 
@@ -784,6 +798,28 @@ profiles:
 	}
 }
 
+func TestResolveArgsRejectsMalformedScannerEnvEntry(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: my-scanner --json {{target}}
+        env:
+          - API_TOKEN=sk-live-resolver
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || !strings.Contains(err.Error(), "API_TOKEN=...") {
+		t.Fatalf("err = %v, want sanitized malformed-env rejection", err)
+	}
+	if strings.Contains(err.Error(), "sk-live-resolver") {
+		t.Fatalf("rejection leaked credential value: %v", err)
+	}
+}
+
 func TestResolveArgsParsesUserDefinedScannerExitCodeGateRules(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")
@@ -825,13 +861,13 @@ profiles:
       - id: blocker
         command: blocker {{target}}
         gate:
-          blockOnExitCode: 7
+          blockOnExitCode: 124
 `)
 	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := opts.GateRules["blocker"].BlockOnExitCode.Codes; !reflect.DeepEqual(got, []int{7}) {
+	if got := opts.GateRules["blocker"].BlockOnExitCode.Codes; !reflect.DeepEqual(got, []int{124}) {
 		t.Fatalf("codes = %#v", got)
 	}
 }
@@ -857,6 +893,56 @@ func TestProfileScannerExitCodeGateRulesRoundTripYAML(t *testing.T) {
 	}
 }
 
+func TestProfileScannerEnvShapeValidation(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		yaml       string
+		wantEnv    []string
+		wantError  string
+		notInError []string
+	}{
+		{
+			name:       "scalar",
+			yaml:       "id: demo\ncommand: demo {{target}}\nenv: sk-" + "live-cred\n",
+			wantError:  "scanner env must be a list of variable names",
+			notInError: []string{"sk-" + "live-cred"},
+		},
+		{
+			name:    "sequence",
+			yaml:    "id: demo\ncommand: demo {{target}}\nenv: [API_TOKEN]\n",
+			wantEnv: []string{"API_TOKEN"},
+		},
+		{
+			name:       "mapping element",
+			yaml:       "id: demo\ncommand: demo {{target}}\nenv: [{a: b}]\n",
+			wantError:  "scanner env entry #1 must be a variable name",
+			notInError: []string{"a: b"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var scanner ProfileScanner
+			err := yaml.Unmarshal([]byte(test.yaml), &scanner)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(scanner.Env, test.wantEnv) {
+					t.Fatalf("env = %#v, want %#v", scanner.Env, test.wantEnv)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("err = %v, want %q", err, test.wantError)
+			}
+			for _, value := range test.notInError {
+				if strings.Contains(err.Error(), value) {
+					t.Fatalf("error leaked YAML value %q: %v", value, err)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveArgsRejectsInvalidExitCodeGateRules(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -867,8 +953,9 @@ func TestResolveArgsRejectsInvalidExitCodeGateRules(t *testing.T) {
 		{name: "non integer", rules: "blockOnExitCode: nope", want: `must be a non-negative integer, a list of non-negative integers, or "nonzero"`},
 		{name: "empty list", rules: "blockOnExitCode: []", want: "must not be an empty list"},
 		{name: "overlap", rules: "blockOnExitCode: nonzero\n          warnOnExitCode: [0, 2]", want: "blockOnExitCode and warnOnExitCode both claim exit code 2"},
-		{name: "reserved shell code", rules: "blockOnExitCode: 137", want: "exit code 137 is reserved for shell and signal failures; use codes 0-125"},
-		{name: "reserved code in list", rules: "warnOnExitCode: [1, 126]", want: "exit code 126 is reserved for shell and signal failures; use codes 0-125"},
+		{name: "reserved docker code boundary", rules: "blockOnExitCode: 125", want: "exit code 125 is reserved for shell and signal failures (Docker reserves 125-127); use codes 0-124"},
+		{name: "reserved shell code", rules: "blockOnExitCode: 137", want: "exit code 137 is reserved for shell and signal failures (Docker reserves 125-127); use codes 0-124"},
+		{name: "reserved code in list", rules: "warnOnExitCode: [1, 126]", want: "exit code 126 is reserved for shell and signal failures (Docker reserves 125-127); use codes 0-124"},
 		{name: "implicit null rule", rules: "blockOnExitCode:", want: `gate blockOnExitCode must be an exit code, a list of exit codes, or "nonzero", not null`},
 		{name: "explicit null rule", rules: "warnOnExitCode: null", want: `gate warnOnExitCode must be an exit code, a list of exit codes, or "nonzero", not null`},
 		{name: "empty gate", rules: "{}", want: "scanner gate must declare blockOnExitCode or warnOnExitCode"},
@@ -886,7 +973,7 @@ func TestResolveArgsRejectsInvalidExitCodeGateRules(t *testing.T) {
 	}
 }
 
-func TestGateRuleForProfileScannerExcludedByCLIOverrideFailsBeforeScanning(t *testing.T) {
+func TestGateRuleForProfileScannerExcludedByCLIOverrideIsDropped(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
@@ -906,13 +993,22 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Verify that gate rules for absent-scanner were silently dropped.
+	if len(opts.GateRules) != 0 {
+		t.Fatalf("opts.GateRules should be empty, got: %#v", opts.GateRules)
+	}
 	commandRunner := &profileCommandRunner{stdout: `{}`}
-	_, err = runner.Run(opts, runner.RunContext{Env: map[string]string{}, CommandRunner: commandRunner})
-	if err == nil || err.Error() != "gate rule references scanner absent-scanner, but it was not requested" {
+	artifact, err := runner.Run(opts, runner.RunContext{Env: map[string]string{}, CommandRunner: commandRunner})
+	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if commandRunner.command != "" {
-		t.Fatalf("scanner executed: %q", commandRunner.command)
+	// Verify the artifact has no fired gate rules and a passing gate.
+	if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+	// Verify clawscan-static ran.
+	if _, ok := artifact.Scanners["clawscan-static"]; !ok {
+		t.Fatal("artifact missing clawscan-static result")
 	}
 }
 
@@ -1046,6 +1142,46 @@ profiles:
 
 	if _, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir); err != nil {
 		t.Fatalf("64-character scanner ID must be accepted: %v", err)
+	}
+}
+
+func TestResolveArgsRejectsWindowsReservedScannerIDs(t *testing.T) {
+	dir := t.TempDir()
+	// con.json, nul.json, com1.json are unwritable on Windows even with the
+	// extension, so the run would fail after the scanner already completed.
+	for _, id := range []string{"con", "nul", "com1", "lpt9"} {
+		config := filepath.Join(dir, id+".clawscan.yml")
+		writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: `+id+`
+        command: scanner {{target}}
+`)
+		_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+		want := "User-defined scanner id " + id + " in profile review is a reserved Windows device name and cannot be used as an output file name"
+		if err == nil || err.Error() != want {
+			t.Fatalf("id %s: err = %v", id, err)
+		}
+	}
+}
+
+func TestResolveArgsAcceptsScannerIDsResemblingDeviceNames(t *testing.T) {
+	dir := t.TempDir()
+	// Only the exact device names are reserved; prefixed or suffixed IDs
+	// (console, com10, nul-check) are ordinary valid filenames.
+	for _, id := range []string{"console", "com10", "nul-check", "aux2"} {
+		config := filepath.Join(dir, id+".clawscan.yml")
+		writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: `+id+`
+        command: scanner {{target}}
+`)
+		if _, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir); err != nil {
+			t.Fatalf("id %s must be accepted: %v", id, err)
+		}
 	}
 }
 

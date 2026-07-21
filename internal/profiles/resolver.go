@@ -158,6 +158,23 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("field %s not found in type profiles.ProfileScanner", node.Content[index].Value)
 			}
 		}
+		for index := 0; index < len(node.Content); index += 2 {
+			if node.Content[index].Value != "env" {
+				continue
+			}
+			envNode := node.Content[index+1]
+			nullScalar := envNode.Kind == yaml.ScalarNode && (envNode.Tag == "!!null" || envNode.Value == "")
+			if envNode.Kind != yaml.SequenceNode && !nullScalar {
+				return errors.New("scanner env must be a list of variable names")
+			}
+			if envNode.Kind == yaml.SequenceNode {
+				for entryIndex, entry := range envNode.Content {
+					if entry.Kind != yaml.ScalarNode {
+						return fmt.Errorf("scanner env entry #%d must be a variable name", entryIndex+1)
+					}
+				}
+			}
+		}
 		var value struct {
 			ID      string              `yaml:"id"`
 			Command string              `yaml:"command"`
@@ -207,6 +224,9 @@ func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, 
 		if !scanner.custom {
 			continue
 		}
+		if bad := runner.InvalidUserDefinedEnvName(scanner.Env); bad != "" {
+			return runner.ScannerRegistry{}, fmt.Errorf("scanner %s env entry %s is not a variable name; declare bare names and set values in the environment", scanner.ID, bad)
+		}
 		targets := append([]string(nil), scanner.Targets...)
 		if len(targets) == 0 {
 			targets = []string{"skill", "url"}
@@ -221,6 +241,42 @@ func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, 
 		}
 	}
 	return registry, nil
+}
+
+// declaredEnvNames unions the env var names every profile in the registry
+// declares (scanner env plus sandbox passthrough). A single-profile run
+// with --sandbox off inherits the full host environment, so a blandly
+// named credential declared only by a sibling profile in the same config
+// must still be redacted from persisted output.
+func (registry ProfileRegistry) declaredEnvNames() []string {
+	seen := map[string]bool{}
+	names := []string{}
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, resolved := range registry.profiles {
+		for _, scanner := range resolved.profile.Scanners {
+			// scanner env: entries are credentials by declaration whatever
+			// their spelling.
+			for _, name := range scanner.Env {
+				add(name)
+			}
+		}
+		// sandbox.env mixes credentials with ordinary configuration
+		// (SKILLSPECTOR_PROVIDER); only credential-classified names feed
+		// redaction, or common values like "openai" would corrupt evidence.
+		for _, name := range resolved.sandbox.Env {
+			if runner.CredentialEnvName(name) {
+				add(name)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func profileGateRules(scanners []ProfileScanner) map[string]runner.ScannerGatePolicy {
@@ -246,6 +302,27 @@ func profileGateRules(scanners []ProfileScanner) map[string]runner.ScannerGatePo
 		rules[scanner.ID] = policy
 	}
 	return rules
+}
+
+// filterGateRulesToScanners drops gate rules for scanners not in the resolved
+// run set. A --scanner override replaces the profile scanner list; gate rules
+// for excluded scanners no longer apply and are silently dropped so the run
+// gates exactly the scanners it executes.
+func filterGateRulesToScanners(rules map[string]runner.ScannerGatePolicy, scanners []string) map[string]runner.ScannerGatePolicy {
+	if len(rules) == 0 {
+		return rules
+	}
+	keep := make(map[string]bool, len(scanners))
+	for _, s := range scanners {
+		keep[s] = true
+	}
+	filtered := make(map[string]runner.ScannerGatePolicy, len(rules))
+	for scanner, policy := range rules {
+		if keep[scanner] {
+			filtered[scanner] = policy
+		}
+	}
+	return filtered
 }
 
 type Sandbox struct {
@@ -310,6 +387,17 @@ var scannerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // inside the common 255-byte filename limit.
 const maxScannerIDLength = 64
 
+// windowsReservedScannerIDs are DOS device names Windows reserves even with
+// an extension: a scan would succeed and then fail writing <id>.json. IDs
+// are already lowercase-only and dot-free, so a whole-ID match suffices.
+var windowsReservedScannerIDs = map[string]bool{
+	"con": true, "prn": true, "aux": true, "nul": true,
+	"com1": true, "com2": true, "com3": true, "com4": true, "com5": true,
+	"com6": true, "com7": true, "com8": true, "com9": true,
+	"lpt1": true, "lpt2": true, "lpt3": true, "lpt4": true, "lpt5": true,
+	"lpt6": true, "lpt7": true, "lpt8": true, "lpt9": true,
+}
+
 var scannerTargetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
 
 type ResolvedRunSet struct {
@@ -359,27 +447,34 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 			return ResolvedRunSet{}, err
 		}
 	}
+	// Discovery without a profile would record the discovered file as the
+	// run's ConfigSource while applying none of its settings — a provenance
+	// claim the run does not honor. Reject instead of misleading, and check
+	// before the generic selection error so bare --discover-config gets the
+	// message naming its actual mistake.
+	if intent.discoverConfig && !intent.profileSet {
+		return ResolvedRunSet{}, errors.New("--discover-config requires --profile; use --config <path> to run every profile in a config")
+	}
 	if !hasExplicitRunSelection(intent) {
 		return ResolvedRunSet{}, explicitRunSelectionError()
 	}
 	if intent.configPath != "" && !intent.profileSet {
 		return resolveAllConfigProfiles(intent, cwd)
 	}
-	// Discovery without a profile would record the discovered file as the
-	// run's ConfigSource while applying none of its settings — a provenance
-	// claim the run does not honor. Reject instead of misleading.
-	if intent.discoverConfig && !intent.profileSet {
-		return ResolvedRunSet{}, errors.New("--discover-config requires --profile; use --config <path> to run every profile in a config")
-	}
 
 	profileName := ""
 	configSource := ""
 	selected := resolvedProfile{profile: Profile{}}
+	var configEnvNames []string
 	if intent.profileSet || intent.configPath != "" || intent.discoverConfig {
 		registry, loadedConfig, err := loadConfigs(cwd, intent.configPath, intent.discoverConfig)
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
+		// Redaction-only: with --sandbox off the run inherits the whole host
+		// env, so credentials declared by sibling profiles in the loaded
+		// config must be scrubbed even though only one profile executes.
+		configEnvNames = registry.declaredEnvNames()
 		if loadedConfig != "" {
 			configSource = loadedConfig
 		}
@@ -389,12 +484,6 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 			selected, ok = registry.Profile(profileName)
 			if !ok {
 				return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
-			}
-			// selected.source is authoritative: a profile served from
-			// embedded YAML is "built-in" even when an unrelated project
-			// config was loaded alongside it.
-			if selected.source == "built-in" {
-				configSource = "built-in"
 			}
 			// selected.source is authoritative: a profile served from
 			// embedded YAML is "built-in" even when an unrelated project
@@ -418,9 +507,10 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		return ResolvedRunSet{}, err
 	}
 	opts.Profile = profileName
-	opts.GateRules = profileGateRules(selected.profile.Scanners)
+	opts.GateRules = filterGateRulesToScanners(profileGateRules(selected.profile.Scanners), opts.Scanners)
 	opts.ConfigSource = configSource
 	opts.DiscoverConfig = intent.discoverConfig
+	opts.BatchRedactEnvNames = configEnvNames
 	if opts.Judge != nil {
 		opts.Judge.Files = files
 	}
@@ -520,7 +610,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 			return ResolvedRunSet{}, err
 		}
 		opts.Profile = profileName
-		opts.GateRules = profileGateRules(selected.profile.Scanners)
+		opts.GateRules = filterGateRulesToScanners(profileGateRules(selected.profile.Scanners), opts.Scanners)
 		opts.ConfigSource = filepath.Clean(projectPath)
 		opts.OutputPath = ""
 		opts.JSON = false
@@ -965,6 +1055,9 @@ func validateProfile(name string, profile Profile) error {
 		if scanner.custom && len(scanner.ID) > maxScannerIDLength {
 			return fmt.Errorf("User-defined scanner id in profile %s is %d characters; scanner IDs are used as file names and must be at most %d characters", name, len(scanner.ID), maxScannerIDLength)
 		}
+		if scanner.custom && windowsReservedScannerIDs[scanner.ID] {
+			return fmt.Errorf("User-defined scanner id %s in profile %s is a reserved Windows device name and cannot be used as an output file name", scanner.ID, name)
+		}
 		if scanner.custom && strings.TrimSpace(scanner.Command) == "" {
 			return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)
 		}
@@ -984,17 +1077,17 @@ func validateProfile(name string, profile Profile) error {
 			if code, overlaps := overlappingExitCodeRules(scanner.Gate.BlockOnExitCode, scanner.Gate.WarnOnExitCode); overlaps {
 				return fmt.Errorf("User-defined scanner %s in profile %s gate blockOnExitCode and warnOnExitCode both claim exit code %d", scanner.ID, name, code)
 			}
-			// Exit statuses >=126 are shell/docker infrastructure signals
-			// (not-executable, not-found, 128+N for kills) and are never
-			// gate-eligible at runtime; accepting one here would create a
-			// rule that silently can never fire.
+			// Exit statuses >=125 are shell/docker infrastructure signals
+			// (Docker reserves 125-127; 128+N reports signal kills) and are
+			// never gate-eligible at runtime; accepting one here would create
+			// a rule that silently can never fire.
 			for _, rule := range []*profileExitCodeRule{scanner.Gate.BlockOnExitCode, scanner.Gate.WarnOnExitCode} {
 				if rule == nil {
 					continue
 				}
 				for _, code := range rule.Codes {
-					if code >= 126 {
-						return fmt.Errorf("User-defined scanner %s in profile %s gate exit code %d is reserved for shell and signal failures; use codes 0-125", scanner.ID, name, code)
+					if code >= 125 {
+						return fmt.Errorf("User-defined scanner %s in profile %s gate exit code %d is reserved for shell and signal failures (Docker reserves 125-127); use codes 0-124", scanner.ID, name, code)
 					}
 				}
 			}

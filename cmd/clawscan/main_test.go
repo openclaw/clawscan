@@ -678,7 +678,7 @@ func TestRunCommandDiscoversSkillsWithExplicitProfile(t *testing.T) {
 }
 
 func clawHubReceiptJudgeCommand() string {
-	return `challenge=$(sed -n 's/.*"challenge": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json); required_file=$(sed -n 's/.*"required_file": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json); if command -v sha256sum >/dev/null 2>&1; then required_sha=$(sha256sum {{ workspace }}/"$required_file" | cut -d ' ' -f 1); else required_sha=$(shasum -a 256 {{ workspace }}/"$required_file" | cut -d ' ' -f 1); fi; printf '{"verdict":"benign","artifact_inspection":{"status":"completed","challenge":"%s","required_file_sha256":"%s","files_inspected":["%s"]}}\n' "$challenge" "$required_sha" "$required_file" > {{ output }}`
+	return `set -- "$(sed -n 's/.*"challenge": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json)" "$(sed -n 's/.*"required_file": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json)"; if command -v sha256sum >/dev/null 2>&1; then set -- "$1" "$2" "$(sha256sum {{ workspace }}/"$2" | cut -d ' ' -f 1)"; else set -- "$1" "$2" "$(shasum -a 256 {{ workspace }}/"$2" | cut -d ' ' -f 1)"; fi; printf '{"verdict":"benign","artifact_inspection":{"status":"completed","challenge":"%s","required_file_sha256":"%s","files_inspected":["%s"]}}\n' "$1" "$3" "$2" > {{ output }}`
 }
 
 func TestRunCommandUsesProjectProfile(t *testing.T) {
