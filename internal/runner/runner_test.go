@@ -1535,6 +1535,61 @@ func TestRunScannerRedactsDeclaredCredentialsFromBuiltinAdapters(t *testing.T) {
 	}
 }
 
+func TestRedactionEnvNamesDockerIncludesPassedOptionalCredentials(t *testing.T) {
+	// The Docker allowlist passes populated credential-classified
+	// OptionalEnv (SKILL_SCANNER_LLM_API_KEY) into the container, so
+	// Docker-mode redaction must cover it.
+	env := map[string]string{"SKILL_SCANNER_LLM_API_KEY": "cisco-llm-secret"}
+	names := redactionEnvNames(Options{
+		Scanners: []string{"cisco"}, ScannerResultPaths: map[string]string{},
+	}, env, SandboxModeDocker)
+	found := false
+	for _, name := range names {
+		if name == "SKILL_SCANNER_LLM_API_KEY" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("passed optional credential missing from Docker redaction set: %v", names)
+	}
+}
+
+func TestRedactionEnvNamesDockerExcludesUnexposedSiblingCredentials(t *testing.T) {
+	// Under Docker an unselected scanner's declared credential never
+	// enters the container; scrubbing its value (ALPHA_AUTH=clean) would
+	// rewrite legitimate "clean" verdicts without preventing a leak.
+	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_AUTH"}, Targets: []string{"skill"},
+	})
+	beta := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "beta", Command: "beta {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(alpha, beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		Scanners: []string{"beta"}, ScannerRegistry: registry,
+		ScannerResultPaths:  map[string]string{},
+		BatchRedactEnvNames: []string{"SIBLING_AUTH"},
+	}
+	env := map[string]string{"ALPHA_AUTH": "clean", "SIBLING_AUTH": "sibling"}
+	docker := redactionEnvNames(opts, env, SandboxModeDocker)
+	for _, name := range docker {
+		if name == "ALPHA_AUTH" || name == "SIBLING_AUTH" {
+			t.Fatalf("unexposed credential %s in Docker redaction set: %v", name, docker)
+		}
+	}
+	host := redactionEnvNames(opts, env, SandboxModeOff)
+	hostSet := map[string]bool{}
+	for _, name := range host {
+		hostSet[name] = true
+	}
+	if !hostSet["ALPHA_AUTH"] || !hostSet["SIBLING_AUTH"] {
+		t.Fatalf("host redaction lost registry/batch coverage: %v", host)
+	}
+}
+
 func TestRunRedactionIgnoresNonCredentialSandboxEnv(t *testing.T) {
 	// The clawhub profile passes SKILLSPECTOR_PROVIDER through the sandbox
 	// allowlist; its common value ("openai") must not be scrubbed from

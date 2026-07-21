@@ -329,15 +329,20 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 }
 
 // redactionEnvNames lists env vars whose values must be scrubbed from
-// anything persisted this run. Unlike sandbox passthrough it covers every
-// credential the resolved registry declares (selected or not, fixture or
-// not) plus sibling batch profiles' declared credentials
-// (BatchRedactEnvNames): with --sandbox off every host command still
-// inherits the whole process environment, so a blandly named credential
-// declared elsewhere is reachable by this profile's scanners and judge.
-func redactionEnvNames(opts Options, env map[string]string) []string {
-	collected := collectEnvNames(opts, env, true)
-	// Sandbox passthrough mixes credentials with ordinary configuration
+// anything persisted this run, scoped to what the run's commands can
+// actually see. With --sandbox off every host command inherits the whole
+// process environment, so the sweep covers every credential the resolved
+// registry declares (selected or not, fixture or not) plus sibling batch
+// profiles' declared credentials (BatchRedactEnvNames). Under Docker only
+// the passthrough allowlist enters the container, so the sweep is that
+// allowlist — including populated credential-classified OptionalEnv, which
+// the container does receive — and nothing more: scrubbing a never-exposed
+// sibling credential whose value coincides with legitimate output would
+// corrupt evidence without preventing any leak.
+func redactionEnvNames(opts Options, env map[string]string, sandboxMode string) []string {
+	hostMode := sandboxMode != SandboxModeDocker
+	collected := collectEnvNames(opts, env, hostMode)
+	// Names mix credentials with ordinary configuration
 	// (SKILLSPECTOR_PROVIDER=openai): scrubbing a common value like
 	// "openai" would corrupt valid evidence. Keep only names classified as
 	// credentials — except explicit user-defined env: declarations, which
@@ -353,12 +358,15 @@ func redactionEnvNames(opts Options, env map[string]string) []string {
 	}
 	// BatchRedactEnvNames arrive pre-vetted by the resolver (sibling
 	// profiles' env: declarations plus credential-classified sandbox
-	// names), so they bypass the filter above.
-	for _, name := range opts.BatchRedactEnvNames {
-		name = strings.TrimSpace(name)
-		if name != "" && !seen[name] {
-			seen[name] = true
-			names = append(names, name)
+	// names), so they bypass the filter above. Host mode only: a sibling
+	// profile's credential never enters this profile's container.
+	if hostMode {
+		for _, name := range opts.BatchRedactEnvNames {
+			name = strings.TrimSpace(name)
+			if name != "" && !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
 		}
 	}
 	sort.Strings(names)
@@ -388,7 +396,11 @@ func declaredCredentialEnvNames(opts Options) map[string]bool {
 	return declared
 }
 
-func collectEnvNames(opts Options, env map[string]string, forRedaction bool) []string {
+// collectEnvNames gathers env var names in scope for a run. wholeRegistry
+// widens the sweep to every adapter's declared credentials for host-mode
+// redaction; false yields the executing-scanner passthrough set used both
+// for the Docker allowlist and Docker-scoped redaction.
+func collectEnvNames(opts Options, env map[string]string, wholeRegistry bool) []string {
 	seen := map[string]bool{}
 	add := func(name string) {
 		name = strings.TrimSpace(name)
@@ -412,12 +424,13 @@ func collectEnvNames(opts Options, env map[string]string, forRedaction bool) []s
 	for _, req := range requirements(opts, env) {
 		add(req.EnvVar)
 	}
-	if forRedaction {
-		// Redaction must cover every credential the resolved registry
-		// declares, not just selected scanners: with --sandbox off the whole
-		// process env reaches every host command, so a blandly named
-		// credential declared by an unselected profile scanner (--scanner
-		// subset) is still reachable by the scanners and judge that do run.
+	if wholeRegistry {
+		// Host-mode redaction must cover every credential the resolved
+		// registry declares, not just selected scanners: with --sandbox off
+		// the whole process env reaches every host command, so a blandly
+		// named credential declared by an unselected profile scanner
+		// (--scanner subset) is still reachable by the scanners and judge
+		// that do run.
 		// Only credentials-by-declaration feed this sweep — scanner
 		// OptionalEnv is ordinary configuration (LOG_LEVEL, AWS_REGION)
 		// whose common values (info, true) would corrupt valid evidence if

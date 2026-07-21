@@ -458,11 +458,11 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
 			Timeout:              20 * time.Minute,
-			// Redaction must cover every selected scanner's env — not the
-			// target-runnable subset, and not the Docker passthrough set:
-			// with --sandbox off a skipped or fixture-satisfied scanner's
-			// credential is still in the host environment.
-			ExposedEnvNames: redactionEnvNames(opts, env),
+			// Redaction scope follows what commands can see: the whole
+			// host env with --sandbox off (skipped and fixture scanners'
+			// credentials included), the passthrough allowlist under
+			// Docker.
+			ExposedEnvNames: redactionEnvNames(opts, env, scannerSandboxMode),
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -491,7 +491,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, redactionEnvNames(opts, env))
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, redactionEnvNames(opts, env, sandbox.Mode))
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -603,10 +603,13 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 	}
 	// All profiles in the batch share one process environment on the host,
 	// so every profile's persisted output must scrub the union of declared
-	// credentials, not just its own.
+	// credentials, not just its own. Collected with host-mode scope: the
+	// union is only applied to host runs (Docker runs drop
+	// BatchRedactEnvNames because sibling credentials never enter their
+	// containers).
 	batchEnvNames := map[string]bool{}
 	for _, opts := range optsList {
-		for _, name := range redactionEnvNames(opts, env) {
+		for _, name := range redactionEnvNames(opts, env, SandboxModeOff) {
 			batchEnvNames[name] = true
 		}
 	}
@@ -891,11 +894,12 @@ func scannerResult(opts Options, scanner string, target resolvedTarget, startedA
 		}
 		// Fixture evidence bypasses RunScanner, so it must pass the same
 		// redaction boundary: a fixture captured from a live run can embed
-		// a currently present declared credential. No command ran, so only
-		// the declared/allowlisted names are in scope — sweeping the whole
-		// host env would let an unrelated secret's value (CI_TOKEN=clean)
-		// corrupt fixture verdicts.
-		names := redactionEnvNames(opts, env)
+		// a currently present declared credential. No command ran, so the
+		// declared credential names are in scope (host-wide collection) but
+		// the env is narrowed to those names — sweeping every host secret's
+		// value would let an unrelated coincidence (CI_TOKEN=clean) corrupt
+		// fixture verdicts.
+		names := redactionEnvNames(opts, env, SandboxModeOff)
 		redacted := redactScannerStdout(string(raw), commandVisibleEnv(env, names, SandboxModeDocker), names)
 		return ScannerResult{
 			Status:      "completed",
