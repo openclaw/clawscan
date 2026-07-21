@@ -299,6 +299,11 @@ var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_sche
 // safeOutputPathSegment, which lowercases; case-distinct IDs would
 // silently overwrite each other's raw evidence.
 var scannerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// maxScannerIDLength keeps <id>.json (plus bundle suffixes) comfortably
+// inside the common 255-byte filename limit.
+const maxScannerIDLength = 64
+
 var scannerTargetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
 
 type ResolvedRunSet struct {
@@ -947,6 +952,12 @@ func validateProfile(name string, profile Profile) error {
 		}
 		if scanner.custom && !scannerIDPattern.MatchString(scanner.ID) {
 			return fmt.Errorf("User-defined scanner %s in profile %s has invalid id; use lowercase letters, digits, underscores, and hyphens, starting with a letter or digit", scanner.ID, name)
+		}
+		// IDs become <id>.json filenames in output bundles and judge
+		// workspaces; an unbounded ID passes validation but fails the run
+		// at artifact-write time with "file name too long".
+		if scanner.custom && len(scanner.ID) > maxScannerIDLength {
+			return fmt.Errorf("User-defined scanner id in profile %s is %d characters; scanner IDs are used as file names and must be at most %d characters", name, len(scanner.ID), maxScannerIDLength)
 		}
 		if scanner.custom && strings.TrimSpace(scanner.Command) == "" {
 			return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)

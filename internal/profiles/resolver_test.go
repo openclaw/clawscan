@@ -991,6 +991,41 @@ profiles:
 	}
 }
 
+func TestResolveArgsRejectsOverlongUserDefinedScannerID(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	longID := strings.Repeat("a", 65)
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: `+longID+`
+        command: scanner {{target}}
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || err.Error() != "User-defined scanner id in profile review is 65 characters; scanner IDs are used as file names and must be at most 64 characters" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveArgsAcceptsMaxLengthUserDefinedScannerID(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	maxID := strings.Repeat("a", 64)
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: `+maxID+`
+        command: scanner {{target}}
+`)
+
+	if _, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir); err != nil {
+		t.Fatalf("64-character scanner ID must be accepted: %v", err)
+	}
+}
+
 func TestResolveArgsRejectsQuotedUserDefinedScannerTargetPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")
