@@ -4285,6 +4285,102 @@ func TestRunJudgeRedactsDeclaredScannerEnvFromResult(t *testing.T) {
 	}
 }
 
+func TestRunJudgeRedactsNumericDeclaredCredentialScalar(t *testing.T) {
+	// A numeric declared credential (SCANNER_AUTH=1234) emitted by the judge
+	// as a JSON number ({"auth":1234}) never hits the string walk; structural
+	// scalar comparison must catch it, as the scanner-output path does.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	custom := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "custom", Command: "custom {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(Options{
+		Target: target, Scanners: []string{"custom"}, ScannerRegistry: registry,
+		Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		Judge:   &JudgeOptions{Command: "judge"},
+	}, RunContext{
+		Env: map[string]string{"SCANNER_AUTH": "1234"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"custom": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		CommandRunner: &recordingCommandRunner{stdout: `{"verdict":"clean","auth":1234,"count":12345}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := artifact.Judge.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("judge result = %#v", artifact.Judge.Result)
+	}
+	if result["auth"] != "[redacted]" {
+		t.Fatalf("numeric declared credential not redacted: %#v", result)
+	}
+	// Exact-match only: 12345 merely contains the digits and must survive.
+	if fmt.Sprintf("%v", result["count"]) != "12345" {
+		t.Fatalf("non-matching number corrupted: %#v", result)
+	}
+}
+
+func TestRunFixtureScannerEnvStillRedactedOnHost(t *testing.T) {
+	// --scanner-result satisfies a scanner from a fixture, but with
+	// --sandbox off its credential is still in the host environment and
+	// reachable by every other command; it must stay in the redaction set.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(dir, "fixture.json")
+	if err := os.WriteFile(fixture, []byte(`{"status":"clean"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixtureScanner := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "fixture-scanner", Command: "fixture {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	live := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "live-scanner", Command: "live {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(fixtureScanner, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(Options{
+		Target:             target,
+		Scanners:           []string{"fixture-scanner", "live-scanner"},
+		ScannerRegistry:    registry,
+		ScannerResultPaths: map[string]string{"fixture-scanner": fixture},
+		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
+	}, RunContext{
+		Env:               map[string]string{"SCANNER_AUTH": "fixture-cred-value"},
+		HostCommandRunner: &recordingCommandRunner{stdout: `{"token":"fixture-cred-value"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(artifact.Scanners["live-scanner"].Raw)
+	if strings.Contains(raw, "fixture-cred-value") {
+		t.Fatalf("fixture scanner's credential leaked through live scanner: %s", raw)
+	}
+	if !strings.Contains(raw, "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", raw)
+	}
+}
+
 func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

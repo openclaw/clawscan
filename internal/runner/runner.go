@@ -451,10 +451,11 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
 			Timeout:              20 * time.Minute,
-			// Redaction must cover every selected scanner's env, not just
-			// the target-runnable subset: with --sandbox off a skipped
-			// scanner's credential is still in the host environment.
-			ExposedEnvNames: sandboxEnvNames(opts, env),
+			// Redaction must cover every selected scanner's env — not the
+			// target-runnable subset, and not the Docker passthrough set:
+			// with --sandbox off a skipped or fixture-satisfied scanner's
+			// credential is still in the host environment.
+			ExposedEnvNames: redactionEnvNames(opts, env),
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -483,7 +484,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, sandboxEnvNames(opts, env))
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, redactionEnvNames(opts, env))
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -1213,6 +1214,12 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		result.Error = "Judge command did not produce JSON output."
 		return result, nil
 	}
+	// Structural redaction first: a declared credential emitted as a JSON
+	// number, bool, or null ({"auth":1234} for SCANNER_AUTH=1234) never
+	// appears as a string node, so the string-only walk below cannot catch
+	// it. redactScannerStdout compares scalars exactly, as the scanner
+	// output path does.
+	raw = redactScannerStdout(raw, env, exposedEnvNames)
 	var parsed any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		if result.Status == "failed" {

@@ -309,7 +309,23 @@ func dockerMounts(cwd string, args []string, scanTargets ...string) []string {
 	return out
 }
 
+// sandboxEnvNames lists env vars passed through to the Docker sandbox.
+// Fixture-satisfied scanners are skipped: they never execute, so their
+// credentials must not enter the container.
 func sandboxEnvNames(opts Options, env map[string]string) []string {
+	return collectEnvNames(opts, env, false)
+}
+
+// redactionEnvNames lists env vars whose values must be scrubbed from
+// anything persisted this run. Unlike sandbox passthrough it includes
+// fixture-satisfied scanners: with --sandbox off every host command still
+// inherits the whole process environment, so a fixture scanner's blandly
+// named credential is reachable by other scanners and the judge.
+func redactionEnvNames(opts Options, env map[string]string) []string {
+	return collectEnvNames(opts, env, true)
+}
+
+func collectEnvNames(opts Options, env map[string]string, includeFixtureScanners bool) []string {
 	seen := map[string]bool{}
 	add := func(name string) {
 		name = strings.TrimSpace(name)
@@ -324,7 +340,7 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 		add(req.EnvVar)
 	}
 	for _, scanner := range opts.Scanners {
-		if opts.ScannerResultPaths[scanner] != "" {
+		if !includeFixtureScanners && opts.ScannerResultPaths[scanner] != "" {
 			continue
 		}
 		adapter, ok := registryForOptions(opts).Adapter(scanner)
