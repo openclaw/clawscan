@@ -175,6 +175,12 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 				}
 				return ResolvedRunSet{}, err
 			}
+			// selected.source is authoritative: a profile served from
+			// embedded YAML is "built-in" even when an unrelated project
+			// config was loaded alongside it.
+			if selected.source == "built-in" {
+				configSource = "built-in"
+			}
 		}
 	}
 

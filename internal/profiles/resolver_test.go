@@ -20,6 +20,9 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if opts.Target != "./skill" {
 		t.Fatalf("target = %q", opts.Target)
 	}
+	if opts.ConfigSource != "built-in" {
+		t.Fatalf("config source = %q, want built-in", opts.ConfigSource)
+	}
 	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
@@ -162,6 +165,32 @@ profiles:
 	}
 	if opts.IgnoredConfig != filepath.Join(dir, ".clawscan.yml") {
 		t.Fatalf("ignored config = %q, want %s", opts.IgnoredConfig, filepath.Join(dir, ".clawscan.yml"))
+	}
+}
+
+func TestResolveArgsBuiltInProfileProvenanceSurvivesDiscoveredConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
+profiles:
+  unrelated:
+    scanners:
+      - clawscan-static
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.ConfigSource != "built-in" {
+		t.Fatalf("config source = %q, want built-in (unrelated discovered config must not claim provenance)", opts.ConfigSource)
+	}
+
+	opts, err = ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.ConfigSource != "built-in" {
+		t.Fatalf("config source = %q, want built-in when discovery finds nothing", opts.ConfigSource)
 	}
 }
 
