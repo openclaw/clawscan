@@ -284,7 +284,7 @@ func TestUserDefinedScannerSkipsExistenceCheckForURLTargets(t *testing.T) {
 
 func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -293,7 +293,7 @@ func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 	commandRunner := &recordingCommandRunner{stderr: "auth failed: hunter2-credential rejected", err: errCommandFailed}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner,
-		Env:         map[string]string{"SCANNER_AUTH": "hunter2-credential"},
+		Env:         map[string]string{"SCANNER_ACCESS": "hunter2-credential"},
 		SandboxMode: SandboxModeOff,
 	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {
@@ -309,7 +309,7 @@ func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 
 func TestUserDefinedScannerRedactsDeclaredEnvInRawJSON(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -318,7 +318,7 @@ func TestUserDefinedScannerRedactsDeclaredEnvInRawJSON(t *testing.T) {
 	commandRunner := &recordingCommandRunner{stdout: `{"token":"hunter2-credential","findings":[]}`}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner,
-		Env:         map[string]string{"SCANNER_AUTH": "hunter2-credential"},
+		Env:         map[string]string{"SCANNER_ACCESS": "hunter2-credential"},
 		SandboxMode: SandboxModeOff,
 	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {
@@ -348,8 +348,8 @@ func TestRedactScannerStdoutCoversJSONEscapedSecrets(t *testing.T) {
 		"secret in key":     {secret: "hunter2", raw: `{"hunter2":"value"}`},
 		"nested array":      {secret: "hunter2", raw: `{"findings":[{"evidence":["saw hunter2 here"]}]}`},
 	} {
-		env := map[string]string{"SCANNER_AUTH": test.secret}
-		declared := []string{"SCANNER_AUTH"}
+		env := map[string]string{"SCANNER_ACCESS": test.secret}
+		declared := []string{"SCANNER_ACCESS"}
 		redacted := redactScannerStdout(test.raw, env, declared)
 		var decoded any
 		if err := json.Unmarshal([]byte(redacted), &decoded); err != nil {
@@ -365,10 +365,10 @@ func TestRedactScannerStdoutCoversJSONEscapedSecrets(t *testing.T) {
 }
 
 func TestRedactScannerStdoutLeavesCleanOutputUntouched(t *testing.T) {
-	env := map[string]string{"SCANNER_AUTH": "hunter2"}
+	env := map[string]string{"SCANNER_ACCESS": "hunter2"}
 	raw := `{"findings": [],
   "note": "keeps formatting when nothing leaks"}`
-	if got := redactScannerStdout(raw, env, []string{"SCANNER_AUTH"}); got != raw {
+	if got := redactScannerStdout(raw, env, []string{"SCANNER_ACCESS"}); got != raw {
 		t.Fatalf("clean output was rewritten: %q", got)
 	}
 }
@@ -479,7 +479,7 @@ func TestUserDefinedScannerTreatsSignalStyleExitCodesAsFailed(t *testing.T) {
 func TestUserDefinedScannerRedactsOtherScannersExposedEnv(t *testing.T) {
 	// Under Docker every scanner sees the whole passthrough set; scanner A's
 	// output must be scrubbed of scanner B's credential even when its name
-	// (BETA_CREDENTIAL) evades the isSecretEnvKey heuristic.
+	// (BETA_LICENSE) evades the isSecretEnvKey heuristic.
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
 	})
@@ -490,8 +490,8 @@ func TestUserDefinedScannerRedactsOtherScannersExposedEnv(t *testing.T) {
 	commandRunner := &recordingCommandRunner{stdout: `{"token":"beta-cred-value"}`}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner,
-		Env:             map[string]string{"BETA_CREDENTIAL": "beta-cred-value"},
-		ExposedEnvNames: []string{"BETA_CREDENTIAL"},
+		Env:             map[string]string{"BETA_LICENSE": "beta-cred-value"},
+		ExposedEnvNames: []string{"BETA_LICENSE"},
 		SandboxMode:     SandboxModeDocker,
 	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {
@@ -528,6 +528,67 @@ func TestUserDefinedScannerDockerRedactionIgnoresUnexposedHostSecrets(t *testing
 	}
 	if !strings.Contains(string(result.Raw), `"verdict":"clean"`) {
 		t.Fatalf("unexposed host secret corrupted Docker evidence: %s", result.Raw)
+	}
+}
+
+func TestUserDefinedScannerHostRedactionCoversStandardCredentialNames(t *testing.T) {
+	// --sandbox off inherits the whole host env, so undeclared credentials
+	// with standard spellings — a personal access token (GITHUB_PAT, whole
+	// _-segment match) and a password-bearing connection string
+	// (DATABASE_URL) — must be scrubbed even though no scanner declared
+	// them and they carry no TOKEN/SECRET/KEY marker.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"pat":"ghp_hostpatvalue","db":"postgres://user:hostdbpass@db/x"}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{
+			"GITHUB_PAT":   "ghp_hostpatvalue",
+			"DATABASE_URL": "postgres://user:hostdbpass@db/x",
+		},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.Raw), "ghp_hostpatvalue") {
+		t.Fatalf("GITHUB_PAT value leaked on --sandbox off: %s", result.Raw)
+	}
+	if strings.Contains(string(result.Raw), "hostdbpass") {
+		t.Fatalf("DATABASE_URL value leaked on --sandbox off: %s", result.Raw)
+	}
+}
+
+func TestUserDefinedScannerHostRedactionKeepsNonSecretSegmentNames(t *testing.T) {
+	// Segment matching must not over-reach: GIT_AUTHOR_NAME contains AUTH
+	// only as a substring of AUTHOR, and PWD names the shell's working
+	// directory. Scrubbing either value would corrupt legitimate evidence.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"author":"Jesse","cwd":"/skills/demo"}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{
+			"GIT_AUTHOR_NAME": "Jesse",
+			"PWD":             "/skills/demo",
+		},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(result.Raw), `"author":"Jesse"`) || !strings.Contains(string(result.Raw), `"cwd":"/skills/demo"`) {
+		t.Fatalf("non-secret env values were scrubbed from evidence: %s", result.Raw)
 	}
 }
 
@@ -585,8 +646,8 @@ func TestUserDefinedScannerRedactsExposedEnvFromErrors(t *testing.T) {
 	commandRunner := &recordingCommandRunner{stderr: "auth failed: beta-cred-value rejected", err: errCommandFailed}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner,
-		Env:             map[string]string{"BETA_CREDENTIAL": "beta-cred-value"},
-		ExposedEnvNames: []string{"BETA_CREDENTIAL"},
+		Env:             map[string]string{"BETA_LICENSE": "beta-cred-value"},
+		ExposedEnvNames: []string{"BETA_LICENSE"},
 		SandboxMode:     SandboxModeOff,
 	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {
@@ -631,7 +692,7 @@ func TestUserDefinedScannerRedactsEscapedUndeclaredSecretsFromErrors(t *testing.
 
 func TestUserDefinedScannerRedactsAlternateEncodedSecretsFromErrors(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -654,7 +715,7 @@ func TestUserDefinedScannerRedactsAlternateEncodedSecretsFromErrors(t *testing.T
 			commandRunner := &recordingCommandRunner{stderr: test.stderr, err: errCommandFailed}
 			result, err := (ExternalScannerRunner{
 				Registry: registry, CommandRunner: commandRunner,
-				Env:         map[string]string{"SCANNER_AUTH": test.secret},
+				Env:         map[string]string{"SCANNER_ACCESS": test.secret},
 				SandboxMode: SandboxModeOff,
 			}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
 			if err != nil {
@@ -758,9 +819,9 @@ func TestRedactScannerStdoutMarkerSubstringSecrets(t *testing.T) {
 	// Secrets that are substrings of the "[redacted]" sentinel must not
 	// survive inside the replacement marker (scanner JSON path).
 	for _, secret := range []string{"act", "redacted", "a"} {
-		env := map[string]string{"SCANNER_AUTH": secret}
+		env := map[string]string{"SCANNER_ACCESS": secret}
 		raw := `{"token":"` + secret + `","note":"before ` + secret + ` after"}`
-		redacted := redactScannerStdout(raw, env, []string{"SCANNER_AUTH"})
+		redacted := redactScannerStdout(raw, env, []string{"SCANNER_ACCESS"})
 		if strings.Contains(redacted, secret) {
 			t.Fatalf("secret %q survived redaction: %s", secret, redacted)
 		}
@@ -772,7 +833,7 @@ func TestRedactScannerStdoutMarkerSubstringSecrets(t *testing.T) {
 
 func TestUserDefinedScannerMarkerSubstringSecretInErrors(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -783,7 +844,7 @@ func TestUserDefinedScannerMarkerSubstringSecretInErrors(t *testing.T) {
 	commandRunner := &recordingCommandRunner{stderr: "auth redacted rejected", err: errCommandFailed}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner,
-		Env:         map[string]string{"SCANNER_AUTH": "redacted"},
+		Env:         map[string]string{"SCANNER_ACCESS": "redacted"},
 		SandboxMode: SandboxModeOff,
 	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {

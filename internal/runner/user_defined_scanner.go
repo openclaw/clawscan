@@ -132,7 +132,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	// Scrub this adapter's declared env plus everything else exposed to
 	// scanners this run (sandbox allowlist, other adapters' credentials):
 	// under Docker every scanner sees the whole passthrough set, and a name
-	// like BETA_CREDENTIAL evades the isSecretEnvKey heuristic.
+	// like BETA_LICENSE evades the isSecretEnvKey heuristic.
 	scrubNames := append(append([]string(nil), adapter.config.Env...), runner.ExposedEnvNames...)
 	// Under Docker only allowlisted names reach the container; scrubbing an
 	// unrelated host secret's value (CI_TOKEN=clean) would corrupt evidence

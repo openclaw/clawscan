@@ -84,6 +84,10 @@ func TestDockerMountFieldQuoting(t *testing.T) {
 		{"source", "/skills/demo", "source=/skills/demo"},
 		{"source", "/skills/a,b", `"source=/skills/a,b"`},
 		{"source", `/skills/say "hi"`, `"source=/skills/say ""hi"""`},
+		// CR and LF are valid in POSIX path components and terminate a CSV
+		// record when unquoted, truncating the mount spec.
+		{"source", "/skills/a\nb", "\"source=/skills/a\nb\""},
+		{"source", "/skills/a\rb", "\"source=/skills/a\rb\""},
 	} {
 		if got := dockerMountField(test.key, test.value); got != test.want {
 			t.Fatalf("dockerMountField(%q, %q) = %q, want %q", test.key, test.value, got, test.want)

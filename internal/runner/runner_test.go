@@ -1381,7 +1381,7 @@ func TestRunHostRedactionCoversSkippedScannersEnv(t *testing.T) {
 		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
 	})
 	pluginOnly := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_CREDENTIAL"}, Targets: []string{"plugin"},
+		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_LICENSE"}, Targets: []string{"plugin"},
 	})
 	registry, err := NewScannerRegistry(alpha, pluginOnly)
 	if err != nil {
@@ -1395,7 +1395,7 @@ func TestRunHostRedactionCoversSkippedScannersEnv(t *testing.T) {
 		ScannerResultPaths: map[string]string{},
 		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
 	}, RunContext{
-		Env:               map[string]string{"BETA_CREDENTIAL": "beta-cred-value"},
+		Env:               map[string]string{"BETA_LICENSE": "beta-cred-value"},
 		HostCommandRunner: host,
 	})
 	if err != nil {
@@ -1421,7 +1421,7 @@ func TestRunHostRedactionCoversUnselectedRegistryScannersEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_AUTH"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_ACCESS"}, Targets: []string{"skill"},
 	})
 	beta := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "beta", Command: "beta {{target}}", Targets: []string{"skill"},
@@ -1438,7 +1438,7 @@ func TestRunHostRedactionCoversUnselectedRegistryScannersEnv(t *testing.T) {
 		ScannerResultPaths: map[string]string{},
 		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
 	}, RunContext{
-		Env:               map[string]string{"ALPHA_AUTH": "alpha-secret-value"},
+		Env:               map[string]string{"ALPHA_ACCESS": "alpha-secret-value"},
 		HostCommandRunner: host,
 	})
 	if err != nil {
@@ -1467,7 +1467,7 @@ func TestRunRedactsDeclaredCredentialsFromFixtureResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(alpha)
 	if err != nil {
@@ -1480,7 +1480,7 @@ func TestRunRedactsDeclaredCredentialsFromFixtureResults(t *testing.T) {
 		ScannerResultPaths: map[string]string{"alpha": fixture},
 		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
 	}, RunContext{
-		Env: map[string]string{"SCANNER_AUTH": "fixture-secret-value"},
+		Env: map[string]string{"SCANNER_ACCESS": "fixture-secret-value"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1496,22 +1496,22 @@ func TestRunRedactsDeclaredCredentialsFromFixtureResults(t *testing.T) {
 
 func TestRunScannerRedactsDeclaredCredentialsFromBuiltinAdapters(t *testing.T) {
 	// The redaction boundary is RunScanner, not each adapter: a profile
-	// mixing a user-defined scanner (declaring bland SCANNER_AUTH) with a
+	// mixing a user-defined scanner (declaring bland SCANNER_ACCESS) with a
 	// built-in scanner exposes the credential to both, and the built-in's
 	// stdout/stderr must be scrubbed too.
 	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := DefaultScannerRegistry().WithAdapters(alpha)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"SCANNER_AUTH": "bland-secret-value"}
+	env := map[string]string{"SCANNER_ACCESS": "bland-secret-value"}
 	runner := ExternalScannerRunner{
 		Registry:      registry,
 		CommandRunner: &recordingCommandRunner{stdout: `{"echo":"bland-secret-value"}`},
 		Env:           env, SandboxMode: SandboxModeOff,
-		ExposedEnvNames: []string{"SCANNER_AUTH"},
+		ExposedEnvNames: []string{"SCANNER_ACCESS"},
 	}
 	result, err := runner.RunScanner("agentverus", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {
@@ -1524,7 +1524,7 @@ func TestRunScannerRedactsDeclaredCredentialsFromBuiltinAdapters(t *testing.T) {
 		Registry:      registry,
 		CommandRunner: &recordingCommandRunner{stderr: "auth bland-secret-value rejected", err: errCommandFailed},
 		Env:           env, SandboxMode: SandboxModeOff,
-		ExposedEnvNames: []string{"SCANNER_AUTH"},
+		ExposedEnvNames: []string{"SCANNER_ACCESS"},
 	}
 	failed, err := failing.RunScanner("agentverus", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {
@@ -1556,10 +1556,10 @@ func TestRedactionEnvNamesDockerIncludesPassedOptionalCredentials(t *testing.T) 
 
 func TestRedactionEnvNamesDockerExcludesUnexposedSiblingCredentials(t *testing.T) {
 	// Under Docker an unselected scanner's declared credential never
-	// enters the container; scrubbing its value (ALPHA_AUTH=clean) would
+	// enters the container; scrubbing its value (ALPHA_ACCESS=clean) would
 	// rewrite legitimate "clean" verdicts without preventing a leak.
 	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_AUTH"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_ACCESS"}, Targets: []string{"skill"},
 	})
 	beta := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "beta", Command: "beta {{target}}", Targets: []string{"skill"},
@@ -1571,12 +1571,12 @@ func TestRedactionEnvNamesDockerExcludesUnexposedSiblingCredentials(t *testing.T
 	opts := Options{
 		Scanners: []string{"beta"}, ScannerRegistry: registry,
 		ScannerResultPaths:  map[string]string{},
-		BatchRedactEnvNames: []string{"SIBLING_AUTH"},
+		BatchRedactEnvNames: []string{"SIBLING_ACCESS"},
 	}
-	env := map[string]string{"ALPHA_AUTH": "clean", "SIBLING_AUTH": "sibling"}
+	env := map[string]string{"ALPHA_ACCESS": "clean", "SIBLING_ACCESS": "sibling"}
 	docker := redactionEnvNames(opts, env, SandboxModeDocker)
 	for _, name := range docker {
-		if name == "ALPHA_AUTH" || name == "SIBLING_AUTH" {
+		if name == "ALPHA_ACCESS" || name == "SIBLING_ACCESS" {
 			t.Fatalf("unexposed credential %s in Docker redaction set: %v", name, docker)
 		}
 	}
@@ -1585,7 +1585,7 @@ func TestRedactionEnvNamesDockerExcludesUnexposedSiblingCredentials(t *testing.T
 	for _, name := range host {
 		hostSet[name] = true
 	}
-	if !hostSet["ALPHA_AUTH"] || !hostSet["SIBLING_AUTH"] {
+	if !hostSet["ALPHA_ACCESS"] || !hostSet["SIBLING_ACCESS"] {
 		t.Fatalf("host redaction lost registry/batch coverage: %v", host)
 	}
 }
@@ -1594,7 +1594,7 @@ func TestRunDockerRedactionSkipsNonRunnableScannerCredentials(t *testing.T) {
 	// The Docker allowlist is built from runnable scanners only. A
 	// selected plugin-only scanner is skipped for a skill target, so its
 	// credential never enters the container and must not scrub another
-	// scanner's evidence — BETA_CREDENTIAL=clean would otherwise rewrite a
+	// scanner's evidence — BETA_LICENSE=clean would otherwise rewrite a
 	// legitimate "verdict":"clean".
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -1605,7 +1605,7 @@ func TestRunDockerRedactionSkipsNonRunnableScannerCredentials(t *testing.T) {
 		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
 	})
 	pluginOnly := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_CREDENTIAL"}, Targets: []string{"plugin"},
+		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_LICENSE"}, Targets: []string{"plugin"},
 	})
 	registry, err := NewScannerRegistry(alpha, pluginOnly)
 	if err != nil {
@@ -1619,7 +1619,7 @@ func TestRunDockerRedactionSkipsNonRunnableScannerCredentials(t *testing.T) {
 		ScannerResultPaths: map[string]string{},
 		Sandbox:            SandboxOptions{Mode: SandboxModeDocker},
 	}, RunContext{
-		Env:               map[string]string{"BETA_CREDENTIAL": "clean"},
+		Env:               map[string]string{"BETA_LICENSE": "clean"},
 		HostCommandRunner: host,
 	})
 	if err != nil {
@@ -1677,9 +1677,9 @@ func TestRunRedactionIgnoresNonCredentialSandboxEnv(t *testing.T) {
 		Scanners:           []string{"beta"},
 		ScannerRegistry:    registry,
 		ScannerResultPaths: map[string]string{},
-		Sandbox:            SandboxOptions{Mode: SandboxModeOff, Env: []string{"SKILLSPECTOR_PROVIDER", "JUDGE_AUTH"}},
+		Sandbox:            SandboxOptions{Mode: SandboxModeOff, Env: []string{"SKILLSPECTOR_PROVIDER", "JUDGE_ACCESS"}},
 	}, RunContext{
-		Env:               map[string]string{"SKILLSPECTOR_PROVIDER": "openai", "JUDGE_AUTH": "judge-cred-value"},
+		Env:               map[string]string{"SKILLSPECTOR_PROVIDER": "openai", "JUDGE_ACCESS": "judge-cred-value"},
 		HostCommandRunner: host,
 	})
 	if err != nil {
@@ -1745,7 +1745,7 @@ func TestRunProfileBatchRedactsSiblingProfileCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_AUTH"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_ACCESS"}, Targets: []string{"skill"},
 	})
 	alphaRegistry, err := NewScannerRegistry(alpha)
 	if err != nil {
@@ -1771,7 +1771,7 @@ func TestRunProfileBatchRedactsSiblingProfileCredentials(t *testing.T) {
 			Sandbox: SandboxOptions{Mode: SandboxModeOff},
 		},
 	}, RunContext{
-		Env:               map[string]string{"ALPHA_AUTH": "alpha-secret-value"},
+		Env:               map[string]string{"ALPHA_ACCESS": "alpha-secret-value"},
 		HostCommandRunner: host,
 	}, dir)
 	if err != nil {
@@ -4626,7 +4626,7 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
 func TestRunJudgeRedactsDeclaredScannerEnvFromResult(t *testing.T) {
 	// The judge shares the command runner (and thus the env allowlist) with
 	// scanners. A custom scanner's declared credential whose name evades
-	// isSecretEnvKey (SCANNER_AUTH) must still be scrubbed from judge output.
+	// isSecretEnvKey (SCANNER_ACCESS) must still be scrubbed from judge output.
 	dir := t.TempDir()
 	t.Chdir(dir)
 	target := filepath.Join(dir, "skill")
@@ -4637,7 +4637,7 @@ func TestRunJudgeRedactsDeclaredScannerEnvFromResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	custom := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "custom", Command: "custom {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "custom", Command: "custom {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := DefaultScannerRegistry().WithAdapters(custom)
 	if err != nil {
@@ -4648,7 +4648,7 @@ func TestRunJudgeRedactsDeclaredScannerEnvFromResult(t *testing.T) {
 		Sandbox: SandboxOptions{Mode: SandboxModeOff},
 		Judge:   &JudgeOptions{Command: "judge"},
 	}, RunContext{
-		Env: map[string]string{"SCANNER_AUTH": "bland-name-credential"},
+		Env: map[string]string{"SCANNER_ACCESS": "bland-name-credential"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"custom": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -4671,7 +4671,7 @@ func TestRunJudgeRedactsDeclaredScannerEnvFromResult(t *testing.T) {
 }
 
 func TestRunJudgeRedactsNumericDeclaredCredentialScalar(t *testing.T) {
-	// A numeric declared credential (SCANNER_AUTH=1234) emitted by the judge
+	// A numeric declared credential (SCANNER_ACCESS=1234) emitted by the judge
 	// as a JSON number ({"auth":1234}) never hits the string walk; structural
 	// scalar comparison must catch it, as the scanner-output path does.
 	dir := t.TempDir()
@@ -4684,7 +4684,7 @@ func TestRunJudgeRedactsNumericDeclaredCredentialScalar(t *testing.T) {
 		t.Fatal(err)
 	}
 	custom := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "custom", Command: "custom {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "custom", Command: "custom {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := DefaultScannerRegistry().WithAdapters(custom)
 	if err != nil {
@@ -4695,7 +4695,7 @@ func TestRunJudgeRedactsNumericDeclaredCredentialScalar(t *testing.T) {
 		Sandbox: SandboxOptions{Mode: SandboxModeOff},
 		Judge:   &JudgeOptions{Command: "judge"},
 	}, RunContext{
-		Env: map[string]string{"SCANNER_AUTH": "1234"},
+		Env: map[string]string{"SCANNER_ACCESS": "1234"},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"custom": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
@@ -4735,7 +4735,7 @@ func TestRunFixtureScannerEnvStillRedactedOnHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixtureScanner := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "fixture-scanner", Command: "fixture {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+		ID: "fixture-scanner", Command: "fixture {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	live := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "live-scanner", Command: "live {{target}}", Targets: []string{"skill"},
@@ -4751,7 +4751,7 @@ func TestRunFixtureScannerEnvStillRedactedOnHost(t *testing.T) {
 		ScannerResultPaths: map[string]string{"fixture-scanner": fixture},
 		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
 	}, RunContext{
-		Env:               map[string]string{"SCANNER_AUTH": "fixture-cred-value"},
+		Env:               map[string]string{"SCANNER_ACCESS": "fixture-cred-value"},
 		HostCommandRunner: &recordingCommandRunner{stdout: `{"token":"fixture-cred-value"}`},
 	})
 	if err != nil {

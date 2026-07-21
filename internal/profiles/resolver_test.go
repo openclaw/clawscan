@@ -213,14 +213,14 @@ func TestResolveArgsSingleProfileCarriesSiblingDeclaredEnvForRedaction(t *testin
 	config := filepath.Join(dir, ".clawscan.yml")
 	// Selecting profile-b must still carry profile-a's declared credential
 	// into the redaction set: with --sandbox off the run inherits the whole
-	// host env, so SHARED_AUTH is reachable by profile-b's scanner.
+	// host env, so SHARED_ACCESS is reachable by profile-b's scanner.
 	writeFile(t, config, `version: 1
 profiles:
   profile-a:
     scanners:
       - id: alpha
         command: alpha {{target}}
-        env: [SHARED_AUTH]
+        env: [SHARED_ACCESS]
   profile-b:
     scanners:
       - id: beta
@@ -233,7 +233,7 @@ profiles:
 	}
 	found := false
 	for _, name := range opts.BatchRedactEnvNames {
-		if name == "SHARED_AUTH" {
+		if name == "SHARED_ACCESS" {
 			found = true
 		}
 	}

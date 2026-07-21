@@ -1185,7 +1185,7 @@ type judgeShellSpec struct {
 // exposedEnvNames lists every env var reachable by commands this run (sandbox
 // allowlist plus all scanners' declared env). The judge shares the command
 // runner with scanners, so its redaction must cover the same set: a declared
-// credential with a bland name (SCANNER_AUTH) evades isSecretEnvKey.
+// credential with a bland name (SCANNER_ACCESS) evades isSecretEnvKey.
 func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string, exposedEnvNames []string) (*JudgeResult, error) {
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
@@ -1255,7 +1255,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		return result, nil
 	}
 	// Structural redaction first: a declared credential emitted as a JSON
-	// number, bool, or null ({"auth":1234} for SCANNER_AUTH=1234) never
+	// number, bool, or null ({"auth":1234} for SCANNER_ACCESS=1234) never
 	// appears as a string node, so the string-only walk below cannot catch
 	// it. redactScannerStdout compares scalars exactly, as the scanner
 	// output path does.
@@ -2022,7 +2022,7 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 	}
 	// Central redaction boundary: every adapter's persisted output — not
 	// just user-defined scanners' — must scrub declared credentials.
-	// A profile can hand a blandly named credential (SCANNER_AUTH) to the
+	// A profile can hand a blandly named credential (SCANNER_ACCESS) to the
 	// shared environment, and a built-in scanner may echo it in stdout or
 	// stderr; adapters that already redact internally pass through
 	// unchanged because their output no longer contains any secret.
@@ -2450,13 +2450,40 @@ func CredentialEnvName(name string) bool {
 	return true
 }
 
+// secretEnvKeySegments are credential markers matched as whole
+// underscore-separated segments of the variable name, so GITHUB_PAT and
+// SCANNER_ACCESS match while GIT_AUTHOR_NAME and PATTERN do not — a
+// substring match there would scrub non-secret values (an author name)
+// from evidence. DSN, DATABASE_URL, and CONNECTION_STRING count because
+// connection strings routinely embed passwords (postgres://user:pass@).
+var secretEnvKeySegments = map[string]bool{
+	"AUTH": true, "CRED": true, "CREDENTIAL": true, "CREDENTIALS": true,
+	"PAT": true, "DSN": true, "PASSWD": true, "PWD": true,
+}
+
 func isSecretEnvKey(key string) bool {
 	upper := strings.ToUpper(key)
-	return strings.Contains(upper, "TOKEN") ||
+	// Bare PWD is the shell's working directory, not a credential:
+	// scrubbing its value would erase legitimate paths from persisted
+	// evidence. DB_PWD-style names still match via the segment scan below.
+	if upper == "PWD" {
+		return false
+	}
+	if strings.Contains(upper, "TOKEN") ||
 		strings.Contains(upper, "SECRET") ||
 		strings.Contains(upper, "PASSWORD") ||
 		strings.HasSuffix(upper, "_KEY") ||
-		strings.Contains(upper, "API_KEY")
+		strings.Contains(upper, "API_KEY") ||
+		strings.Contains(upper, "DATABASE_URL") ||
+		strings.Contains(upper, "CONNECTION_STRING") {
+		return true
+	}
+	for _, segment := range strings.Split(upper, "_") {
+		if secretEnvKeySegments[segment] {
+			return true
+		}
+	}
+	return false
 }
 
 func requirements(opts Options, env map[string]string) []EnvRequirement {

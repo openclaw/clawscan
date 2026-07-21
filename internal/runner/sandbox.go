@@ -310,12 +310,13 @@ func dockerMounts(cwd string, args []string, scanTargets ...string) []string {
 }
 
 // dockerMountField renders one key=value field of a --mount spec. Docker
-// parses the spec as CSV, so a path containing a comma (valid in Windows
-// and POSIX path components) must be CSV-quoted or Docker reads the
-// remainder as another mount field and rejects the invocation.
+// parses the spec as CSV, so a path containing a comma, quote, or newline
+// (all valid in POSIX path components) must be CSV-quoted or Docker reads
+// the remainder as another field/record and rejects or truncates the
+// mount.
 func dockerMountField(key string, value string) string {
 	field := key + "=" + value
-	if strings.ContainsAny(field, `,"`) {
+	if strings.ContainsAny(field, ",\"\r\n") {
 		return `"` + strings.ReplaceAll(field, `"`, `""`) + `"`
 	}
 	return field
