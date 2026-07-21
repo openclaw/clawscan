@@ -171,6 +171,29 @@ func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerNeverRunsInTargetDirectory(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	target := t.TempDir()
+	if _, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", target, "2026-07-21T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %d", len(commandRunner.calls))
+	}
+	if cwd := commandRunner.calls[0].cwd; cwd != "" {
+		t.Fatalf("scanner ran with cwd %q; must not inherit the untrusted target directory", cwd)
+	}
+}
+
 func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},

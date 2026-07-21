@@ -210,7 +210,11 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 		env = EnvMap(os.Environ())
 	}
 	applyRuntimeEnvDefaults(opts, env)
-	if err := ValidateRequirements(opts, env); err != nil {
+	// Benchmark cases are skill targets; a scanner that can only skip them
+	// (e.g. plugin-only) must not demand credentials up front. Mirrors Run.
+	requirementOpts := opts
+	requirementOpts.Scanners = runnableScanners(opts, "skill")
+	if err := ValidateRequirements(requirementOpts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
 	if opts.Benchmark.IDsSource != "" {

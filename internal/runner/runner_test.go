@@ -419,6 +419,36 @@ func TestRunOpenClawBenchmarkUsesExplicitPredictionsOutput(t *testing.T) {
 	})
 }
 
+func TestRunBenchmarkSkipsRequirementsOfPluginOnlyScanners(t *testing.T) {
+	pluginOnly := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"PLUGIN_ONLY_TOKEN"}, Targets: []string{"plugin"},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(pluginOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := benchmarkTestOptions(t, "SkillTrustBench", "", 0, 0, "")
+	opts.Scanners = []string{"clawscan-static", "plugin-only"}
+	opts.ScannerRegistry = registry
+	_, err = RunBenchmark(opts, RunContext{
+		Env: map[string]string{},
+		BenchmarkClient: staticBenchmarkClient{
+			skillTrustBenchRows: []SkillTrustBenchRow{
+				{ID: "case_1", Judgment: "malicious"},
+			},
+			materializedSkillTrustBench: map[string]map[string]string{
+				"case_1": {"SKILL.md": "# Demo\n"},
+			},
+		},
+	})
+	if err != nil && strings.Contains(err.Error(), "PLUGIN_ONLY_TOKEN") {
+		t.Fatalf("plugin-only scanner requirements must not gate a skill benchmark: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunBenchmarkRejectsPredictionsOutputForSkillTrustBench(t *testing.T) {
 	opts := benchmarkTestOptions(t, "SkillTrustBench", "", 0, 0, filepath.Join(t.TempDir(), "predictions.jsonl"))
 	_, err := RunBenchmark(opts, RunContext{

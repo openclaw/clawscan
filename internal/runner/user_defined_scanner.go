@@ -3,9 +3,6 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -84,7 +81,10 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	output, runErr := runner.CommandRunner.Run(shell.command, args, userDefinedScannerCWD(target), timeout)
+	// Never run with the untrusted target as working directory: CWD-sensitive
+	// commands (python -m, npx) would resolve target-supplied code with
+	// scanner credentials in env. The command receives the path via {{target}}.
+	output, runErr := runner.CommandRunner.Run(shell.command, args, "", timeout)
 	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
@@ -150,15 +150,3 @@ func userDefinedScannerShell(goos string, sandboxMode string) judgeShellSpec {
 }
 
 var targetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
-
-func userDefinedScannerCWD(target string) string {
-	parsed, err := url.Parse(target)
-	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
-		return ""
-	}
-	info, err := os.Stat(target)
-	if err == nil && info.IsDir() {
-		return target
-	}
-	return filepath.Dir(target)
-}
