@@ -991,6 +991,29 @@ profiles:
 	}
 }
 
+func TestResolveArgsRejectsAliasedNullGateRule(t *testing.T) {
+	// A null anchored elsewhere and referenced via alias reaches the gate as
+	// an AliasNode, not a !!null-tagged scalar; the fail-closed check must
+	// resolve aliases or the gate silently decodes to a disabled policy.
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    output: &disabled null
+    scanners:
+      - id: demo
+        command: demo {{target}}
+        gate:
+          blockOnExitCode: *disabled
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || !strings.Contains(err.Error(), `gate blockOnExitCode must be an exit code, a list of exit codes, or "nonzero", not null`) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestResolveArgsRejectsOverlongUserDefinedScannerID(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")

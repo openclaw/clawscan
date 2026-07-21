@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 type UserDefinedScannerConfig struct {
@@ -202,7 +204,71 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 	for _, secret := range secrets {
 		redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
 	}
+	// JSON permits alternate encodings of the same string (a\/b for a/b,
+	// \u escapes) that byte replacement cannot enumerate. Decode escape
+	// sequences and, if a secret surfaces, return the scrubbed decoded text
+	// instead — losing the original escaping is acceptable, leaking is not.
+	if decoded := decodeJSONStringEscapes(redacted); decoded != redacted {
+		scrubbed := decoded
+		for _, secret := range secrets {
+			scrubbed = strings.ReplaceAll(scrubbed, secret, "[redacted]")
+		}
+		if scrubbed != decoded {
+			return scrubbed
+		}
+	}
 	return redacted
+}
+
+// decodeJSONStringEscapes interprets JSON string escape sequences (\", \\,
+// \/, \uXXXX including surrogate pairs) embedded in free-form text. Unknown
+// or truncated sequences pass through unchanged.
+func decodeJSONStringEscapes(value string) string {
+	if !strings.Contains(value, `\`) {
+		return value
+	}
+	var out strings.Builder
+	out.Grow(len(value))
+	for index := 0; index < len(value); {
+		if value[index] != '\\' || index+1 >= len(value) {
+			out.WriteByte(value[index])
+			index++
+			continue
+		}
+		switch value[index+1] {
+		case '"', '\\', '/':
+			out.WriteByte(value[index+1])
+			index += 2
+		case 'u':
+			if index+6 > len(value) {
+				out.WriteByte(value[index])
+				index++
+				continue
+			}
+			first, err := strconv.ParseUint(value[index+2:index+6], 16, 32)
+			if err != nil {
+				out.WriteByte(value[index])
+				index++
+				continue
+			}
+			decoded := rune(first)
+			width := 6
+			if utf16.IsSurrogate(decoded) && index+12 <= len(value) && value[index+6] == '\\' && value[index+7] == 'u' {
+				if second, err := strconv.ParseUint(value[index+8:index+12], 16, 32); err == nil {
+					if combined := utf16.DecodeRune(decoded, rune(second)); combined != utf8.RuneError {
+						decoded = combined
+						width = 12
+					}
+				}
+			}
+			out.WriteRune(decoded)
+			index += width
+		default:
+			out.WriteByte(value[index])
+			index++
+		}
+	}
+	return out.String()
 }
 
 // redactScannerStdout scrubs credentials from scanner stdout before it is

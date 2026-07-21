@@ -578,6 +578,65 @@ func TestUserDefinedScannerRedactsEscapedUndeclaredSecretsFromErrors(t *testing.
 	}
 }
 
+func TestUserDefinedScannerRedactsAlternateEncodedSecretsFromErrors(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// json.Marshal never produces \/ or a, but a scanner echoing a
+	// request body may: the escaped stderr text decodes back to the secret,
+	// so failure-text redaction must catch alternate encodings too.
+	tests := []struct {
+		name   string
+		secret string
+		stderr string
+	}{
+		{name: "solidus escape", secret: "a/b-secret", stderr: `request failed: {"auth":"a\/b-secret"}`},
+		{name: "unicode escape", secret: "s\u00e9cret", stderr: `request failed: {"auth":"s\u00e9cret"}`},
+		{name: "surrogate pair", secret: "pass\U0001F600word", stderr: `request failed: {"auth":"pass\ud83d\ude00word"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			commandRunner := &recordingCommandRunner{stderr: test.stderr, err: errCommandFailed}
+			result, err := (ExternalScannerRunner{
+				Registry: registry, CommandRunner: commandRunner,
+				Env:         map[string]string{"SCANNER_AUTH": test.secret},
+				SandboxMode: SandboxModeOff,
+			}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded := decodeJSONStringEscapes(result.Error)
+			if strings.Contains(result.Error, test.secret) || strings.Contains(decoded, test.secret) {
+				t.Fatalf("alternate-encoded secret survives in error: %q", result.Error)
+			}
+			if !strings.Contains(result.Error, "[redacted]") {
+				t.Fatalf("expected redaction marker in error: %q", result.Error)
+			}
+		})
+	}
+}
+
+func TestDecodeJSONStringEscapesPassesThroughUnknownSequences(t *testing.T) {
+	for input, want := range map[string]string{
+		`plain text`:        "plain text",
+		`a\/b`:              "a/b",
+		`s\u00e9cret`:       "s\u00e9cret",
+		`pa\"ss and back\\`: `pa"ss and back\`,
+		`\ud83d\ude00`:      "\U0001F600",
+		`trailing\`:         `trailing\`,
+		`\uZZZZ stays`:      `\uZZZZ stays`,
+		`C:\new\table`:      `C:\new\table`,
+	} {
+		if got := decodeJSONStringEscapes(input); got != want {
+			t.Fatalf("decodeJSONStringEscapes(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestRedactScannerStdoutRedactsNullScalarSecret(t *testing.T) {
 	env := map[string]string{"SCANNER_PIN": "null"}
 	redacted := redactScannerStdout(`{"token":null,"other":null}`, env, []string{"SCANNER_PIN"})

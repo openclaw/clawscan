@@ -117,12 +117,18 @@ func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
 	}
 	// Null rule values decode to a nil pointer without ever reaching
 	// profileExitCodeRule.UnmarshalYAML, which would silently disable the
-	// gate. Security gates must fail closed on malformed config.
+	// gate. Security gates must fail closed on malformed config. An alias
+	// (`blockOnExitCode: *anchor`) is resolved before tag inspection so a
+	// null smuggled through an anchor is caught too.
 	rules := 0
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
 		case "blockOnExitCode", "warnOnExitCode":
-			if node.Content[index+1].Tag == "!!null" {
+			value := node.Content[index+1]
+			for value.Kind == yaml.AliasNode && value.Alias != nil {
+				value = value.Alias
+			}
+			if value.Tag == "!!null" {
 				return fmt.Errorf("scanner gate %s must be an exit code, a list of exit codes, or \"nonzero\", not null", node.Content[index].Value)
 			}
 			rules++
