@@ -28,6 +28,9 @@ import (
 type Options struct {
 	Target             string
 	Profile            string
+	ConfigSource       string
+	DiscoverConfig     bool
+	IgnoredConfig      string
 	ContextPath        string
 	Benchmark          *BenchmarkOptions
 	Scanners           []string
@@ -87,6 +90,7 @@ type CommandOutput struct {
 type Artifact struct {
 	SchemaVersion string                   `json:"schemaVersion"`
 	Profile       string                   `json:"profile,omitempty"`
+	ConfigSource  string                   `json:"configSource,omitempty"`
 	Context       json.RawMessage          `json:"context,omitempty"`
 	Target        Target                   `json:"target"`
 	StartedAt     string                   `json:"startedAt"`
@@ -2117,6 +2121,7 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 	return Artifact{
 		SchemaVersion: "clawscan-run-v1",
 		Profile:       opts.Profile,
+		ConfigSource:  opts.ConfigSource,
 		Target: Target{
 			Kind:         "skill",
 			Input:        opts.Target,

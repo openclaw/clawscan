@@ -54,7 +54,7 @@ func ProfileIDs() []string {
 }
 
 func InspectProfiles(cwd string) (ProfileCatalog, error) {
-	registry, err := loadConfigs(cwd, "")
+	registry, _, err := loadConfigs(cwd, "", true)
 	if err != nil {
 		return ProfileCatalog{}, err
 	}

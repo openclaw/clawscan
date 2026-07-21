@@ -1100,6 +1100,36 @@ func TestArtifactRedactsEnvValues(t *testing.T) {
 	}
 }
 
+func TestArtifactConfigSourceField_FlagsOnly(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "clawscan-static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.ConfigSource = "flags-only"
+
+	artifact := NewArtifact(opts, "/tmp/my-skill", "2026-06-03T00:00:00Z", "2026-06-03T00:00:01Z", map[string]string{})
+
+	if artifact.ConfigSource != "flags-only" {
+		t.Fatalf("config source = %q", artifact.ConfigSource)
+	}
+}
+
+func TestArtifactConfigSourceField_OmitsEmptySource(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "clawscan-static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	artifact := NewArtifact(opts, "/tmp/my-skill", "2026-06-03T00:00:00Z", "2026-06-03T00:00:01Z", map[string]string{})
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"configSource"`)) {
+		t.Fatalf("empty config source was serialized: %s", raw)
+	}
+}
+
 func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")

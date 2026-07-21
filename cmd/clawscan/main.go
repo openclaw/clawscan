@@ -61,6 +61,7 @@ func run(args []string, environ []string) error {
 	if err != nil {
 		return err
 	}
+	printIgnoredConfigNotice(os.Stderr, resolved.IgnoredConfig)
 	if resolved.AllProfiles {
 		return runAllProfiles(resolved, environ, cwd)
 	}
@@ -124,6 +125,7 @@ func runBenchmarkCommand(args []string, environ []string) error {
 	if err != nil {
 		return err
 	}
+	printIgnoredConfigNotice(os.Stderr, resolved.IgnoredConfig)
 	if resolved.AllProfiles {
 		return errors.New("clawscan benchmark does not support --config without --profile")
 	}
@@ -151,6 +153,13 @@ func runBenchmarkCommand(args []string, environ []string) error {
 	}
 	printBenchmarkSummary(os.Stdout, artifact, "")
 	return nil
+}
+
+func printIgnoredConfigNotice(w io.Writer, configPath string) {
+	if configPath == "" {
+		return
+	}
+	fmt.Fprintf(w, "warning: discovered %s at %s but not loading it; use --config %s or --discover-config to load discovered config\n", filepath.Base(configPath), configPath, configPath)
 }
 
 func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd string) error {
@@ -566,6 +575,7 @@ Usage:
 Core flags:
   --profile <name>            Profile to run. Use --profile clawhub for ClawHub parity.
   --config <path>             Load profiles from a specific .clawscan.yml file; omit --profile to run them all.
+  --discover-config           Find and load the nearest .clawscan.yml/.clawscan.yaml in the current directory or a parent.
   --scanner <id>              Scanner to run. Repeat for multiple scanners.
   --scanner-result <id=path>  Use a JSON fixture instead of running that scanner.
   --context <path>            Load profile runtime context from a JSON file.
