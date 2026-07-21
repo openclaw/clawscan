@@ -2154,11 +2154,16 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
+	timedOut := ctx.Err() == context.DeadlineExceeded
+	if timedOut {
 		err = fmt.Errorf("command timed out after %s", timeout)
 	}
 	output := CommandOutput{Stdout: stdout.String(), Stderr: stderr.String()}
-	if cmd.ProcessState != nil {
+	// A timed-out process has no exit verdict: Unix reports the kill as
+	// 128+N (filtered later), but Windows TerminateProcess reports 1, which
+	// is indistinguishable from a real findings-mean-nonzero exit and would
+	// let partial output pass as a completed scan.
+	if cmd.ProcessState != nil && !timedOut {
 		exitCode := cmd.ProcessState.ExitCode()
 		if exitCode >= 0 {
 			output.ExitCode = &exitCode

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -40,6 +41,8 @@ type dockerCommandRunner struct {
 	Env      map[string]string
 	Image    string
 	EnvNames []string
+	// GOOS overrides runtime.GOOS in tests; empty means the real host OS.
+	GOOS string
 }
 
 func resolveSandbox(opts Options, env map[string]string) (resolvedSandbox, error) {
@@ -175,6 +178,21 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 		}
 		inference = filtered
 	}
+	// A Windows host path (C:\skills\demo) is not absolute inside the Linux
+	// runtime image: Docker would reject it as a mount destination and the
+	// scanner could never resolve it. Mount the host source at a stable
+	// POSIX path and hand the scanner that path instead.
+	goos := runner.GOOS
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	if target != "" && goos == "windows" {
+		if _, err := os.Stat(target); err == nil {
+			dockerArgs = append(dockerArgs, "--mount", "type=bind,source="+target+",target="+windowsScanTargetContainerPath+",readonly")
+			args = rewritePositionalScannerTarget(args, target, windowsScanTargetContainerPath)
+		}
+		target = ""
+	}
 	for _, mount := range dockerMounts(cwd, inference, target) {
 		dockerArgs = append(dockerArgs, "--mount", mount)
 	}
@@ -218,6 +236,20 @@ func positionalScannerTarget(command string, args []string) string {
 		}
 	}
 	return ""
+}
+
+// windowsScanTargetContainerPath is where a Windows host scan target is
+// bind-mounted inside the Linux runtime image.
+const windowsScanTargetContainerPath = "/clawscan/target"
+
+func rewritePositionalScannerTarget(args []string, from string, to string) []string {
+	rewritten := append([]string(nil), args...)
+	for index, arg := range rewritten {
+		if arg == "clawscan-target" && index+1 < len(rewritten) && rewritten[index+1] == from {
+			rewritten[index+1] = to
+		}
+	}
+	return rewritten
 }
 
 // dockerMounts infers bind mounts from cwd and command args. Existing paths
