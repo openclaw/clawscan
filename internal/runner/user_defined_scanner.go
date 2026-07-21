@@ -62,13 +62,10 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	usePositionalTarget := shell.command == "/bin/sh"
 	if usePositionalTarget {
 		targetReplacement = `"$1"`
-	} else if strings.Contains(target, "%") {
-		// cmd.exe expands %VAR% even inside double quotes, so a target path
-		// containing % would be corrupted before the scanner sees it. Refuse
-		// rather than scan the wrong path.
+	} else if unsafeWindowsShellTarget(target) {
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			Error: fmt.Sprintf("User-defined scanner %s cannot receive target paths containing %% on the Windows host shell; use the Docker sandbox or a %%-free path", adapter.config.ID),
+			Error: fmt.Sprintf(`User-defined scanner %s cannot receive targets containing %% or " on the Windows host shell; use the Docker sandbox or a target without those characters`, adapter.config.ID),
 		}, nil
 	}
 	rendered := targetPlaceholderPattern.ReplaceAllStringFunc(adapter.config.Command, func(string) string {
@@ -117,9 +114,9 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	scrubNames := append(append([]string(nil), adapter.config.Env...), runner.ExposedEnvNames...)
 	raw := redactScannerStdout(strings.TrimSpace(output.Stdout), runner.Env, scrubNames)
 	if runErr != nil {
-		// Declared env vars are credentials by declaration, whatever their
-		// spelling; redact their values even when isSecretEnvKey would not.
-		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, runner.Env), runner.Env, adapter.config.Env)
+		// Failure text needs the same coverage as stdout: declared env plus
+		// everything exposed to scanners this run, whatever the spelling.
+		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, runner.Env), runner.Env, scrubNames)
 		// Valid JSON is completed evidence only for a normal nonzero exit
 		// (findings-mean-nonzero scanners). A nil gate-eligible exit code
 		// means timeout or signal: partial output must not report success
@@ -145,6 +142,14 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 		Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
 		ExitCode: exitCode, Raw: json.RawMessage(raw),
 	}, nil
+}
+
+// unsafeWindowsShellTarget reports whether a target cannot be interpolated
+// into a cmd.exe command line safely: %VAR% expands even inside double
+// quotes, and backslash does not escape " for cmd.exe's parser, so a quote
+// in a URL target could terminate the argument and inject host commands.
+func unsafeWindowsShellTarget(target string) bool {
+	return strings.ContainsAny(target, `%"`)
 }
 
 func gateEligibleExitCode(exitCode *int) *int {

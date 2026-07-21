@@ -459,6 +459,50 @@ func TestUserDefinedScannerRedactsOtherScannersExposedEnv(t *testing.T) {
 	}
 }
 
+func TestUnsafeWindowsShellTargetRejectsQuotesAndPercents(t *testing.T) {
+	// cmd.exe cannot safely receive quotes (backslash does not escape " for
+	// its parser, enabling breakout) or percents (%VAR% expands inside double
+	// quotes). Both must be refused before interpolation.
+	for _, target := range []string{`https://host/" & calc & "`, `C:\skill%path`} {
+		if !unsafeWindowsShellTarget(target) {
+			t.Fatalf("target %q should be refused on the Windows host shell", target)
+		}
+	}
+	for _, target := range []string{`C:\skills\my-skill`, "https://example.com/skill", "/tmp/skill with space"} {
+		if unsafeWindowsShellTarget(target) {
+			t.Fatalf("safe target %q was refused", target)
+		}
+	}
+}
+
+func TestUserDefinedScannerRedactsExposedEnvFromErrors(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another scanner's credential (name evades isSecretEnvKey) written to
+	// stderr must not persist in ScannerResult.Error.
+	commandRunner := &recordingCommandRunner{stderr: "auth failed: beta-cred-value rejected", err: errCommandFailed}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:             map[string]string{"BETA_CREDENTIAL": "beta-cred-value"},
+		ExposedEnvNames: []string{"BETA_CREDENTIAL"},
+		SandboxMode:     SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Error, "beta-cred-value") {
+		t.Fatalf("exposed credential leaked into error: %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "[redacted]") {
+		t.Fatalf("expected redaction marker in error: %q", result.Error)
+	}
+}
+
 func TestRedactScannerStdoutRedactsNullScalarSecret(t *testing.T) {
 	env := map[string]string{"SCANNER_PIN": "null"}
 	redacted := redactScannerStdout(`{"token":null,"other":null}`, env, []string{"SCANNER_PIN"})
