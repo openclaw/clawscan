@@ -451,6 +451,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
 			Timeout:              20 * time.Minute,
+			ExposedEnvNames:      sandboxEnvNames(gatingOpts, env),
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -1914,6 +1915,10 @@ type ExternalScannerRunner struct {
 	SkillSpectorCommand  []string
 	VirusTotalHTTPClient VirusTotalHTTPClient
 	Timeout              time.Duration
+	// ExposedEnvNames lists every env var reachable by scanners this run
+	// (sandbox allowlist plus all adapters' declared env), so one scanner's
+	// output can be scrubbed of another scanner's credentials.
+	ExposedEnvNames []string
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {

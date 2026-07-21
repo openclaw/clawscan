@@ -110,7 +110,12 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	// so structural redaction of decoded strings suffices — and byte-level
 	// replacement must not run first, or a short secret like "1" would corrupt
 	// non-string JSON tokens and flip a healthy scan to failed.
-	raw := redactScannerStdout(strings.TrimSpace(output.Stdout), runner.Env, adapter.config.Env)
+	// Scrub this adapter's declared env plus everything else exposed to
+	// scanners this run (sandbox allowlist, other adapters' credentials):
+	// under Docker every scanner sees the whole passthrough set, and a name
+	// like BETA_CREDENTIAL evades the isSecretEnvKey heuristic.
+	scrubNames := append(append([]string(nil), adapter.config.Env...), runner.ExposedEnvNames...)
+	raw := redactScannerStdout(strings.TrimSpace(output.Stdout), runner.Env, scrubNames)
 	if runErr != nil {
 		// Declared env vars are credentials by declaration, whatever their
 		// spelling; redact their values even when isSecretEnvKey would not.

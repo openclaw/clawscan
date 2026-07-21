@@ -430,6 +430,35 @@ func TestUserDefinedScannerTreatsSignalStyleExitCodesAsFailed(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRedactsOtherScannersExposedEnv(t *testing.T) {
+	// Under Docker every scanner sees the whole passthrough set; scanner A's
+	// output must be scrubbed of scanner B's credential even when its name
+	// (BETA_CREDENTIAL) evades the isSecretEnvKey heuristic.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"token":"beta-cred-value"}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:             map[string]string{"BETA_CREDENTIAL": "beta-cred-value"},
+		ExposedEnvNames: []string{"BETA_CREDENTIAL"},
+		SandboxMode:     SandboxModeDocker,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.Raw), "beta-cred-value") {
+		t.Fatalf("another scanner's exposed credential persisted: %s", result.Raw)
+	}
+	if !strings.Contains(string(result.Raw), "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", result.Raw)
+	}
+}
+
 func TestRedactScannerStdoutRedactsNullScalarSecret(t *testing.T) {
 	env := map[string]string{"SCANNER_PIN": "null"}
 	redacted := redactScannerStdout(`{"token":null,"other":null}`, env, []string{"SCANNER_PIN"})
