@@ -1366,6 +1366,50 @@ func TestRunExitCodeGateActionsAndPrecedence(t *testing.T) {
 	}
 }
 
+func TestRunHostRedactionCoversSkippedScannersEnv(t *testing.T) {
+	// With --sandbox off every scanner inherits the whole host environment,
+	// including credentials of scanners skipped for this target kind. The
+	// redaction list must be built from all selected scanners, not just the
+	// target-runnable subset, or a plugin-only scanner's credential leaks
+	// into another scanner's raw artifact JSON.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	pluginOnly := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_CREDENTIAL"}, Targets: []string{"plugin"},
+	})
+	registry, err := NewScannerRegistry(alpha, pluginOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{stdout: `{"token":"beta-cred-value"}`}
+	artifact, err := Run(Options{
+		Target:             target,
+		Scanners:           []string{"alpha", "plugin-only"},
+		ScannerRegistry:    registry,
+		ScannerResultPaths: map[string]string{},
+		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
+	}, RunContext{
+		Env:               map[string]string{"BETA_CREDENTIAL": "beta-cred-value"},
+		HostCommandRunner: host,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(artifact.Scanners["alpha"].Raw)
+	if strings.Contains(raw, "beta-cred-value") {
+		t.Fatalf("skipped scanner's credential leaked into raw JSON: %s", raw)
+	}
+	if !strings.Contains(raw, "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", raw)
+	}
+}
+
 func TestRunBlockGateBeatsWarnAcrossScanners(t *testing.T) {
 	target := t.TempDir()
 	artifact, err := Run(Options{

@@ -115,12 +115,23 @@ func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return errors.New("scanner gate must be an object")
 	}
+	// Null rule values decode to a nil pointer without ever reaching
+	// profileExitCodeRule.UnmarshalYAML, which would silently disable the
+	// gate. Security gates must fail closed on malformed config.
+	rules := 0
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
 		case "blockOnExitCode", "warnOnExitCode":
+			if node.Content[index+1].Tag == "!!null" {
+				return fmt.Errorf("scanner gate %s must be an exit code, a list of exit codes, or \"nonzero\", not null", node.Content[index].Value)
+			}
+			rules++
 		default:
 			return fmt.Errorf("field %s not found in type profiles.ProfileScannerGate", node.Content[index].Value)
 		}
+	}
+	if rules == 0 {
+		return errors.New("scanner gate must declare blockOnExitCode or warnOnExitCode")
 	}
 	type plainGate ProfileScannerGate
 	return node.Decode((*plainGate)(gate))

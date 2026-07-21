@@ -451,7 +451,10 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
 			Timeout:              20 * time.Minute,
-			ExposedEnvNames:      sandboxEnvNames(gatingOpts, env),
+			// Redaction must cover every selected scanner's env, not just
+			// the target-runnable subset: with --sandbox off a skipped
+			// scanner's credential is still in the host environment.
+			ExposedEnvNames: sandboxEnvNames(opts, env),
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)

@@ -869,6 +869,9 @@ func TestResolveArgsRejectsInvalidExitCodeGateRules(t *testing.T) {
 		{name: "overlap", rules: "blockOnExitCode: nonzero\n          warnOnExitCode: [0, 2]", want: "blockOnExitCode and warnOnExitCode both claim exit code 2"},
 		{name: "reserved shell code", rules: "blockOnExitCode: 137", want: "exit code 137 is reserved for shell and signal failures; use codes 0-125"},
 		{name: "reserved code in list", rules: "warnOnExitCode: [1, 126]", want: "exit code 126 is reserved for shell and signal failures; use codes 0-125"},
+		{name: "implicit null rule", rules: "blockOnExitCode:", want: `gate blockOnExitCode must be an exit code, a list of exit codes, or "nonzero", not null`},
+		{name: "explicit null rule", rules: "warnOnExitCode: null", want: `gate warnOnExitCode must be an exit code, a list of exit codes, or "nonzero", not null`},
+		{name: "empty gate", rules: "{}", want: "scanner gate must declare blockOnExitCode or warnOnExitCode"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
