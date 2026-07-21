@@ -258,6 +258,34 @@ func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRedactsDeclaredEnvInRawJSON(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"token":"hunter2-credential","findings":[]}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"SCANNER_AUTH": "hunter2-credential"},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q", result.Status)
+	}
+	if strings.Contains(string(result.Raw), "hunter2-credential") {
+		t.Fatalf("declared env value persisted in raw scanner output: %s", result.Raw)
+	}
+	if !strings.Contains(string(result.Raw), "[redacted]") {
+		t.Fatalf("expected redaction marker in raw output: %s", result.Raw)
+	}
+}
+
 func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
 	exitCode := 2
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{

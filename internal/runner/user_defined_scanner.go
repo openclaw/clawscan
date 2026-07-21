@@ -103,7 +103,11 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	output, runErr := runner.CommandRunner.Run(shell.command, args, cwd, timeout)
 	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	raw := strings.TrimSpace(output.Stdout)
+	// Raw stdout is persisted verbatim into the artifact and per-scanner
+	// output files, so declared credential values must be scrubbed from it
+	// too, not just from failure text. Redacting before the JSON validity
+	// check keeps a leaked secret out of both the raw and failure paths.
+	raw := redactDeclaredEnvValues(strings.TrimSpace(output.Stdout), runner.Env, adapter.config.Env)
 	if runErr != nil {
 		// Declared env vars are credentials by declaration, whatever their
 		// spelling; redact their values even when isSecretEnvKey would not.
