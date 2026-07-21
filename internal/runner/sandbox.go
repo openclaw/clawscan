@@ -159,7 +159,7 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 			dockerArgs = append(dockerArgs, "-e", name)
 		}
 	}
-	for _, mount := range dockerMounts(cwd, args) {
+	for _, mount := range dockerMounts(cwd, mountInferenceArgs(command, args)) {
 		dockerArgs = append(dockerArgs, "--mount", mount)
 	}
 	if cwd != "" {
@@ -168,6 +168,25 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	dockerArgs = append(dockerArgs, runner.Image, command)
 	dockerArgs = append(dockerArgs, args...)
 	return runner.Host.Run("docker", dockerArgs, "", timeout)
+}
+
+// mountInferenceArgs drops the rendered shell program from mount inference:
+// for `/bin/sh -c '<program>' [positional args...]` the program is one
+// absolute-looking string ("/usr/bin/scanner \"$1\"") that never stats, and
+// inferring a parent from it would bind-mount /usr/bin writable into the
+// container. Only the -c operand is excluded; every other arg (including
+// not-yet-created output paths with spaces) keeps its mount.
+func mountInferenceArgs(command string, args []string) []string {
+	if command != "/bin/sh" {
+		return args
+	}
+	for index, arg := range args {
+		if arg == "-c" && index+1 < len(args) {
+			filtered := append([]string(nil), args[:index+1]...)
+			return append(filtered, args[index+2:]...)
+		}
+	}
+	return args
 }
 
 func dockerMounts(cwd string, args []string) []string {
@@ -182,13 +201,6 @@ func dockerMounts(cwd string, args []string) []string {
 		}
 		if existing, err := os.Stat(clean); err == nil {
 			mounts[clean] = readOnly || !existing.IsDir()
-			return
-		}
-		// A rendered shell program ("/usr/bin/scanner \"$1\"") reaches Run as
-		// one absolute-looking arg that never stats; inferring a parent here
-		// would bind-mount /usr/bin writable into the container. Whitespace
-		// or quotes mark a program, not a not-yet-created output path.
-		if strings.ContainsAny(path, " \t\n\"'") {
 			return
 		}
 		parent := filepath.Dir(clean)

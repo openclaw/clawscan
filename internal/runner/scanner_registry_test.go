@@ -287,16 +287,40 @@ func TestUserDefinedScannerRedactsDeclaredEnvInRawJSON(t *testing.T) {
 }
 
 func TestRedactDeclaredEnvValuesCoversJSONEscapedSecrets(t *testing.T) {
-	env := map[string]string{"SCANNER_AUTH": `pa"ss\word`}
-	declared := []string{"SCANNER_AUTH"}
-	// Inside a JSON string the secret appears in escaped form only.
-	raw := `{"token":"pa\"ss\\word","findings":[]}`
-	redacted := redactDeclaredEnvValues(raw, env, declared)
-	if strings.Contains(redacted, `pa\"ss`) || strings.Contains(redacted, `pa"ss`) {
-		t.Fatalf("escaped secret survived redaction: %s", redacted)
+	// JSON permits alternative encodings of the same string, so redaction must
+	// operate on decoded values, not one serialized representation.
+	for name, test := range map[string]struct {
+		secret string
+		raw    string
+	}{
+		"canonical escapes": {secret: `pa"ss\word`, raw: `{"token":"pa\"ss\\word","findings":[]}`},
+		"solidus escape":    {secret: "a/b", raw: `{"token":"a\/b"}`},
+		"unicode escapes":   {secret: "sécret", raw: `{"token":"s\u00e9cret"}`},
+		"secret in key":     {secret: "hunter2", raw: `{"hunter2":"value"}`},
+		"nested array":      {secret: "hunter2", raw: `{"findings":[{"evidence":["saw hunter2 here"]}]}`},
+	} {
+		env := map[string]string{"SCANNER_AUTH": test.secret}
+		declared := []string{"SCANNER_AUTH"}
+		redacted := redactDeclaredEnvValuesInJSON(redactDeclaredEnvValues(test.raw, env, declared), env, declared)
+		var decoded any
+		if err := json.Unmarshal([]byte(redacted), &decoded); err != nil {
+			t.Fatalf("%s: redacted output is not JSON: %v", name, err)
+		}
+		if strings.Contains(redacted, test.secret) {
+			t.Fatalf("%s: secret survived redaction: %s", name, redacted)
+		}
+		if !strings.Contains(redacted, "[redacted]") {
+			t.Fatalf("%s: expected redaction marker: %s", name, redacted)
+		}
 	}
-	if !strings.Contains(redacted, "[redacted]") {
-		t.Fatalf("expected redaction marker: %s", redacted)
+}
+
+func TestRedactDeclaredEnvValuesInJSONLeavesCleanOutputUntouched(t *testing.T) {
+	env := map[string]string{"SCANNER_AUTH": "hunter2"}
+	raw := `{"findings": [],
+  "note": "keeps formatting when nothing leaks"}`
+	if got := redactDeclaredEnvValuesInJSON(raw, env, []string{"SCANNER_AUTH"}); got != raw {
+		t.Fatalf("clean output was rewritten: %q", got)
 	}
 }
 

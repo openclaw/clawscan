@@ -108,6 +108,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	// too, not just from failure text. Redacting before the JSON validity
 	// check keeps a leaked secret out of both the raw and failure paths.
 	raw := redactDeclaredEnvValues(strings.TrimSpace(output.Stdout), runner.Env, adapter.config.Env)
+	raw = redactDeclaredEnvValuesInJSON(raw, runner.Env, adapter.config.Env)
 	if runErr != nil {
 		// Declared env vars are credentials by declaration, whatever their
 		// spelling; redact their values even when isSecretEnvKey would not.
@@ -170,6 +171,85 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 		redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
 	}
 	return redacted
+}
+
+// redactDeclaredEnvValuesInJSON redacts at the decoded level: JSON permits
+// alternative encodings of the same string ("a\/b", \u escapes), so byte
+// matching on the serialized form cannot be complete. Valid JSON is decoded,
+// every string containing a declared secret is scrubbed, and the document is
+// re-serialized. Non-JSON input is returned unchanged — the byte-level pass
+// already handled it.
+func redactDeclaredEnvValuesInJSON(value string, env map[string]string, declared []string) string {
+	if value == "" || len(env) == 0 || len(declared) == 0 || !json.Valid([]byte(value)) {
+		return value
+	}
+	secrets := make([]string, 0, len(declared))
+	for _, name := range declared {
+		if secret := env[name]; strings.TrimSpace(secret) != "" {
+			secrets = append(secrets, secret)
+		}
+	}
+	if len(secrets) == 0 {
+		return value
+	}
+	sort.Slice(secrets, func(i int, j int) bool {
+		return len(secrets[i]) > len(secrets[j])
+	})
+	var document any
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+	if err := decoder.Decode(&document); err != nil {
+		return value
+	}
+	document, changed := redactJSONStrings(document, secrets)
+	if !changed {
+		return value
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return value
+	}
+	return string(encoded)
+}
+
+func redactJSONStrings(node any, secrets []string) (any, bool) {
+	switch typed := node.(type) {
+	case string:
+		redacted := typed
+		for _, secret := range secrets {
+			redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
+		}
+		return redacted, redacted != typed
+	case map[string]any:
+		changed := false
+		for key, child := range typed {
+			redactedChild, childChanged := redactJSONStrings(child, secrets)
+			redactedKey, keyChanged := redactJSONStrings(key, secrets)
+			if keyChanged {
+				delete(typed, key)
+				typed[redactedKey.(string)] = redactedChild
+				changed = true
+				continue
+			}
+			if childChanged {
+				typed[key] = redactedChild
+				changed = true
+			}
+		}
+		return typed, changed
+	case []any:
+		changed := false
+		for index, child := range typed {
+			redactedChild, childChanged := redactJSONStrings(child, secrets)
+			if childChanged {
+				typed[index] = redactedChild
+				changed = true
+			}
+		}
+		return typed, changed
+	default:
+		return node, false
+	}
 }
 
 func userDefinedScannerShell(goos string, sandboxMode string) judgeShellSpec {
