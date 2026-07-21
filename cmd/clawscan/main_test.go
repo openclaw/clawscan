@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openclaw/clawscan/internal/runner"
 )
 
 func TestRunCommandPrintsHelp(t *testing.T) {
@@ -508,6 +510,21 @@ func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "clawscan-results", outputPath)); err != nil {
 		t.Fatalf("scanner output file missing: %v", err)
+	}
+}
+
+func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
+	artifact := runner.Artifact{
+		Gate: "block",
+		GateRules: []runner.FiredGateRule{
+			{Scanner: "my-scanner", Rule: "blockOnExitCode", ExitCode: 3, Action: "block"},
+		},
+		Scanners: map[string]runner.ScannerResult{},
+	}
+	var output strings.Builder
+	printRunSummary(&output, runner.RunTargetsResult{Single: &artifact}, "")
+	if !strings.Contains(output.String(), "gate: block (my-scanner exit 3 -> block)") {
+		t.Fatalf("summary missing gate rule:\n%s", output.String())
 	}
 }
 

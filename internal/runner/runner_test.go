@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1121,6 +1122,25 @@ func TestArtifactConfigSourceField_FlagsOnly(t *testing.T) {
 	}
 }
 
+func TestNewArtifactAlwaysIncludesPassingGate(t *testing.T) {
+	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "clawscan-static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	artifact := NewArtifact(opts, "/tmp/my-skill", "start", "complete", map[string]string{})
+	if artifact.Gate != "pass" {
+		t.Fatalf("gate = %q", artifact.Gate)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"gate":"pass"`)) {
+		t.Fatalf("artifact omitted gate: %s", raw)
+	}
+}
+
 func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -1177,6 +1197,119 @@ func TestRunIncludesDurationMsForScannerResults(t *testing.T) {
 	}
 
 	assertScannerDurationJSON(t, artifact, "skillspector")
+}
+
+func TestRunBlocksWhenNonzeroExitCodeRuleFires(t *testing.T) {
+	target := t.TempDir()
+	exitCode := 2
+	opts := Options{
+		Target: target, Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{
+			"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}},
+		},
+	}
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{
+		results: map[string]ScannerResult{"clawscan-static": {Status: "completed", ExitCode: &exitCode}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" {
+		t.Fatalf("gate = %q", artifact.Gate)
+	}
+	want := []FiredGateRule{{Scanner: "clawscan-static", Rule: "blockOnExitCode", ExitCode: 2, Action: "block"}}
+	if !reflect.DeepEqual(artifact.GateRules, want) {
+		t.Fatalf("gate rules = %#v", artifact.GateRules)
+	}
+}
+
+func TestRunExitCodeGateActionsAndPrecedence(t *testing.T) {
+	tests := []struct {
+		name    string
+		results map[string]ScannerResult
+		rules   map[string]ScannerGatePolicy
+		want    string
+		fired   int
+	}{
+		{
+			name: "zero does not fire nonzero", results: gateResults(0),
+			rules: map[string]ScannerGatePolicy{"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}}},
+			want:  "pass",
+		},
+		{
+			name: "warning fires", results: gateResults(3),
+			rules: map[string]ScannerGatePolicy{"clawscan-static": {WarnOnExitCode: &ExitCodeRule{Codes: []int{3}}}},
+			want:  "warn", fired: 1,
+		},
+		{
+			name: "listed code fires", results: gateResults(2),
+			rules: map[string]ScannerGatePolicy{"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Codes: []int{1, 2, 3}}}},
+			want:  "block", fired: 1,
+		},
+		{
+			name: "unlisted code passes", results: gateResults(4),
+			rules: map[string]ScannerGatePolicy{"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Codes: []int{1, 2, 3}}}},
+			want:  "pass",
+		},
+		{
+			name: "skipped scanner does not fire", results: map[string]ScannerResult{"clawscan-static": {Status: "skipped", ExitCode: intPointer(2)}},
+			rules: map[string]ScannerGatePolicy{"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}}},
+			want:  "pass",
+		},
+		{
+			name: "failed scanner does not fire", results: map[string]ScannerResult{"clawscan-static": {Status: "failed", ExitCode: intPointer(2)}},
+			rules: map[string]ScannerGatePolicy{"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}}},
+			want:  "pass",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := t.TempDir()
+			artifact, err := Run(Options{
+				Target: target, Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}, GateRules: test.rules,
+			}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: test.results}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Gate != test.want || len(artifact.GateRules) != test.fired {
+				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+			}
+		})
+	}
+}
+
+func TestRunBlockGateBeatsWarnAcrossScanners(t *testing.T) {
+	target := t.TempDir()
+	artifact, err := Run(Options{
+		Target: target, Scanners: []string{"clawscan-static", "skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{
+			"clawscan-static": {WarnOnExitCode: &ExitCodeRule{Codes: []int{1}}},
+			"skillspector":    {BlockOnExitCode: &ExitCodeRule{Codes: []int{2}}},
+		},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"clawscan-static": {Status: "completed", ExitCode: intPointer(1)},
+		"skillspector":    {Status: "completed", ExitCode: intPointer(2)},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 2 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+}
+
+func TestRunRejectsGateRuleForUnrequestedScannerBeforeScanning(t *testing.T) {
+	scannerRunner := &gateScannerRunner{results: gateResults(0)}
+	_, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"absent-scanner": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: scannerRunner})
+	if err == nil || err.Error() != "gate rule references scanner absent-scanner, but it was not requested" {
+		t.Fatalf("err = %v", err)
+	}
+	if scannerRunner.calls != 0 {
+		t.Fatalf("scanner ran %d times", scannerRunner.calls)
+	}
 }
 
 func TestRunIncludesDurationMsForFixtureScannerResults(t *testing.T) {
@@ -4093,6 +4226,27 @@ func (skippedScannerRunner) RunScanner(name string, target string, startedAt str
 	}, nil
 }
 
+type gateScannerRunner struct {
+	results map[string]ScannerResult
+	calls   int
+}
+
+func (runner *gateScannerRunner) RunScanner(name string, _ string, startedAt string) (ScannerResult, error) {
+	runner.calls++
+	result := runner.results[name]
+	result.StartedAt = startedAt
+	result.CompletedAt = startedAt
+	return result, nil
+}
+
+func gateResults(exitCode int) map[string]ScannerResult {
+	return map[string]ScannerResult{"clawscan-static": {Status: "completed", ExitCode: intPointer(exitCode)}}
+}
+
+func intPointer(value int) *int {
+	return &value
+}
+
 type staticScannerRunner struct {
 	results map[string]ScannerResult
 }
@@ -4337,6 +4491,7 @@ type recordingCommandRunner struct {
 	stdout      string
 	stderr      string
 	err         error
+	exitCode    *int
 	runHook     func(command string, args []string, cwd string) error
 }
 
@@ -4377,7 +4532,7 @@ func (r *recordingCommandRunner) Run(command string, args []string, cwd string, 
 	if stdout == "" {
 		stdout = "ok"
 	}
-	return CommandOutput{Stdout: stdout, Stderr: r.stderr}, r.err
+	return CommandOutput{Stdout: stdout, Stderr: r.stderr, ExitCode: r.exitCode}, r.err
 }
 
 var errCommandFailed = errors.New("exit status 1")

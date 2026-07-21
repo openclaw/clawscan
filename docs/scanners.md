@@ -36,6 +36,8 @@ profiles:
         targets:
           - skill
           - plugin
+        gate:
+          blockOnExitCode: nonzero
 ```
 
 String entries select built-in scanners. Object entries define a scanner for
@@ -47,6 +49,25 @@ that config-backed run and accept these fields:
 | `command` | yes | Shell command to execute. Unquoted `{{target}}` is replaced with the safely passed resolved target; do not wrap the placeholder in shell quotes. |
 | `env` | no | Required environment variable names. Values stay in the process environment and are never stored in the config or artifact. |
 | `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
+| `gate` | no | Exit-code policy with optional `blockOnExitCode` and `warnOnExitCode` rules. |
+
+Each exit-code rule accepts one non-negative integer, a list such as `[1, 2,
+3]`, or the string `nonzero`. The block and warning rules may not claim the
+same exit code. For example:
+
+```yaml
+gate:
+  blockOnExitCode: [2, 3]
+  warnOnExitCode: 1
+```
+
+After every selected scanner finishes, ClawScan records the strongest fired
+action as the top-level artifact `gate`: `block` wins over `warn`, and an
+artifact with no fired rules records `"gate": "pass"`. Each fired rule is also
+listed in `gateRules` with its scanner ID, rule name, exit code, and action.
+Skipped scanners do not fire gate rules. A scanner result with status `failed`
+also does not fire an exit-code rule; a nonzero command that still returned
+valid JSON has status `completed` and can fire one.
 
 The command must write JSON to stdout. ClawScan preserves valid stdout as the
 scanner's raw evidence; empty or non-JSON stdout produces a failed scanner
