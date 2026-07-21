@@ -24,7 +24,10 @@ To load a discovered config file, use one of these flags:
 - `--config <path>` - Explicitly specify a config file path
 - `--discover-config` - Search upward from the current directory and load the nearest `.clawscan.yml` or `.clawscan.yaml`
 
-Mixing `--config` and `--discover-config` is an error.
+Mixing `--config` and `--discover-config` is an error. `--discover-config`
+also requires `--profile`: without a profile the run would record the
+discovered file as its config source while applying none of its settings.
+Use `--config <path>` without `--profile` to run every profile in a config.
 
 ```bash
 clawscan ./my-skill --config ./security/clawscan.yml --profile review

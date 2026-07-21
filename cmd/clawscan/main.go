@@ -575,7 +575,7 @@ Usage:
 Core flags:
   --profile <name>            Profile to run. Use --profile clawhub for ClawHub parity.
   --config <path>             Load profiles from a specific .clawscan.yml file; omit --profile to run them all.
-  --discover-config           Find and load the nearest .clawscan.yml/.clawscan.yaml in the current directory or a parent.
+  --discover-config           Find and load the nearest .clawscan.yml/.clawscan.yaml in the current directory or a parent. Requires --profile.
   --scanner <id>              Scanner to run. Repeat for multiple scanners.
   --scanner-result <id=path>  Use a JSON fixture instead of running that scanner.
   --context <path>            Load profile runtime context from a JSON file.

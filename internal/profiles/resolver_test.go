@@ -261,13 +261,16 @@ profiles:
 	}
 }
 
-func TestResolveArgsDiscoverConfigWithoutConfigLeavesSourceEmpty(t *testing.T) {
-	opts, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static", "--discover-config"}, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+func TestResolveArgsDiscoverConfigRequiresProfile(t *testing.T) {
+	// Without a profile the run would record the discovered file as its
+	// ConfigSource while applying none of its settings (sandbox mode/image/
+	// env); rejecting is honest, silently ignoring the config is not.
+	_, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static", "--discover-config"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for --discover-config without --profile")
 	}
-	if opts.ConfigSource != "" {
-		t.Fatalf("config source = %q, want empty", opts.ConfigSource)
+	if !strings.Contains(err.Error(), "--discover-config requires --profile") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

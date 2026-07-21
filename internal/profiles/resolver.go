@@ -145,6 +145,12 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if intent.configPath != "" && !intent.profileSet {
 		return resolveAllConfigProfiles(intent, cwd)
 	}
+	// Discovery without a profile would record the discovered file as the
+	// run's ConfigSource while applying none of its settings — a provenance
+	// claim the run does not honor. Reject instead of misleading.
+	if intent.discoverConfig && !intent.profileSet {
+		return ResolvedRunSet{}, errors.New("--discover-config requires --profile; use --config <path> to run every profile in a config")
+	}
 
 	profileName := ""
 	configSource := ""
