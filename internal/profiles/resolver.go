@@ -92,11 +92,10 @@ type cliIntent struct {
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
 
 type ResolvedRunSet struct {
-	Options       []runner.Options
-	OutputPath    string
-	JSON          bool
-	AllProfiles   bool
-	IgnoredConfig string
+	Options     []runner.Options
+	OutputPath  string
+	JSON        bool
+	AllProfiles bool
 }
 
 func ResolveArgs(args []string, cwd string) (runner.Options, error) {
@@ -171,15 +170,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 			var ok bool
 			selected, ok = registry.Profile(profileName)
 			if !ok {
-				err := unknownProfileError(profileName, registry.IDs())
-				// The profile may live in a discovered-but-unloaded config;
-				// surface the migration hint here or the user never sees it.
-				if intent.configPath == "" && !intent.discoverConfig {
-					if ignored, findErr := findIgnoredConfig(cwd); findErr == nil && ignored != "" {
-						err = fmt.Errorf("%w (found %s but did not load it; pass --config %s or --discover-config)", err, ignored, ignored)
-					}
-				}
-				return ResolvedRunSet{}, err
+				return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
 			}
 			// selected.source is authoritative: a profile served from
 			// embedded YAML is "built-in" even when an unrelated project
@@ -201,12 +192,6 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	opts.Profile = profileName
 	opts.ConfigSource = configSource
 	opts.DiscoverConfig = intent.discoverConfig
-	if intent.configPath == "" && !intent.discoverConfig {
-		opts.IgnoredConfig, err = findIgnoredConfig(cwd)
-		if err != nil {
-			return ResolvedRunSet{}, err
-		}
-	}
 	if opts.Judge != nil {
 		opts.Judge.Files = files
 	}
@@ -217,10 +202,9 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		}
 	}
 	return ResolvedRunSet{
-		Options:       []runner.Options{opts},
-		OutputPath:    opts.OutputPath,
-		JSON:          opts.JSON,
-		IgnoredConfig: opts.IgnoredConfig,
+		Options:    []runner.Options{opts},
+		OutputPath: opts.OutputPath,
+		JSON:       opts.JSON,
 	}, nil
 }
 
@@ -441,26 +425,6 @@ func discoverConfig(cwd string) (string, error) {
 		}
 		if yamlExists {
 			return yamlPath, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", nil
-		}
-		current = parent
-	}
-}
-
-func findIgnoredConfig(cwd string) (string, error) {
-	current, err := filepath.Abs(cwd)
-	if err != nil {
-		return "", err
-	}
-	for {
-		for _, name := range []string{".clawscan.yml", ".clawscan.yaml"} {
-			path := filepath.Join(current, name)
-			if fileExists(path) {
-				return path, nil
-			}
 		}
 		parent := filepath.Dir(current)
 		if parent == current {

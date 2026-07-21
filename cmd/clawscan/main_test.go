@@ -151,7 +151,7 @@ func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 	}
 }
 
-func TestRunCommandProfilesPrintsMergedDiscoveredProfiles(t *testing.T) {
+func TestRunCommandProfilesPrintsBuiltInProfilesOnly(t *testing.T) {
 	dir := t.TempDir()
 	removedProfile := "skills" + "-sh"
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
@@ -178,12 +178,10 @@ profiles:
 		"Source",
 		"Scanners",
 		"clawhub",
-		".clawscan.yml",
-		"clawscan-static",
+		"built-in",
+		"skillspector, clawscan-static",
 		"clawhub-aig",
 		"skillspector, aig",
-		"local-review",
-		"snyk",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("profiles output missing %q:\n%s", want, stdout)
@@ -191,6 +189,9 @@ profiles:
 	}
 	if strings.Contains(stdout, removedProfile) {
 		t.Fatalf("profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
+	}
+	if strings.Contains(stdout, "local-review") {
+		t.Fatalf("profiles output should not include project profile:\n%s", stdout)
 	}
 }
 
@@ -217,10 +218,8 @@ profiles:
 		"profiles:",
 		"clawhub:",
 		"clawhub-aig:",
-		"local-review:",
-		"- clawscan-static",
+		"- skillspector",
 		"- aig",
-		"json: true",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("verbose profiles output missing %q:\n%s", want, stdout)
@@ -228,6 +227,9 @@ profiles:
 	}
 	if strings.Contains(stdout, removedProfile+":") {
 		t.Fatalf("verbose profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
+	}
+	if strings.Contains(stdout, "local-review:") {
+		t.Fatalf("verbose profiles output should not include project profile:\n%s", stdout)
 	}
 }
 
@@ -696,7 +698,7 @@ profiles:
 	}
 }
 
-func TestRunDefaultModeIgnoresConfigAndPrintsNotice(t *testing.T) {
+func TestRunDefaultModeIgnoresConfigWithoutNotice(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	writeSkill(t, target, "# Ignored config\n")
@@ -719,32 +721,8 @@ func TestRunDefaultModeIgnoresConfigAndPrintsNotice(t *testing.T) {
 	if artifact.ConfigSource != "flags-only" {
 		t.Fatalf("config source = %q", artifact.ConfigSource)
 	}
-	want := "warning: discovered .clawscan.yml at " + config + " but not loading it; use --config " + config + " or --discover-config to load discovered config\n"
-	if stderr != want {
-		t.Fatalf("stderr = %q, want %q", stderr, want)
-	}
-	if strings.Contains(stdout, "warning: discovered") {
-		t.Fatalf("notice leaked to stdout: %s", stdout)
-	}
-}
-
-func TestRunDefaultModeIgnoresParentConfigAndPrintsNotice(t *testing.T) {
-	parent := t.TempDir()
-	config := filepath.Join(parent, ".clawscan.yml")
-	writeFile(t, config, "version: [\n")
-	child := filepath.Join(parent, "child")
-	target := filepath.Join(child, "skill")
-	writeSkill(t, target, "# Parent ignored config\n")
-	t.Chdir(child)
-
-	_, stderr := captureOutput(t, func() {
-		if err := run([]string{target, "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	if !strings.Contains(stderr, config) || !strings.Contains(stderr, "--discover-config") {
-		t.Fatalf("stderr = %q", stderr)
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
 
@@ -811,30 +789,6 @@ profiles:
 		t.Fatalf("config source = %q, want %q", artifact.ConfigSource, explicit)
 	}
 	if stderr != "" {
-		t.Fatalf("stderr = %q", stderr)
-	}
-}
-
-func TestRunJSONFlagDoesNotIncludeNoticeInStdout(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	writeSkill(t, target, "# JSON notice separation\n")
-	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles: {}\n")
-	t.Chdir(dir)
-
-	stdout, stderr := captureOutput(t, func() {
-		if err := run([]string{target, "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	if !json.Valid([]byte(stdout)) {
-		t.Fatalf("stdout is not valid JSON: %s", stdout)
-	}
-	if strings.Contains(stdout, "warning: discovered") {
-		t.Fatalf("notice leaked to stdout: %s", stdout)
-	}
-	if !strings.Contains(stderr, "warning: discovered") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }

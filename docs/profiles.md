@@ -15,9 +15,14 @@ bundled judge prompt with `packageRelease` target context.
 ## Config discovery
 
 By default, ClawScan does not auto-discover `.clawscan.yml` or `.clawscan.yaml`
-files from the current directory or parent directories. If your run detects a
-config file that could have been loaded, ClawScan prints a notice to stderr
-suggesting you use `--config <path>` or `--discover-config`.
+files from the current directory or parent directories.
+
+ClawScan never loads a config file it was not explicitly pointed at. A
+`.clawscan.yml` can define user-defined scanners whose commands execute with
+your credentials in the environment, so silently loading one from the current
+directory or a parent (for example, from inside a repository you are scanning)
+would let an untrusted target execute commands. Pass `--config <path>` or opt in
+with `--discover-config`.
 
 To load a discovered config file, use one of these flags:
 
@@ -35,14 +40,11 @@ clawscan ./my-skill --profile review --discover-config
 ```
 
 Without either flag, ClawScan uses built-in profiles and CLI flags only. The
-warning is a single stderr line and never changes JSON stdout. The
-`clawscan profiles` catalog command still includes the nearest discovered
-project config.
+`clawscan profiles` catalog command lists built-in profiles only.
 
 ## Inspect available profiles
 
-Inspect the resolved profile catalog, including the nearest project
-`.clawscan.yml` / `.clawscan.yaml` when present:
+Inspect the built-in profile catalog:
 
 ```bash
 clawscan profiles

@@ -30,7 +30,6 @@ type Options struct {
 	Profile            string
 	ConfigSource       string
 	DiscoverConfig     bool
-	IgnoredConfig      string
 	ContextPath        string
 	Benchmark          *BenchmarkOptions
 	Scanners           []string

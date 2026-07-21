@@ -143,14 +143,18 @@ func TestResolveArgsTreatsScannerOnlyCommandAsAdHocWithoutDefaultJudge(t *testin
 	}
 }
 
-func TestResolveArgsDefaultRunDoesNotAutoDiscover_WithCwdConfig(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
+func TestResolveArgsFlagsOnlyRunIgnoresAncestorConfig(t *testing.T) {
+	parent := t.TempDir()
+	writeFile(t, filepath.Join(parent, ".clawscan.yml"), `version: 1
 profiles:
   custom:
     scanners:
       - virustotal
 `)
+	dir := filepath.Join(parent, "child")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	opts, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static"}, dir)
 	if err != nil {
@@ -162,9 +166,6 @@ profiles:
 	}
 	if opts.ConfigSource != "flags-only" {
 		t.Fatalf("config source = %q, want flags-only", opts.ConfigSource)
-	}
-	if opts.IgnoredConfig != filepath.Join(dir, ".clawscan.yml") {
-		t.Fatalf("ignored config = %q, want %s", opts.IgnoredConfig, filepath.Join(dir, ".clawscan.yml"))
 	}
 }
 
@@ -194,10 +195,9 @@ profiles:
 	}
 }
 
-func TestResolveArgsUnknownProfileMentionsIgnoredConfig(t *testing.T) {
+func TestResolveArgsUnknownProfileDoesNotDiscoverConfig(t *testing.T) {
 	dir := t.TempDir()
-	config := filepath.Join(dir, ".clawscan.yml")
-	writeFile(t, config, `version: 1
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
 profiles:
   custom:
     scanners:
@@ -208,30 +208,9 @@ profiles:
 	if err == nil {
 		t.Fatal("expected unknown profile error")
 	}
-	if !strings.Contains(err.Error(), "Unknown profile: custom") {
-		t.Fatalf("error = %q, want unknown profile", err)
-	}
-	if !strings.Contains(err.Error(), config) || !strings.Contains(err.Error(), "--discover-config") {
-		t.Fatalf("error = %q, want ignored-config hint naming %s and --discover-config", err, config)
-	}
-}
-
-func TestResolveArgsDefaultRunDoesNotAutoDiscover_WithParentConfig(t *testing.T) {
-	parent := t.TempDir()
-	config := filepath.Join(parent, ".clawscan.yml")
-	writeFile(t, config, "version: 1\nprofiles: {}\n")
-	child := filepath.Join(parent, "child")
-	if err := os.Mkdir(child, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	opts, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static"}, child)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if opts.IgnoredConfig != config {
-		t.Fatalf("ignored config = %q, want %q", opts.IgnoredConfig, config)
+	want := "Unknown profile: custom (available: clawhub, clawhub-aig)"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
 	}
 }
 
@@ -285,7 +264,7 @@ func TestResolveArgsConfigAndDiscoverConfigFlagsAreMutuallyExclusive(t *testing.
 	}
 }
 
-func TestResolveArgsExplicitConfigSkipsDiscoveryAndPrintsNoNotice(t *testing.T) {
+func TestResolveArgsExplicitConfigUsesExplicitSource(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
 profiles:
@@ -308,25 +287,6 @@ profiles:
 
 	if opts.ConfigSource != explicit {
 		t.Fatalf("config source = %q", opts.ConfigSource)
-	}
-	if opts.IgnoredConfig != "" {
-		t.Fatalf("ignored config = %q, want empty", opts.IgnoredConfig)
-	}
-}
-
-func TestResolveArgsNoConfigAnywherePrintsNoNotice(t *testing.T) {
-	dir := t.TempDir()
-
-	opts, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static"}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if opts.ConfigSource != "flags-only" {
-		t.Fatalf("config source = %q", opts.ConfigSource)
-	}
-	if opts.IgnoredConfig != "" {
-		t.Fatalf("ignored config = %q, want empty", opts.IgnoredConfig)
 	}
 }
 
