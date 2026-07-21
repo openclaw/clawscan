@@ -217,6 +217,11 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if err := ValidateRequirements(requirementOpts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
+	// Deterministic config errors must surface before any benchmark I/O; Run
+	// would reject this on the first case, after archives were downloaded.
+	if err := validateGateRuleScanners(opts); err != nil {
+		return BenchmarkArtifact{}, err
+	}
 	if opts.Benchmark.IDsSource != "" {
 		selection, err := LoadBenchmarkIDSelection(opts.Benchmark.IDsSource)
 		if err != nil {

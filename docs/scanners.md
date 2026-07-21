@@ -51,8 +51,11 @@ that config-backed run and accept these fields:
 | `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
 | `gate` | no | Exit-code policy with optional `blockOnExitCode` and `warnOnExitCode` rules. |
 
-Each exit-code rule accepts one non-negative integer, a list such as `[1, 2,
-3]`, or the string `nonzero`. The block and warning rules may not claim the
+Each exit-code rule accepts one integer in `0-125`, a list such as `[1, 2,
+3]`, or the string `nonzero`. Codes `126` and above are rejected: shells and
+Docker reserve them for infrastructure failures (not-executable, not-found,
+`128+N` for signal kills), and ClawScan treats such exits as failed scans
+rather than scanner verdicts. The block and warning rules may not claim the
 same exit code. For example:
 
 ```yaml

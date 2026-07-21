@@ -467,6 +467,41 @@ func TestRunBenchmarkRejectsPredictionsOutputForSkillTrustBench(t *testing.T) {
 	}
 }
 
+func TestRunBenchmarkValidatesGateRulesBeforeBenchmarkIO(t *testing.T) {
+	opts := benchmarkTestOptions(t, "SkillTrustBench", "", 0, 0, "")
+	opts.GateRules = map[string]ScannerGatePolicy{
+		"missing-scanner": {BlockOnExitCode: &ExitCodeRule{Codes: []int{3}}},
+	}
+	_, err := RunBenchmark(opts, RunContext{
+		Env:             map[string]string{},
+		BenchmarkClient: failingBenchmarkClient{t: t},
+	})
+	if err == nil || !strings.Contains(err.Error(), "gate rule references scanner missing-scanner, but it was not requested") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// failingBenchmarkClient fails the test on any use: gate misconfiguration
+// must be rejected before benchmark data is fetched.
+type failingBenchmarkClient struct {
+	t *testing.T
+}
+
+func (client failingBenchmarkClient) FetchOpenClawRows(dataset string, split string, offset int, limit int) ([]OpenClawBenchmarkRow, error) {
+	client.t.Fatal("FetchOpenClawRows called before gate rule validation")
+	return nil, nil
+}
+
+func (client failingBenchmarkClient) FetchSkillTrustBenchRows(dataset string, split string, offset int, limit int) ([]SkillTrustBenchRow, error) {
+	client.t.Fatal("FetchSkillTrustBenchRows called before gate rule validation")
+	return nil, nil
+}
+
+func (client failingBenchmarkClient) MaterializeSkillTrustBenchRow(root string, row SkillTrustBenchRow) (string, error) {
+	client.t.Fatal("MaterializeSkillTrustBenchRow called before gate rule validation")
+	return "", nil
+}
+
 func TestBenchmarkPredictionsPreferJudgeVerdict(t *testing.T) {
 	predictions, err := BenchmarkPredictions(BenchmarkArtifact{
 		Benchmark: BenchmarkMetadata{ID: openClawBenchmarkID},

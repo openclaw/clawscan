@@ -956,6 +956,20 @@ func validateProfile(name string, profile Profile) error {
 			if code, overlaps := overlappingExitCodeRules(scanner.Gate.BlockOnExitCode, scanner.Gate.WarnOnExitCode); overlaps {
 				return fmt.Errorf("User-defined scanner %s in profile %s gate blockOnExitCode and warnOnExitCode both claim exit code %d", scanner.ID, name, code)
 			}
+			// Exit statuses >=126 are shell/docker infrastructure signals
+			// (not-executable, not-found, 128+N for kills) and are never
+			// gate-eligible at runtime; accepting one here would create a
+			// rule that silently can never fire.
+			for _, rule := range []*profileExitCodeRule{scanner.Gate.BlockOnExitCode, scanner.Gate.WarnOnExitCode} {
+				if rule == nil {
+					continue
+				}
+				for _, code := range rule.Codes {
+					if code >= 126 {
+						return fmt.Errorf("User-defined scanner %s in profile %s gate exit code %d is reserved for shell and signal failures; use codes 0-125", scanner.ID, name, code)
+					}
+				}
+			}
 		}
 		for _, target := range scanner.Targets {
 			switch target {
