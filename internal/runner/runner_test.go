@@ -1410,6 +1410,49 @@ func TestRunHostRedactionCoversSkippedScannersEnv(t *testing.T) {
 	}
 }
 
+func TestRunHostRedactionCoversUnselectedRegistryScannersEnv(t *testing.T) {
+	// --scanner can select a subset of the resolved profile's scanners, but
+	// with --sandbox off the whole process env still reaches the selected
+	// ones. A blandly named credential declared by an unselected scanner in
+	// the same registry must still be scrubbed from persisted output.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_AUTH"}, Targets: []string{"skill"},
+	})
+	beta := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "beta", Command: "beta {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(alpha, beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{stdout: `{"token":"alpha-secret-value"}`}
+	artifact, err := Run(Options{
+		Target:             target,
+		Scanners:           []string{"beta"},
+		ScannerRegistry:    registry,
+		ScannerResultPaths: map[string]string{},
+		Sandbox:            SandboxOptions{Mode: SandboxModeOff},
+	}, RunContext{
+		Env:               map[string]string{"ALPHA_AUTH": "alpha-secret-value"},
+		HostCommandRunner: host,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(artifact.Scanners["beta"].Raw)
+	if strings.Contains(raw, "alpha-secret-value") {
+		t.Fatalf("unselected scanner's credential leaked into raw JSON: %s", raw)
+	}
+	if !strings.Contains(raw, "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", raw)
+	}
+}
+
 func TestRunProfileBatchRedactsSiblingProfileCredentials(t *testing.T) {
 	// A --config batch shares one host environment across profiles under
 	// --sandbox off, so profile B's scanner can emit the blandly named

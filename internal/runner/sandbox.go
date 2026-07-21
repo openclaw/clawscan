@@ -329,12 +329,12 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 }
 
 // redactionEnvNames lists env vars whose values must be scrubbed from
-// anything persisted this run. Unlike sandbox passthrough it includes
-// fixture-satisfied scanners and sibling batch profiles' declared
-// credentials (BatchRedactEnvNames): with --sandbox off every host command
-// still inherits the whole process environment, so a blandly named
-// credential declared elsewhere is reachable by this profile's scanners
-// and judge.
+// anything persisted this run. Unlike sandbox passthrough it covers every
+// credential the resolved registry declares (selected or not, fixture or
+// not) plus sibling batch profiles' declared credentials
+// (BatchRedactEnvNames): with --sandbox off every host command still
+// inherits the whole process environment, so a blandly named credential
+// declared elsewhere is reachable by this profile's scanners and judge.
 func redactionEnvNames(opts Options, env map[string]string) []string {
 	names := collectEnvNames(opts, env, true)
 	if len(opts.BatchRedactEnvNames) == 0 {
@@ -355,12 +355,22 @@ func redactionEnvNames(opts Options, env map[string]string) []string {
 	return names
 }
 
-func collectEnvNames(opts Options, env map[string]string, includeFixtureScanners bool) []string {
+func collectEnvNames(opts Options, env map[string]string, forRedaction bool) []string {
 	seen := map[string]bool{}
 	add := func(name string) {
 		name = strings.TrimSpace(name)
 		if name != "" {
 			seen[name] = true
+		}
+	}
+	addInfo := func(info ScannerInfo) {
+		for _, name := range info.RequiredEnv {
+			add(name)
+		}
+		for _, name := range info.OptionalEnv {
+			if strings.TrimSpace(env[name]) != "" {
+				add(name)
+			}
 		}
 	}
 	for _, name := range opts.Sandbox.Env {
@@ -369,22 +379,28 @@ func collectEnvNames(opts Options, env map[string]string, includeFixtureScanners
 	for _, req := range requirements(opts, env) {
 		add(req.EnvVar)
 	}
-	for _, scanner := range opts.Scanners {
-		if !includeFixtureScanners && opts.ScannerResultPaths[scanner] != "" {
-			continue
+	if forRedaction {
+		// Redaction must cover every credential the resolved registry
+		// declares, not just selected scanners: with --sandbox off the whole
+		// process env reaches every host command, so a blandly named
+		// credential declared by an unselected profile scanner (--scanner
+		// subset) is still reachable by the scanners and judge that do run.
+		for _, info := range registryForOptions(opts).Infos() {
+			addInfo(info)
 		}
-		adapter, ok := registryForOptions(opts).Adapter(scanner)
-		if !ok {
-			continue
-		}
-		info := adapter.Info()
-		for _, name := range info.RequiredEnv {
-			add(name)
-		}
-		for _, name := range info.OptionalEnv {
-			if strings.TrimSpace(env[name]) != "" {
-				add(name)
+	} else {
+		// Sandbox passthrough stays a narrow allowlist: only scanners that
+		// will actually execute; fixture-satisfied scanners never run, so
+		// their credentials must not enter the container.
+		for _, scanner := range opts.Scanners {
+			if opts.ScannerResultPaths[scanner] != "" {
+				continue
 			}
+			adapter, ok := registryForOptions(opts).Adapter(scanner)
+			if !ok {
+				continue
+			}
+			addInfo(adapter.Info())
 		}
 	}
 	names := make([]string, 0, len(seen))
