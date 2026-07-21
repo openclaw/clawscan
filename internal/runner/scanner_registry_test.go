@@ -171,6 +171,31 @@ func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stderr: "auth failed: hunter2-credential rejected", err: errCommandFailed}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"SCANNER_AUTH": "hunter2-credential"},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Error, "hunter2-credential") {
+		t.Fatalf("declared env value leaked into error: %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "[redacted]") {
+		t.Fatalf("expected redaction marker in error: %q", result.Error)
+	}
+}
+
 func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
 	exitCode := 2
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{

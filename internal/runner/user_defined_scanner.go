@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -62,6 +63,14 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	usePositionalTarget := shell.command == "/bin/sh"
 	if usePositionalTarget {
 		targetReplacement = `"$1"`
+	} else if strings.Contains(target, "%") {
+		// cmd.exe expands %VAR% even inside double quotes, so a target path
+		// containing % would be corrupted before the scanner sees it. Refuse
+		// rather than scan the wrong path.
+		return ScannerResult{
+			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Error: fmt.Sprintf("User-defined scanner %s cannot receive target paths containing %% on the Windows host shell; use the Docker sandbox or a %%-free path", adapter.config.ID),
+		}, nil
 	}
 	rendered := targetPlaceholderPattern.ReplaceAllStringFunc(adapter.config.Command, func(string) string {
 		return targetReplacement
@@ -80,7 +89,9 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
-		message := commandError(runErr, output.Stderr, runner.Env)
+		// Declared env vars are credentials by declaration, whatever their
+		// spelling; redact their values even when isSecretEnvKey would not.
+		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, runner.Env), runner.Env, adapter.config.Env)
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
@@ -109,6 +120,26 @@ func gateEligibleExitCode(exitCode *int) *int {
 		return nil
 	}
 	return exitCode
+}
+
+func redactDeclaredEnvValues(value string, env map[string]string, declared []string) string {
+	if value == "" || len(env) == 0 || len(declared) == 0 {
+		return value
+	}
+	secrets := make([]string, 0, len(declared))
+	for _, name := range declared {
+		if secret := env[name]; strings.TrimSpace(secret) != "" {
+			secrets = append(secrets, secret)
+		}
+	}
+	sort.Slice(secrets, func(i int, j int) bool {
+		return len(secrets[i]) > len(secrets[j])
+	})
+	redacted := value
+	for _, secret := range secrets {
+		redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
+	}
+	return redacted
 }
 
 func userDefinedScannerShell(goos string, sandboxMode string) judgeShellSpec {

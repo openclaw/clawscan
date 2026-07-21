@@ -370,6 +370,11 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 			if selected.source == "built-in" {
 				configSource = "built-in"
 			}
+			// A profile served from embedded YAML is not "flags-only";
+			// record its real provenance.
+			if selected.source == "built-in" && configSource == "flags-only" {
+				configSource = "built-in"
+			}
 		}
 	}
 
