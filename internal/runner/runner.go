@@ -1998,7 +1998,25 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 			Raw:         nil,
 		}, nil
 	}
-	return adapter.Run(runner, target, startedAt)
+	result, err := adapter.Run(runner, target, startedAt)
+	if err != nil {
+		return result, err
+	}
+	// Central redaction boundary: every adapter's persisted output — not
+	// just user-defined scanners' — must scrub declared credentials.
+	// A profile can hand a blandly named credential (SCANNER_AUTH) to the
+	// shared environment, and a built-in scanner may echo it in stdout or
+	// stderr; adapters that already redact internally pass through
+	// unchanged because their output no longer contains any secret.
+	if len(runner.ExposedEnvNames) > 0 {
+		if len(result.Raw) > 0 {
+			result.Raw = json.RawMessage(redactScannerStdout(string(result.Raw), runner.Env, runner.ExposedEnvNames))
+		}
+		if result.Error != "" {
+			result.Error = redactDeclaredEnvValues(result.Error, runner.Env, runner.ExposedEnvNames)
+		}
+	}
+	return result, nil
 }
 
 func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt string) (ScannerResult, error) {

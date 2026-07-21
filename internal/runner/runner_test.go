@@ -1453,6 +1453,47 @@ func TestRunHostRedactionCoversUnselectedRegistryScannersEnv(t *testing.T) {
 	}
 }
 
+func TestRunScannerRedactsDeclaredCredentialsFromBuiltinAdapters(t *testing.T) {
+	// The redaction boundary is RunScanner, not each adapter: a profile
+	// mixing a user-defined scanner (declaring bland SCANNER_AUTH) with a
+	// built-in scanner exposes the credential to both, and the built-in's
+	// stdout/stderr must be scrubbed too.
+	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"SCANNER_AUTH": "bland-secret-value"}
+	runner := ExternalScannerRunner{
+		Registry:      registry,
+		CommandRunner: &recordingCommandRunner{stdout: `{"echo":"bland-secret-value"}`},
+		Env:           env, SandboxMode: SandboxModeOff,
+		ExposedEnvNames: []string{"SCANNER_AUTH"},
+	}
+	result, err := runner.RunScanner("agentverus", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.Raw), "bland-secret-value") {
+		t.Fatalf("declared credential leaked through built-in adapter raw: %s", result.Raw)
+	}
+	failing := ExternalScannerRunner{
+		Registry:      registry,
+		CommandRunner: &recordingCommandRunner{stderr: "auth bland-secret-value rejected", err: errCommandFailed},
+		Env:           env, SandboxMode: SandboxModeOff,
+		ExposedEnvNames: []string{"SCANNER_AUTH"},
+	}
+	failed, err := failing.RunScanner("agentverus", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(failed.Error, "bland-secret-value") {
+		t.Fatalf("declared credential leaked through built-in adapter error: %q", failed.Error)
+	}
+}
+
 func TestRunHostRedactionIgnoresNonCredentialOptionalEnv(t *testing.T) {
 	// Built-in scanners list ordinary configuration (LOG_LEVEL, model
 	// names, SSL toggles) in OptionalEnv. Their populated values must not
