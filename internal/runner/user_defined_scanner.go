@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -253,6 +254,22 @@ func redactJSONStrings(node any, secrets []string) (any, bool) {
 			redacted = strings.ReplaceAll(redacted, secret, "[redacted]")
 		}
 		return redacted, redacted != typed
+	case json.Number:
+		// A numeric-looking secret (PIN=1234) may be emitted unquoted; the
+		// scalar's exact text matching a secret is a leak like any other.
+		for _, secret := range secrets {
+			if string(typed) == secret {
+				return "[redacted]", true
+			}
+		}
+		return typed, false
+	case bool:
+		for _, secret := range secrets {
+			if strconv.FormatBool(typed) == secret {
+				return "[redacted]", true
+			}
+		}
+		return typed, false
 	case map[string]any:
 		changed := false
 		for key, child := range typed {

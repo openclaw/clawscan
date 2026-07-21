@@ -1253,6 +1253,29 @@ func TestRunBlocksWhenNonzeroExitCodeRuleFires(t *testing.T) {
 	}
 }
 
+func TestRunRepeatedScannerFlagFiresGateRuleOnce(t *testing.T) {
+	target := t.TempDir()
+	exitCode := 2
+	opts := Options{
+		// A repeated --scanner flag keeps duplicate IDs in Scanners but only
+		// one result exists per ID; the rule must not fire twice.
+		Target: target, Scanners: []string{"clawscan-static", "clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{
+			"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}},
+		},
+	}
+	artifact, err := Run(opts, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{
+		results: map[string]ScannerResult{"clawscan-static": {Status: "completed", ExitCode: &exitCode}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FiredGateRule{{Scanner: "clawscan-static", Rule: "blockOnExitCode", ExitCode: 2, Action: "block"}}
+	if !reflect.DeepEqual(artifact.GateRules, want) {
+		t.Fatalf("gate rules = %#v, want single fired rule", artifact.GateRules)
+	}
+}
+
 func TestRunExitCodeGateActionsAndPrecedence(t *testing.T) {
 	tests := []struct {
 		name    string

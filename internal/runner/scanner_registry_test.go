@@ -370,17 +370,57 @@ func TestRedactScannerStdoutScrubsUndeclaredSecretEnv(t *testing.T) {
 	}
 }
 
+func TestRedactScannerStdoutRedactsScalarEncodedSecrets(t *testing.T) {
+	// Numeric or boolean secrets may be emitted unquoted; the scalar's exact
+	// text matching a secret is a leak like any other.
+	for name, test := range map[string]struct {
+		secret string
+		raw    string
+		leak   string
+	}{
+		"numeric scalar": {secret: "1234", raw: `{"token":1234,"count":7}`, leak: "1234"},
+		"boolean scalar": {secret: "true", raw: `{"token":true}`, leak: "true"},
+	} {
+		env := map[string]string{"SCANNER_PIN": test.secret}
+		redacted := redactScannerStdout(test.raw, env, []string{"SCANNER_PIN"})
+		if strings.Contains(redacted, test.leak) {
+			t.Fatalf("%s: scalar secret survived: %s", name, redacted)
+		}
+		if !strings.Contains(redacted, "[redacted]") {
+			t.Fatalf("%s: expected redaction marker: %s", name, redacted)
+		}
+		if !json.Valid([]byte(redacted)) {
+			t.Fatalf("%s: redacted output is not valid JSON: %s", name, redacted)
+		}
+	}
+	// Non-matching scalars must survive untouched.
+	env := map[string]string{"SCANNER_PIN": "1234"}
+	redacted := redactScannerStdout(`{"count":7,"ok":true}`, env, []string{"SCANNER_PIN"})
+	if !strings.Contains(redacted, `"count":7`) || !strings.Contains(redacted, `"ok":true`) {
+		t.Fatalf("unrelated scalars were rewritten: %s", redacted)
+	}
+}
+
 func TestRedactScannerStdoutDoesNotCorruptNonStringTokens(t *testing.T) {
-	// A short secret such as "1" must never rewrite numeric or boolean JSON
-	// tokens; that would invalidate the JSON and flip a healthy scan to failed.
+	// A short secret such as "1" must never break JSON syntax the way byte
+	// replacement did (`{"count":[redacted]}` is invalid and flipped healthy
+	// scans to failed). Scalars are redacted only on exact match: count:10
+	// merely contains the secret's digits and must survive, while count:1
+	// (exact match) becomes a redacted string — still valid JSON either way.
 	env := map[string]string{"DEMO_TOKEN": "1"}
-	raw := `{"count":1,"enabled":true,"note":"value 1 appears here"}`
+	raw := `{"count":10,"exact":1,"enabled":true,"note":"value 1 appears here"}`
 	redacted := redactScannerStdout(raw, env, []string{"DEMO_TOKEN"})
 	if !json.Valid([]byte(redacted)) {
 		t.Fatalf("redacted output is not valid JSON: %s", redacted)
 	}
-	if !strings.Contains(redacted, `"count":1`) {
-		t.Fatalf("numeric token was corrupted: %s", redacted)
+	if !strings.Contains(redacted, `"count":10`) {
+		t.Fatalf("non-matching numeric token was corrupted: %s", redacted)
+	}
+	if !strings.Contains(redacted, `"enabled":true`) {
+		t.Fatalf("non-matching boolean token was corrupted: %s", redacted)
+	}
+	if strings.Contains(redacted, `"exact":1`) {
+		t.Fatalf("exact-match scalar secret survived: %s", redacted)
 	}
 	if strings.Contains(redacted, "value 1 appears") {
 		t.Fatalf("secret inside string survived: %s", redacted)

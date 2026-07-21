@@ -2215,7 +2215,14 @@ func validateGateRuleScanners(opts Options) error {
 }
 
 func evaluateGate(artifact *Artifact, opts Options) {
+	// A repeated --scanner flag keeps duplicate entries in opts.Scanners but
+	// only one result per ID; evaluating twice would double the fired rules.
+	evaluated := map[string]bool{}
 	for _, scanner := range opts.Scanners {
+		if evaluated[scanner] {
+			continue
+		}
+		evaluated[scanner] = true
 		result := artifact.Scanners[scanner]
 		if result.Status != "completed" || result.ExitCode == nil {
 			continue
