@@ -416,7 +416,13 @@ func redactScannerStdout(value string, env map[string]string, declared []string)
 		return value
 	}
 	document, changed := redactJSONStrings(document, newSecretScrubber(secrets))
-	if !changed {
+	// Go's decoder keeps only an object's last duplicate member, so a
+	// secret hidden in an earlier duplicate ({"auth":"sekret","auth":"x"})
+	// is invisible to the walk above yet still present in the raw bytes.
+	// Returning the original verbatim would persist it; re-encoding the
+	// decoded document drops the duplicate member — and its secret — the
+	// same way any JSON consumer would read the object.
+	if !changed && !hasDuplicateJSONKeys(value) {
 		return value
 	}
 	encoded, err := json.Marshal(document)
@@ -424,6 +430,65 @@ func redactScannerStdout(value string, env map[string]string, declared []string)
 		return value
 	}
 	return string(encoded)
+}
+
+// hasDuplicateJSONKeys reports whether any object in the JSON text declares
+// the same member name twice. Only valid JSON reaches this scan, so a token
+// error just reports false and the caller keeps the original text.
+func hasDuplicateJSONKeys(value string) bool {
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+	type frame struct {
+		object    bool
+		keys      map[string]bool
+		expectKey bool
+	}
+	var stack []*frame
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		top := func() *frame {
+			if len(stack) == 0 {
+				return nil
+			}
+			return stack[len(stack)-1]
+		}
+		switch typed := token.(type) {
+		case json.Delim:
+			switch typed {
+			case '{':
+				stack = append(stack, &frame{object: true, keys: map[string]bool{}, expectKey: true})
+			case '[':
+				stack = append(stack, &frame{})
+			case '}', ']':
+				stack = stack[:len(stack)-1]
+				if parent := top(); parent != nil && parent.object {
+					parent.expectKey = true
+				}
+			}
+		case string:
+			if current := top(); current != nil && current.object && current.expectKey {
+				if current.keys[typed] {
+					return true
+				}
+				current.keys[typed] = true
+				current.expectKey = false
+				continue
+			}
+			if current := top(); current != nil && current.object {
+				current.expectKey = true
+			}
+		default:
+			if current := top(); current != nil && current.object {
+				current.expectKey = true
+			}
+		}
+		if len(stack) == 0 && decoder.More() == false {
+			return false
+		}
+	}
 }
 
 // commandVisibleEnv returns the env whose values feed redaction for a
@@ -464,7 +529,13 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 		add(env[name])
 	}
 	for name, secret := range env {
-		if isSecretEnvKey(name) {
+		// The name heuristic over-matches configuration like
+		// PASSWORD_STORE_ENABLE_EXTENSIONS=true; scrubbing such a common
+		// literal would rewrite every matching boolean in scanner JSON. A
+		// real credential is never one of these words, so skip them for
+		// undeclared vars (explicit env: declarations above are kept
+		// whatever their value — the operator called them credentials).
+		if isSecretEnvKey(name) && !commonConfigLiteral(secret) {
 			add(secret)
 		}
 	}
@@ -472,6 +543,18 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 		return len(secrets[i]) > len(secrets[j])
 	})
 	return secrets
+}
+
+// commonConfigLiteral reports values that secret-named configuration toggles
+// commonly hold (PASSWORD_STORE_ENABLE_EXTENSIONS=true, TOKEN_CACHE=0) and
+// that no real credential would ever be. Scrubbing one would corrupt every
+// matching scalar in legitimate scanner evidence.
+func commonConfigLiteral(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "false", "yes", "no", "on", "off", "0", "1", "enabled", "disabled", "none", "null", "auto", "default":
+		return true
+	}
+	return false
 }
 
 func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {

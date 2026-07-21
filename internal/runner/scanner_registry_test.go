@@ -906,6 +906,93 @@ func TestRedactScannerStdoutPreservesFieldsOnKeyCollision(t *testing.T) {
 	}
 }
 
+func TestRedactScannerStdoutDropsSecretsInDuplicateJSONKeys(t *testing.T) {
+	// Go's decoder keeps only an object's last duplicate member, so a
+	// secret hidden in the earlier duplicate is invisible to the node walk
+	// but still present in the raw bytes. The original text must not be
+	// returned verbatim in that case.
+	env := map[string]string{"DEMO_TOKEN": "sekret"}
+	raw := `{"auth":"sekret","auth":"safe"}`
+	redacted := redactScannerStdout(raw, env, []string{"DEMO_TOKEN"})
+	if strings.Contains(redacted, "sekret") {
+		t.Fatalf("duplicate-key secret survived redaction: %s", redacted)
+	}
+	if !json.Valid([]byte(redacted)) {
+		t.Fatalf("redacted output is not valid JSON: %s", redacted)
+	}
+	// A duplicate secret value inside the duplicate key's value node too.
+	raw = `{"a":{"tok":"sekret","tok":"x"},"b":1}`
+	redacted = redactScannerStdout(raw, env, []string{"DEMO_TOKEN"})
+	if strings.Contains(redacted, "sekret") {
+		t.Fatalf("nested duplicate-key secret survived: %s", redacted)
+	}
+	// No duplicates and no secrets: input must pass through untouched,
+	// preserving original formatting.
+	clean := `{"findings": [],
+  "note": "kept"}`
+	if got := redactScannerStdout(clean, env, []string{"DEMO_TOKEN"}); got != clean {
+		t.Fatalf("clean output was rewritten: %q", got)
+	}
+}
+
+func TestHasDuplicateJSONKeys(t *testing.T) {
+	for raw, want := range map[string]bool{
+		`{"a":1,"a":2}`:             true,
+		`{"a":{"b":1,"b":2}}`:       true,
+		`[{"x":1},{"x":1,"x":2}]`:   true,
+		`{"a":1,"b":{"a":2}}`:       false,
+		`{"a":"a"}`:                 false,
+		`[1,2,3]`:                   false,
+		`{"a":["a","a"]}`:           false,
+		`{"a":{"b":1},"c":{"b":1}}`: false,
+	} {
+		if got := hasDuplicateJSONKeys(raw); got != want {
+			t.Fatalf("hasDuplicateJSONKeys(%s) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
+func TestScannerSecretValuesSkipsCommonConfigLiterals(t *testing.T) {
+	// PASSWORD_STORE_ENABLE_EXTENSIONS=true is configuration, not a
+	// credential; sweeping "true" would rewrite every matching boolean in
+	// scanner evidence. Declared env: values are kept whatever they hold.
+	env := map[string]string{
+		"PASSWORD_STORE_ENABLE_EXTENSIONS": "true",
+		"CI_TOKEN":                         "real-secret",
+		"DECLARED_FLAG":                    "false",
+	}
+	secrets := scannerSecretValues(env, []string{"DECLARED_FLAG"})
+	got := strings.Join(secrets, ",")
+	if strings.Contains(got, "true") {
+		t.Fatalf("config literal swept as secret: %v", secrets)
+	}
+	if !strings.Contains(got, "real-secret") {
+		t.Fatalf("real secret missing from sweep: %v", secrets)
+	}
+	if !strings.Contains(got, "false") {
+		t.Fatalf("declared value must be kept even as a literal: %v", secrets)
+	}
+}
+
+func TestRunScannerRedactsUndeclaredHostSecretsWithNoExposedNames(t *testing.T) {
+	// A built-in command scanner with no declared or passthrough env still
+	// inherits the whole host env with --sandbox off; the central redaction
+	// boundary must run despite ExposedEnvNames being empty.
+	commandRunner := &recordingCommandRunner{stdout: `{"echo":"host-secret-value"}`}
+	result, err := (ExternalScannerRunner{
+		Registry: DefaultScannerRegistry(), CommandRunner: commandRunner,
+		Env:             map[string]string{"CI_TOKEN": "host-secret-value"},
+		ExposedEnvNames: nil,
+		SandboxMode:     SandboxModeOff,
+	}).RunScanner("agentverus", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.Raw), "host-secret-value") {
+		t.Fatalf("built-in scanner leaked undeclared host secret with empty exposed names: %s", result.Raw)
+	}
+}
+
 func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
 	exitCode := 2
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{

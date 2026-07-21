@@ -166,9 +166,18 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	// The scan target must never use the writable-parent fallback below:
 	// if it disappears between the scanner's own existence check and this
 	// stat (rename, deletion), falling back would bind the surrounding host
-	// directory read-write into the container. Fail closed instead — the
-	// scanner then fails on a missing path with no host exposure.
+	// directory read-write into the container. Fail closed instead — and
+	// refuse to start the container at all: with no mount, image content
+	// at the same absolute path would be scanned and reported as the host
+	// target, producing evidence for the wrong subject.
 	target := positionalScannerTarget(command, args)
+	if target != "" {
+		if clean := filepath.Clean(target); filepath.IsAbs(clean) {
+			if _, err := os.Stat(clean); err != nil {
+				return CommandOutput{}, fmt.Errorf("scan target vanished before sandbox start: %s", target)
+			}
+		}
+	}
 	if target != "" {
 		filtered := inference[:0:0]
 		for _, arg := range inference {

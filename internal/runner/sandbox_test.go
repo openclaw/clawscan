@@ -109,21 +109,20 @@ func TestPositionalScannerTargetExtraction(t *testing.T) {
 }
 
 func TestDockerRunFailsClosedWhenScannerTargetVanishes(t *testing.T) {
-	// End-to-end through dockerCommandRunner: the vanished target neither
-	// mounts itself nor its parent.
+	// A target that vanished between the adapter's existence check and
+	// sandbox start must abort before the container runs: with no mount,
+	// image content at the same absolute path would be scanned and
+	// reported as the host target.
 	parent := t.TempDir()
 	missing := filepath.Join(parent, "vanished-skill")
 	host := &recordingCommandRunner{stdout: "{}"}
 	runner := dockerCommandRunner{Host: host, Env: map[string]string{}, Image: DefaultSandboxImage}
-	if _, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", missing}, "", time.Minute); err != nil {
-		t.Fatal(err)
+	_, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", missing}, "", time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "scan target vanished") {
+		t.Fatalf("err = %v, want vanished-target refusal", err)
 	}
-	if len(host.calls) != 1 {
-		t.Fatalf("calls = %d", len(host.calls))
-	}
-	joined := strings.Join(host.calls[0].args, "\x00")
-	if strings.Contains(joined, "source="+parent) || strings.Contains(joined, "source="+missing) {
-		t.Fatalf("vanished target leaked a host mount: %#v", host.calls[0].args)
+	if len(host.calls) != 0 {
+		t.Fatalf("container ran despite vanished target: %#v", host.calls)
 	}
 }
 
@@ -154,15 +153,16 @@ func TestDockerRunTranslatesWindowsTargetToContainerPath(t *testing.T) {
 	}
 }
 
-func TestDockerRunWindowsMissingTargetMountsNothing(t *testing.T) {
+func TestDockerRunWindowsMissingTargetFailsClosed(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "vanished-skill")
 	host := &recordingCommandRunner{stdout: "{}"}
 	runner := dockerCommandRunner{Host: host, Env: map[string]string{}, Image: DefaultSandboxImage, GOOS: "windows"}
-	if _, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", missing}, "", time.Minute); err != nil {
-		t.Fatal(err)
+	_, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", missing}, "", time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "scan target vanished") {
+		t.Fatalf("err = %v, want vanished-target refusal", err)
 	}
-	if joined := strings.Join(host.calls[0].args, "\x00"); strings.Contains(joined, "type=bind") {
-		t.Fatalf("missing windows target produced a mount: %#v", host.calls[0].args)
+	if len(host.calls) != 0 {
+		t.Fatalf("container ran despite vanished target: %#v", host.calls)
 	}
 }
 
@@ -181,6 +181,25 @@ func TestDefaultCommandRunnerSuppressesExitCodeOnTimeout(t *testing.T) {
 	}
 	if output.ExitCode != nil {
 		t.Fatalf("timed-out command recorded exit code %d; partial output could pass as a completed scan", *output.ExitCode)
+	}
+}
+
+func TestDefaultCommandRunnerTimeoutKillsProcessTree(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("needs /bin/sh")
+	}
+	// A forked grandchild (`sleep 30 &`) inherits the stdout pipe. Killing
+	// only the direct shell would leave the pipe open and block Run for
+	// the grandchild's full lifetime; the process-group kill must reach it.
+	start := time.Now()
+	_, err := defaultCommandRunner{}.Run("/bin/sh", []string{"-c", "echo '{}'; sleep 30 & wait"}, "", 150*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v", err)
+	}
+	// Must beat the 10s WaitDelay backstop: a group kill that missed the
+	// grandchild would only return once WaitDelay force-closes the pipes.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("timed-out command with forked child blocked for %s; process tree was not killed", elapsed)
 	}
 }
 

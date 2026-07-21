@@ -2042,8 +2042,13 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 	// shared environment, and a built-in scanner may echo it in stdout or
 	// stderr; adapters that already redact internally pass through
 	// unchanged because their output no longer contains any secret.
-	if len(runner.ExposedEnvNames) > 0 {
-		visibleEnv := commandVisibleEnv(runner.Env, runner.ExposedEnvNames, runner.SandboxMode)
+	// This must run even with no exposed names: with --sandbox off the
+	// command still inherits the whole host env, and the secret-named sweep
+	// inside the redaction helpers covers undeclared credentials (CI_TOKEN).
+	// Under Docker an empty allowlist narrows visibleEnv to nothing and the
+	// helpers return their input unchanged.
+	visibleEnv := commandVisibleEnv(runner.Env, runner.ExposedEnvNames, runner.SandboxMode)
+	if len(visibleEnv) > 0 {
 		if len(result.Raw) > 0 {
 			result.Raw = json.RawMessage(redactScannerStdout(string(result.Raw), visibleEnv, runner.ExposedEnvNames))
 		}
@@ -2264,6 +2269,12 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// Kill the whole process tree on timeout, and bound the post-kill wait:
+	// a backgrounded grandchild (`sleep 1h & wait` under /bin/sh) inherits
+	// the stdout/stderr pipes and would otherwise keep Run blocked past the
+	// deadline even after the direct child died.
+	configureCommandTreeKill(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	err := cmd.Run()
 	timedOut := ctx.Err() == context.DeadlineExceeded
 	if timedOut {
@@ -2413,7 +2424,10 @@ func redactEnvValues(value string, env map[string]string) string {
 	}
 	secrets := make([]string, 0)
 	for key, secret := range env {
-		if strings.TrimSpace(secret) == "" || !isSecretEnvKey(key) {
+		// Skip common config-toggle values (see commonConfigLiteral):
+		// PASSWORD_STORE_ENABLE_EXTENSIONS=true is not a credential, and
+		// scrubbing "true" would rewrite unrelated diagnostics.
+		if strings.TrimSpace(secret) == "" || !isSecretEnvKey(key) || commonConfigLiteral(secret) {
 			continue
 		}
 		secrets = append(secrets, secret)
