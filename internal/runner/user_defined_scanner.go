@@ -103,12 +103,13 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	output, runErr := runner.CommandRunner.Run(shell.command, args, cwd, timeout)
 	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	// Raw stdout is persisted verbatim into the artifact and per-scanner
-	// output files, so declared credential values must be scrubbed from it
-	// too, not just from failure text. Redacting before the JSON validity
-	// check keeps a leaked secret out of both the raw and failure paths.
-	raw := redactDeclaredEnvValues(strings.TrimSpace(output.Stdout), runner.Env, adapter.config.Env)
-	raw = redactDeclaredEnvValuesInJSON(raw, runner.Env, adapter.config.Env)
+	// Raw stdout is persisted into the artifact and per-scanner output files,
+	// so credentials must be scrubbed from it, not just from failure text.
+	// Only valid JSON is ever persisted (both paths below gate on json.Valid),
+	// so structural redaction of decoded strings suffices — and byte-level
+	// replacement must not run first, or a short secret like "1" would corrupt
+	// non-string JSON tokens and flip a healthy scan to failed.
+	raw := redactScannerStdout(strings.TrimSpace(output.Stdout), runner.Env, adapter.config.Env)
 	if runErr != nil {
 		// Declared env vars are credentials by declaration, whatever their
 		// spelling; redact their values even when isSecretEnvKey would not.
@@ -173,28 +174,27 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 	return redacted
 }
 
-// redactDeclaredEnvValuesInJSON redacts at the decoded level: JSON permits
-// alternative encodings of the same string ("a\/b", \u escapes), so byte
-// matching on the serialized form cannot be complete. Valid JSON is decoded,
-// every string containing a declared secret is scrubbed, and the document is
-// re-serialized. Non-JSON input is returned unchanged — the byte-level pass
-// already handled it.
-func redactDeclaredEnvValuesInJSON(value string, env map[string]string, declared []string) string {
-	if value == "" || len(env) == 0 || len(declared) == 0 || !json.Valid([]byte(value)) {
+// redactScannerStdout scrubs credentials from scanner stdout before it is
+// persisted. Only valid JSON ever reaches the artifact, and JSON permits
+// alternative encodings of the same string ("a\/b", \u escapes), so redaction
+// is structural: decode, scrub every string node, re-serialize. Byte-level
+// replacement is deliberately not used here — a short secret such as "1"
+// would corrupt non-string tokens ({"count":1}) and flip a healthy scan to
+// failed. Non-JSON input is returned unchanged; the failure-text path redacts
+// it separately.
+//
+// The scanner sees more than its declared env (--sandbox off inherits the
+// process environment; Docker passes --sandbox-env and other adapters'
+// credentials), so every secret-named env value is scrubbed too, not just
+// declared ones.
+func redactScannerStdout(value string, env map[string]string, declared []string) string {
+	if value == "" || len(env) == 0 || !json.Valid([]byte(value)) {
 		return value
 	}
-	secrets := make([]string, 0, len(declared))
-	for _, name := range declared {
-		if secret := env[name]; strings.TrimSpace(secret) != "" {
-			secrets = append(secrets, secret)
-		}
-	}
+	secrets := scannerSecretValues(env, declared)
 	if len(secrets) == 0 {
 		return value
 	}
-	sort.Slice(secrets, func(i int, j int) bool {
-		return len(secrets[i]) > len(secrets[j])
-	})
 	var document any
 	decoder := json.NewDecoder(strings.NewReader(value))
 	decoder.UseNumber()
@@ -210,6 +210,35 @@ func redactDeclaredEnvValuesInJSON(value string, env map[string]string, declared
 		return value
 	}
 	return string(encoded)
+}
+
+// scannerSecretValues collects the env values to scrub from scanner output:
+// declared env vars are credentials by declaration whatever their spelling,
+// and secret-named vars (isSecretEnvKey) are included because the scanner may
+// see them without declaring them. Longest-first so overlapping secrets
+// redact fully.
+func scannerSecretValues(env map[string]string, declared []string) []string {
+	seen := map[string]bool{}
+	secrets := make([]string, 0, len(declared))
+	add := func(secret string) {
+		if strings.TrimSpace(secret) == "" || seen[secret] {
+			return
+		}
+		seen[secret] = true
+		secrets = append(secrets, secret)
+	}
+	for _, name := range declared {
+		add(env[name])
+	}
+	for name, secret := range env {
+		if isSecretEnvKey(name) {
+			add(secret)
+		}
+	}
+	sort.Slice(secrets, func(i int, j int) bool {
+		return len(secrets[i]) > len(secrets[j])
+	})
+	return secrets
 }
 
 func redactJSONStrings(node any, secrets []string) (any, bool) {

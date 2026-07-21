@@ -286,7 +286,7 @@ func TestUserDefinedScannerRedactsDeclaredEnvInRawJSON(t *testing.T) {
 	}
 }
 
-func TestRedactDeclaredEnvValuesCoversJSONEscapedSecrets(t *testing.T) {
+func TestRedactScannerStdoutCoversJSONEscapedSecrets(t *testing.T) {
 	// JSON permits alternative encodings of the same string, so redaction must
 	// operate on decoded values, not one serialized representation.
 	for name, test := range map[string]struct {
@@ -301,7 +301,7 @@ func TestRedactDeclaredEnvValuesCoversJSONEscapedSecrets(t *testing.T) {
 	} {
 		env := map[string]string{"SCANNER_AUTH": test.secret}
 		declared := []string{"SCANNER_AUTH"}
-		redacted := redactDeclaredEnvValuesInJSON(redactDeclaredEnvValues(test.raw, env, declared), env, declared)
+		redacted := redactScannerStdout(test.raw, env, declared)
 		var decoded any
 		if err := json.Unmarshal([]byte(redacted), &decoded); err != nil {
 			t.Fatalf("%s: redacted output is not JSON: %v", name, err)
@@ -315,12 +315,44 @@ func TestRedactDeclaredEnvValuesCoversJSONEscapedSecrets(t *testing.T) {
 	}
 }
 
-func TestRedactDeclaredEnvValuesInJSONLeavesCleanOutputUntouched(t *testing.T) {
+func TestRedactScannerStdoutLeavesCleanOutputUntouched(t *testing.T) {
 	env := map[string]string{"SCANNER_AUTH": "hunter2"}
 	raw := `{"findings": [],
   "note": "keeps formatting when nothing leaks"}`
-	if got := redactDeclaredEnvValuesInJSON(raw, env, []string{"SCANNER_AUTH"}); got != raw {
+	if got := redactScannerStdout(raw, env, []string{"SCANNER_AUTH"}); got != raw {
 		t.Fatalf("clean output was rewritten: %q", got)
+	}
+}
+
+func TestRedactScannerStdoutScrubsUndeclaredSecretEnv(t *testing.T) {
+	// --sandbox off inherits the whole process env, and Docker passes
+	// --sandbox-env and other adapters' credentials, so secret-named env vars
+	// must be scrubbed even when this scanner never declared them.
+	env := map[string]string{"OPENAI_API_KEY": "sekret-value"}
+	raw := `{"token":"sekret-value"}`
+	redacted := redactScannerStdout(raw, env, nil)
+	if strings.Contains(redacted, "sekret-value") {
+		t.Fatalf("undeclared secret env value survived: %s", redacted)
+	}
+	if !strings.Contains(redacted, "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", redacted)
+	}
+}
+
+func TestRedactScannerStdoutDoesNotCorruptNonStringTokens(t *testing.T) {
+	// A short secret such as "1" must never rewrite numeric or boolean JSON
+	// tokens; that would invalidate the JSON and flip a healthy scan to failed.
+	env := map[string]string{"DEMO_TOKEN": "1"}
+	raw := `{"count":1,"enabled":true,"note":"value 1 appears here"}`
+	redacted := redactScannerStdout(raw, env, []string{"DEMO_TOKEN"})
+	if !json.Valid([]byte(redacted)) {
+		t.Fatalf("redacted output is not valid JSON: %s", redacted)
+	}
+	if !strings.Contains(redacted, `"count":1`) {
+		t.Fatalf("numeric token was corrupted: %s", redacted)
+	}
+	if strings.Contains(redacted, "value 1 appears") {
+		t.Fatalf("secret inside string survived: %s", redacted)
 	}
 }
 
