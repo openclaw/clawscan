@@ -41,10 +41,11 @@ type Options struct {
 	Sandbox            SandboxOptions
 	GateRules          map[string]ScannerGatePolicy
 	// BatchRedactEnvNames widens redaction (never sandbox passthrough) to
-	// credentials declared by sibling profiles in a --config batch: with
-	// --sandbox off every profile's host commands inherit the same full
-	// environment, so profile B can emit a blandly named credential that
-	// only profile A declared.
+	// credentials declared outside this run's own scanner set: sibling
+	// profiles in a --config batch, and other profiles in the loaded config
+	// on single-profile runs. With --sandbox off every host command
+	// inherits the same full environment, so a blandly named credential
+	// declared elsewhere in the config is still reachable here.
 	BatchRedactEnvNames []string
 }
 
