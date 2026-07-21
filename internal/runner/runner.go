@@ -2414,6 +2414,27 @@ func redactJudgeResult(value any, scrub func(string) string) any {
 	}
 }
 
+// CredentialEnvName reports whether an env var name should be treated as a
+// credential for redaction. Secret-named vars always are. Names the built-in
+// registry lists as optional configuration (SKILLSPECTOR_PROVIDER,
+// DEFAULT_MODEL) are not: their common values (openai, info) would corrupt
+// valid evidence if scrubbed. Unknown names fail closed as credentials,
+// because sandbox.env is the documented channel for blandly named
+// judge-specific credentials.
+func CredentialEnvName(name string) bool {
+	if isSecretEnvKey(name) {
+		return true
+	}
+	for _, info := range DefaultScannerRegistry().Infos() {
+		for _, optional := range info.OptionalEnv {
+			if optional == name {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func isSecretEnvKey(key string) bool {
 	upper := strings.ToUpper(key)
 	return strings.Contains(upper, "TOKEN") ||

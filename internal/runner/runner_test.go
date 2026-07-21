@@ -1535,6 +1535,45 @@ func TestRunScannerRedactsDeclaredCredentialsFromBuiltinAdapters(t *testing.T) {
 	}
 }
 
+func TestRunRedactionIgnoresNonCredentialSandboxEnv(t *testing.T) {
+	// The clawhub profile passes SKILLSPECTOR_PROVIDER through the sandbox
+	// allowlist; its common value ("openai") must not be scrubbed from
+	// evidence, while a blandly named sandbox-env credential still is.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	beta := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "beta", Command: "beta {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{stdout: `{"provider":"openai","auth":"judge-cred-value"}`}
+	artifact, err := Run(Options{
+		Target:             target,
+		Scanners:           []string{"beta"},
+		ScannerRegistry:    registry,
+		ScannerResultPaths: map[string]string{},
+		Sandbox:            SandboxOptions{Mode: SandboxModeOff, Env: []string{"SKILLSPECTOR_PROVIDER", "JUDGE_AUTH"}},
+	}, RunContext{
+		Env:               map[string]string{"SKILLSPECTOR_PROVIDER": "openai", "JUDGE_AUTH": "judge-cred-value"},
+		HostCommandRunner: host,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(artifact.Scanners["beta"].Raw)
+	if !strings.Contains(raw, `"provider":"openai"`) {
+		t.Fatalf("non-credential sandbox env value corrupted evidence: %s", raw)
+	}
+	if strings.Contains(raw, "judge-cred-value") {
+		t.Fatalf("sandbox-env credential leaked: %s", raw)
+	}
+}
+
 func TestRunHostRedactionIgnoresNonCredentialOptionalEnv(t *testing.T) {
 	// Built-in scanners list ordinary configuration (LOG_LEVEL, model
 	// names, SSL toggles) in OptionalEnv. Their populated values must not

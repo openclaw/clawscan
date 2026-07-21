@@ -336,14 +336,24 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 // inherits the whole process environment, so a blandly named credential
 // declared elsewhere is reachable by this profile's scanners and judge.
 func redactionEnvNames(opts Options, env map[string]string) []string {
-	names := collectEnvNames(opts, env, true)
-	if len(opts.BatchRedactEnvNames) == 0 {
-		return names
-	}
+	collected := collectEnvNames(opts, env, true)
+	// Sandbox passthrough mixes credentials with ordinary configuration
+	// (SKILLSPECTOR_PROVIDER=openai): scrubbing a common value like
+	// "openai" would corrupt valid evidence. Keep only names classified as
+	// credentials — except explicit user-defined env: declarations, which
+	// are credentials whatever their name.
+	declared := declaredCredentialEnvNames(opts)
+	names := collected[:0]
 	seen := map[string]bool{}
-	for _, name := range names {
-		seen[name] = true
+	for _, name := range collected {
+		if declared[name] || CredentialEnvName(name) {
+			names = append(names, name)
+			seen[name] = true
+		}
 	}
+	// BatchRedactEnvNames arrive pre-vetted by the resolver (sibling
+	// profiles' env: declarations plus credential-classified sandbox
+	// names), so they bypass the filter above.
 	for _, name := range opts.BatchRedactEnvNames {
 		name = strings.TrimSpace(name)
 		if name != "" && !seen[name] {
@@ -353,6 +363,29 @@ func redactionEnvNames(opts Options, env map[string]string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func declaredCredentialEnvNames(opts Options) map[string]bool {
+	type credentialDeclarer interface {
+		DeclaredCredentialEnv() []string
+	}
+	declared := map[string]bool{}
+	registry := registryForOptions(opts)
+	for _, id := range registry.IDs() {
+		adapter, ok := registry.Adapter(id)
+		if !ok {
+			continue
+		}
+		if declarer, ok := adapter.(credentialDeclarer); ok {
+			for _, name := range declarer.DeclaredCredentialEnv() {
+				name = strings.TrimSpace(name)
+				if name != "" {
+					declared[name] = true
+				}
+			}
+		}
+	}
+	return declared
 }
 
 func collectEnvNames(opts Options, env map[string]string, forRedaction bool) []string {
