@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"runtime"
 	"sort"
@@ -81,10 +82,25 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	// Never run with the untrusted target as working directory: CWD-sensitive
-	// commands (python -m, npx) would resolve target-supplied code with
-	// scanner credentials in env. The command receives the path via {{target}}.
-	output, runErr := runner.CommandRunner.Run(shell.command, args, "", timeout)
+	// Never run with an untrusted working directory: CWD-sensitive commands
+	// (python -m, npx) would resolve target-supplied code with scanner
+	// credentials in env. An empty cwd inherits ClawScan's own process cwd,
+	// which may itself be the untrusted target (clawscan .), so host runs get
+	// a fresh empty directory. Docker runs keep "" — with no cwd nothing is
+	// mounted and the container's own workdir is already isolated.
+	cwd := ""
+	if runner.SandboxMode != SandboxModeDocker {
+		isolated, err := os.MkdirTemp("", "clawscan-scanner-")
+		if err != nil {
+			return ScannerResult{
+				Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Error: fmt.Sprintf("User-defined scanner %s could not create an isolated working directory: %v", adapter.config.ID, err),
+			}, nil
+		}
+		defer os.RemoveAll(isolated)
+		cwd = isolated
+	}
+	output, runErr := runner.CommandRunner.Run(shell.command, args, cwd, timeout)
 	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)

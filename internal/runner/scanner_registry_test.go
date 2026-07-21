@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -171,7 +172,7 @@ func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
 	}
 }
 
-func TestUserDefinedScannerNeverRunsInTargetDirectory(t *testing.T) {
+func TestUserDefinedScannerRunsInIsolatedDirectoryOnHost(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
 	})
@@ -189,8 +190,46 @@ func TestUserDefinedScannerNeverRunsInTargetDirectory(t *testing.T) {
 	if len(commandRunner.calls) != 1 {
 		t.Fatalf("calls = %d", len(commandRunner.calls))
 	}
+	cwd := commandRunner.calls[0].cwd
+	if cwd == "" {
+		t.Fatal("host scanner ran with empty cwd; would inherit ClawScan's process cwd, which may be the untrusted target")
+	}
+	if cwd == target || strings.HasPrefix(cwd, target+string(os.PathSeparator)) {
+		t.Fatalf("scanner ran inside the untrusted target directory %q", cwd)
+	}
+	processCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cwd == processCwd {
+		t.Fatalf("scanner inherited ClawScan's process cwd %q", cwd)
+	}
+	if _, err := os.Stat(cwd); !os.IsNotExist(err) {
+		t.Fatalf("isolated scanner cwd %q was not cleaned up (stat err = %v)", cwd, err)
+	}
+}
+
+func TestUserDefinedScannerDockerRunKeepsEmptyCwd(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	if _, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeDocker,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %d", len(commandRunner.calls))
+	}
+	// Docker runs must not receive a host temp dir as cwd: dockerCommandRunner
+	// would mount it and set it as the container workdir for no benefit.
 	if cwd := commandRunner.calls[0].cwd; cwd != "" {
-		t.Fatalf("scanner ran with cwd %q; must not inherit the untrusted target directory", cwd)
+		t.Fatalf("docker scanner run got cwd %q, want empty", cwd)
 	}
 }
 
