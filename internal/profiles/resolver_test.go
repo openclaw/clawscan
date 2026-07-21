@@ -165,6 +165,28 @@ profiles:
 	}
 }
 
+func TestResolveArgsUnknownProfileMentionsIgnoredConfig(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  custom:
+    scanners:
+      - virustotal
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--profile", "custom"}, dir)
+	if err == nil {
+		t.Fatal("expected unknown profile error")
+	}
+	if !strings.Contains(err.Error(), "Unknown profile: custom") {
+		t.Fatalf("error = %q, want unknown profile", err)
+	}
+	if !strings.Contains(err.Error(), config) || !strings.Contains(err.Error(), "--discover-config") {
+		t.Fatalf("error = %q, want ignored-config hint naming %s and --discover-config", err, config)
+	}
+}
+
 func TestResolveArgsDefaultRunDoesNotAutoDiscover_WithParentConfig(t *testing.T) {
 	parent := t.TempDir()
 	config := filepath.Join(parent, ".clawscan.yml")

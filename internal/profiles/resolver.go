@@ -165,7 +165,15 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 			var ok bool
 			selected, ok = registry.Profile(profileName)
 			if !ok {
-				return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
+				err := unknownProfileError(profileName, registry.IDs())
+				// The profile may live in a discovered-but-unloaded config;
+				// surface the migration hint here or the user never sees it.
+				if intent.configPath == "" && !intent.discoverConfig {
+					if ignored, findErr := findIgnoredConfig(cwd); findErr == nil && ignored != "" {
+						err = fmt.Errorf("%w (found %s but did not load it; pass --config %s or --discover-config)", err, ignored, ignored)
+					}
+				}
+				return ResolvedRunSet{}, err
 			}
 		}
 	}
