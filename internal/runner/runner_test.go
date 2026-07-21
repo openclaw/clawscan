@@ -1590,6 +1590,71 @@ func TestRedactionEnvNamesDockerExcludesUnexposedSiblingCredentials(t *testing.T
 	}
 }
 
+func TestRunDockerRedactionSkipsNonRunnableScannerCredentials(t *testing.T) {
+	// The Docker allowlist is built from runnable scanners only. A
+	// selected plugin-only scanner is skipped for a skill target, so its
+	// credential never enters the container and must not scrub another
+	// scanner's evidence — BETA_CREDENTIAL=clean would otherwise rewrite a
+	// legitimate "verdict":"clean".
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	pluginOnly := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_CREDENTIAL"}, Targets: []string{"plugin"},
+	})
+	registry, err := NewScannerRegistry(alpha, pluginOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{stdout: `{"verdict":"clean"}`}
+	artifact, err := Run(Options{
+		Target:             target,
+		Scanners:           []string{"alpha", "plugin-only"},
+		ScannerRegistry:    registry,
+		ScannerResultPaths: map[string]string{},
+		Sandbox:            SandboxOptions{Mode: SandboxModeDocker},
+	}, RunContext{
+		Env:               map[string]string{"BETA_CREDENTIAL": "clean"},
+		HostCommandRunner: host,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(artifact.Scanners["alpha"].Raw)
+	if !strings.Contains(raw, `"verdict":"clean"`) {
+		t.Fatalf("non-runnable scanner's credential corrupted Docker evidence: %s", raw)
+	}
+}
+
+func TestUserDefinedScannerDockerErrorNotScrubbedByUnexposedHostSecrets(t *testing.T) {
+	// Failure diagnostics from a Docker run must not be rewritten by a
+	// host-only secret whose value overlaps ordinary stderr text.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stderr: "scanner binary not found", err: errCommandFailed}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"CI_TOKEN": "not found"},
+		SandboxMode: SandboxModeDocker,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Error, "scanner binary not found") {
+		t.Fatalf("unexposed host secret corrupted Docker error text: %q", result.Error)
+	}
+}
+
 func TestRunRedactionIgnoresNonCredentialSandboxEnv(t *testing.T) {
 	// The clawhub profile passes SKILLSPECTOR_PROVIDER through the sandbox
 	// allowlist; its common value ("openai") must not be scrubbed from

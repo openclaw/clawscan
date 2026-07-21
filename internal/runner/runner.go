@@ -461,8 +461,11 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			// Redaction scope follows what commands can see: the whole
 			// host env with --sandbox off (skipped and fixture scanners'
 			// credentials included), the passthrough allowlist under
-			// Docker.
-			ExposedEnvNames: redactionEnvNames(opts, env, scannerSandboxMode),
+			// Docker. The Docker allowlist is built from gatingOpts
+			// (runnable scanners only), so redaction must use the same
+			// options — a skipped scanner's credential never enters the
+			// container and scrubbing its value would corrupt evidence.
+			ExposedEnvNames: redactionEnvNames(redactionOptsForMode(opts, gatingOpts, scannerSandboxMode), env, scannerSandboxMode),
 		}
 	}
 	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
@@ -491,7 +494,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, redactionEnvNames(opts, env, sandbox.Mode))
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, redactionEnvNames(redactionOptsForMode(opts, gatingOpts, sandbox.Mode), env, sandbox.Mode))
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -2467,6 +2470,17 @@ func requirements(opts Options, env map[string]string) []EnvRequirement {
 		}
 	}
 	return dedupe(reqs)
+}
+
+// redactionOptsForMode picks which option set scopes redaction: under
+// Docker the container allowlist is built from the runnable-scanner subset
+// (gatingOpts), so redaction must match it; host mode keeps the full
+// selection since every host command inherits the whole environment.
+func redactionOptsForMode(opts Options, gatingOpts Options, sandboxMode string) Options {
+	if sandboxMode == SandboxModeDocker {
+		return gatingOpts
+	}
+	return opts
 }
 
 func registryForOptions(opts Options) ScannerRegistry {

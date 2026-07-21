@@ -142,7 +142,10 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	if runErr != nil {
 		// Failure text needs the same coverage as stdout: declared env plus
 		// everything exposed to scanners this run, whatever the spelling.
-		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, runner.Env), visibleEnv, scrubNames)
+		// commandError's own secret-named sweep must also use the visible
+		// env: pre-scrubbing with the whole host env would corrupt Docker
+		// diagnostics matching an unexposed host value by coincidence.
+		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, visibleEnv), visibleEnv, scrubNames)
 		// Valid JSON is completed evidence only for a normal nonzero exit
 		// (findings-mean-nonzero scanners). A nil gate-eligible exit code
 		// means timeout or signal: partial output must not report success
