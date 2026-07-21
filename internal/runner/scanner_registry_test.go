@@ -286,6 +286,20 @@ func TestUserDefinedScannerRedactsDeclaredEnvInRawJSON(t *testing.T) {
 	}
 }
 
+func TestRedactDeclaredEnvValuesCoversJSONEscapedSecrets(t *testing.T) {
+	env := map[string]string{"SCANNER_AUTH": `pa"ss\word`}
+	declared := []string{"SCANNER_AUTH"}
+	// Inside a JSON string the secret appears in escaped form only.
+	raw := `{"token":"pa\"ss\\word","findings":[]}`
+	redacted := redactDeclaredEnvValues(raw, env, declared)
+	if strings.Contains(redacted, `pa\"ss`) || strings.Contains(redacted, `pa"ss`) {
+		t.Fatalf("escaped secret survived redaction: %s", redacted)
+	}
+	if !strings.Contains(redacted, "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", redacted)
+	}
+}
+
 func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
 	exitCode := 2
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{

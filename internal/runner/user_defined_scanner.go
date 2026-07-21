@@ -146,10 +146,20 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 	if value == "" || len(env) == 0 || len(declared) == 0 {
 		return value
 	}
-	secrets := make([]string, 0, len(declared))
+	secrets := make([]string, 0, len(declared)*2)
 	for _, name := range declared {
-		if secret := env[name]; strings.TrimSpace(secret) != "" {
-			secrets = append(secrets, secret)
+		secret := env[name]
+		if strings.TrimSpace(secret) == "" {
+			continue
+		}
+		secrets = append(secrets, secret)
+		// A secret inside JSON string output appears in its escaped form
+		// ("pa\"ss" for pa"ss); the literal never occurs in the bytes, so
+		// redact the JSON encoding too.
+		if encoded, err := json.Marshal(secret); err == nil {
+			if escaped := strings.Trim(string(encoded), `"`); escaped != secret {
+				secrets = append(secrets, escaped)
+			}
 		}
 	}
 	sort.Slice(secrets, func(i int, j int) bool {

@@ -184,6 +184,13 @@ func dockerMounts(cwd string, args []string) []string {
 			mounts[clean] = readOnly || !existing.IsDir()
 			return
 		}
+		// A rendered shell program ("/usr/bin/scanner \"$1\"") reaches Run as
+		// one absolute-looking arg that never stats; inferring a parent here
+		// would bind-mount /usr/bin writable into the container. Whitespace
+		// or quotes mark a program, not a not-yet-created output path.
+		if strings.ContainsAny(path, " \t\n\"'") {
+			return
+		}
 		parent := filepath.Dir(clean)
 		if parent != "." && parent != clean {
 			mounts[parent] = false
