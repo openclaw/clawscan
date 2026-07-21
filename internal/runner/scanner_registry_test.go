@@ -236,6 +236,52 @@ func TestUserDefinedScannerDockerRunKeepsEmptyCwd(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRejectsMissingTargetBeforeRunning(t *testing.T) {
+	// A missing local target must fail before the command runs: Docker mount
+	// inference binds a missing path's parent read-write, so a typo'd target
+	// would expose the surrounding host directory writable to the container.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeDocker,
+	}).RunScanner("demo", filepath.Join(t.TempDir(), "missing-skill"), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "target does not exist") {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("scanner command ran despite missing target: %#v", commandRunner.calls)
+	}
+}
+
+func TestUserDefinedScannerSkipsExistenceCheckForURLTargets(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"url"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeDocker, TargetKind: "url",
+	}).RunScanner("demo", "https://example.com/skill", "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" || len(commandRunner.calls) != 1 {
+		t.Fatalf("URL target must run without a local existence check: %#v calls=%d", result, len(commandRunner.calls))
+	}
+}
+
 func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_AUTH"}, Targets: []string{"skill"},
@@ -592,6 +638,9 @@ func TestUserDefinedScannerInterpolatesDollarTargetLiterally(t *testing.T) {
 	}
 	commandRunner := &recordingCommandRunner{stdout: `{}`}
 	target := filepath.Join(t.TempDir(), "skill-$USER")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
 	}).RunScanner("demo", target, "2026-07-21T00:00:00Z")

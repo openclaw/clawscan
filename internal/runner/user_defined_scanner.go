@@ -57,6 +57,18 @@ func (adapter userDefinedScannerAdapter) SupportsTargetKind(kind string) bool {
 func (adapter userDefinedScannerAdapter) CommandBacked() bool { return true }
 
 func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
+	// A missing local target must fail here, before mount inference: Docker
+	// mount fallback binds a missing path's parent read-write (so scanners
+	// can create output files), and a typo'd target would hand the container
+	// writable access to the surrounding host directory.
+	if runner.TargetKind != targetKindURL {
+		if _, err := os.Stat(target); err != nil {
+			return ScannerResult{
+				Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Error: fmt.Sprintf("User-defined scanner %s target does not exist: %s", adapter.config.ID, target),
+			}, nil
+		}
+	}
 	shell := userDefinedScannerShell(runtime.GOOS, runner.SandboxMode)
 	targetReplacement := shell.quote(target)
 	usePositionalTarget := shell.command == "/bin/sh"
