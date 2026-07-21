@@ -260,7 +260,7 @@ func printProfileCatalog(w io.Writer, catalog profiles.ProfileCatalog, cwd strin
 		if info.Profile.Judge != nil {
 			judge = "configured"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, displayProfileSource(info.Source, cwd), strings.Join(info.Profile.Scanners, ", "), judge)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, displayProfileSource(info.Source, cwd), strings.Join(info.Profile.ScannerIDs(), ", "), judge)
 	}
 	_ = tw.Flush()
 }

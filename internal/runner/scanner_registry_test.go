@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -144,6 +145,68 @@ func TestExternalScannerRunnerDispatchesThroughRegistry(t *testing.T) {
 	_, err = (ExternalScannerRunner{Registry: registry}).RunScanner("demo", "/tmp/skill", "2026-06-23T12:00:00Z")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"findings":["detected"]}`, stderr: "findings detected", err: errCommandFailed}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" || string(result.Raw) != `{"findings":["detected"]}` {
+		t.Fatalf("result = %#v", result)
+	}
+	if !strings.Contains(result.Error, "findings detected") {
+		t.Fatalf("error = %q", result.Error)
+	}
+}
+
+func TestUserDefinedScannerInterpolatesDollarTargetLiterally(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	target := filepath.Join(t.TempDir(), "skill-$USER")
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", target, "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	args := commandRunner.calls[0].args
+	if len(args) != 4 || !strings.Contains(args[1], `"$1"`) || strings.Contains(args[1], target) || args[3] != target {
+		t.Fatalf("target was not passed as a separate shell argument: %#v", args)
+	}
+}
+
+func TestUserDefinedScannerUsesContainerShellInDockerMode(t *testing.T) {
+	dockerShell := userDefinedScannerShell("windows", SandboxModeDocker)
+	if dockerShell.command != "/bin/sh" || strings.Join(dockerShell.args, " ") != "-c" {
+		t.Fatalf("docker shell = %#v", dockerShell)
+	}
+	hostShell := userDefinedScannerShell("windows", SandboxModeOff)
+	if hostShell.command != "cmd.exe" || strings.Join(hostShell.args, " ") != "/C" {
+		t.Fatalf("host shell = %#v", hostShell)
 	}
 }
 

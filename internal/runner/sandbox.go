@@ -227,7 +227,7 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 		if opts.ScannerResultPaths[scanner] != "" {
 			continue
 		}
-		adapter, ok := DefaultScannerRegistry().Adapter(scanner)
+		adapter, ok := registryForOptions(opts).Adapter(scanner)
 		if !ok {
 			continue
 		}
@@ -257,7 +257,7 @@ func requiresCommandExecution(opts Options) bool {
 		if opts.ScannerResultPaths[scanner] != "" {
 			continue
 		}
-		adapter, ok := DefaultScannerRegistry().Adapter(scanner)
+		adapter, ok := registryForOptions(opts).Adapter(scanner)
 		if !ok {
 			continue
 		}

@@ -33,6 +33,7 @@ type Options struct {
 	ContextPath        string
 	Benchmark          *BenchmarkOptions
 	Scanners           []string
+	ScannerRegistry    ScannerRegistry
 	ScannerResultPaths map[string]string
 	OutputPath         string
 	JSON               bool
@@ -236,7 +237,12 @@ func NewBenchmarkOptions(id string, split string, limit int, offset int, predict
 }
 
 func ParseArgs(args []string) (Options, error) {
+	return ParseArgsWithRegistry(args, DefaultScannerRegistry())
+}
+
+func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, error) {
 	opts := Options{ScannerResultPaths: map[string]string{}}
+	opts.ScannerRegistry = registry
 	start := 0
 	if len(args) > 0 && !strings.HasPrefix(args[0], "--") {
 		opts.Target = args[0]
@@ -251,7 +257,7 @@ func ParseArgs(args []string) (Options, error) {
 			if err != nil {
 				return Options{}, err
 			}
-			if !DefaultScannerRegistry().Contains(value) {
+			if !registry.Contains(value) {
 				return Options{}, fmt.Errorf("Unknown scanner: %s", value)
 			}
 			opts.Scanners = append(opts.Scanners, value)
@@ -279,7 +285,7 @@ func ParseArgs(args []string) (Options, error) {
 			if !ok || scanner == "" || path == "" {
 				return Options{}, errors.New("Expected --scanner-result value as scanner=path")
 			}
-			if !DefaultScannerRegistry().Contains(scanner) {
+			if !registry.Contains(scanner) {
 				return Options{}, fmt.Errorf("Unknown scanner: %s", scanner)
 			}
 			opts.ScannerResultPaths[scanner] = path
@@ -403,6 +409,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			Profile:              opts.Profile,
 			TargetKind:           target.kind,
 			TargetID:             target.id,
+			Registry:             registryForOptions(opts),
 			SandboxMode:          scannerSandboxMode,
 			SkillSpectorCommand:  ctx.SkillSpectorCommand,
 			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
@@ -826,7 +833,7 @@ func scannerResult(opts Options, scanner string, target resolvedTarget, startedA
 			Raw:         json.RawMessage(raw),
 		}, nil
 	}
-	if !scannerSupportsTargetKind(scanner, target.kind) {
+	if !scannerSupportsTargetKindInRegistry(registryForOptions(opts), scanner, target.kind) {
 		return unsupportedTargetKindResult(scanner, target.kind, startedAt), nil
 	}
 	return scannerRunner.RunScanner(scanner, target.resolvedPath, startedAt)
@@ -2237,11 +2244,18 @@ func requirements(opts Options, env map[string]string) []EnvRequirement {
 		if opts.ScannerResultPaths[scanner] != "" {
 			continue
 		}
-		if adapter, ok := DefaultScannerRegistry().Adapter(scanner); ok {
+		if adapter, ok := registryForOptions(opts).Adapter(scanner); ok {
 			reqs = append(reqs, adapter.Requirements(env)...)
 		}
 	}
 	return dedupe(reqs)
+}
+
+func registryForOptions(opts Options) ScannerRegistry {
+	if opts.ScannerRegistry.isZero() {
+		return DefaultScannerRegistry()
+	}
+	return opts.ScannerRegistry
 }
 
 func envPresence(opts Options, env map[string]string) map[string]string {

@@ -33,6 +33,16 @@ type ScannerRegistry struct {
 	adapters map[string]ScannerAdapter
 }
 
+func (registry ScannerRegistry) WithAdapters(adapters ...ScannerAdapter) (ScannerRegistry, error) {
+	all := make([]ScannerAdapter, 0, len(registry.adapters)+len(adapters))
+	for _, id := range registry.IDs() {
+		adapter, _ := registry.Adapter(id)
+		all = append(all, adapter)
+	}
+	all = append(all, adapters...)
+	return NewScannerRegistry(all...)
+}
+
 func NewScannerRegistry(adapters ...ScannerAdapter) (ScannerRegistry, error) {
 	registry := ScannerRegistry{adapters: map[string]ScannerAdapter{}}
 	for _, adapter := range adapters {
