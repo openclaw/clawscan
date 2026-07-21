@@ -566,8 +566,10 @@ func TestUserDefinedScannerHostRedactionCoversStandardCredentialNames(t *testing
 
 func TestUserDefinedScannerHostRedactionKeepsNonSecretSegmentNames(t *testing.T) {
 	// Segment matching must not over-reach: GIT_AUTHOR_NAME contains AUTH
-	// only as a substring of AUTHOR, and PWD names the shell's working
-	// directory. Scrubbing either value would corrupt legitimate evidence.
+	// only inside AUTHOR, TOKENIZERS_PARALLELISM contains TOKEN only inside
+	// TOKENIZERS, and PWD names the shell's working directory. Scrubbing any
+	// of these values ("false" would rewrite every matching JSON boolean)
+	// would corrupt legitimate evidence.
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
 	})
@@ -575,20 +577,23 @@ func TestUserDefinedScannerHostRedactionKeepsNonSecretSegmentNames(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandRunner := &recordingCommandRunner{stdout: `{"author":"Jesse","cwd":"/skills/demo"}`}
+	commandRunner := &recordingCommandRunner{stdout: `{"author":"Jesse","cwd":"/skills/demo","clean":false}`}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner,
 		Env: map[string]string{
-			"GIT_AUTHOR_NAME": "Jesse",
-			"PWD":             "/skills/demo",
+			"GIT_AUTHOR_NAME":        "Jesse",
+			"PWD":                    "/skills/demo",
+			"TOKENIZERS_PARALLELISM": "false",
 		},
 		SandboxMode: SandboxModeOff,
 	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(result.Raw), `"author":"Jesse"`) || !strings.Contains(string(result.Raw), `"cwd":"/skills/demo"`) {
-		t.Fatalf("non-secret env values were scrubbed from evidence: %s", result.Raw)
+	for _, want := range []string{`"author":"Jesse"`, `"cwd":"/skills/demo"`, `"clean":false`} {
+		if !strings.Contains(string(result.Raw), want) {
+			t.Fatalf("non-secret env value scrubbed %s from evidence: %s", want, result.Raw)
+		}
 	}
 }
 

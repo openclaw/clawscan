@@ -2474,13 +2474,14 @@ func CredentialEnvName(name string) bool {
 
 // secretEnvKeySegments are credential markers matched as whole
 // underscore-separated segments of the variable name, so GITHUB_PAT and
-// SCANNER_ACCESS match while GIT_AUTHOR_NAME and PATTERN do not — a
-// substring match there would scrub non-secret values (an author name)
-// from evidence. DSN, DATABASE_URL, and CONNECTION_STRING count because
-// connection strings routinely embed passwords (postgres://user:pass@).
+// SNYK_TOKEN match while GIT_AUTHOR_NAME, PATTERN, and
+// TOKENIZERS_PARALLELISM do not — a substring match there would scrub
+// non-secret values (an author name, "false") from evidence. DSN,
+// DATABASE_URL, and CONNECTION_STRING count because connection strings
+// routinely embed passwords (postgres://user:pass@).
 var secretEnvKeySegments = map[string]bool{
 	"AUTH": true, "CRED": true, "CREDENTIAL": true, "CREDENTIALS": true,
-	"PAT": true, "DSN": true, "PASSWD": true, "PWD": true,
+	"PAT": true, "DSN": true, "PASSWD": true, "PWD": true, "TOKEN": true,
 }
 
 func isSecretEnvKey(key string) bool {
@@ -2491,10 +2492,10 @@ func isSecretEnvKey(key string) bool {
 	if upper == "PWD" {
 		return false
 	}
-	if strings.Contains(upper, "TOKEN") ||
-		strings.Contains(upper, "SECRET") ||
+	if strings.Contains(upper, "SECRET") ||
 		strings.Contains(upper, "PASSWORD") ||
 		strings.HasSuffix(upper, "_KEY") ||
+		strings.HasSuffix(upper, "TOKEN") ||
 		strings.Contains(upper, "API_KEY") ||
 		strings.Contains(upper, "DATABASE_URL") ||
 		strings.Contains(upper, "CONNECTION_STRING") {
