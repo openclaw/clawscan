@@ -114,7 +114,11 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 		// Declared env vars are credentials by declaration, whatever their
 		// spelling; redact their values even when isSecretEnvKey would not.
 		message := redactDeclaredEnvValues(commandError(runErr, output.Stderr, runner.Env), runner.Env, adapter.config.Env)
-		if json.Valid([]byte(raw)) {
+		// Valid JSON is completed evidence only for a normal nonzero exit
+		// (findings-mean-nonzero scanners). A nil gate-eligible exit code
+		// means timeout or signal: partial output must not report success
+		// or let exit-code gates pass.
+		if exitCode != nil && json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
 				Error: message, ExitCode: exitCode, Raw: json.RawMessage(raw),

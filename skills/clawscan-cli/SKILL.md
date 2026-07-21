@@ -85,8 +85,8 @@ Built-in profiles:
 
 Profiles are loaded from embedded built-ins. Project `.clawscan.yml` /
 `.clawscan.yaml` files are NOT loaded automatically: pass `--config <path>` to
-load a specific config, or `--discover-config` to load the nearest one found
-upward from the current directory. A project profile with the same name shadows
+load a specific config, or `--discover-config` (with `--profile`) to load the
+nearest one found upward from the current directory. A project profile with the same name shadows
 the built-in whole profile. `--config <path>` without `--profile` runs every
 profile in that config and emits a `clawscan-batch-v1` artifact. Discovery is
 off by default because project configs can define scanner commands that execute

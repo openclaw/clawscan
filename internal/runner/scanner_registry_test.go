@@ -157,7 +157,10 @@ func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandRunner := &recordingCommandRunner{stdout: `{"findings":["detected"]}`, stderr: "findings detected", err: errCommandFailed}
+	// Normal nonzero exit (findings-mean-nonzero scanners): valid JSON stays
+	// completed evidence. Abnormal termination is covered separately below.
+	exitCode := 1
+	commandRunner := &recordingCommandRunner{stdout: `{"findings":["detected"]}`, stderr: "findings detected", err: errCommandFailed, exitCode: &exitCode}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
 	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
@@ -321,6 +324,34 @@ func TestRedactScannerStdoutLeavesCleanOutputUntouched(t *testing.T) {
   "note": "keeps formatting when nothing leaks"}`
 	if got := redactScannerStdout(raw, env, []string{"SCANNER_AUTH"}); got != raw {
 		t.Fatalf("clean output was rewritten: %q", got)
+	}
+}
+
+func TestUserDefinedScannerAbnormalExitWithValidJSONFails(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Timeout/signal: runErr set, no usable exit code, but stdout is valid
+	// JSON. Partial output must not report success or satisfy exit-code gates.
+	commandRunner := &recordingCommandRunner{stdout: `{"findings":[]}`, stderr: "killed", err: errCommandFailed}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed for abnormal termination", result.Status)
+	}
+	if result.ExitCode != nil {
+		t.Fatalf("exit code = %v, want nil", *result.ExitCode)
+	}
+	if result.Raw != nil {
+		t.Fatalf("partial output persisted after abnormal termination: %s", result.Raw)
 	}
 }
 
