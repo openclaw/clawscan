@@ -1485,11 +1485,33 @@ func posixShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
+// windowsCmdQuote quotes a value for Windows argv parsing
+// (CommandLineToArgvW rules): backslashes are literal unless they precede a
+// double quote, so a run of backslashes before an embedded quote or the
+// closing quote must be doubled — otherwise a target like C:\ renders as
+// "C:\" and the trailing backslash escapes the closing quote, corrupting
+// the argument.
 func windowsCmdQuote(value string) string {
-	if value == "" {
-		return `""`
+	var out strings.Builder
+	out.WriteByte('"')
+	pending := 0
+	for _, r := range value {
+		switch r {
+		case '\\':
+			pending++
+		case '"':
+			out.WriteString(strings.Repeat(`\`, 2*pending+1))
+			out.WriteByte('"')
+			pending = 0
+		default:
+			out.WriteString(strings.Repeat(`\`, pending))
+			pending = 0
+			out.WriteRune(r)
+		}
 	}
-	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+	out.WriteString(strings.Repeat(`\`, 2*pending))
+	out.WriteByte('"')
+	return out.String()
 }
 
 func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandState) (string, error) {

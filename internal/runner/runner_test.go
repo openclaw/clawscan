@@ -4546,6 +4546,25 @@ func TestJudgeShellForGOOSUsesPlatformShell(t *testing.T) {
 	}
 }
 
+func TestWindowsCmdQuoteDoublesTrailingBackslashes(t *testing.T) {
+	// CommandLineToArgvW treats a backslash before a quote as an escape:
+	// "C:\" hands the callee `C:"` glued to the next token. Trailing
+	// backslash runs must be doubled before the closing quote, and runs
+	// before an embedded quote doubled plus one for the escaped quote.
+	for input, want := range map[string]string{
+		``:               `""`,
+		`C:\skills\demo`: `"C:\skills\demo"`,
+		`C:\`:            `"C:\\"`,
+		`C:\dir\\`:       `"C:\dir\\\\"`,
+		`say "hi"`:       `"say \"hi\""`,
+		`end\"q`:         `"end\\\"q"`,
+	} {
+		if got := windowsCmdQuote(input); got != want {
+			t.Fatalf("windowsCmdQuote(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 type skippedScannerRunner struct{}
 
 func (skippedScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {

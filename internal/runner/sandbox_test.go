@@ -61,6 +61,36 @@ func TestDockerMountsMountsExistingScanTargetReadonly(t *testing.T) {
 	}
 }
 
+func TestDockerMountsQuotesCommaPaths(t *testing.T) {
+	// Docker parses --mount as CSV: an unquoted comma in a path splits the
+	// spec into a bogus extra field and Docker rejects the invocation.
+	parent := t.TempDir()
+	target := filepath.Join(parent, "skills, reviewed")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mounts := dockerMounts("", nil, target)
+	if len(mounts) != 1 {
+		t.Fatalf("mounts = %v", mounts)
+	}
+	want := `type=bind,"source=` + target + `","target=` + target + `",readonly`
+	if mounts[0] != want {
+		t.Fatalf("mount = %q, want %q", mounts[0], want)
+	}
+}
+
+func TestDockerMountFieldQuoting(t *testing.T) {
+	for _, test := range []struct{ key, value, want string }{
+		{"source", "/skills/demo", "source=/skills/demo"},
+		{"source", "/skills/a,b", `"source=/skills/a,b"`},
+		{"source", `/skills/say "hi"`, `"source=/skills/say ""hi"""`},
+	} {
+		if got := dockerMountField(test.key, test.value); got != test.want {
+			t.Fatalf("dockerMountField(%q, %q) = %q, want %q", test.key, test.value, got, test.want)
+		}
+	}
+}
+
 func TestPositionalScannerTargetExtraction(t *testing.T) {
 	target := "/skills/demo"
 	if got := positionalScannerTarget("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", target}); got != target {

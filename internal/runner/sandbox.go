@@ -188,7 +188,7 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	}
 	if target != "" && goos == "windows" {
 		if _, err := os.Stat(target); err == nil {
-			dockerArgs = append(dockerArgs, "--mount", "type=bind,source="+target+",target="+windowsScanTargetContainerPath+",readonly")
+			dockerArgs = append(dockerArgs, "--mount", "type=bind,"+dockerMountField("source", target)+",target="+windowsScanTargetContainerPath+",readonly")
 			args = rewritePositionalScannerTarget(args, target, windowsScanTargetContainerPath)
 		}
 		target = ""
@@ -300,13 +300,25 @@ func dockerMounts(cwd string, args []string, scanTargets ...string) []string {
 	sort.Strings(sources)
 	out := make([]string, 0, len(sources))
 	for _, source := range sources {
-		option := "type=bind,source=" + source + ",target=" + source
+		option := "type=bind," + dockerMountField("source", source) + "," + dockerMountField("target", source)
 		if mounts[source] {
 			option += ",readonly"
 		}
 		out = append(out, option)
 	}
 	return out
+}
+
+// dockerMountField renders one key=value field of a --mount spec. Docker
+// parses the spec as CSV, so a path containing a comma (valid in Windows
+// and POSIX path components) must be CSV-quoted or Docker reads the
+// remainder as another mount field and rejects the invocation.
+func dockerMountField(key string, value string) string {
+	field := key + "=" + value
+	if strings.ContainsAny(field, `,"`) {
+		return `"` + strings.ReplaceAll(field, `"`, `""`) + `"`
+	}
+	return field
 }
 
 // sandboxEnvNames lists env vars passed through to the Docker sandbox.
