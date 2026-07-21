@@ -40,6 +40,12 @@ type Options struct {
 	Judge              *JudgeOptions
 	Sandbox            SandboxOptions
 	GateRules          map[string]ScannerGatePolicy
+	// BatchRedactEnvNames widens redaction (never sandbox passthrough) to
+	// credentials declared by sibling profiles in a --config batch: with
+	// --sandbox off every profile's host commands inherit the same full
+	// environment, so profile B can emit a blandly named credential that
+	// only profile A declared.
+	BatchRedactEnvNames []string
 }
 
 type ExitCodeRule struct {
@@ -594,10 +600,25 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 			ScannerStatuses: map[string]map[string]int{},
 		},
 	}
+	// All profiles in the batch share one process environment on the host,
+	// so every profile's persisted output must scrub the union of declared
+	// credentials, not just its own.
+	batchEnvNames := map[string]bool{}
+	for _, opts := range optsList {
+		for _, name := range redactionEnvNames(opts, env) {
+			batchEnvNames[name] = true
+		}
+	}
+	sharedEnvNames := make([]string, 0, len(batchEnvNames))
+	for name := range batchEnvNames {
+		sharedEnvNames = append(sharedEnvNames, name)
+	}
+	sort.Strings(sharedEnvNames)
 	targets := map[string]bool{}
 	for _, opts := range optsList {
 		runOpts := opts
 		runOpts.OutputPath = ""
+		runOpts.BatchRedactEnvNames = sharedEnvNames
 		for key, value := range envPresence(runOpts, env) {
 			batch.Env[key] = value
 		}

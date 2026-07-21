@@ -1410,6 +1410,62 @@ func TestRunHostRedactionCoversSkippedScannersEnv(t *testing.T) {
 	}
 }
 
+func TestRunProfileBatchRedactsSiblingProfileCredentials(t *testing.T) {
+	// A --config batch shares one host environment across profiles under
+	// --sandbox off, so profile B's scanner can emit the blandly named
+	// credential only profile A declared. Batch redaction must cover the
+	// union of declared credentials, not the current profile's alone.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alpha := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "alpha {{target}}", Env: []string{"ALPHA_AUTH"}, Targets: []string{"skill"},
+	})
+	alphaRegistry, err := NewScannerRegistry(alpha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "beta", Command: "beta {{target}}", Targets: []string{"skill"},
+	})
+	betaRegistry, err := NewScannerRegistry(beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{stdout: `{"token":"alpha-secret-value"}`}
+	batch, err := RunProfileBatch([]Options{
+		{
+			Target: target, Profile: "profile-a", Scanners: []string{"alpha"},
+			ScannerRegistry: alphaRegistry, ScannerResultPaths: map[string]string{},
+			Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		},
+		{
+			Target: target, Profile: "profile-b", Scanners: []string{"beta"},
+			ScannerRegistry: betaRegistry, ScannerResultPaths: map[string]string{},
+			Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		},
+	}, RunContext{
+		Env:               map[string]string{"ALPHA_AUTH": "alpha-secret-value"},
+		HostCommandRunner: host,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Errors) != 0 {
+		t.Fatalf("batch errors: %#v", batch.Errors)
+	}
+	for _, run := range batch.Runs {
+		for scanner, result := range run.Scanners {
+			raw := string(result.Raw)
+			if strings.Contains(raw, "alpha-secret-value") {
+				t.Fatalf("profile %s scanner %s leaked sibling profile's credential: %s", run.Profile, scanner, raw)
+			}
+		}
+	}
+}
+
 func TestRunBlockGateBeatsWarnAcrossScanners(t *testing.T) {
 	target := t.TempDir()
 	artifact, err := Run(Options{

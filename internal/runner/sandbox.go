@@ -318,11 +318,29 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 
 // redactionEnvNames lists env vars whose values must be scrubbed from
 // anything persisted this run. Unlike sandbox passthrough it includes
-// fixture-satisfied scanners: with --sandbox off every host command still
-// inherits the whole process environment, so a fixture scanner's blandly
-// named credential is reachable by other scanners and the judge.
+// fixture-satisfied scanners and sibling batch profiles' declared
+// credentials (BatchRedactEnvNames): with --sandbox off every host command
+// still inherits the whole process environment, so a blandly named
+// credential declared elsewhere is reachable by this profile's scanners
+// and judge.
 func redactionEnvNames(opts Options, env map[string]string) []string {
-	return collectEnvNames(opts, env, true)
+	names := collectEnvNames(opts, env, true)
+	if len(opts.BatchRedactEnvNames) == 0 {
+		return names
+	}
+	seen := map[string]bool{}
+	for _, name := range names {
+		seen[name] = true
+	}
+	for _, name := range opts.BatchRedactEnvNames {
+		name = strings.TrimSpace(name)
+		if name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func collectEnvNames(opts Options, env map[string]string, includeFixtureScanners bool) []string {
