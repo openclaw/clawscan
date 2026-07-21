@@ -981,7 +981,7 @@ profiles:
 `)
 
 	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
-	if err == nil || err.Error() != "User-defined scanner foo=bar in profile review has invalid id; use letters, digits, underscores, and hyphens, starting with a letter or digit" {
+	if err == nil || err.Error() != "User-defined scanner foo=bar in profile review has invalid id; use lowercase letters, digits, underscores, and hyphens, starting with a letter or digit" {
 		t.Fatalf("err = %v", err)
 	}
 }

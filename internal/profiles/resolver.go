@@ -283,7 +283,11 @@ type cliIntent struct {
 }
 
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
-var scannerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// Lowercase-only: scanner IDs become output filenames via
+// safeOutputPathSegment, which lowercases; case-distinct IDs would
+// silently overwrite each other's raw evidence.
+var scannerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 var scannerTargetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
 
 type ResolvedRunSet struct {
@@ -931,7 +935,7 @@ func validateProfile(name string, profile Profile) error {
 			return fmt.Errorf("User-defined scanner in profile %s must include a non-empty id", name)
 		}
 		if scanner.custom && !scannerIDPattern.MatchString(scanner.ID) {
-			return fmt.Errorf("User-defined scanner %s in profile %s has invalid id; use letters, digits, underscores, and hyphens, starting with a letter or digit", scanner.ID, name)
+			return fmt.Errorf("User-defined scanner %s in profile %s has invalid id; use lowercase letters, digits, underscores, and hyphens, starting with a letter or digit", scanner.ID, name)
 		}
 		if scanner.custom && strings.TrimSpace(scanner.Command) == "" {
 			return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)
