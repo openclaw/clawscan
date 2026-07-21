@@ -255,6 +255,19 @@ func redactionMarker(secrets []string) string {
 	if preferredSafe {
 		return redactionMarkerPreferred
 	}
+	if safe := secretFreeRune(secrets); safe != "" {
+		return strings.Repeat(safe, 10)
+	}
+	// Unreachable for realistic secret sets (secrets would need to cover
+	// every candidate rune); scrub then deletes the bytes as a last resort.
+	return ""
+}
+
+// secretFreeRune returns a one-rune string absent from every secret, so text
+// built from it can neither contain a credential nor combine with adjacent
+// bytes to rebuild one. Empty only when the secrets cover every candidate
+// rune, which no realistic secret set does.
+func secretFreeRune(secrets []string) string {
 	runeSafe := func(r rune) bool {
 		for _, secret := range secrets {
 			if strings.ContainsRune(secret, r) {
@@ -265,16 +278,14 @@ func redactionMarker(secrets []string) string {
 	}
 	for _, r := range redactionMarkerRunes {
 		if runeSafe(r) {
-			return strings.Repeat(string(r), 10)
+			return string(r)
 		}
 	}
 	for r := rune(0x2580); r <= 0x25ff; r++ {
 		if runeSafe(r) {
-			return strings.Repeat(string(r), 10)
+			return string(r)
 		}
 	}
-	// Unreachable for realistic secret sets (secrets would need to cover
-	// every candidate rune); scrub then deletes the bytes as a last resort.
 	return ""
 }
 
@@ -492,22 +503,41 @@ func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {
 		}
 		return typed, false
 	case map[string]any:
+		// Two-phase rebuild: unchanged keys keep their entries first, then
+		// redacted keys are inserted collision-safe. Assigning a redacted key
+		// directly could overwrite an unrelated field whose key already
+		// equals the marker (or a second secret key redacting to the same
+		// marker), silently dropping evidence. Keys are processed in sorted
+		// order so collision suffixes are deterministic.
 		changed := false
-		for key, child := range typed {
-			redactedChild, childChanged := redactJSONStrings(child, scrubber)
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		out := make(map[string]any, len(typed))
+		var renamedKeys []string
+		renamedChildren := map[string]any{}
+		renames := map[string]string{}
+		for _, key := range keys {
+			redactedChild, childChanged := redactJSONStrings(typed[key], scrubber)
 			redactedKey, keyChanged := redactJSONStrings(key, scrubber)
 			if keyChanged {
-				delete(typed, key)
-				typed[redactedKey.(string)] = redactedChild
+				renamedKeys = append(renamedKeys, key)
+				renamedChildren[key] = redactedChild
+				renames[key] = redactedKey.(string)
 				changed = true
 				continue
 			}
+			out[key] = redactedChild
 			if childChanged {
-				typed[key] = redactedChild
 				changed = true
 			}
 		}
-		return typed, changed
+		for _, key := range renamedKeys {
+			out[collisionFreeKey(renames[key], out, scrubber)] = renamedChildren[key]
+		}
+		return out, changed
 	case []any:
 		changed := false
 		for index, child := range typed {
@@ -520,6 +550,29 @@ func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {
 		return typed, changed
 	default:
 		return node, false
+	}
+}
+
+// collisionFreeKey returns candidate if no map entry holds it, otherwise
+// candidate extended with repetitions of a rune absent from every secret:
+// any substring spanning the appended boundary contains that rune, so the
+// suffix can neither be nor complete a credential. Terminates because taken
+// is finite and each repetition count yields a distinct key.
+func collisionFreeKey(candidate string, taken map[string]any, scrubber secretScrubber) string {
+	if _, exists := taken[candidate]; !exists {
+		return candidate
+	}
+	safe := secretFreeRune(scrubber.secrets)
+	if safe == "" {
+		// Unreachable for realistic secret sets (they would need to cover
+		// every candidate rune); matches redactionMarker's last resort.
+		safe = "␀"
+	}
+	for count := 1; ; count++ {
+		next := candidate + strings.Repeat(safe, count)
+		if _, exists := taken[next]; !exists {
+			return next
+		}
 	}
 }
 

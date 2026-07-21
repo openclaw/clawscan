@@ -865,6 +865,42 @@ func TestSecretScrubberReplacementCannotRebuildSecret(t *testing.T) {
 	}
 }
 
+func TestRedactScannerStdoutPreservesFieldsOnKeyCollision(t *testing.T) {
+	// A JSON key containing a secret is renamed to the marker. If another
+	// field's key already equals the marker, direct assignment would
+	// overwrite it and silently drop evidence; the redacted key must land
+	// under a collision-safe name instead.
+	env := map[string]string{"SCANNER_ACCESS": "abc"}
+	raw := `{"abc":1,"[redacted]":2}`
+	redacted := redactScannerStdout(raw, env, []string{"SCANNER_ACCESS"})
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(redacted), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed) != 2 {
+		t.Fatalf("field dropped on key collision: %s", redacted)
+	}
+	if strings.Contains(redacted, "abc") {
+		t.Fatalf("secret key survived redaction: %s", redacted)
+	}
+	// Two secret keys redacting to the same marker must also both survive.
+	raw = `{"abc-primary":1,"abc-fallback":2}`
+	env = map[string]string{"SCANNER_ACCESS": "abc-primary", "SCANNER_ACCESS_2": "abc-fallback"}
+	redacted = redactScannerStdout(raw, env, []string{"SCANNER_ACCESS", "SCANNER_ACCESS_2"})
+	parsed = nil
+	if err := json.Unmarshal([]byte(redacted), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed) != 2 {
+		t.Fatalf("field dropped when two keys redact identically: %s", redacted)
+	}
+	for _, secret := range []string{"abc-primary", "abc-fallback"} {
+		if strings.Contains(redacted, secret) {
+			t.Fatalf("secret %q survived redaction: %s", secret, redacted)
+		}
+	}
+}
+
 func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
 	exitCode := 2
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{

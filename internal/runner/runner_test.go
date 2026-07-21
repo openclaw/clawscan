@@ -4623,6 +4623,57 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
 	}
 }
 
+func TestRunJudgePreservesFieldsOnRedactedKeyCollision(t *testing.T) {
+	// A judge-result key containing a secret is renamed to the marker; a
+	// sibling key already spelled "[redacted]" must not be overwritten by
+	// that rename — both fields belong in the artifact.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{
+		target,
+		"--scanner", "skillspector",
+		"--judge", "judge",
+		"--sandbox", "off",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, RunContext{
+		Env: map[string]string{"OPENAI_API_KEY": "present", "SNYK_TOKEN": "abc"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
+		}},
+		CommandRunner: &recordingCommandRunner{stdout: `{"abc":"x","[redacted]":"y"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil {
+		t.Fatal("judge missing")
+	}
+	result, ok := artifact.Judge.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("judge result = %#v", artifact.Judge.Result)
+	}
+	if len(result) != 2 {
+		t.Fatalf("field dropped on redacted key collision: %#v", result)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"abc"`)) {
+		t.Fatalf("secret key survived in judge result: %s", raw)
+	}
+}
+
 func TestRunJudgeRedactsDeclaredScannerEnvFromResult(t *testing.T) {
 	// The judge shares the command runner (and thus the env allowlist) with
 	// scanners. A custom scanner's declared credential whose name evades

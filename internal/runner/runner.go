@@ -1271,7 +1271,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		result.Result = scrub(raw)
 		return result, nil
 	}
-	parsed = redactJudgeResult(parsed, scrub)
+	parsed = redactJudgeResult(parsed, scrub, newSecretScrubber(scannerSecretValues(visibleEnv, exposedEnvNames)))
 	parsedObject, ok := parsed.(map[string]any)
 	if !ok {
 		result.Status = "failed"
@@ -2408,20 +2408,42 @@ func redactEnvValues(value string, env map[string]string) string {
 	return newSecretScrubber(secrets).scrub(value)
 }
 
-func redactJudgeResult(value any, scrub func(string) string) any {
+func redactJudgeResult(value any, scrub func(string) string, scrubber secretScrubber) any {
 	switch typed := value.(type) {
 	case string:
 		return scrub(typed)
 	case []any:
 		redacted := make([]any, len(typed))
 		for index, item := range typed {
-			redacted[index] = redactJudgeResult(item, scrub)
+			redacted[index] = redactJudgeResult(item, scrub, scrubber)
 		}
 		return redacted
 	case map[string]any:
+		// Unchanged keys land first, scrubbed keys are inserted
+		// collision-safe afterwards: two keys scrubbing to the same marker
+		// (or a pre-existing key equal to it) would otherwise overwrite one
+		// another and silently drop a field from the judge result. Sorted
+		// order keeps collision suffixes deterministic.
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
 		redacted := make(map[string]any, len(typed))
-		for key, item := range typed {
-			redacted[scrub(key)] = redactJudgeResult(item, scrub)
+		var scrubbedKeys []string
+		renames := map[string]string{}
+		for _, key := range keys {
+			child := redactJudgeResult(typed[key], scrub, scrubber)
+			if scrubbedKey := scrub(key); scrubbedKey != key {
+				scrubbedKeys = append(scrubbedKeys, key)
+				renames[key] = scrubbedKey
+				typed[key] = child
+				continue
+			}
+			redacted[key] = child
+		}
+		for _, key := range scrubbedKeys {
+			redacted[collisionFreeKey(renames[key], redacted, scrubber)] = typed[key]
 		}
 		return redacted
 	default:
