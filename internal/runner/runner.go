@@ -441,12 +441,18 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
+	// An injected RunContext.CommandRunner executes directly with the host
+	// environment even when options request Docker, so redaction for both
+	// scanners and the judge must scope to the whole host env, not the
+	// container allowlist — otherwise an undeclared host credential in
+	// valid output would persist unscrubbed.
+	effectiveSandboxMode := sandbox.Mode
+	if ctx.CommandRunner != nil {
+		effectiveSandboxMode = SandboxModeOff
+	}
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
-		scannerSandboxMode := sandbox.Mode
-		if ctx.CommandRunner != nil {
-			scannerSandboxMode = SandboxModeOff
-		}
+		scannerSandboxMode := effectiveSandboxMode
 		scannerRunner = ExternalScannerRunner{
 			CommandRunner:        commandRunner,
 			Env:                  env,
@@ -494,7 +500,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, redactionEnvNames(redactionOptsForMode(opts, gatingOpts, sandbox.Mode), env, sandbox.Mode))
+		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode, effectiveSandboxMode, redactionEnvNames(redactionOptsForMode(opts, gatingOpts, effectiveSandboxMode), env, effectiveSandboxMode))
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -1186,7 +1192,13 @@ type judgeShellSpec struct {
 // allowlist plus all scanners' declared env). The judge shares the command
 // runner with scanners, so its redaction must cover the same set: a declared
 // credential with a bland name (SCANNER_ACCESS) evades isSecretEnvKey.
-func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string, exposedEnvNames []string) (*JudgeResult, error) {
+//
+// sandboxMode is the requested mode and drives the {{ judge_sandbox }}
+// placeholder (the run configuration's trust boundary). redactionSandboxMode
+// is the mode the command actually executes under — an injected
+// RunContext.CommandRunner runs on the host even when Docker was requested —
+// and scopes which env values are scrubbed from persisted judge output.
+func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string, redactionSandboxMode string, exposedEnvNames []string) (*JudgeResult, error) {
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
 		return nil, err
@@ -1237,14 +1249,18 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		Result:           nil,
 	}
 	// Under Docker the judge only sees allowlisted env names; the full host
-	// env stays in scope for --sandbox off.
-	visibleEnv := commandVisibleEnv(env, exposedEnvNames, sandboxMode)
+	// env stays in scope for --sandbox off and injected host runners.
+	visibleEnv := commandVisibleEnv(env, exposedEnvNames, redactionSandboxMode)
 	scrub := func(value string) string {
 		return redactDeclaredEnvValues(value, visibleEnv, exposedEnvNames)
 	}
 	if runErr != nil {
+		// commandError's own secret-named sweep must use the visible env
+		// too: under Docker an unallowlisted host value (DATABASE_URL=clean)
+		// never reached the container, and pre-scrubbing with the full host
+		// env would rewrite matching diagnostics before scrub could see them.
 		result.Status = "failed"
-		result.Error = scrub(commandError(runErr, output.Stderr, env))
+		result.Error = scrub(commandError(runErr, output.Stderr, visibleEnv))
 	}
 	if raw == "" {
 		if result.Status == "failed" {

@@ -4623,6 +4623,64 @@ func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
 	}
 }
 
+func TestRunJudgeInjectedRunnerScrubsHostCredentialsDespiteDockerOptions(t *testing.T) {
+	// An injected RunContext.CommandRunner executes on the host even when
+	// options request Docker, so judge redaction must sweep the whole host
+	// env: an undeclared host credential in valid judge JSON would
+	// otherwise persist because only the container allowlist was scrubbed.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	target := filepath.Join(dir, "skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(Options{
+		Target: target, Scanners: []string{"clawscan-static"},
+		Sandbox: SandboxOptions{Mode: SandboxModeDocker},
+		Judge:   &JudgeOptions{Command: "judge"},
+	}, RunContext{
+		Env: map[string]string{"SNYK_TOKEN": "host-judge-secret"},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
+			"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{}`)},
+		}},
+		CommandRunner: &recordingCommandRunner{stdout: `{"note":"saw host-judge-secret"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("host-judge-secret")) {
+		t.Fatalf("injected host runner leaked undeclared host credential: %s", raw)
+	}
+}
+
+func TestRunJudgeDockerFailureDiagnosticsIgnoreUnexposedHostValues(t *testing.T) {
+	// Under Docker the judge never saw an unallowlisted host variable;
+	// commandError's secret-named sweep must not rewrite stderr diagnostics
+	// that coincide with such a value (DATABASE_URL=clean).
+	env := map[string]string{"DATABASE_URL": "clean"}
+	target := t.TempDir()
+	artifact := Artifact{Target: Target{Kind: "skill", ResolvedPath: target}}
+	result, err := RunJudge(JudgeOptions{Command: "judge"}, artifact, &recordingCommandRunner{
+		stderr: "judge exited: verdict clean rejected", err: errCommandFailed,
+	}, time.Minute, env, SandboxModeDocker, SandboxModeDocker, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q", result.Status)
+	}
+	if !strings.Contains(result.Error, "verdict clean rejected") {
+		t.Fatalf("unexposed host value corrupted judge diagnostics: %q", result.Error)
+	}
+}
+
 func TestRunJudgePreservesFieldsOnRedactedKeyCollision(t *testing.T) {
 	// A judge-result key containing a secret is renamed to the marker; a
 	// sibling key already spelled "[redacted]" must not be overwritten by
