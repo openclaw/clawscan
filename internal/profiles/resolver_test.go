@@ -1003,6 +1003,53 @@ profiles:
 	}
 }
 
+func TestResolveArgsRejectsUserDefinedScannerWithoutActiveTargetPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	for name, command := range map[string]string{
+		"missing":      "my-scanner --json",
+		"comment-only": "my-scanner --json # {{target}}",
+	} {
+		writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: `+command+`
+`)
+		_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+		if err == nil || !strings.Contains(err.Error(), "must reference {{target}}") {
+			t.Fatalf("%s: err = %v, want active-placeholder rejection", name, err)
+		}
+	}
+}
+
+func TestResolveArgsBuiltInProfileProvenanceSurvivesDiscoveredConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
+profiles:
+  unrelated:
+    scanners:
+      - clawscan-static
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.ConfigSource != "built-in" {
+		t.Fatalf("config source = %q, want built-in (unrelated discovered config must not claim provenance)", opts.ConfigSource)
+	}
+
+	opts, err = ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.ConfigSource != "built-in" {
+		t.Fatalf("config source = %q, want built-in when discovery finds nothing", opts.ConfigSource)
+	}
+}
+
 func TestResolveArgsAllowsApostropheInShellCommentBeforeTargetPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")

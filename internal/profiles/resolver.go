@@ -370,9 +370,10 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 			if selected.source == "built-in" {
 				configSource = "built-in"
 			}
-			// A profile served from embedded YAML is not "flags-only";
-			// record its real provenance.
-			if selected.source == "built-in" && configSource == "flags-only" {
+			// selected.source is authoritative: a profile served from
+			// embedded YAML is "built-in" even when an unrelated project
+			// config was loaded alongside it.
+			if selected.source == "built-in" {
 				configSource = "built-in"
 			}
 		}
@@ -935,8 +936,14 @@ func validateProfile(name string, profile Profile) error {
 		if scanner.custom && strings.TrimSpace(scanner.Command) == "" {
 			return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)
 		}
-		if scanner.custom && !scannerTargetPlaceholdersAreUnquoted(scanner.Command) {
-			return fmt.Errorf("User-defined scanner %s in profile %s must use {{target}} outside shell quotes", scanner.ID, name)
+		if scanner.custom {
+			unquoted, active := scannerTargetPlaceholderUsage(scanner.Command)
+			if !unquoted {
+				return fmt.Errorf("User-defined scanner %s in profile %s must use {{target}} outside shell quotes", scanner.ID, name)
+			}
+			if !active {
+				return fmt.Errorf("User-defined scanner %s in profile %s must reference {{target}} outside quotes and comments so the scanner receives the scan target", scanner.ID, name)
+			}
 		}
 		if scanner.custom && runner.DefaultScannerRegistry().Contains(scanner.ID) {
 			return fmt.Errorf("User-defined scanner %s collides with a built-in scanner ID", scanner.ID)
@@ -996,7 +1003,11 @@ func overlappingExitCodeRules(block *profileExitCodeRule, warn *profileExitCodeR
 	return 0, false
 }
 
-func scannerTargetPlaceholdersAreUnquoted(command string) bool {
+// scannerTargetPlaceholderUsage reports whether every {{target}} placeholder
+// sits outside shell quotes (unquoted) and whether at least one placeholder is
+// active — outside quotes and comments — so the scanner actually receives the
+// selected target.
+func scannerTargetPlaceholderUsage(command string) (unquoted bool, active bool) {
 	matches := scannerTargetPlaceholderPattern.FindAllStringIndex(command, -1)
 	matchIndex := 0
 	quote := byte(0)
@@ -1005,7 +1016,10 @@ func scannerTargetPlaceholdersAreUnquoted(command string) bool {
 	for index := 0; index < len(command); index++ {
 		if matchIndex < len(matches) && index == matches[matchIndex][0] {
 			if !comment && quote != 0 {
-				return false
+				return false, active
+			}
+			if !comment {
+				active = true
 			}
 			index = matches[matchIndex][1] - 1
 			matchIndex++
@@ -1039,7 +1053,7 @@ func scannerTargetPlaceholdersAreUnquoted(command string) bool {
 			quote = 0
 		}
 	}
-	return true
+	return true, active
 }
 
 func shellCommentCanStart(command string, index int) bool {
