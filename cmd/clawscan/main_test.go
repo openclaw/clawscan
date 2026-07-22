@@ -52,7 +52,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"SkillTrustBench",
 		"clawhub-security-signals",
 		"Accepted scanner IDs:",
-		"agentverus, aig, cisco, clawscan-static, skillspector, snyk, socket, virustotal",
+		"agentverus, aig, cisco, clawscan-static, relyable, skillspector, snyk, socket, virustotal",
 		"Required environment variables:",
 		"aig: LLM_API_KEY or OPENAI_API_KEY",
 		"SOCKET_CLI_API_TOKEN",

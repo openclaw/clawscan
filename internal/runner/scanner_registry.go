@@ -289,6 +289,38 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runStatic,
 		},
 		scannerAdapter{
+			id:            "relyable",
+			commandBacked: true,
+			info: ScannerInfo{
+				DisplayName:   "Relyable",
+				RepositoryURL: "https://github.com/veriker/relyable",
+				Description:   "Functional re-derivation evidence: does the skill still do what its docs claim, recomputed? Emits the strongest grade that applies. exogenous: a declared rederive.json property manifest (idempotence / round-trip), with both sides of the relation computed from the skill's own code and the result mutation-tested against vacuity. self_spec: re-runs the author's own committed oracle (shipped tests or documented I/O examples). cold_golden: when an LLM key is set, a code-blind model infers goldens from SKILL.md alone and abstains unless the docs pin exact behavior; divergences are reported as unconfirmed, never as accusations. non_rederivable: the honest floor, never a fabricated pass. Functional axis only; complements the security scanners and does not detect malware or prompt injection. Skill code runs only inside the Docker sandbox (or with an explicit opt-in), in a scrubbed environment, and the scanner fails closed otherwise. Not preinstalled in the clawscan-runtime image: install on the host with clawscan install relyable, or build a derived sandbox image for Docker-mode runs (see docs/scanners.md).",
+				// Deliberately RELYABLE_-prefixed only: generic provider keys
+				// (ANTHROPIC_API_KEY / OPENAI_API_KEY) are honored by standalone
+				// relyable-scan but are NOT listed here, so the sandbox env
+				// passthrough never auto-forwards an operator's generic keys to
+				// this scanner. Setting RELYABLE_LLM_API_KEY is an explicit
+				// per-scanner opt-in.
+				OptionalEnv: []string{
+					"RELYABLE_SCAN_ALLOW_HOST_EXEC",
+					"RELYABLE_LLM_API_KEY",
+					"RELYABLE_LLM_PROVIDER",
+					"RELYABLE_LLM_MODEL",
+					"RELYABLE_LLM_BASE_URL",
+				},
+			},
+			installPlan: InstallPlan{
+				ScannerID:        "relyable",
+				Name:             "Relyable",
+				CheckExecutables: []string{"relyable-scan"},
+				Commands: []InstallCommand{
+					{Command: "uv", Args: []string{"tool", "install", "git+https://github.com/veriker/relyable.git", "--with", "pytest"}},
+				},
+				VerifyCommand: InstallCommand{Command: "relyable-scan", Args: []string{"--help"}},
+			},
+			run: ExternalScannerRunner.runRelyable,
+		},
+		scannerAdapter{
 			id:              "skillspector",
 			commandBacked:   true,
 			supportsPlugins: true,
