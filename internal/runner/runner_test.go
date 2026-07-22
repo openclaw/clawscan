@@ -1734,6 +1734,23 @@ func TestRunHostRedactionIgnoresNonCredentialOptionalEnv(t *testing.T) {
 	}
 }
 
+func TestCredentialEnvNameWindowsFoldsOptionalEnvCase(t *testing.T) {
+	if credentialEnvNameOnGOOS("skillspector_provider", "windows") {
+		t.Fatal("Windows case variant of optional env was classified as a credential")
+	}
+	if !credentialEnvNameOnGOOS("skillspector_provider", "linux") {
+		t.Fatal("non-Windows case variant must remain fail-closed")
+	}
+	if credentialEnvNameOnGOOS("SKILLSPECTOR_PROVIDER", "linux") {
+		t.Fatal("exact optional env match was classified as a credential")
+	}
+	for _, goos := range []string{"windows", "linux"} {
+		if !credentialEnvNameOnGOOS("api_token", goos) {
+			t.Fatalf("secret-named env was not classified as a credential on %s", goos)
+		}
+	}
+}
+
 func TestRunProfileBatchRedactsSiblingProfileCredentials(t *testing.T) {
 	// A --config batch shares one host environment across profiles under
 	// --sandbox off, so profile B's scanner can emit the blandly named

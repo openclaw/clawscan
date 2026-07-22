@@ -744,6 +744,10 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"scanner --build-arg mode=fast":                  "",
 		"scanner --url 'https://x.test/?a=b' {{target}}": "",
 		"scanner --retries=3 --api-version=2 {{target}}": "",
+		"(API_TOKEN=sk-live; printf x); : {{target}}":    "API_TOKEN",
+		"(api_token=sk-live; scanner {{target}})":        "api_token",
+		"`API_TOKEN=sk-live` scanner {{target}}":         "API_TOKEN",
+		"scanner --filter '(mode=fast)'":                 "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -802,7 +806,7 @@ func TestEnvValueForNameFindsNonEmptyExactMatch(t *testing.T) {
 func TestUserDefinedScannerInfoSanitizesMalformedEnvEntries(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "alpha", Command: "scanner {{target}}",
-		Env: []string{"API_TOKEN=sk-live-info-leak", "GOOD_NAME"}, Targets: []string{"skill"},
+		Env: []string{"API_TOKEN=sk-live-info-leak", "=sk-live-eqzero", "GOOD_NAME"}, Targets: []string{"skill"},
 	})
 	want := []string{"API_TOKEN", "GOOD_NAME"}
 	if got := adapter.Info().RequiredEnv; !reflect.DeepEqual(got, want) {
@@ -819,6 +823,9 @@ func TestUserDefinedScannerInfoSanitizesMalformedEnvEntries(t *testing.T) {
 		for _, name := range names {
 			if strings.Contains(name, "sk-live") {
 				t.Fatalf("sanitized env name leaked credential value: %q", name)
+			}
+			if name == "" {
+				t.Fatal("sanitized env names contain an empty element")
 			}
 		}
 	}
@@ -854,6 +861,34 @@ func TestUserDefinedScannerRejectsMalformedEnvDeclaration(t *testing.T) {
 		t.Fatalf("result = %q / %q, want malformed-env rejection", result.Status, result.Error)
 	}
 	if strings.Contains(result.Error, "sk-live-declared") {
+		t.Fatalf("rejection echoes inline value: %s", result.Error)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("command ran despite malformed env: %#v", commandRunner.calls)
+	}
+}
+
+func TestUserDefinedScannerRejectsMalformedEnvDeclarationAtEqualsZero(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "scanner {{target}}",
+		Env: []string{"=sk-live-eqzero"}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "=...") {
+		t.Fatalf("result = %q / %q, want safely truncated malformed-env rejection", result.Status, result.Error)
+	}
+	if strings.Contains(result.Error, "sk-live-eqzero") {
 		t.Fatalf("rejection echoes inline value: %s", result.Error)
 	}
 	if len(commandRunner.calls) != 0 {

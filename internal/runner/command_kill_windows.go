@@ -12,6 +12,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// windowsKillExitCode is an arbitrary, improbable natural exit code stamped
+// by our termination paths so deadline kills can be distinguished from exits.
+const windowsKillExitCode = 0xC1AC5CA9
+
 // processTreeKiller makes timeout cancellation reach the whole process
 // tree on Windows. TerminateProcess kills only the direct child, and
 // taskkill /T resolves the tree by parent PID at kill time — useless once
@@ -52,16 +56,28 @@ func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
 	cmd.Cancel = func() error {
 		killer.fired.Store(true)
 		if killer.job != 0 {
-			if err := windows.TerminateJobObject(killer.job, 1); err == nil {
+			if err := windows.TerminateJobObject(killer.job, windowsKillExitCode); err == nil {
 				return nil
 			}
 		}
 		if cmd.Process == nil {
 			return nil
 		}
-		return cmd.Process.Kill()
+		if err := terminateProcessWithSentinel(cmd.Process.Pid); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
 	}
 	return killer
+}
+
+func terminateProcessWithSentinel(pid int) error {
+	handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(handle)
+	return windows.TerminateProcess(handle, windowsKillExitCode)
 }
 
 // started assigns the suspended child to the job, then resumes it. It
@@ -129,11 +145,14 @@ func resumeMainThread(pid uint32) bool {
 // PID, so this reaches grandchildren taskkill /T no longer could.
 func (killer *processTreeKiller) reapStragglers(cmd *exec.Cmd) {
 	if killer.job != 0 {
-		_ = windows.TerminateJobObject(killer.job, 1)
-		return
+		if err := windows.TerminateJobObject(killer.job, windowsKillExitCode); err == nil {
+			return
+		}
 	}
 	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		if err := terminateProcessWithSentinel(cmd.Process.Pid); err != nil {
+			_ = cmd.Process.Kill()
+		}
 	}
 }
 
@@ -144,6 +163,14 @@ func (killer *processTreeKiller) release() {
 		_ = windows.CloseHandle(killer.job)
 		killer.job = 0
 	}
+}
+
+// killConfirmed reports whether the process exited with the sentinel code
+// our kill paths stamp via TerminateJobObject/TerminateProcess. A natural
+// exit racing the deadline keeps its own code and must not be reported as
+// a timeout.
+func (killer *processTreeKiller) killConfirmed(cmd *exec.Cmd) bool {
+	return cmd.ProcessState != nil && uint32(cmd.ProcessState.ExitCode()) == windowsKillExitCode
 }
 
 // cancelFired reports whether the kill path actually ran. The caller uses

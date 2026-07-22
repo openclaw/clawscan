@@ -675,13 +675,15 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 // leading assignment run or immediately after an assignment wrapper. Inline
 // values sit outside every redaction scope, so name-based carve-outs let a
 // bland credential name persist into evidence. Lowercase and mixed-case
-// NAME=value operands outside assignment position remain allowed.
+// NAME=value operands outside assignment position remain allowed. Grouping
+// and control punctuation plus $ are trimmed from token ends so subshell and
+// brace-group syntax cannot hide an assignment.
 func inlineCredentialAssignment(command string) string {
 	tokens := strings.Fields(command)
 	assignmentRun := true
 	previous := ""
 	for _, raw := range tokens {
-		token := strings.Trim(strings.TrimRight(raw, ";&|"), `'"`)
+		token := strings.Trim(raw, "'\"();&|{}$`")
 		eq := strings.IndexByte(token, '=')
 		isAssignment := eq > 0 && envAssignmentNamePattern.MatchString(token[:eq])
 		if isAssignment {
@@ -722,9 +724,12 @@ func sanitizedDeclaredEnvNames(declared []string) []string {
 	sanitized := make([]string, 0, len(declared))
 	for _, name := range declared {
 		if !envAssignmentNamePattern.MatchString(name) {
-			if eq := strings.IndexByte(name, '='); eq > 0 {
+			if eq := strings.IndexByte(name, '='); eq >= 0 {
 				name = name[:eq]
 			}
+		}
+		if name == "" {
+			continue
 		}
 		sanitized = append(sanitized, name)
 	}
@@ -741,7 +746,7 @@ func invalidDeclaredEnvName(declared []string) string {
 		if envAssignmentNamePattern.MatchString(name) {
 			continue
 		}
-		if eq := strings.IndexByte(name, '='); eq > 0 {
+		if eq := strings.IndexByte(name, '='); eq >= 0 {
 			return name[:eq] + "=..."
 		}
 		if len(name) > 64 {

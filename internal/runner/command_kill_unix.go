@@ -61,6 +61,18 @@ func (killer *processTreeKiller) release() {
 	}
 }
 
+// killConfirmed reports whether the process's wait status shows it died
+// from our SIGKILL rather than exiting on its own. A natural exit that
+// races the deadline must keep its gate-eligible exit code instead of
+// being misreported as a timeout.
+func (killer *processTreeKiller) killConfirmed(cmd *exec.Cmd) bool {
+	if cmd.ProcessState == nil {
+		return false
+	}
+	status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	return ok && status.Signaled() && status.Signal() == syscall.SIGKILL
+}
+
 // cancelFired reports whether the kill path actually ran. The caller uses
 // this instead of re-reading ctx.Err() after Wait returns: a command that
 // finished just before the deadline must not be reclassified as timed out

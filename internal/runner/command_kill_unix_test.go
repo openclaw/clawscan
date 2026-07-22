@@ -3,7 +3,9 @@
 package runner
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +13,41 @@ import (
 	"testing"
 	"time"
 )
+
+func TestDefaultCommandRunnerNaturalExitRacingDeadlineKeepsExitCode(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("needs /bin/sh")
+	}
+
+	natural := exec.CommandContext(context.Background(), "/bin/sh", "-c", "exit 7")
+	naturalKiller := configureCommandTreeKill(natural)
+	if err := natural.Run(); err == nil {
+		t.Fatal("natural command unexpectedly succeeded")
+	}
+	if naturalKiller.killConfirmed(natural) {
+		t.Fatal("natural exit was misclassified as a configured kill")
+	}
+	naturalKiller.release()
+
+	killed := exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30")
+	killedKiller := configureCommandTreeKill(killed)
+	if err := killed.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := killedKiller.started(killed); err != nil {
+		t.Fatal(err)
+	}
+	if err := killed.Cancel(); err != nil {
+		t.Fatal(err)
+	}
+	if err := killed.Wait(); err == nil {
+		t.Fatal("killed command unexpectedly succeeded")
+	}
+	if !killedKiller.killConfirmed(killed) {
+		t.Fatal("configured SIGKILL was not confirmed by the wait status")
+	}
+	killedKiller.release()
+}
 
 func TestDefaultCommandRunnerReapsDetachedDaemonAfterNormalCompletion(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {

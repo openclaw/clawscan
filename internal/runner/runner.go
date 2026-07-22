@@ -2379,11 +2379,11 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 		}
 	}
 	closeReadersAndAwait()
-	// Classify timeout by whether the kill path actually fired, not by
-	// re-reading ctx.Err(): a command that finished just before the
-	// deadline must not be reported timed out because the context timer
-	// fired while this goroutine was descheduled.
-	timedOut := killer.cancelFired() && ctx.Err() == context.DeadlineExceeded && err != nil
+	// Classify timeout by whether the kill path actually fired and the wait
+	// status confirms that kill, not just by re-reading ctx.Err(). Cancel can
+	// race a natural exit that happened just before the deadline, and that
+	// exit's gate-eligible code must survive.
+	timedOut := killer.cancelFired() && ctx.Err() == context.DeadlineExceeded && err != nil && killer.killConfirmed(cmd)
 	if waitDelayExpired && !timedOut {
 		// Suppress the exit verdict whatever it was: partial pipe output
 		// from a run that needed force-closing must not pass as a
@@ -2604,14 +2604,26 @@ func redactJudgeResult(value any, scrub func(string) string, scrubber secretScru
 // DEFAULT_MODEL) are not: their common values (openai, info) would corrupt
 // valid evidence if scrubbed. Unknown names fail closed as credentials,
 // because sandbox.env is the documented channel for blandly named
-// judge-specific credentials.
+// judge-specific credentials. Windows optional-env matching folds case to
+// follow that platform's case-insensitive environment semantics.
 func CredentialEnvName(name string) bool {
+	return credentialEnvNameOnGOOS(name, runtime.GOOS)
+}
+
+func credentialEnvNameOnGOOS(name string, goos string) bool {
 	if isSecretEnvKey(name) {
 		return true
 	}
 	for _, info := range DefaultScannerRegistry().Infos() {
 		for _, optional := range info.OptionalEnv {
 			if optional == name {
+				return false
+			}
+			// Windows env names are case-insensitive: the same variable
+			// reaches the scanner under any spelling, and scrubbing an
+			// optional-config value like "openai" corrupts evidence.
+			// Elsewhere spellings are distinct names and stay fail-closed.
+			if goos == "windows" && strings.EqualFold(optional, name) {
 				return false
 			}
 		}
