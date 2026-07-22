@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type UserDefinedScannerConfig struct {
@@ -739,244 +741,268 @@ func jsonSecretLeaves(secret string) []string {
 
 var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// assignmentWrapperWords are command words whose following NAME=value
-// operand sets an environment variable in the child regardless of case.
-// readonly, declare, local, and typeset are assignment-taking shell builtins:
-// `readonly access=v` binds access inside the child shell, outside every
-// redaction scope, so the operand must be rejected like an env/export one.
-var assignmentWrapperWords = map[string]bool{
-	"env": true, "export": true, "set": true, "setx": true, "sudo": true,
-	"readonly": true, "declare": true, "local": true, "typeset": true,
+const shellAnalysisDepthLimit = 10
+
+var runCommandAssignmentWrappers = map[string]bool{"env": true, "sudo": true}
+
+var declarationAssignmentWrappers = map[string]bool{
+	"export": true, "set": true, "setx": true, "readonly": true,
+	"declare": true, "local": true, "typeset": true,
 }
 
-// shellInterpreterWords are commands whose operand is itself a shell
-// command; the first non-option operand after one is a nested command
-// start, so assignment-shaped tokens there must be rejected. eval evaluates
-// its operand as shell code in the current shell, so it belongs here even
-// though it takes no -c option — its first operand directly begins the
-// nested command.
-var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true, "eval": true}
-
-// shellCommandIntroducers are reserved words (and the ! pipeline-negation
-// keyword) after which a new command
-// begins, so an assignment immediately following one is at command-start
-// (if VAR=v; then VAR=v; while VAR=v). Recognizing them conservatively —
-// not a full grammar — keeps the guard from missing assignments inside
-// compound commands.
-var shellCommandIntroducers = map[string]bool{
-	"if": true, "then": true, "elif": true, "else": true,
-	"do": true, "while": true, "until": true, "time": true,
-	"!": true,
+var envOptionsWithValues = map[string]bool{
+	"-u": true, "-C": true, "-S": true,
+	"--unset": true, "--chdir": true, "--split-string": true,
 }
 
-// inlineCredentialAssignment reports the first rejected NAME=value token in
-// an operator-authored command, or "". It rejects secret-named assignments,
-// conventional ALL-UPPERCASE environment names, and any-case names in the
-// leading assignment run, at a new command start after ;, &, or | separators
-// wherever they appear or after a newline, after shell reserved words that
-// introduce a command list, or in an assignment-wrapper zone.
-// The first operand of a shell interpreter word (sh, bash, and peers,
-// including path forms such as /bin/sh) is also treated as a nested command
-// start. Separator handling is not shell-quote-aware and therefore rejects
-// conservatively. Wrapper and shell-interpreter options and the bare operand
-// immediately following an option keep their zones active. This conservatively
-// over-rejects a no-argument option before the real command when a later
-// NAME=value is intended as an ordinary operand (env -i scanner mode=fast);
-// operators can move the assignment or drop the wrapper.
-// Inline values sit outside every redaction scope, so name-based carve-outs
-// let a bland credential name persist into evidence. Lowercase and mixed-case
-// NAME=value operands outside assignment position remain allowed. Grouping and
-// control punctuation plus $ are trimmed from token ends so subshell and
-// brace-group syntax cannot hide an assignment.
+var inlineAssignmentInterpreterWords = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true,
+}
+
+// inlineCredentialAssignment reports the first NAME=value expression that the
+// shell or a known assignment wrapper evaluates as an assignment, or "".
+// Parsing the shell grammar keeps ordinary scanner arguments such as mode=fast
+// and quoted separators out of assignment position.
 func inlineCredentialAssignment(command string) string {
-	commandStart := true
-	wrapperZone := false
-	shellZone := false
-	prevWasOption := false
-	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
-		commandStart = true
-		wrapperZone = false
-		shellZone = false
-		prevWasOption = false
-		for _, field := range strings.Fields(line) {
-			// Split attached separators (true;NAME=v, a|b, x&&NAME=v): the
-			// shell treats each ;&| as a command boundary regardless of
-			// surrounding whitespace, so each segment is inspected as if it
-			// began a new token, and every boundary resets command-start.
-			segments := strings.FieldsFunc(field, func(r rune) bool {
-				return r == ';' || r == '&' || r == '|'
-			})
-			endsWithSeparator := strings.HasSuffix(field, ";") || strings.HasSuffix(field, "&") || strings.HasSuffix(field, "|")
-			for si, segment := range segments {
-				if si > 0 {
-					// Interior separator: the segment starts a new command.
-					commandStart = true
-					wrapperZone = false
-					shellZone = false
-					prevWasOption = false
+	return inlineCredentialAssignmentAtDepth(command, 0)
+}
+
+func inlineCredentialAssignmentAtDepth(command string, depth int) string {
+	if depth >= shellAnalysisDepthLimit {
+		return ""
+	}
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		// A bash-grammar parse failure means the default-path /bin/sh rejects
+		// the command too (sh grammar is a subset of bash), so the scanner
+		// never runs and no inline value can leak. Treat as no assignment.
+		return ""
+	}
+
+	found := ""
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if found != "" {
+			return false
+		}
+		switch node := node.(type) {
+		case *syntax.CallExpr:
+			for _, assignment := range node.Assigns {
+				if assignment.Name != nil {
+					found = assignment.Name.Value
+					return false
 				}
-				token := strings.Trim(segment, "'\"(){}$`")
-				if token != "" {
-					// Derive the assignment name from a backslash-stripped view so
-					// a shell-escaped equals (env API_TOKEN\=sk-live) is recognized
-					// as the assignment the shell actually performs after removing
-					// the backslash, rather than a name that fails the regex.
-					assignment := strings.ReplaceAll(token, `\`, "")
-					eq := strings.IndexByte(assignment, '=')
-					if eq > 0 && envAssignmentNamePattern.MatchString(assignment[:eq]) {
-						name := assignment[:eq]
-						if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone || shellZone {
-							return name
-						}
-						// A non-rejected assignment operand does not move us past the
-						// command word.
-						prevWasOption = false
-					} else if assignmentWrapperWords[strings.ToLower(path.Base(token))] {
-						wrapperZone = true
-						commandStart = false
-						prevWasOption = false
-					} else if shellInterpreterWords[strings.ToLower(path.Base(token))] {
-						shellZone = true
-						commandStart = false
-						prevWasOption = false
-					} else if shellCommandIntroducers[strings.ToLower(token)] {
-						commandStart = true
-						wrapperZone = false
-						shellZone = false
-						prevWasOption = false
-					} else if strings.HasPrefix(token, "-") && (wrapperZone || shellZone) {
-						// Wrapper and interpreter options (env -i, sh -c) keep the zone open.
-						prevWasOption = true
-					} else if (wrapperZone || shellZone) && prevWasOption {
-						// A bare option operand keeps the wrapper or interpreter zone open.
-						prevWasOption = false
-					} else {
-						wrapperZone = false
-						shellZone = false
-						commandStart = false
-						prevWasOption = false
+			}
+			if len(node.Args) == 0 {
+				return true
+			}
+			commandWord, ok := staticWord(node.Args[0])
+			if !ok {
+				return true
+			}
+			base := strings.ToLower(path.Base(commandWord))
+			switch {
+			case runCommandAssignmentWrappers[base]:
+				found = runCommandWrapperAssignment(base, node.Args[1:])
+			case declarationAssignmentWrappers[base]:
+				found = declarationWrapperAssignment(node.Args[1:])
+			case base == "eval":
+				parts := make([]string, 0, len(node.Args)-1)
+				for _, arg := range node.Args[1:] {
+					text, ok := staticWord(arg)
+					if !ok {
+						return false
+					}
+					parts = append(parts, text)
+				}
+				found = inlineCredentialAssignmentAtDepth(strings.Join(parts, " "), depth+1)
+				return false
+			case inlineAssignmentInterpreterWords[base]:
+				if operand := commandStringOperand(base, node.Args); operand != nil {
+					if text, ok := staticWord(operand); ok {
+						found = inlineCredentialAssignmentAtDepth(text, depth+1)
 					}
 				}
-				if strings.HasSuffix(segment, "{") || strings.HasSuffix(segment, "(") || strings.HasSuffix(segment, ")") {
-					// Function bodies (f(){ ), brace groups ({ ), subshells (( ), and case
-					// arms (pat) ) all begin a fresh command after this token.
-					commandStart = true
-					wrapperZone = false
-					shellZone = false
-					prevWasOption = false
+			}
+		case *syntax.DeclClause:
+			for _, assignment := range node.Args {
+				if !assignment.Naked && assignment.Name != nil {
+					found = assignment.Name.Value
+					return false
 				}
 			}
-			if endsWithSeparator {
-				commandStart = true
-				wrapperZone = false
-				shellZone = false
-				prevWasOption = false
+		}
+		return found == ""
+	})
+	return found
+}
+
+func runCommandWrapperAssignment(base string, args []*syntax.Word) string {
+	expectValue := false
+	for _, arg := range args {
+		word, ok := staticWord(arg)
+		if !ok {
+			return ""
+		}
+		if expectValue {
+			expectValue = false
+			continue
+		}
+		if strings.HasPrefix(word, "-") {
+			if base == "env" && envOptionsWithValues[word] && !strings.ContainsRune(word, '=') {
+				expectValue = true
 			}
+			continue
+		}
+		if name, ok := leadingAssignmentName(word); ok {
+			return name
+		}
+		return ""
+	}
+	return ""
+}
+
+func declarationWrapperAssignment(args []*syntax.Word) string {
+	for _, arg := range args {
+		word, ok := staticWord(arg)
+		if !ok || strings.HasPrefix(word, "-") {
+			continue
+		}
+		if name, ok := leadingAssignmentName(word); ok {
+			return name
 		}
 	}
 	return ""
 }
 
-// commandReparsesTarget reports whether a command with a target placeholder
-// contains any whole-word `eval` token or embeds a target placeholder anywhere
-// in the first operand of a shell interpreter's command string, including an
-// interpreter hidden behind transparent launcher wrappers. A placeholder inside
-// that first operand (`sh -c {{target}}`, `sh -c echo-{{target}}`) is re-parsed
-// as shell code by the nested interpreter, so the positional-parameter and
-// quoting defenses do not survive; a placeholder in a later operand
-// (`sh -c scan.sh {{target}}`) is an inner positional parameter ($0/$1) that
-// the interpreter does not reparse, so only the first command-string operand is
-// inspected. eval remains position-independent; this deliberately over-rejects
-// the rare scanner that takes the literal string "eval" as an argument rather
-// than risking execution of an untrusted target.
+func leadingAssignmentName(word string) (string, bool) {
+	eq := strings.IndexByte(word, '=')
+	if eq <= 0 || !envAssignmentNamePattern.MatchString(word[:eq]) {
+		return "", false
+	}
+	return word[:eq], true
+}
+
+func staticWord(word *syntax.Word) (string, bool) {
+	var text strings.Builder
+	if !appendStaticWordParts(&text, word.Parts, false) {
+		return "", false
+	}
+	return text.String(), true
+}
+
+func appendStaticWordParts(text *strings.Builder, parts []syntax.WordPart, quoted bool) bool {
+	for _, part := range parts {
+		switch part := part.(type) {
+		case *syntax.Lit:
+			for i := 0; i < len(part.Value); i++ {
+				if part.Value[i] == '\\' && !quoted && i+1 < len(part.Value) {
+					i++
+				}
+				text.WriteByte(part.Value[i])
+			}
+		case *syntax.SglQuoted:
+			text.WriteString(part.Value)
+		case *syntax.DblQuoted:
+			if !appendStaticWordParts(text, part.Parts, true) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// commandReparsesTarget reports whether a target placeholder is evaluated by
+// eval, a shell interpreter's command-string operand, or command substitution.
 func commandReparsesTarget(command string) bool {
 	if !targetPlaceholderPattern.MatchString(command) {
 		return false
 	}
-	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
-		awaitingCommandWord := true
-		interpreter := ""
-		sawCmdFlag := false
-		behindLauncher := false
-		resetCommand := func() {
-			awaitingCommandWord = true
-			interpreter = ""
-			sawCmdFlag = false
-			behindLauncher = false
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		// Unparseable as bash means the default-path /bin/sh rejects it too, so
+		// the reparsing construct never executes; the target's "$1" quoting is
+		// the primary defense regardless. Treat as no reparse.
+		return false
+	}
+
+	reparses := false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if reparses {
+			return false
 		}
-		for _, field := range strings.Fields(line) {
-			segments := strings.FieldsFunc(field, func(r rune) bool {
-				return r == ';' || r == '&' || r == '|'
-			})
-			endsWithSeparator := strings.HasSuffix(field, ";") || strings.HasSuffix(field, "&") || strings.HasSuffix(field, "|")
-			for si, segment := range segments {
-				if si > 0 {
-					resetCommand()
-				}
-				token := strings.Trim(segment, "'\"(){}$`")
-				if token == "" {
-					continue
-				}
-				lower := strings.ToLower(path.Base(token))
-				if lower == "eval" {
-					return true
-				}
-				if awaitingCommandWord {
-					// Launchers (env, sudo) and shell reserved words (if, then, do,
-					// !) both precede the real command word rather than being it, so
-					// skip them to reach the interpreter behind `then sh -c ...`.
-					if launcherWords[lower] {
-						behindLauncher = true
-						continue
-					}
-					if shellCommandIntroducers[lower] {
-						continue
-					}
-					eq := strings.IndexByte(token, '=')
-					if strings.HasPrefix(token, "-") || (eq > 0 && envAssignmentNamePattern.MatchString(token[:eq])) {
-						continue
-					}
-					if reparsingInterpreterWords[lower] {
-						awaitingCommandWord = false
-						interpreter = lower
-						continue
-					}
-					// A non-interpreter bare word behind a launcher may be a
-					// positional argument (timeout's duration) that precedes the
-					// real command, so keep scanning for an interpreter rather than
-					// settling on it. Without a launcher it is the command word.
-					if behindLauncher {
-						continue
-					}
-					awaitingCommandWord = false
-					interpreter = ""
-					continue
-				}
-				if interpreter == "" {
-					continue
-				}
-				if !sawCmdFlag {
-					if isCommandStringFlag(interpreter, token) {
-						sawCmdFlag = true
-					}
-					continue
-				}
-				// The placeholder is dangerous anywhere inside this first
-				// command-string operand, not only when the whole operand is the
-				// bare placeholder: `sh -c echo-{{target}}` still renders the
-				// target into the nested interpreter's code position.
-				placeholderOperand := strings.Trim(segment, "'\"()$`")
-				if targetPlaceholderPattern.MatchString(placeholderOperand) {
-					return true
-				}
-				sawCmdFlag = false
+		switch node := node.(type) {
+		case *syntax.CmdSubst:
+			reparses = nodeContainsTarget(command, node)
+			return !reparses
+		case *syntax.CallExpr:
+			interpreter, args, eval := reparsingCommand(node)
+			if eval {
+				reparses = true
+				return false
 			}
-			if endsWithSeparator {
-				resetCommand()
+			if interpreter != "" {
+				if operand := commandStringOperand(interpreter, args); operand != nil {
+					reparses = nodeContainsTarget(command, operand)
+				}
 			}
+		}
+		return !reparses
+	})
+	return reparses
+}
+
+func reparsingCommand(call *syntax.CallExpr) (interpreter string, args []*syntax.Word, eval bool) {
+	if len(call.Args) == 0 {
+		return "", nil, false
+	}
+	commandWord, ok := staticWord(call.Args[0])
+	if !ok {
+		return "", nil, false
+	}
+	base := strings.ToLower(path.Base(commandWord))
+	if base == "eval" {
+		return "", nil, true
+	}
+	if reparsingInterpreterWords[base] {
+		return base, call.Args, false
+	}
+	if !launcherWords[base] {
+		return "", nil, false
+	}
+	for i, arg := range call.Args[1:] {
+		word, ok := staticWord(arg)
+		if !ok {
+			continue
+		}
+		base = strings.ToLower(path.Base(word))
+		if base == "eval" {
+			return "", nil, true
+		}
+		if reparsingInterpreterWords[base] {
+			return base, call.Args[i+1:], false
 		}
 	}
-	return false
+	return "", nil, false
+}
+
+func commandStringOperand(interpreter string, args []*syntax.Word) *syntax.Word {
+	for i := 1; i < len(args); i++ {
+		word, ok := staticWord(args[i])
+		if !ok {
+			continue
+		}
+		if isCommandStringFlag(interpreter, word) && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return nil
+}
+
+func nodeContainsTarget(command string, node syntax.Node) bool {
+	start, end := int(node.Pos().Offset()), int(node.End().Offset())
+	return start >= 0 && end >= start && end <= len(command) && targetPlaceholderPattern.MatchString(command[start:end])
 }
 
 // launcherWords exec their trailing arguments as a command, so the real
@@ -1004,21 +1030,6 @@ func isCommandStringFlag(interpreter string, token string) bool {
 	default:
 		return !strings.HasPrefix(token, "--") && strings.HasPrefix(token, "-") && strings.ContainsRune(token[1:], 'c')
 	}
-}
-
-// upperCaseEnvName reports whether name looks like a conventional
-// environment variable: at least one letter and no lowercase letters.
-func upperCaseEnvName(name string) bool {
-	hasLetter := false
-	for _, r := range name {
-		if r >= 'a' && r <= 'z' {
-			return false
-		}
-		if r >= 'A' && r <= 'Z' {
-			hasLetter = true
-		}
-	}
-	return hasLetter
 }
 
 // sanitizedDeclaredEnvNames returns the adapter's env: declarations with any
