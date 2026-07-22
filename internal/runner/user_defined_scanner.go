@@ -289,7 +289,8 @@ func (scrubber secretScrubber) scrubDeep(value string) string {
 	result := scrubber.scrub(value)
 	current := result
 	// Decode to a fixed point. Termination is guaranteed: every escape
-	// decodeJSONStringEscapes rewrites (\", \\, \/, \uXXXX) strictly
+	// decodeJSONStringEscapes rewrites (\", \\, \/, \b, \f, \n, \r, \t,
+	// \uXXXX) strictly
 	// shrinks the string, and unknown escapes pass through unchanged, so
 	// decoded != current implies len(decoded) < len(current).
 	for {
@@ -397,8 +398,8 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 }
 
 // decodeJSONStringEscapes interprets JSON string escape sequences (\", \\,
-// \/, \uXXXX including surrogate pairs) embedded in free-form text. Unknown
-// or truncated sequences pass through unchanged.
+// \/, \b, \f, \n, \r, \t, and \uXXXX including surrogate pairs) embedded in
+// free-form text. Unknown or truncated sequences pass through unchanged.
 func decodeJSONStringEscapes(value string) string {
 	if !strings.Contains(value, `\`) {
 		return value
@@ -414,6 +415,21 @@ func decodeJSONStringEscapes(value string) string {
 		switch value[index+1] {
 		case '"', '\\', '/':
 			out.WriteByte(value[index+1])
+			index += 2
+		case 'b':
+			out.WriteByte('\b')
+			index += 2
+		case 'f':
+			out.WriteByte('\f')
+			index += 2
+		case 'n':
+			out.WriteByte('\n')
+			index += 2
+		case 'r':
+			out.WriteByte('\r')
+			index += 2
+		case 't':
+			out.WriteByte('\t')
 			index += 2
 		case 'u':
 			if index+6 > len(value) {
@@ -672,30 +688,44 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 // inlineCredentialAssignment reports the first rejected NAME=value token in
 // an operator-authored command, or "". It rejects secret-named assignments,
 // conventional ALL-UPPERCASE environment names, and any-case names in the
-// leading assignment run or immediately after an assignment wrapper. Inline
-// values sit outside every redaction scope, so name-based carve-outs let a
-// bland credential name persist into evidence. Lowercase and mixed-case
-// NAME=value operands outside assignment position remain allowed. Grouping
-// and control punctuation plus $ are trimmed from token ends so subshell and
+// leading assignment run, at a new command start after ;, &, or | separators,
+// or in an assignment-wrapper zone. Wrapper options keep that zone active.
+// Inline values sit outside every redaction scope, so name-based carve-outs
+// let a bland credential name persist into evidence. Lowercase and mixed-case
+// NAME=value operands outside assignment position remain allowed. Grouping and
+// control punctuation plus $ are trimmed from token ends so subshell and
 // brace-group syntax cannot hide an assignment.
 func inlineCredentialAssignment(command string) string {
-	tokens := strings.Fields(command)
-	assignmentRun := true
-	previous := ""
-	for _, raw := range tokens {
+	commandStart := true
+	wrapperZone := false
+	for _, raw := range strings.Fields(command) {
 		token := strings.Trim(raw, "'\"();&|{}$`")
+		endsCommand := strings.HasSuffix(raw, ";") || strings.HasSuffix(raw, "&") || strings.HasSuffix(raw, "|")
+		if token == "" {
+			commandStart = commandStart || endsCommand
+			continue
+		}
 		eq := strings.IndexByte(token, '=')
-		isAssignment := eq > 0 && envAssignmentNamePattern.MatchString(token[:eq])
-		if isAssignment {
+		if eq > 0 && envAssignmentNamePattern.MatchString(token[:eq]) {
 			name := token[:eq]
-			afterWrapper := assignmentWrapperWords[strings.ToLower(previous)]
-			if isSecretEnvKey(name) || upperCaseEnvName(name) || assignmentRun || afterWrapper {
+			if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone {
 				return name
 			}
+			// A non-rejected assignment operand does not move us past the
+			// command word.
+		} else if assignmentWrapperWords[strings.ToLower(token)] {
+			wrapperZone = true
+			commandStart = false
+		} else if strings.HasPrefix(token, "-") && wrapperZone {
+			// Wrapper options (env -i, sudo -E) keep the zone open.
 		} else {
-			assignmentRun = false
+			wrapperZone = false
+			commandStart = false
 		}
-		previous = token
+		if endsCommand {
+			commandStart = true
+			wrapperZone = false
+		}
 	}
 	return ""
 }

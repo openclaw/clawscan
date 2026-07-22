@@ -701,6 +701,30 @@ func TestScrubDeepReachesArbitraryEncodingDepth(t *testing.T) {
 	}
 }
 
+func TestScrubDeepCatchesMultilineSecretUnderEscapeLayers(t *testing.T) {
+	secret := "line1\nline2-secret-credential"
+	inner, err := json.Marshal(map[string]string{"auth": secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := json.Marshal(map[string]string{"message": string(inner)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	redacted := newSecretScrubber([]string{secret}).scrubDeep(string(outer))
+	for layer := 0; ; layer++ {
+		if strings.Contains(redacted, secret) || strings.Contains(redacted, "line2-secret-credential") {
+			t.Fatalf("layer %d contains multiline secret", layer)
+		}
+		decoded := decodeJSONStringEscapes(redacted)
+		if decoded == redacted {
+			break
+		}
+		redacted = decoded
+	}
+}
+
 func TestRedactJSONStringsCanonicalNumberSecrets(t *testing.T) {
 	// A numeric secret emitted in an alternate spelling (1e3 for 1000,
 	// 1.0 for 1) reveals the same credential.
@@ -723,8 +747,9 @@ func TestRedactJSONStringsCanonicalNumberSecrets(t *testing.T) {
 
 func TestInlineCredentialAssignment(t *testing.T) {
 	// Secret-named and uppercase assignments are rejected anywhere, while
-	// any-case assignments are rejected in a leading run or after wrappers.
-	// Lowercase and mixed-case operand-style NAME=value tokens stay allowed.
+	// any-case assignments are rejected in a leading run, after command
+	// separators, or in wrapper zones that include options. Lowercase and
+	// mixed-case operand-style NAME=value tokens stay allowed.
 	for command, want := range map[string]string{
 		"API_TOKEN=sk-live scanner {{target}}":           "API_TOKEN",
 		"FOO=1 DB_PASSWORD=x scanner {{target}}":         "FOO",
@@ -748,6 +773,11 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"(api_token=sk-live; scanner {{target}})":        "api_token",
 		"`API_TOKEN=sk-live` scanner {{target}}":         "API_TOKEN",
 		"scanner --filter '(mode=fast)'":                 "",
+		"true; session=sk-live scanner {{target}}":       "session",
+		"scanner {{target}} && session=sk-live scanner2": "session",
+		"env -i session=sk-live scanner {{target}}":      "session",
+		"sudo -E deploy_key=x scanner {{target}}":        "deploy_key",
+		"scanner -o mode=fast":                           "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -1095,7 +1125,8 @@ func TestDecodeJSONStringEscapesPassesThroughUnknownSequences(t *testing.T) {
 		`\ud83d\ude00`:      "\U0001F600",
 		`trailing\`:         `trailing\`,
 		`\uZZZZ stays`:      `\uZZZZ stays`,
-		`C:\new\table`:      `C:\new\table`,
+		`\b\f\n\r\t`:        "\b\f\n\r\t",
+		`C:\new\table`:      "C:\new\table",
 	} {
 		if got := decodeJSONStringEscapes(input); got != want {
 			t.Fatalf("decodeJSONStringEscapes(%q) = %q, want %q", input, got, want)
