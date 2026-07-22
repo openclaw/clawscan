@@ -80,7 +80,13 @@ variables with secret-like names, are structurally redacted and the JSON is
 re-serialized, so stored bytes can differ from raw stdout. A string value that
 hides a secret under nested JSON string escapes is decoded to expose and redact
 it, so that value's escape sequences are normalized in the stored evidence; all
-other accepted evidence keeps its original values. Required environment
+other accepted evidence keeps its original values. A credential variable whose
+value is itself a JSON object or array is also redacted leaf by leaf, but only
+its scalar leaves of at least five characters: shorter leaves (a four-digit PIN,
+a two-letter region code) are left in place to avoid over-redacting the many
+short, non-secret values that legitimately appear in evidence. Declare short
+secrets as their own credential variables rather than as leaves of a structured
+value if they must be redacted. Required environment
 variables are checked before any scanner starts. Artifacts record each
 requirement as only `present` or `missing`.
 

@@ -888,10 +888,12 @@ func commandReparsesTarget(command string) bool {
 		awaitingCommandWord := true
 		interpreter := ""
 		sawCmdFlag := false
+		behindLauncher := false
 		resetCommand := func() {
 			awaitingCommandWord = true
 			interpreter = ""
 			sawCmdFlag = false
+			behindLauncher = false
 		}
 		for _, field := range strings.Fields(line) {
 			segments := strings.FieldsFunc(field, func(r rune) bool {
@@ -914,19 +916,31 @@ func commandReparsesTarget(command string) bool {
 					// Launchers (env, sudo) and shell reserved words (if, then, do,
 					// !) both precede the real command word rather than being it, so
 					// skip them to reach the interpreter behind `then sh -c ...`.
-					if launcherWords[lower] || shellCommandIntroducers[lower] {
+					if launcherWords[lower] {
+						behindLauncher = true
+						continue
+					}
+					if shellCommandIntroducers[lower] {
 						continue
 					}
 					eq := strings.IndexByte(token, '=')
 					if strings.HasPrefix(token, "-") || (eq > 0 && envAssignmentNamePattern.MatchString(token[:eq])) {
 						continue
 					}
-					awaitingCommandWord = false
 					if reparsingInterpreterWords[lower] {
+						awaitingCommandWord = false
 						interpreter = lower
-					} else {
-						interpreter = ""
+						continue
 					}
+					// A non-interpreter bare word behind a launcher may be a
+					// positional argument (timeout's duration) that precedes the
+					// real command, so keep scanning for an interpreter rather than
+					// settling on it. Without a launcher it is the command word.
+					if behindLauncher {
+						continue
+					}
+					awaitingCommandWord = false
+					interpreter = ""
 					continue
 				}
 				if interpreter == "" {
