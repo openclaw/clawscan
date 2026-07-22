@@ -713,13 +713,16 @@ func TestRunDefaultModeIgnoresConfigWithoutNotice(t *testing.T) {
 	})
 
 	var artifact struct {
-		ConfigSource string `json:"configSource"`
+		ConfigSource *string `json:"configSource"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
 		t.Fatalf("stdout is not artifact JSON: %v\n%s", err, stdout)
 	}
-	if artifact.ConfigSource != "flags-only" {
-		t.Fatalf("config source = %q", artifact.ConfigSource)
+	if artifact.ConfigSource != nil {
+		t.Fatalf("config source = %q, want nil", *artifact.ConfigSource)
+	}
+	if !strings.Contains(stdout, `"configSource": null`) {
+		t.Fatalf("stdout lacks explicit null config source: %s", stdout)
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty", stderr)
@@ -746,13 +749,16 @@ profiles:
 	})
 
 	var artifact struct {
-		ConfigSource string `json:"configSource"`
+		ConfigSource *string `json:"configSource"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
 		t.Fatal(err)
 	}
-	if artifact.ConfigSource != config {
-		t.Fatalf("config source = %q, want %q", artifact.ConfigSource, config)
+	if artifact.ConfigSource == nil {
+		t.Fatalf("config source = nil, want %q", config)
+	}
+	if *artifact.ConfigSource != config {
+		t.Fatalf("config source = %q, want %q", *artifact.ConfigSource, config)
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q", stderr)
@@ -780,13 +786,16 @@ profiles:
 	})
 
 	var artifact struct {
-		ConfigSource string `json:"configSource"`
+		ConfigSource *string `json:"configSource"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
 		t.Fatal(err)
 	}
-	if artifact.ConfigSource != explicit {
-		t.Fatalf("config source = %q, want %q", artifact.ConfigSource, explicit)
+	if artifact.ConfigSource == nil {
+		t.Fatalf("config source = nil, want %q", explicit)
+	}
+	if *artifact.ConfigSource != explicit {
+		t.Fatalf("config source = %q, want %q", *artifact.ConfigSource, explicit)
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q", stderr)
@@ -819,7 +828,7 @@ profiles:
 		SchemaVersion string `json:"schemaVersion"`
 		Runs          []struct {
 			Profile      string                 `json:"profile"`
-			ConfigSource string                 `json:"configSource"`
+			ConfigSource *string                `json:"configSource"`
 			Scanners     map[string]interface{} `json:"scanners"`
 		} `json:"runs"`
 	}
@@ -836,8 +845,11 @@ profiles:
 		t.Fatalf("profiles = %q", got)
 	}
 	for _, run := range artifact.Runs {
-		if run.ConfigSource != config {
-			t.Fatalf("config source = %q, want %q", run.ConfigSource, config)
+		if run.ConfigSource == nil {
+			t.Fatalf("config source = nil, want %q", config)
+		}
+		if *run.ConfigSource != config {
+			t.Fatalf("config source = %q, want %q", *run.ConfigSource, config)
 		}
 		if _, ok := run.Scanners["clawscan-static"]; !ok {
 			t.Fatalf("missing clawscan-static scanner for %s: %#v", run.Profile, run.Scanners)

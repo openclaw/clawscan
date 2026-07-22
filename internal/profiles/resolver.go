@@ -153,9 +153,6 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 
 	profileName := ""
 	configSource := ""
-	if intent.configPath == "" && !intent.discoverConfig {
-		configSource = "flags-only"
-	}
 	selected := resolvedProfile{profile: Profile{}}
 	if intent.profileSet || intent.configPath != "" || intent.discoverConfig {
 		registry, loadedConfig, err := loadConfigs(cwd, intent.configPath, intent.discoverConfig)

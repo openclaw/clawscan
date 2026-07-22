@@ -164,8 +164,8 @@ profiles:
 	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
-	if opts.ConfigSource != "flags-only" {
-		t.Fatalf("config source = %q, want flags-only", opts.ConfigSource)
+	if opts.ConfigSource != "" {
+		t.Fatalf("config source = %q, want empty for a flags-only run", opts.ConfigSource)
 	}
 }
 
