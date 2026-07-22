@@ -212,6 +212,18 @@ profiles:
         - < {{ prompt:./prompt.md }}
 ```
 
+Run a profile from that file by naming the config explicitly, or opting in to
+discovery for the current directory tree:
+
+```bash
+clawscan ./my-skill --config .clawscan.yml --profile review
+clawscan ./my-skill --profile review --discover-config
+```
+
+ClawScan never loads a `.clawscan.yml` it was not explicitly pointed at:
+config files can define scanners and judges that execute commands, so discovery
+is opt-in per run (see [docs/profiles.md](docs/profiles.md)).
+
 ## Judge Harness
 
 `--judge` hands scanner evidence to an external agent command so it can inspect

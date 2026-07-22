@@ -774,10 +774,17 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"`API_TOKEN=sk-live` scanner {{target}}":         "API_TOKEN",
 		"scanner --filter '(mode=fast)'":                 "",
 		"true; session=sk-live scanner {{target}}":       "session",
+		"true;session=sk-live scanner {{target}}":        "session",
+		"true&&session=sk-live scanner {{target}}":       "session",
+		"scanner {{target}}|session=sk-live post":        "session",
 		"scanner {{target}} && session=sk-live scanner2": "session",
-		"env -i session=sk-live scanner {{target}}":      "session",
-		"sudo -E deploy_key=x scanner {{target}}":        "deploy_key",
-		"scanner -o mode=fast":                           "",
+		// Deliberate conservative rejection: without a real shell parser, the
+		// quoted ampersand cannot be distinguished from a command separator.
+		"scanner --url 'https://x.test/?a=b&c=d' {{target}}": "c",
+		"FOO=1&&scanner {{target}}":                          "FOO",
+		"env -i session=sk-live scanner {{target}}":          "session",
+		"sudo -E deploy_key=x scanner {{target}}":            "deploy_key",
+		"scanner -o mode=fast":                               "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)

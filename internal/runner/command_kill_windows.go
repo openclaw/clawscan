@@ -87,6 +87,12 @@ func (killer *processTreeKiller) started(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
+	if killer.fired.Load() && killer.job == 0 {
+		if err := terminateProcessWithSentinel(cmd.Process.Pid); err != nil {
+			_ = cmd.Process.Kill()
+		}
+		return fmt.Errorf("process containment unavailable (job object creation failed); killed the sandboxed command rather than run it uncontained")
+	}
 	if killer.job == 0 {
 		_ = cmd.Process.Kill()
 		return fmt.Errorf("process containment unavailable (job object creation failed); killed the sandboxed command rather than run it uncontained")
@@ -103,9 +109,19 @@ func (killer *processTreeKiller) started(cmd *exec.Cmd) error {
 		killer.job = 0
 		return fmt.Errorf("failed to assign sandboxed command to its job object; killed it rather than run it uncontained")
 	}
+	if killer.fired.Load() {
+		// Cancellation already ran against an empty job (deadline fired
+		// between Start and assignment). The child must not resume: kill
+		// via the job it now belongs to and report the timeout-shaped
+		// death; the suspended child never executed anything.
+		_ = windows.TerminateJobObject(killer.job, windowsKillExitCode)
+		return fmt.Errorf("command canceled before sandbox assignment completed; killed it without resuming")
+	}
 	if !killer.suspended {
 		return nil
 	}
+	// Cancellation can race this check and ResumeThread, but assignment is
+	// complete, so Cancel's job termination reaches a briefly resumed child.
 	if resumeMainThread(pid) {
 		return nil
 	}
