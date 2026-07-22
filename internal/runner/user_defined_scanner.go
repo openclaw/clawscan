@@ -100,10 +100,10 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 			Error: fmt.Sprintf("User-defined scanner %s command embeds an inline environment assignment (%s=...); its value cannot be redacted — declare it under env: and reference it as an environment variable instead", adapter.config.ID, name),
 		}, nil
 	}
-	if commandEvalReparsesTarget(adapter.config.Command) {
+	if commandReparsesTarget(adapter.config.Command) {
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			Error: fmt.Sprintf("User-defined scanner %s runs eval with a target placeholder; eval re-parses its operand, so a target containing shell metacharacters would execute — remove eval or drop the {{target}} placeholder", adapter.config.ID),
+			Error: fmt.Sprintf("User-defined scanner %s re-parses the interpolated target as shell code (eval, or a shell interpreter's -c/-Command operand); a target containing shell metacharacters would execute — remove the reparsing construct or drop the {{target}} placeholder", adapter.config.ID),
 		}, nil
 	}
 	shell := userDefinedScannerShell(runtime.GOOS, runner.SandboxMode)
@@ -693,18 +693,22 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 	return secrets
 }
 
-// jsonSecretLeaves returns the string leaf values of secret when secret is a
-// JSON object or array, so a structurally re-emitted JSON credential
+// jsonSecretLeaves returns string and numeric scalar leaf values of secret when
+// secret is a JSON object or array, so a structurally re-emitted JSON credential
 // ({"token":"sk-live"} surfacing as {"auth":{"token":"sk-live"}}) is redacted
-// leaf by leaf. Only strings of length >= 5 are returned: shorter scalars,
-// numbers, and booleans would over-redact legitimate evidence.
+// leaf by leaf. Only scalars of length >= 5 are returned; booleans, nulls, and
+// short scalars are excluded to avoid over-redacting legitimate evidence.
+// Duplicate object members inside a credential value remain an exotic residual:
+// JSON decoding keeps only the last member.
 func jsonSecretLeaves(secret string) []string {
 	trimmed := strings.TrimSpace(secret)
 	if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') || !json.Valid([]byte(trimmed)) {
 		return nil
 	}
 	var doc any
-	if err := json.Unmarshal([]byte(trimmed), &doc); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&doc); err != nil {
 		return nil
 	}
 	var leaves []string
@@ -722,6 +726,10 @@ func jsonSecretLeaves(secret string) []string {
 		case string:
 			if len(value) >= 5 {
 				leaves = append(leaves, value)
+			}
+		case json.Number:
+			if len(string(value)) >= 5 {
+				leaves = append(leaves, string(value))
 			}
 		}
 	}
@@ -743,14 +751,18 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 // nested command.
 var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true, "eval": true}
 
-// shellCommandIntroducers are reserved words after which a new command
+// shellCommandIntroducers are reserved words (and the ! pipeline-negation
+// keyword) after which a new command
 // begins, so an assignment immediately following one is at command-start
 // (if VAR=v; then VAR=v; while VAR=v). Recognizing them conservatively —
 // not a full grammar — keeps the guard from missing assignments inside
-// compound commands.
+// compound commands. Case-pattern arms and function-body command starts remain
+// a known conservative-heuristic limitation, covered by the Docker sandbox and
+// operator trust boundary.
 var shellCommandIntroducers = map[string]bool{
 	"if": true, "then": true, "elif": true, "else": true,
 	"do": true, "while": true, "until": true, "time": true,
+	"!": true,
 }
 
 // inlineCredentialAssignment reports the first rejected NAME=value token in
@@ -849,26 +861,90 @@ func inlineCredentialAssignment(command string) string {
 	return ""
 }
 
-// commandEvalReparsesTarget reports whether the command contains any whole-word
-// `eval` token while also interpolating a target placeholder. eval re-parses its
-// operand, so an interpolated target containing shell metacharacters would be
-// executed; the positional-parameter and quoting defenses do not survive that
-// re-parse. This deliberately over-rejects a scanner that takes the literal
-// string "eval" as an argument, which is rare and safer than missing a re-parse
-// of the untrusted target.
-func commandEvalReparsesTarget(command string) bool {
+// commandReparsesTarget reports whether a command with a target placeholder
+// contains any whole-word `eval` token or passes a bare target placeholder as a
+// shell interpreter's command-string operand. Both constructs re-parse the
+// interpolated target as shell code, so the positional-parameter and quoting
+// defenses do not survive. eval remains position-independent; this deliberately
+// over-rejects the rare scanner that takes the literal string "eval" as an
+// argument rather than risking execution of an untrusted target.
+func commandReparsesTarget(command string) bool {
 	if !targetPlaceholderPattern.MatchString(command) {
 		return false
 	}
-	for _, field := range strings.Fields(command) {
-		for _, segment := range strings.FieldsFunc(field, func(r rune) bool { return r == ';' || r == '&' || r == '|' }) {
-			token := strings.Trim(segment, "'\"(){}$`")
-			if token != "" && strings.ToLower(path.Base(token)) == "eval" {
-				return true
+	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		cmdWordSeen := false
+		interpreter := ""
+		sawCmdFlag := false
+		resetCommand := func() {
+			cmdWordSeen = false
+			interpreter = ""
+			sawCmdFlag = false
+		}
+		for _, field := range strings.Fields(line) {
+			segments := strings.FieldsFunc(field, func(r rune) bool {
+				return r == ';' || r == '&' || r == '|'
+			})
+			endsWithSeparator := strings.HasSuffix(field, ";") || strings.HasSuffix(field, "&") || strings.HasSuffix(field, "|")
+			for si, segment := range segments {
+				if si > 0 {
+					resetCommand()
+				}
+				token := strings.Trim(segment, "'\"(){}$`")
+				if token == "" {
+					continue
+				}
+				lower := strings.ToLower(path.Base(token))
+				if lower == "eval" {
+					return true
+				}
+				if !cmdWordSeen {
+					cmdWordSeen = true
+					if reparsingInterpreterWords[lower] {
+						interpreter = lower
+					}
+					continue
+				}
+				if interpreter == "" {
+					continue
+				}
+				if !sawCmdFlag {
+					if isCommandStringFlag(interpreter, token) {
+						sawCmdFlag = true
+					}
+					continue
+				}
+				placeholderOperand := strings.Trim(segment, "'\"()$`")
+				if bareTargetPlaceholderPattern.MatchString(placeholderOperand) {
+					return true
+				}
+				sawCmdFlag = false
+			}
+			if endsWithSeparator {
+				resetCommand()
 			}
 		}
 	}
 	return false
+}
+
+var reparsingInterpreterWords = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true,
+	"cmd": true, "cmd.exe": true,
+	"powershell": true, "powershell.exe": true, "pwsh": true,
+}
+
+func isCommandStringFlag(interpreter string, token string) bool {
+	switch interpreter {
+	case "cmd", "cmd.exe":
+		t := strings.ToLower(token)
+		return t == "/c" || t == "/k"
+	case "powershell", "powershell.exe", "pwsh":
+		t := strings.ToLower(token)
+		return t == "-c" || t == "-command" || t == "-encodedcommand"
+	default:
+		return !strings.HasPrefix(token, "--") && strings.HasPrefix(token, "-") && strings.ContainsRune(token[1:], 'c')
+	}
 }
 
 // upperCaseEnvName reports whether name looks like a conventional
@@ -1093,3 +1169,4 @@ func userDefinedScannerShell(goos string, sandboxMode string) judgeShellSpec {
 }
 
 var targetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
+var bareTargetPlaceholderPattern = regexp.MustCompile(`^\{\{\s*target\s*\}\}$`)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -863,6 +864,10 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"while :; do access=sk-" + "live-cred scanner; done":            "access",
 		"if x=1; then scanner; fi":                                      "x",
 		"scanner --then mode=fast":                                      "",
+		"! access=sk-live scanner {{target}}":                           "access",
+		"scanner --flag && ! db=secret run":                             "db",
+		"scanner !notanassignment":                                      "",
+		"scanner mode=fast":                                             "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -870,12 +875,20 @@ func TestInlineCredentialAssignment(t *testing.T) {
 	}
 }
 
-func TestCommandEvalReparsesTarget(t *testing.T) {
+func TestCommandReparsesTarget(t *testing.T) {
 	for command, want := range map[string]bool{
 		"if true; then eval scanner {{target}}; fi": true,
 		"while :; do eval scanner {{target}}; done": true,
 		"eval scanner {{target}}":                   true,
 		"/bin/eval scanner {{target}}":              true,
+		"sh -c {{target}}":                          true,
+		"bash -lc {{target}}":                       true,
+		"/bin/sh -c {{target}}":                     true,
+		"cmd /C {{target}}":                         true,
+		"powershell -Command {{target}}":            true,
+		"sh -c 'myscanner {{target}} | jq .'":       false,
+		"myscanner -c {{target}}":                   false,
+		"sh -c scan.sh {{target}}":                  false,
 		"scanner {{target}}":                        false,
 		// Conservative over-rejection: eval is a whole-word token even when
 		// the scanner intends it as a literal argument.
@@ -883,8 +896,8 @@ func TestCommandEvalReparsesTarget(t *testing.T) {
 		"myscanner --mode=eval {{target}}": false,
 		"eval scanner --static":            false,
 	} {
-		if got := commandEvalReparsesTarget(command); got != want {
-			t.Fatalf("commandEvalReparsesTarget(%q) = %t, want %t", command, got, want)
+		if got := commandReparsesTarget(command); got != want {
+			t.Fatalf("commandReparsesTarget(%q) = %t, want %t", command, got, want)
 		}
 	}
 }
@@ -905,11 +918,35 @@ func TestUserDefinedScannerRejectsEvalTargetPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "failed" || !strings.Contains(result.Error, "runs eval with a target placeholder") {
+	if result.Status != "failed" || !strings.Contains(result.Error, "re-parses the interpolated target as shell code") {
 		t.Fatalf("result = %q / %q, want eval-target rejection", result.Status, result.Error)
 	}
 	if len(commandRunner.calls) != 0 {
 		t.Fatalf("command ran despite eval-target rejection: %#v", commandRunner.calls)
+	}
+}
+
+func TestUserDefinedScannerRejectsShellCommandTargetPlaceholder(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "sh -c {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "re-parses the interpolated target as shell code") {
+		t.Fatalf("result = %q / %q, want shell-command-target rejection", result.Status, result.Error)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("command ran despite shell-command-target rejection: %#v", commandRunner.calls)
 	}
 }
 
@@ -1530,6 +1567,41 @@ func TestScannerSecretValuesIncludesJSONCredentialLeaves(t *testing.T) {
 	}
 }
 
+func TestJSONSecretLeavesIncludesNumericCredential(t *testing.T) {
+	leaves := jsonSecretLeaves(`{"pin":123456}`)
+	if !slices.Contains(leaves, "123456") {
+		t.Fatalf("numeric JSON credential leaf missing from %v", leaves)
+	}
+}
+
+func TestUserDefinedScannerRedactsNumericJSONCredentialLeaf(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{"pin":123456}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"SCANNER_ACCESS": `{"pin":123456}`},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed", result.Status)
+	}
+	if strings.Contains(string(result.Raw), "123456") {
+		t.Fatalf("numeric JSON credential leaf survived redaction: %s", result.Raw)
+	}
+	if !strings.Contains(string(result.Raw), "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", result.Raw)
+	}
+}
+
 func TestRedactScannerStdoutScrubsReemittedJSONCredentialLeaves(t *testing.T) {
 	credential := "sk-" + "live-cred"
 	env := map[string]string{"SCANNER_ACCESS": `{"to` + `ken":"` + credential + `"}`}
@@ -1549,6 +1621,18 @@ func TestScannerSecretValuesExcludesShortJSONCredentialLeaves(t *testing.T) {
 		if secret == "ab" {
 			t.Fatalf("short JSON credential leaf was included: %v", secrets)
 		}
+	}
+}
+
+func TestJSONSecretLeavesExcludesShortNumericCredential(t *testing.T) {
+	leaves := jsonSecretLeaves(`{"count":42}`)
+	if slices.Contains(leaves, "42") {
+		t.Fatalf("short numeric JSON credential leaf was included: %v", leaves)
+	}
+	raw := `{"count":42}`
+	env := map[string]string{"SCANNER_ACCESS": raw}
+	if got := redactScannerStdout(raw, env, []string{"SCANNER_ACCESS"}); got != raw {
+		t.Fatalf("short numeric evidence was changed: got %s, want %s", got, raw)
 	}
 }
 
