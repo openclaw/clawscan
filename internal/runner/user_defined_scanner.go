@@ -97,7 +97,11 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	if usePositionalTarget {
 		args = append(args, "clawscan-target", target)
 	}
-	fullCommand := append([]string{shell.command}, args...)
+	// The artifact records only the scanner ID, never the rendered command
+	// line: a user-defined command is operator-authored config and may embed
+	// inline credentials (API_TOKEN=sk-live scanner {{target}}), which must
+	// not be persisted into evidence.
+	fullCommand := []string{"user-defined-scanner", adapter.config.ID}
 	timeout := runner.Timeout
 	if timeout == 0 {
 		timeout = 20 * time.Minute
@@ -138,7 +142,23 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	// unrelated host secret's value (CI_TOKEN=clean) would corrupt evidence
 	// without preventing any leak. --sandbox off keeps the full host env.
 	visibleEnv := commandVisibleEnv(runner.Env, scrubNames, runner.SandboxMode)
-	raw := redactScannerStdout(strings.TrimSpace(output.Stdout), visibleEnv, scrubNames)
+	trimmed := strings.TrimSpace(output.Stdout)
+	// Evidence is rejected outright — not repaired — when structural
+	// redaction cannot see everything the raw bytes hold: invalid UTF-8
+	// defeats byte-exact secret comparison after decoding, and duplicate
+	// object members hide earlier values from the decoded walk while
+	// re-encoding would silently rewrite the evidence.
+	evidenceUnsafe := ""
+	if json.Valid([]byte(trimmed)) {
+		evidenceUnsafe = scannerEvidenceUnsafe(trimmed)
+	}
+	raw := redactScannerStdout(trimmed, visibleEnv, scrubNames)
+	if evidenceUnsafe != "" {
+		return ScannerResult{
+			Status: "failed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
+			Error: fmt.Sprintf("User-defined scanner %s output rejected: %s", adapter.config.ID, evidenceUnsafe), ExitCode: exitCode,
+		}, nil
+	}
 	if runErr != nil {
 		// Failure text needs the same coverage as stdout: declared env plus
 		// everything exposed to scanners this run, whatever the spelling.
@@ -416,13 +436,16 @@ func redactScannerStdout(value string, env map[string]string, declared []string)
 		return value
 	}
 	document, changed := redactJSONStrings(document, newSecretScrubber(secrets))
-	// Go's decoder keeps only an object's last duplicate member, so a
-	// secret hidden in an earlier duplicate ({"auth":"sekret","auth":"x"})
-	// is invisible to the walk above yet still present in the raw bytes.
-	// Returning the original verbatim would persist it; re-encoding the
-	// decoded document drops the duplicate member — and its secret — the
-	// same way any JSON consumer would read the object.
-	if !changed && !hasDuplicateJSONKeys(value) {
+	// Returning the original verbatim is only safe when the decoded walk saw
+	// everything the raw bytes hold. Two cases defeat it: Go's decoder keeps
+	// only an object's last duplicate member, hiding a secret in an earlier
+	// duplicate ({"auth":"sekret","auth":"x"}), and invalid UTF-8 decodes to
+	// U+FFFD so a byte-exact secret never matches. Re-encoding the decoded
+	// document destroys both hazards the same way any JSON consumer would
+	// read the text. Paths that persist scanner evidence reject these inputs
+	// outright (scannerEvidenceUnsafe) before evidence acceptance; this
+	// re-encode is the fail-safe for diagnostic and judge-output paths.
+	if !changed && !hasDuplicateJSONKeys(value) && utf8.ValidString(value) {
 		return value
 	}
 	encoded, err := json.Marshal(document)
@@ -430,6 +453,23 @@ func redactScannerStdout(value string, env map[string]string, declared []string)
 		return value
 	}
 	return string(encoded)
+}
+
+// scannerEvidenceUnsafe reports why valid-JSON evidence cannot be safely
+// persisted through structural redaction, or "" when it can. Invalid UTF-8
+// survives json.Valid but decoding swaps the bytes for U+FFFD, so a
+// byte-exact secret comparison misses and the original bytes would persist.
+// Duplicate object members are invisible to the decoded walk (only the last
+// survives), and re-encoding to drop them would silently rewrite evidence.
+// Both cases fail closed: the callers reject the evidence outright.
+func scannerEvidenceUnsafe(value string) string {
+	if !utf8.ValidString(value) {
+		return "contains invalid UTF-8"
+	}
+	if hasDuplicateJSONKeys(value) {
+		return "contains duplicate JSON object members"
+	}
+	return ""
 }
 
 // hasDuplicateJSONKeys reports whether any object in the JSON text declares
@@ -529,13 +569,11 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 		add(env[name])
 	}
 	for name, secret := range env {
-		// The name heuristic over-matches configuration like
-		// PASSWORD_STORE_ENABLE_EXTENSIONS=true; scrubbing such a common
-		// literal would rewrite every matching boolean in scanner JSON. A
-		// real credential is never one of these words, so skip them for
-		// undeclared vars (explicit env: declarations above are kept
-		// whatever their value — the operator called them credentials).
-		if isSecretEnvKey(name) && !commonConfigLiteral(secret) {
+		// Exemptions are by name, never by value: DB_PASSWORD=default is a
+		// weak credential, not configuration, and skipping "default" would
+		// persist it unredacted. Names isSecretEnvKey over-matches are
+		// listed in nonCredentialSecretNamedEnv instead.
+		if isSecretEnvKey(name) && !nonCredentialSecretNamedEnv(name) {
 			add(secret)
 		}
 	}
@@ -545,16 +583,30 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 	return secrets
 }
 
-// commonConfigLiteral reports values that secret-named configuration toggles
-// commonly hold (PASSWORD_STORE_ENABLE_EXTENSIONS=true, TOKEN_CACHE=0) and
-// that no real credential would ever be. Scrubbing one would corrupt every
-// matching scalar in legitimate scanner evidence.
-func commonConfigLiteral(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "true", "false", "yes", "no", "on", "off", "0", "1", "enabled", "disabled", "none", "null", "auto", "default":
-		return true
-	}
-	return false
+// nonCredentialSecretNamedEnvNames lists names isSecretEnvKey matches that
+// are well-known configuration switches, not credentials. Exempting by NAME
+// is deliberate: exempting by value (skipping "true" or "default") would
+// persist a weak real credential like DB_PASSWORD=default unredacted, while
+// sweeping a toggle's value would corrupt every matching scalar in
+// legitimate scanner evidence. Unknown secret-named vars stay fail-closed
+// as credentials.
+var nonCredentialSecretNamedEnvNames = map[string]bool{
+	// pass(1) configuration (PASSWORD_STORE_* settings hold directories,
+	// booleans, lengths, and seconds — never the store's secrets). Every
+	// entry here must actually match isSecretEnvKey; names it already
+	// ignores (GIT_ASKPASS, TOKENIZERS_PARALLELISM) do not belong.
+	"PASSWORD_STORE_DIR":               true,
+	"PASSWORD_STORE_ENABLE_EXTENSIONS": true,
+	"PASSWORD_STORE_EXTENSIONS_DIR":    true,
+	"PASSWORD_STORE_GENERATED_LENGTH":  true,
+	"PASSWORD_STORE_CHARACTER_SET":     true,
+	"PASSWORD_STORE_CLIP_TIME":         true,
+	"PASSWORD_STORE_UMASK":             true,
+	"PASSWORD_STORE_X_SELECTION":       true,
+}
+
+func nonCredentialSecretNamedEnv(name string) bool {
+	return nonCredentialSecretNamedEnvNames[strings.ToUpper(name)]
 }
 
 func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {

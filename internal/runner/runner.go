@@ -901,6 +901,11 @@ func scannerResult(opts Options, scanner string, target resolvedTarget, startedA
 		if !json.Valid(raw) {
 			return ScannerResult{}, fmt.Errorf("scanner result %s is not valid JSON: %s", scanner, path)
 		}
+		// Same evidence-safety bar as live scanner stdout: invalid UTF-8
+		// and duplicate object members defeat structural redaction.
+		if reason := scannerEvidenceUnsafe(string(raw)); reason != "" {
+			return ScannerResult{}, fmt.Errorf("scanner result %s rejected: %s: %s", scanner, reason, path)
+		}
 		// Fixture evidence bypasses RunScanner, so it must pass the same
 		// redaction boundary: a fixture captured from a live run can embed
 		// a currently present declared credential. No command ran, so the
@@ -2255,6 +2260,9 @@ func discoverSkillSpectorCommand() []string {
 
 type defaultCommandRunner struct {
 	Env map[string]string
+	// WaitDelay bounds the post-exit wait for descendants holding the
+	// output pipes; zero means the production default. Overridden in tests.
+	WaitDelay time.Duration
 }
 
 func (runner defaultCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
@@ -2275,8 +2283,23 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	// deadline even after the direct child died.
 	configureCommandTreeKill(cmd)
 	cmd.WaitDelay = 10 * time.Second
+	if runner.WaitDelay > 0 {
+		cmd.WaitDelay = runner.WaitDelay
+	}
 	err := cmd.Run()
 	timedOut := ctx.Err() == context.DeadlineExceeded
+	// WaitDelay expiry means the command exited but left descendants holding
+	// its output pipes (scanner printed {} and backgrounded a daemon). Those
+	// descendants inherited scanner credentials, so kill the whole tree, and
+	// suppress the exit verdict: partial pipe output from a run that needed
+	// force-closing must not pass as a completed scan.
+	waitDelayExpired := errors.Is(err, exec.ErrWaitDelay)
+	if waitDelayExpired {
+		if cmd.Cancel != nil {
+			_ = cmd.Cancel()
+		}
+		err = fmt.Errorf("command left background processes holding its output pipes; killed the process tree: %w", err)
+	}
 	if timedOut {
 		err = fmt.Errorf("command timed out after %s", timeout)
 	}
@@ -2285,7 +2308,7 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	// 128+N (filtered later), but Windows TerminateProcess reports 1, which
 	// is indistinguishable from a real findings-mean-nonzero exit and would
 	// let partial output pass as a completed scan.
-	if cmd.ProcessState != nil && !timedOut {
+	if cmd.ProcessState != nil && !timedOut && !waitDelayExpired {
 		exitCode := cmd.ProcessState.ExitCode()
 		if exitCode >= 0 {
 			output.ExitCode = &exitCode
@@ -2424,10 +2447,10 @@ func redactEnvValues(value string, env map[string]string) string {
 	}
 	secrets := make([]string, 0)
 	for key, secret := range env {
-		// Skip common config-toggle values (see commonConfigLiteral):
-		// PASSWORD_STORE_ENABLE_EXTENSIONS=true is not a credential, and
-		// scrubbing "true" would rewrite unrelated diagnostics.
-		if strings.TrimSpace(secret) == "" || !isSecretEnvKey(key) || commonConfigLiteral(secret) {
+		// Exemptions are by name (nonCredentialSecretNamedEnv), never by
+		// value: DB_PASSWORD=default is a weak credential, and skipping
+		// common-looking values would persist it unredacted.
+		if strings.TrimSpace(secret) == "" || !isSecretEnvKey(key) || nonCredentialSecretNamedEnv(key) {
 			continue
 		}
 		secrets = append(secrets, secret)

@@ -564,6 +564,70 @@ func TestUserDefinedScannerHostRedactionCoversStandardCredentialNames(t *testing
 	}
 }
 
+func TestUserDefinedScannerArtifactOmitsRenderedCommand(t *testing.T) {
+	// A user-defined command may embed inline credentials
+	// (API_TOKEN=sk-live scanner {{target}}); the rendered command line
+	// must never be persisted into artifact evidence.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "API_TOKEN=sk-live-inline scanner {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(result.Command, " ")
+	if strings.Contains(joined, "sk-live-inline") {
+		t.Fatalf("inline credential persisted in artifact command: %v", result.Command)
+	}
+	if joined != "user-defined-scanner alpha" {
+		t.Fatalf("artifact command = %v, want scanner ID reference only", result.Command)
+	}
+}
+
+func TestUserDefinedScannerRejectsUnsafeEvidence(t *testing.T) {
+	// json.Valid accepts invalid UTF-8 inside strings, but decoding swaps
+	// the bytes for U+FFFD so byte-exact secret comparison misses; and
+	// duplicate object members hide earlier values from the decoded walk.
+	// Both must fail the scan, not persist as evidence.
+	for name, stdout := range map[string]string{
+		"invalid-utf8":   "{\"note\":\"\xff\xfe\"}",
+		"duplicate-keys": `{"auth":"a","auth":"b"}`,
+	} {
+		adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+			ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+		})
+		registry, err := NewScannerRegistry(adapter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		commandRunner := &recordingCommandRunner{stdout: stdout}
+		result, err := (ExternalScannerRunner{
+			Registry: registry, CommandRunner: commandRunner,
+			Env: map[string]string{"CI_TOKEN": "unrelated"}, SandboxMode: SandboxModeOff,
+		}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Status != "failed" {
+			t.Fatalf("%s: status = %q, want failed", name, result.Status)
+		}
+		if len(result.Raw) != 0 {
+			t.Fatalf("%s: unsafe evidence persisted: %s", name, result.Raw)
+		}
+		if !strings.Contains(result.Error, "output rejected") {
+			t.Fatalf("%s: error = %q", name, result.Error)
+		}
+	}
+}
+
 func TestUserDefinedScannerHostRedactionKeepsNonSecretSegmentNames(t *testing.T) {
 	// Segment matching must not over-reach: GIT_AUTHOR_NAME contains AUTH
 	// only inside AUTHOR, TOKENIZERS_PARALLELISM contains TOKEN only inside
@@ -952,25 +1016,25 @@ func TestHasDuplicateJSONKeys(t *testing.T) {
 	}
 }
 
-func TestScannerSecretValuesSkipsCommonConfigLiterals(t *testing.T) {
-	// PASSWORD_STORE_ENABLE_EXTENSIONS=true is configuration, not a
-	// credential; sweeping "true" would rewrite every matching boolean in
-	// scanner evidence. Declared env: values are kept whatever they hold.
+func TestScannerSecretValuesExemptsByNameNeverByValue(t *testing.T) {
+	// PASSWORD_STORE_ENABLE_EXTENSIONS is a known pass(1) toggle, exempted
+	// by NAME. DB_PASSWORD=default must still be swept — a weak credential
+	// holding a common-looking value is a credential all the same.
 	env := map[string]string{
 		"PASSWORD_STORE_ENABLE_EXTENSIONS": "true",
+		"DB_PASSWORD":                      "default",
 		"CI_TOKEN":                         "real-secret",
-		"DECLARED_FLAG":                    "false",
 	}
-	secrets := scannerSecretValues(env, []string{"DECLARED_FLAG"})
+	secrets := scannerSecretValues(env, nil)
 	got := strings.Join(secrets, ",")
 	if strings.Contains(got, "true") {
-		t.Fatalf("config literal swept as secret: %v", secrets)
+		t.Fatalf("known config toggle swept as secret: %v", secrets)
+	}
+	if !strings.Contains(got, "default") {
+		t.Fatalf("weak credential exempted by value: %v", secrets)
 	}
 	if !strings.Contains(got, "real-secret") {
 		t.Fatalf("real secret missing from sweep: %v", secrets)
-	}
-	if !strings.Contains(got, "false") {
-		t.Fatalf("declared value must be kept even as a literal: %v", secrets)
 	}
 }
 
