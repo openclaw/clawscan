@@ -235,7 +235,7 @@ func runProfiles(args []string) error {
 	if err != nil {
 		return err
 	}
-	catalog, err := profiles.InspectProfiles(cwd)
+	catalog, err := profiles.InspectProfiles()
 	if err != nil {
 		return err
 	}
@@ -566,6 +566,7 @@ Usage:
 Core flags:
   --profile <name>            Profile to run. Use --profile clawhub for ClawHub parity.
   --config <path>             Load profiles from a specific .clawscan.yml file; omit --profile to run them all.
+  --discover-config           Find and load the nearest .clawscan.yml/.clawscan.yaml in the current directory or a parent. Requires --profile. Off by default: config files can define scanners that run arbitrary commands, so ClawScan never loads config it was not explicitly told to trust.
   --scanner <id>              Scanner to run. Repeat for multiple scanners.
   --scanner-result <id=path>  Use a JSON fixture instead of running that scanner.
   --context <path>            Load profile runtime context from a JSON file.
@@ -596,7 +597,7 @@ Catalog commands:
   clawscan scanners           List supported scanners with required env vars.
   clawscan scanners list      Alias for clawscan scanners.
   clawscan scanners <id>      Show scanner repository, description, env vars, and install guidance.
-  clawscan profiles           List built-in plus nearest project .clawscan.yml/.clawscan.yaml profiles.
+  clawscan profiles           List built-in profiles.
   clawscan profiles -v        Print the resolved profile catalog as pasteable YAML.
   clawscan benchmark list     List supported benchmarks with source datasets and splits.
 

@@ -32,6 +32,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"Install scanner dependencies without running scans.",
 		"--profile <name>",
 		"--config <path>",
+		"--discover-config",
 		"Benchmark command flags:",
 		"--split <name>",
 		"--ids <path-or-url>",
@@ -150,7 +151,7 @@ func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 	}
 }
 
-func TestRunCommandProfilesPrintsMergedDiscoveredProfiles(t *testing.T) {
+func TestRunCommandProfilesPrintsBuiltInProfilesOnly(t *testing.T) {
 	dir := t.TempDir()
 	removedProfile := "skills" + "-sh"
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
@@ -177,12 +178,10 @@ profiles:
 		"Source",
 		"Scanners",
 		"clawhub",
-		".clawscan.yml",
-		"clawscan-static",
+		"built-in",
+		"skillspector, clawscan-static",
 		"clawhub-aig",
 		"skillspector, aig",
-		"local-review",
-		"snyk",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("profiles output missing %q:\n%s", want, stdout)
@@ -190,6 +189,9 @@ profiles:
 	}
 	if strings.Contains(stdout, removedProfile) {
 		t.Fatalf("profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
+	}
+	if strings.Contains(stdout, "local-review") {
+		t.Fatalf("profiles output should not include project profile:\n%s", stdout)
 	}
 }
 
@@ -216,10 +218,8 @@ profiles:
 		"profiles:",
 		"clawhub:",
 		"clawhub-aig:",
-		"local-review:",
-		"- clawscan-static",
+		"- skillspector",
 		"- aig",
-		"json: true",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("verbose profiles output missing %q:\n%s", want, stdout)
@@ -227,6 +227,9 @@ profiles:
 	}
 	if strings.Contains(stdout, removedProfile+":") {
 		t.Fatalf("verbose profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
+	}
+	if strings.Contains(stdout, "local-review:") {
+		t.Fatalf("verbose profiles output should not include project profile:\n%s", stdout)
 	}
 }
 
@@ -675,7 +678,7 @@ profiles:
 	t.Chdir(dir)
 
 	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--profile", "local"}, []string{}); err != nil {
+		if err := run([]string{target, "--profile", "local", "--discover-config"}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -695,7 +698,111 @@ profiles:
 	}
 }
 
-func TestRunCommandConfigWithoutProfileRunsEveryConfigProfile(t *testing.T) {
+func TestRunDefaultModeIgnoresConfigWithoutNotice(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Ignored config\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, "version: [\n")
+	t.Chdir(dir)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := run([]string{target, "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		ConfigSource *string `json:"configSource"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatalf("stdout is not artifact JSON: %v\n%s", err, stdout)
+	}
+	if artifact.ConfigSource != nil {
+		t.Fatalf("config source = %q, want nil", *artifact.ConfigSource)
+	}
+	if !strings.Contains(stdout, `"configSource": null`) {
+		t.Fatalf("stdout lacks explicit null config source: %s", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestRunWithDiscoverConfigLoadsConfig_NoNotice(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Discovered config\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  custom:
+    scanners:
+      - clawscan-static
+`)
+	t.Chdir(dir)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := run([]string{target, "--profile", "custom", "--discover-config", "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		ConfigSource *string `json:"configSource"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.ConfigSource == nil {
+		t.Fatalf("config source = nil, want %q", config)
+	}
+	if *artifact.ConfigSource != config {
+		t.Fatalf("config source = %q, want %q", *artifact.ConfigSource, config)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestRunWithExplicitConfigLoadsConfig_NoNotice(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Explicit config\n")
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: [\n")
+	explicit := filepath.Join(dir, "explicit.yml")
+	writeFile(t, explicit, `version: 1
+profiles:
+  p:
+    scanners:
+      - clawscan-static
+`)
+	t.Chdir(dir)
+
+	stdout, stderr := captureOutput(t, func() {
+		if err := run([]string{target, "--config", explicit, "--profile", "p", "--json"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var artifact struct {
+		ConfigSource *string `json:"configSource"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.ConfigSource == nil {
+		t.Fatalf("config source = nil, want %q", explicit)
+	}
+	if *artifact.ConfigSource != explicit {
+		t.Fatalf("config source = %q, want %q", *artifact.ConfigSource, explicit)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestBatchArtifactRuns_EachHasConfigSource(t *testing.T) {
 	dir := t.TempDir()
 	writeSkill(t, filepath.Join(dir, "skills", "foo"), "# Foo\n")
 	writeSkill(t, filepath.Join(dir, "skills", "bar"), "# Bar\n")
@@ -720,8 +827,9 @@ profiles:
 	var artifact struct {
 		SchemaVersion string `json:"schemaVersion"`
 		Runs          []struct {
-			Profile  string                 `json:"profile"`
-			Scanners map[string]interface{} `json:"scanners"`
+			Profile      string                 `json:"profile"`
+			ConfigSource *string                `json:"configSource"`
+			Scanners     map[string]interface{} `json:"scanners"`
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
@@ -737,6 +845,12 @@ profiles:
 		t.Fatalf("profiles = %q", got)
 	}
 	for _, run := range artifact.Runs {
+		if run.ConfigSource == nil {
+			t.Fatalf("config source = nil, want %q", config)
+		}
+		if *run.ConfigSource != config {
+			t.Fatalf("config source = %q, want %q", *run.ConfigSource, config)
+		}
 		if _, ok := run.Scanners["clawscan-static"]; !ok {
 			t.Fatalf("missing clawscan-static scanner for %s: %#v", run.Profile, run.Scanners)
 		}
@@ -863,4 +977,51 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	os.Stdout = original
 	return string(out)
+}
+
+func captureOutput(t *testing.T, fn func()) (string, string) {
+	t.Helper()
+
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = stdoutWrite
+	os.Stderr = stderrWrite
+	t.Cleanup(func() {
+		os.Stdout = originalStdout
+		os.Stderr = originalStderr
+	})
+
+	fn()
+
+	if err := stdoutWrite.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrWrite.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := io.ReadAll(stdoutRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := io.ReadAll(stderrRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stdoutRead.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrRead.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = originalStdout
+	os.Stderr = originalStderr
+	return string(stdout), string(stderr)
 }

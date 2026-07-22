@@ -83,15 +83,17 @@ Built-in profiles:
 | --- | --- | --- |
 | `clawhub` | `skillspector`, `clawscan-static` | bundled Codex judge with ClawHub prompt/schema |
 
-Profiles are loaded from embedded built-ins plus the nearest `.clawscan.yml` or
-`.clawscan.yaml` discovered upward from the current directory. A project profile
-with the same name shadows the built-in whole profile. `--config <path>` loads a
-specific config; without `--profile`, it runs every profile in that config and
-emits a `clawscan-batch-v1` artifact.
+Profiles are loaded from embedded built-ins. Project `.clawscan.yml` /
+`.clawscan.yaml` files are NOT loaded automatically: pass `--config <path>` to
+load a specific config, or `--discover-config` to load the nearest one found
+upward from the current directory. A project profile with the same name shadows
+the built-in whole profile. `--config <path>` without `--profile` runs every
+profile in that config and emits a `clawscan-batch-v1` artifact. Discovery is
+off by default because project configs can define scanner commands that execute
+with the caller's environment and credentials.
 
-Use `clawscan profiles` to inspect the resolved built-in plus nearest local
-profile catalog. Use `clawscan profiles -v` to print the merged catalog as
-pasteable YAML.
+Use `clawscan profiles` to inspect the built-in profile catalog. Use
+`clawscan profiles -v` to print it as pasteable YAML.
 
 CLI flags override the selected profile for one run. Passing `--scanner`
 without `--profile` creates an ad hoc scanner-only run, so profile judges are

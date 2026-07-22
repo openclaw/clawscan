@@ -107,6 +107,6 @@ ClawScan turns that approach into a repeatable CLI. It includes a built-in `claw
 | --- | --- |
 | `clawscan <target> --scanner <id>` | Run one or more scanners against an explicit target. Omit `<target>` to scan child skill directories under `./skills`. |
 | `clawscan scanners [list\|<scanner-id>]` | Discover supported scanner IDs, required env vars, upstream links, descriptions, and install guidance. |
-| `clawscan profiles [-v]` | Inspect built-in plus nearest project-local profiles; `-v` prints the resolved profile catalog as YAML. |
+| `clawscan profiles [-v]` | Inspect built-in profiles; `-v` prints the catalog as YAML. |
 | `clawscan benchmark [list\|<benchmark-id>]` | Discover or run supported benchmarks through a selected scanner/profile/judge setup. |
 | `clawscan install <scanner-id> [...]` | Install or verify local scanner dependencies where ClawScan has registry-backed install plans. |

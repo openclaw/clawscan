@@ -1,8 +1,6 @@
 package profiles
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,27 +78,12 @@ func TestProfileRegistryRejectsUnknownScannerReferences(t *testing.T) {
 	}
 }
 
-func TestInspectProfilesDiscoversNearestConfigAndShadowsBuiltIns(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
-profiles:
-  clawhub:
-    scanners:
-      - clawscan-static
-  local:
-    scanners:
-      - socket
-`)
-	nested := filepath.Join(dir, "nested")
-	if err := os.Mkdir(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	catalog, err := InspectProfiles(nested)
+func TestInspectProfilesReturnsBuiltIns(t *testing.T) {
+	catalog, err := InspectProfiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,clawhub-aig,local" {
+	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,clawhub-aig" {
 		t.Fatalf("profile ids = %q", got)
 	}
 
@@ -108,10 +91,10 @@ profiles:
 	if !ok {
 		t.Fatal("missing clawhub profile")
 	}
-	if got := strings.Join(clawhub.Profile.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(clawhub.Profile.Scanners, ","); got != "skillspector,clawscan-static" {
 		t.Fatalf("clawhub scanners = %q", got)
 	}
-	if !strings.HasSuffix(clawhub.Source, ".clawscan.yml") {
+	if clawhub.Source != "built-in" {
 		t.Fatalf("clawhub source = %q", clawhub.Source)
 	}
 

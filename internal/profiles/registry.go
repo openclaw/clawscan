@@ -53,11 +53,8 @@ func ProfileIDs() []string {
 	return DefaultProfileRegistry().IDs()
 }
 
-func InspectProfiles(cwd string) (ProfileCatalog, error) {
-	registry, err := loadConfigs(cwd, "")
-	if err != nil {
-		return ProfileCatalog{}, err
-	}
+func InspectProfiles() (ProfileCatalog, error) {
+	registry := DefaultProfileRegistry()
 	catalog := ProfileCatalog{profiles: map[string]ProfileInfo{}}
 	for _, id := range registry.IDs() {
 		resolved, _ := registry.Profile(id)

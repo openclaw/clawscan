@@ -28,6 +28,8 @@ import (
 type Options struct {
 	Target             string
 	Profile            string
+	ConfigSource       string
+	DiscoverConfig     bool
 	ContextPath        string
 	Benchmark          *BenchmarkOptions
 	Scanners           []string
@@ -85,16 +87,19 @@ type CommandOutput struct {
 }
 
 type Artifact struct {
-	SchemaVersion string                   `json:"schemaVersion"`
-	Profile       string                   `json:"profile,omitempty"`
-	Context       json.RawMessage          `json:"context,omitempty"`
-	Target        Target                   `json:"target"`
-	StartedAt     string                   `json:"startedAt"`
-	CompletedAt   string                   `json:"completedAt"`
-	Env           map[string]string        `json:"env"`
-	Sandbox       SandboxMetadata          `json:"sandbox"`
-	Scanners      map[string]ScannerResult `json:"scanners"`
-	Judge         *JudgeResult             `json:"judge"`
+	SchemaVersion string `json:"schemaVersion"`
+	Profile       string `json:"profile,omitempty"`
+	// ConfigSource deliberately lacks omitempty: null positively claims no config
+	// influenced the run, unlike older artifacts that omitted the field.
+	ConfigSource *string                  `json:"configSource"`
+	Context      json.RawMessage          `json:"context,omitempty"`
+	Target       Target                   `json:"target"`
+	StartedAt    string                   `json:"startedAt"`
+	CompletedAt  string                   `json:"completedAt"`
+	Env          map[string]string        `json:"env"`
+	Sandbox      SandboxMetadata          `json:"sandbox"`
+	Scanners     map[string]ScannerResult `json:"scanners"`
+	Judge        *JudgeResult             `json:"judge"`
 }
 
 type RunTargetsResult struct {
@@ -2114,9 +2119,15 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 			Raw:         nil,
 		}
 	}
+	var configSource *string
+	if opts.ConfigSource != "" {
+		source := opts.ConfigSource
+		configSource = &source
+	}
 	return Artifact{
 		SchemaVersion: "clawscan-run-v1",
 		Profile:       opts.Profile,
+		ConfigSource:  configSource,
 		Target: Target{
 			Kind:         "skill",
 			Input:        opts.Target,

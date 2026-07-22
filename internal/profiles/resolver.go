@@ -61,6 +61,7 @@ type cliIntent struct {
 	profile              string
 	profileSet           bool
 	configPath           string
+	discoverConfig       bool
 	contextPath          string
 	scanners             []string
 	scannerResultPaths   map[string]string
@@ -143,19 +144,37 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if intent.configPath != "" && !intent.profileSet {
 		return resolveAllConfigProfiles(intent, cwd)
 	}
+	// Discovery without a profile would record the discovered file as the
+	// run's ConfigSource while applying none of its settings — a provenance
+	// claim the run does not honor. Reject instead of misleading.
+	if intent.discoverConfig && !intent.profileSet {
+		return ResolvedRunSet{}, errors.New("--discover-config requires --profile; use --config <path> to run every profile in a config")
+	}
 
 	profileName := ""
+	configSource := ""
 	selected := resolvedProfile{profile: Profile{}}
-	if intent.profileSet || intent.configPath != "" {
-		registry, err := loadConfigs(cwd, intent.configPath)
+	if intent.profileSet || intent.configPath != "" || intent.discoverConfig {
+		registry, loadedConfig, err := loadConfigs(cwd, intent.configPath, intent.discoverConfig)
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
-		profileName = intent.profile
-		var ok bool
-		selected, ok = registry.Profile(profileName)
-		if !ok {
-			return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
+		if loadedConfig != "" {
+			configSource = loadedConfig
+		}
+		if intent.profileSet {
+			profileName = intent.profile
+			var ok bool
+			selected, ok = registry.Profile(profileName)
+			if !ok {
+				return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
+			}
+			// selected.source is authoritative: a profile served from
+			// embedded YAML is "built-in" even when an unrelated project
+			// config was loaded alongside it.
+			if selected.source == "built-in" {
+				configSource = "built-in"
+			}
 		}
 	}
 
@@ -168,6 +187,8 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		return ResolvedRunSet{}, err
 	}
 	opts.Profile = profileName
+	opts.ConfigSource = configSource
+	opts.DiscoverConfig = intent.discoverConfig
 	if opts.Judge != nil {
 		opts.Judge.Files = files
 	}
@@ -192,7 +213,7 @@ func explicitRunSelectionError() error {
 	return errors.New("No scanner, profile, or config selected. Pass --scanner, --profile, or --config. Use `clawscan benchmark <benchmark-id>` for benchmark runs.")
 }
 
-func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
+func loadConfigs(cwd string, explicitConfig string, discover bool) (ProfileRegistry, string, error) {
 	registry := DefaultProfileRegistry()
 
 	var projectPath string
@@ -202,20 +223,25 @@ func loadConfigs(cwd string, explicitConfig string) (ProfileRegistry, error) {
 		if !filepath.IsAbs(projectPath) {
 			projectPath = filepath.Join(cwd, projectPath)
 		}
-	} else {
+		projectPath = filepath.Clean(projectPath)
+	} else if discover {
 		projectPath, err = discoverConfig(cwd)
 		if err != nil {
-			return ProfileRegistry{}, err
+			return ProfileRegistry{}, "", err
 		}
 	}
 	if projectPath == "" {
-		return registry, nil
+		return registry, "", nil
 	}
 	projectProfiles, err := loadProjectProfiles(projectPath)
 	if err != nil {
-		return ProfileRegistry{}, err
+		return ProfileRegistry{}, "", err
 	}
-	return registry.Merge(projectProfiles)
+	registry, err = registry.Merge(projectProfiles)
+	if err != nil {
+		return ProfileRegistry{}, "", err
+	}
+	return registry, projectPath, nil
 }
 
 func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, error) {
@@ -258,6 +284,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 			return ResolvedRunSet{}, err
 		}
 		opts.Profile = profileName
+		opts.ConfigSource = filepath.Clean(projectPath)
 		opts.OutputPath = ""
 		opts.JSON = false
 		if opts.Judge != nil {
@@ -434,6 +461,8 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			}
 			intent.configPath = value
 			i = next
+		case "--discover-config":
+			intent.discoverConfig = true
 		case "--context":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -551,6 +580,9 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 		default:
 			return cliIntent{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
+	}
+	if intent.configPath != "" && intent.discoverConfig {
+		return cliIntent{}, errors.New("--config and --discover-config are mutually exclusive")
 	}
 	return intent, nil
 }
