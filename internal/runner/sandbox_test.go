@@ -126,6 +126,48 @@ func TestDockerRunFailsClosedWhenScannerTargetVanishes(t *testing.T) {
 	}
 }
 
+func TestDockerRunURLTargetSkipsMountVerification(t *testing.T) {
+	host := &recordingCommandRunner{stdout: "{}"}
+	runner := dockerCommandRunner{Host: host, Env: map[string]string{}, Image: DefaultSandboxImage}
+	url := "https://example.com/skill"
+	if _, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", url}, "", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(host.calls))
+	}
+	args := host.calls[0].args
+	if args[len(args)-1] != url {
+		t.Fatalf("URL target rewritten: %#v", args)
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "type=bind,") && strings.Contains(arg, "example.com") {
+			t.Fatalf("URL target produced a mount: %#v", args)
+		}
+	}
+}
+
+func TestDockerRunWindowsURLTargetSkipsMountTranslation(t *testing.T) {
+	host := &recordingCommandRunner{stdout: "{}"}
+	runner := dockerCommandRunner{Host: host, Env: map[string]string{}, Image: DefaultSandboxImage, GOOS: "windows"}
+	url := "https://example.com/skill"
+	if _, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", url}, "", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(host.calls))
+	}
+	args := host.calls[0].args
+	if args[len(args)-1] != url {
+		t.Fatalf("Windows URL target rewritten: %#v", args)
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "type=bind,") && strings.Contains(arg, "example.com") {
+			t.Fatalf("Windows URL target produced a mount: %#v", args)
+		}
+	}
+}
+
 func TestDockerRunPinsSymlinkTargetToPhysicalPath(t *testing.T) {
 	// A symlink target is resolved to its physical path before mounting,
 	// so a link swapped after validation redirects nothing — the bind
@@ -202,6 +244,51 @@ func TestDockerRunWindowsMissingTargetFailsClosed(t *testing.T) {
 	}
 	if len(host.calls) != 0 {
 		t.Fatalf("container ran despite vanished target: %#v", host.calls)
+	}
+}
+
+func TestDockerRunWindowsEnvPassthroughIsCaseInsensitive(t *testing.T) {
+	host := &recordingCommandRunner{stdout: "{}"}
+	runner := dockerCommandRunner{
+		Host: host, Env: map[string]string{"SCANNER_ACCESS": "secret"},
+		Image: DefaultSandboxImage, GOOS: "windows", EnvNames: []string{"scanner_access"},
+	}
+	if _, err := runner.Run("scanner", nil, "", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(host.calls))
+	}
+	joined := strings.Join(host.calls[0].args, "\x00")
+	if !strings.Contains(joined, "-e\x00SCANNER_ACCESS") {
+		t.Fatalf("real Windows env key not passed through: %#v", host.calls[0].args)
+	}
+	if strings.Contains(joined, "-e\x00scanner_access") {
+		t.Fatalf("declared rather than real env key passed through: %#v", host.calls[0].args)
+	}
+	if strings.Contains(joined, "secret") {
+		t.Fatalf("credential value leaked into Docker args: %#v", host.calls[0].args)
+	}
+}
+
+func TestDockerRunNonWindowsEnvPassthroughRemainsExact(t *testing.T) {
+	host := &recordingCommandRunner{stdout: "{}"}
+	runner := dockerCommandRunner{
+		Host: host, Env: map[string]string{"SCANNER_ACCESS": "secret"},
+		Image: DefaultSandboxImage, EnvNames: []string{"scanner_access"},
+	}
+	if _, err := runner.Run("scanner", nil, "", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(host.calls))
+	}
+	joined := strings.Join(host.calls[0].args, "\x00")
+	if strings.Contains(joined, "-e\x00") {
+		t.Fatalf("case-mismatched env key passed through on non-Windows host: %#v", host.calls[0].args)
+	}
+	if strings.Contains(joined, "secret") {
+		t.Fatalf("credential value leaked into Docker args: %#v", host.calls[0].args)
 	}
 }
 

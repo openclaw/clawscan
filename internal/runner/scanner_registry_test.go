@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -706,12 +707,15 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"API_TOKEN=sk-live scanner {{target}}":           "API_TOKEN",
 		"FOO=1 DB_PASSWORD=x scanner {{target}}":         "DB_PASSWORD",
 		"env API_TOKEN=sk-live scanner {{target}}":       "API_TOKEN",
+		"env 'API_TOKEN=sk-live' scanner {{target}}":     "API_TOKEN",
 		"export API_TOKEN=sk-live; scanner {{target}}":   "API_TOKEN",
 		"set API_TOKEN=sk-live && scanner {{target}}":    "API_TOKEN",
+		`set "API_TOKEN=sk-live" && scanner {{target}}`:  "API_TOKEN",
 		"scanner --arg API_TOKEN=inline {{target}}":      "API_TOKEN",
 		"scanner --token abc {{target}}":                 "",
 		"scanner {{target}}":                             "",
 		"PATH=/usr/bin scanner {{target}}":               "",
+		"scanner --header 'PATH=/usr/bin'":               "",
 		"scanner --url 'https://x.test/?a=b' {{target}}": "",
 		"scanner --retries=3 --api-version=2 {{target}}": "",
 	} {
@@ -756,6 +760,41 @@ func TestEnvEntriesForNameWindowsIsCaseInsensitive(t *testing.T) {
 	linux := envEntriesForNameOnGOOS(env, "scanner_access", "linux")
 	if len(linux) != 0 {
 		t.Fatalf("non-windows lookup must be exact: %v", linux)
+	}
+}
+
+func TestEnvValueForNameFindsNonEmptyExactMatch(t *testing.T) {
+	env := map[string]string{"SCANNER_ACCESS": "secret-value"}
+	if got := envValueForName(env, "SCANNER_ACCESS"); got != "secret-value" {
+		t.Fatalf("envValueForName() = %q, want non-empty exact match", got)
+	}
+	if got := envValueForName(map[string]string{"SCANNER_ACCESS": "  "}, "SCANNER_ACCESS"); got != "" {
+		t.Fatalf("envValueForName() = %q, want empty for whitespace-only value", got)
+	}
+}
+
+func TestUserDefinedScannerInfoSanitizesMalformedEnvEntries(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "scanner {{target}}",
+		Env: []string{"API_TOKEN=sk-live-info-leak", "GOOD_NAME"}, Targets: []string{"skill"},
+	})
+	want := []string{"API_TOKEN", "GOOD_NAME"}
+	if got := adapter.Info().RequiredEnv; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Info().RequiredEnv = %v, want %v", got, want)
+	}
+	declarer, ok := adapter.(interface{ DeclaredCredentialEnv() []string })
+	if !ok {
+		t.Fatal("user-defined scanner does not expose declared credential env")
+	}
+	if got := declarer.DeclaredCredentialEnv(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("DeclaredCredentialEnv() = %v, want %v", got, want)
+	}
+	for _, names := range [][]string{adapter.Info().RequiredEnv, declarer.DeclaredCredentialEnv()} {
+		for _, name := range names {
+			if strings.Contains(name, "sk-live") {
+				t.Fatalf("sanitized env name leaked credential value: %q", name)
+			}
+		}
 	}
 }
 

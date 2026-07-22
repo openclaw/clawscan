@@ -165,9 +165,24 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	// failure.
 	containerName := clawscanContainerName()
 	dockerArgs := []string{"run", "--rm", "--name", containerName, "--network", "bridge"}
+	goos := runner.GOOS
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	seenEnvKeys := map[string]bool{}
 	for _, name := range runner.EnvNames {
-		if strings.TrimSpace(runner.Env[name]) != "" {
-			dockerArgs = append(dockerArgs, "-e", name)
+		entries := envEntriesForNameOnGOOS(runner.Env, name, goos)
+		keys := make([]string, 0, len(entries))
+		for key := range entries {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if strings.TrimSpace(entries[key]) == "" || seenEnvKeys[key] {
+				continue
+			}
+			seenEnvKeys[key] = true
+			dockerArgs = append(dockerArgs, "-e", key)
 		}
 	}
 	// The scan target must never use the writable-parent fallback below:
@@ -179,20 +194,25 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	// reported as the host target, producing evidence for the wrong
 	// subject.
 	target := positionalScannerTarget(command, args)
+	// Only absolute local paths participate in mount pinning and the vanished-
+	// target post-condition: a URL (or other non-path) target gets no bind
+	// mount by design, and dockerMounts only ever mounts absolute paths.
+	if target != "" && !filepath.IsAbs(filepath.Clean(target)) {
+		target = ""
+	}
 	if target != "" {
-		if clean := filepath.Clean(target); filepath.IsAbs(clean) {
-			// EvalSymlinks pins the physical path: mounting the resolved
-			// path means a symlink swapped in after this check redirects
-			// nothing — the bind source is already the real directory. A
-			// resolution failure is the vanished-target case.
-			resolved, err := filepath.EvalSymlinks(clean)
-			if err != nil {
-				return CommandOutput{}, fmt.Errorf("scan target vanished before sandbox start: %s", target)
-			}
-			if resolved != target {
-				args = rewritePositionalScannerTarget(args, target, resolved)
-				target = resolved
-			}
+		clean := filepath.Clean(target)
+		// EvalSymlinks pins the physical path: mounting the resolved
+		// path means a symlink swapped in after this check redirects
+		// nothing — the bind source is already the real directory. A
+		// resolution failure is the vanished-target case.
+		resolved, err := filepath.EvalSymlinks(clean)
+		if err != nil {
+			return CommandOutput{}, fmt.Errorf("scan target vanished before sandbox start: %s", target)
+		}
+		if resolved != target {
+			args = rewritePositionalScannerTarget(args, target, resolved)
+			target = resolved
 		}
 	}
 	// Inference must run on the post-rewrite args: computing it earlier
@@ -212,15 +232,12 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	// runtime image: Docker would reject it as a mount destination and the
 	// scanner could never resolve it. Mount the host source at a stable
 	// POSIX path and hand the scanner that path instead.
-	goos := runner.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
 	if target != "" && goos == "windows" {
-		if _, err := os.Stat(target); err == nil {
-			dockerArgs = append(dockerArgs, "--mount", "type=bind,"+dockerMountField("source", target)+",target="+windowsScanTargetContainerPath+",readonly")
-			args = rewritePositionalScannerTarget(args, target, windowsScanTargetContainerPath)
+		if _, err := os.Stat(target); err != nil {
+			return CommandOutput{}, fmt.Errorf("scan target vanished before sandbox start: %s", target)
 		}
+		dockerArgs = append(dockerArgs, "--mount", "type=bind,"+dockerMountField("source", target)+",target="+windowsScanTargetContainerPath+",readonly")
+		args = rewritePositionalScannerTarget(args, target, windowsScanTargetContainerPath)
 		target = ""
 	}
 	mounts := dockerMounts(cwd, inference, target)
@@ -480,7 +497,7 @@ func collectEnvNames(opts Options, env map[string]string, wholeRegistry bool) []
 			add(name)
 		}
 		for _, name := range info.OptionalEnv {
-			if strings.TrimSpace(env[name]) != "" {
+			if envValueForName(env, name) != "" {
 				add(name)
 			}
 		}

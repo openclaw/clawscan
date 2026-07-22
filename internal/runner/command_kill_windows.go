@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"fmt"
 	"os/exec"
 	"sync/atomic"
 	"syscall"
@@ -19,8 +20,9 @@ import (
 // parent: every descendant stays in the job, and terminating the job
 // kills them all regardless of the parent's state.
 type processTreeKiller struct {
-	job   windows.Handle
-	fired atomic.Bool
+	job       windows.Handle
+	fired     atomic.Bool
+	suspended bool
 }
 
 func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
@@ -47,6 +49,7 @@ func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
 			cmd.SysProcAttr = &syscall.SysProcAttr{}
 		}
 		cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+		killer.suspended = true
 	}
 	cmd.Cancel = func() error {
 		killer.fired.Store(true)
@@ -69,9 +72,9 @@ func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
 // terminating an empty job while the unassigned command and its
 // descendants keep running with scanner credentials. With no job, Cancel
 // and reapStragglers fall back to direct-process kill.
-func (killer *processTreeKiller) started(cmd *exec.Cmd) {
+func (killer *processTreeKiller) started(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
-		return
+		return nil
 	}
 	pid := uint32(cmd.Process.Pid)
 	if killer.job != 0 {
@@ -85,16 +88,27 @@ func (killer *processTreeKiller) started(cmd *exec.Cmd) {
 			killer.job = 0
 		}
 	}
-	resumeMainThread(pid)
+	if !killer.suspended {
+		return nil
+	}
+	if resumeMainThread(pid) {
+		return nil
+	}
+	// The child is stuck suspended; leaving it would burn the whole run
+	// timeout and misreport a tooling failure as a scanner timeout. Kill it
+	// (job first, direct process as fallback) and surface the real cause.
+	killer.reapStragglers(cmd)
+	return fmt.Errorf("failed to resume sandboxed command after suspended start; killed it")
 }
 
 // resumeMainThread resumes the CREATE_SUSPENDED child's initial thread.
-func resumeMainThread(pid uint32) {
+func resumeMainThread(pid uint32) bool {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 	if err != nil {
-		return
+		return false
 	}
 	defer windows.CloseHandle(snapshot)
+	resumed := false
 	var entry windows.ThreadEntry32
 	entry.Size = uint32(unsafe.Sizeof(entry))
 	for err := windows.Thread32First(snapshot, &entry); err == nil; err = windows.Thread32Next(snapshot, &entry) {
@@ -102,10 +116,13 @@ func resumeMainThread(pid uint32) {
 			continue
 		}
 		if thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID); err == nil {
-			_, _ = windows.ResumeThread(thread)
+			if _, err := windows.ResumeThread(thread); err == nil {
+				resumed = true
+			}
 			_ = windows.CloseHandle(thread)
 		}
 	}
+	return resumed
 }
 
 // reapStragglers kills descendants still holding the output pipes after

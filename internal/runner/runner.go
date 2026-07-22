@@ -397,7 +397,7 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 func ValidateRequirements(opts Options, env map[string]string) error {
 	var missing []EnvRequirement
 	for _, req := range requirements(opts, env) {
-		if strings.TrimSpace(env[req.EnvVar]) == "" {
+		if envValueForName(env, req.EnvVar) == "" {
 			missing = append(missing, req)
 		}
 	}
@@ -2290,39 +2290,109 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	if runner.Env != nil {
 		cmd.Env = envMapToEnviron(runner.Env)
 	}
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	// Kill the whole process tree on timeout, and bound the post-kill wait:
-	// a backgrounded grandchild (`sleep 1h & wait` under /bin/sh) inherits
-	// the stdout/stderr pipes and would otherwise keep Run blocked past the
-	// deadline even after the direct child died.
+	// Own the stdio pipes instead of handing exec a bytes.Buffer: with
+	// *os.File stdio, Wait returns as soon as the direct child exits and
+	// never blocks on descendants holding the pipes — so drain expiry is
+	// observed here directly, regardless of the child's exit status. The
+	// stdlib's ErrWaitDelay only surfaces when Wait would otherwise return
+	// nil; a scanner that exits nonzero while a backgrounded child holds
+	// stdout would silently keep its exit code and pass force-closed
+	// partial output off as a completed scan.
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		return CommandOutput{}, err
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
+		return CommandOutput{}, err
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 	killer := configureCommandTreeKill(cmd)
 	defer killer.release()
+	// WaitDelay still bounds Wait if Cancel fails to kill the child.
 	cmd.WaitDelay = 10 * time.Second
 	if runner.WaitDelay > 0 {
 		cmd.WaitDelay = runner.WaitDelay
 	}
-	err := cmd.Start()
-	if err == nil {
-		killer.started(cmd)
-		err = cmd.Wait()
+	err = cmd.Start()
+	// The parent's copies of the write ends must close regardless of Start
+	// success, or the readers below would never see EOF.
+	stdoutW.Close()
+	stderrW.Close()
+	var stdout, stderr bytes.Buffer
+	drained := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(&stdout, stdoutR)
+		drained <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(&stderr, stderrR)
+		drained <- struct{}{}
+	}()
+	pendingReaders := 2
+	// awaitDrain reports how many readers have not hit EOF by the deadline.
+	awaitDrain := func(pending int, deadline time.Duration) int {
+		timer := time.NewTimer(deadline)
+		defer timer.Stop()
+		for pending > 0 {
+			select {
+			case <-drained:
+				pending--
+			case <-timer.C:
+				return pending
+			}
+		}
+		return 0
 	}
+	closeReadersAndAwait := func() {
+		stdoutR.Close()
+		stderrR.Close()
+		// Closing an *os.File interrupts blocked reads. Wait for every copier
+		// to acknowledge that close before touching either buffer.
+		for pendingReaders > 0 {
+			<-drained
+			pendingReaders--
+		}
+	}
+	waitDelayExpired := false
+	if err == nil {
+		if startErr := killer.started(cmd); startErr != nil {
+			_ = cmd.Wait()
+			closeReadersAndAwait()
+			return CommandOutput{}, startErr
+		}
+		err = cmd.Wait()
+		pendingReaders = awaitDrain(pendingReaders, cmd.WaitDelay)
+		if pendingReaders > 0 {
+			// The child exited but descendants still hold the pipes. Kill
+			// the tree, then force EOF by closing the read ends so the
+			// copier goroutines cannot leak even if a descendant escaped.
+			killer.reapStragglers(cmd)
+			pendingReaders = awaitDrain(pendingReaders, time.Second)
+			if pendingReaders > 0 {
+				closeReadersAndAwait()
+			}
+			waitDelayExpired = true
+		}
+	}
+	closeReadersAndAwait()
 	// Classify timeout by whether the kill path actually fired, not by
 	// re-reading ctx.Err(): a command that finished just before the
 	// deadline must not be reported timed out because the context timer
 	// fired while this goroutine was descheduled.
 	timedOut := killer.cancelFired() && ctx.Err() == context.DeadlineExceeded && err != nil
-	// WaitDelay expiry means the command exited but left descendants holding
-	// its output pipes (scanner printed {} and backgrounded a daemon). Those
-	// descendants inherited scanner credentials, so kill the whole tree, and
-	// suppress the exit verdict: partial pipe output from a run that needed
-	// force-closing must not pass as a completed scan.
-	waitDelayExpired := errors.Is(err, exec.ErrWaitDelay)
-	if waitDelayExpired {
-		killer.reapStragglers(cmd)
-		err = fmt.Errorf("command left background processes holding its output pipes; killed the process tree: %w", err)
+	if waitDelayExpired && !timedOut {
+		// Suppress the exit verdict whatever it was: partial pipe output
+		// from a run that needed force-closing must not pass as a
+		// completed scan.
+		if err != nil {
+			err = fmt.Errorf("command left background processes holding its output pipes; killed the process tree: %w", err)
+		} else {
+			err = errors.New("command left background processes holding its output pipes; killed the process tree")
+		}
 	}
 	if timedOut {
 		err = fmt.Errorf("command timed out after %s", timeout)
@@ -2620,7 +2690,7 @@ func registryForOptions(opts Options) ScannerRegistry {
 func envPresence(opts Options, env map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, req := range requirements(opts, env) {
-		if strings.TrimSpace(env[req.EnvVar]) == "" {
+		if envValueForName(env, req.EnvVar) == "" {
 			out[req.EnvVar] = "missing"
 		} else {
 			out[req.EnvVar] = "present"

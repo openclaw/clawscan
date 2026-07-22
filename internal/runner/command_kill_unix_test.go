@@ -82,3 +82,34 @@ func TestDefaultCommandRunnerWaitDelayExpiryKillsDescendantsAndSuppressesExit(t 
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+func TestDefaultCommandRunnerWaitDelayExpiryWithNonzeroExitSuppressesExit(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("needs /bin/sh")
+	}
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	output, err := defaultCommandRunner{WaitDelay: 200 * time.Millisecond}.Run(
+		"/bin/sh", []string{"-c", `echo '{}'; sleep 30 & echo $! > ` + pidFile + `; exit 3`}, "", time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "background processes") {
+		t.Fatalf("err = %v, want wait-delay refusal", err)
+	}
+	if output.ExitCode != nil {
+		t.Fatalf("wait-delay run recorded exit code %d; partial output could pass as a completed scan", *output.ExitCode)
+	}
+	pid, readErr := os.ReadFile(pidFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	childPid, atoiErr := strconv.Atoi(strings.TrimSpace(string(pid)))
+	if atoiErr != nil || childPid <= 0 {
+		t.Fatalf("bad child pid %q: %v", pid, atoiErr)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(childPid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(childPid, syscall.SIGKILL)
+			t.Fatalf("descendant %d survived wait-delay cleanup", childPid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

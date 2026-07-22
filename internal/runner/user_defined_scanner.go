@@ -39,23 +39,14 @@ func (adapter userDefinedScannerAdapter) ID() string { return adapter.config.ID 
 
 func (adapter userDefinedScannerAdapter) Requirements(_ map[string]string) []EnvRequirement {
 	requirements := make([]EnvRequirement, 0, len(adapter.config.Env))
-	for _, name := range adapter.config.Env {
-		// A malformed entry (API_TOKEN=sk-live) must not reach the
-		// missing-variable diagnostic verbatim: the text after = may be a
-		// live credential and the diagnostic prints EnvVar into terminal
-		// and CI logs. Run rejects the config; report only the name part.
-		if !envAssignmentNamePattern.MatchString(name) {
-			if eq := strings.IndexByte(name, '='); eq > 0 {
-				name = name[:eq]
-			}
-		}
+	for _, name := range sanitizedDeclaredEnvNames(adapter.config.Env) {
 		requirements = append(requirements, EnvRequirement{EnvVar: name, Reason: adapter.config.ID + " scanner"})
 	}
 	return requirements
 }
 
 func (adapter userDefinedScannerAdapter) Info() ScannerInfo {
-	return ScannerInfo{ID: adapter.config.ID, DisplayName: adapter.config.ID, RequiredEnv: append([]string(nil), adapter.config.Env...)}
+	return ScannerInfo{ID: adapter.config.ID, DisplayName: adapter.config.ID, RequiredEnv: sanitizedDeclaredEnvNames(adapter.config.Env)}
 }
 
 func (adapter userDefinedScannerAdapter) InstallPlan() InstallPlan {
@@ -73,7 +64,7 @@ func (adapter userDefinedScannerAdapter) CommandBacked() bool { return true }
 // hand the command secrets, so their values must always be redacted from
 // persisted output.
 func (adapter userDefinedScannerAdapter) DeclaredCredentialEnv() []string {
-	return append([]string(nil), adapter.config.Env...)
+	return sanitizedDeclaredEnvNames(adapter.config.Env)
 }
 
 func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
@@ -621,6 +612,17 @@ func envEntriesForNameOnGOOS(env map[string]string, name string, goos string) ma
 	return entries
 }
 
+// envValueForName returns a non-empty value for name under the platform's
+// name-equality rules (case-insensitive on Windows), or "".
+func envValueForName(env map[string]string, name string) string {
+	for _, value := range envEntriesForName(env, name) {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // scannerSecretValues collects the env values to scrub from scanner output:
 // declared env vars are credentials by declaration whatever their spelling,
 // and secret-named vars (isSecretEnvKey) are included because the scanner may
@@ -661,7 +663,8 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // inlineCredentialAssignment reports the first secret-named VAR=value
-// assignment in an operator-authored command, or "". Inline credential
+// assignment in an operator-authored command, or "". Quoted assignment
+// forms are caught conservatively too. Inline credential
 // literals sit outside every redaction scope (they are never in the
 // process env map), so a command echoing one would persist it into
 // evidence. Every token is scanned, not just leading assignment words:
@@ -675,6 +678,7 @@ var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 func inlineCredentialAssignment(command string) string {
 	for _, token := range strings.Fields(command) {
 		token = strings.TrimRight(token, ";&|")
+		token = strings.Trim(token, `'"`)
 		eq := strings.IndexByte(token, '=')
 		if eq <= 0 || !envAssignmentNamePattern.MatchString(token[:eq]) {
 			continue
@@ -684,6 +688,24 @@ func inlineCredentialAssignment(command string) string {
 		}
 	}
 	return ""
+}
+
+// sanitizedDeclaredEnvNames returns the adapter's env: declarations with any
+// malformed assignment entry truncated to its name part. The text after = in
+// a misconfigured entry (API_TOKEN=sk-live) may be a live credential and must
+// never flow into artifact metadata, requirements diagnostics, or redaction
+// name lists.
+func sanitizedDeclaredEnvNames(declared []string) []string {
+	sanitized := make([]string, 0, len(declared))
+	for _, name := range declared {
+		if !envAssignmentNamePattern.MatchString(name) {
+			if eq := strings.IndexByte(name, '='); eq > 0 {
+				name = name[:eq]
+			}
+		}
+		sanitized = append(sanitized, name)
+	}
+	return sanitized
 }
 
 // invalidDeclaredEnvName reports the name portion of a scanner env:
@@ -705,6 +727,13 @@ func invalidDeclaredEnvName(declared []string) string {
 		return name
 	}
 	return ""
+}
+
+// InvalidUserDefinedEnvName reports the offending entry of a user-defined
+// scanner env: list that is not a bare variable name, truncated so a value
+// after = is never echoed, or "" when all entries are valid.
+func InvalidUserDefinedEnvName(declared []string) string {
+	return invalidDeclaredEnvName(declared)
 }
 
 // nonCredentialSecretNamedEnvNames lists names isSecretEnvKey matches that

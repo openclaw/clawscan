@@ -39,7 +39,7 @@ func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
 
 // started is a post-Start hook; group membership is inherited via Setpgid,
 // so there is nothing to do on Unix.
-func (killer *processTreeKiller) started(*exec.Cmd) {}
+func (killer *processTreeKiller) started(*exec.Cmd) error { return nil }
 
 // reapStragglers kills descendants still holding the output pipes after
 // the direct child exited (WaitDelay expiry). The group is private to this
