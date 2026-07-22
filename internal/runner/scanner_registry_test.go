@@ -868,6 +868,9 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"scanner --flag && ! db=secret run":                             "db",
 		"scanner !notanassignment":                                      "",
 		"scanner mode=fast":                                             "",
+		"f(){ access=sk-live; }; f {{target}}":                          "access",
+		"case $x in a) db=sk-live ;; esac":                              "db",
+		"(cd dir && scanner mode=fast)":                                 "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -886,8 +889,15 @@ func TestCommandReparsesTarget(t *testing.T) {
 		"/bin/sh -c {{target}}":                     true,
 		"cmd /C {{target}}":                         true,
 		"powershell -Command {{target}}":            true,
+		"env sh -c {{target}}":                      true,
+		"sudo bash -lc {{target}}":                  true,
+		"env NAME=v sh -c {{target}}":               true,
+		"env -i sh -c {{target}}":                   true,
+		"/usr/bin/env sh -c {{target}}":             true,
 		"sh -c 'myscanner {{target}} | jq .'":       false,
+		"sh -c 'scan {{target}} | jq'":              false,
 		"myscanner -c {{target}}":                   false,
+		"env myscanner {{target}}":                  false,
 		"sh -c scan.sh {{target}}":                  false,
 		"scanner {{target}}":                        false,
 		// Conservative over-rejection: eval is a whole-word token even when

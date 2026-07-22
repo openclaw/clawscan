@@ -756,9 +756,7 @@ var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": tru
 // begins, so an assignment immediately following one is at command-start
 // (if VAR=v; then VAR=v; while VAR=v). Recognizing them conservatively —
 // not a full grammar — keeps the guard from missing assignments inside
-// compound commands. Case-pattern arms and function-body command starts remain
-// a known conservative-heuristic limitation, covered by the Docker sandbox and
-// operator trust boundary.
+// compound commands.
 var shellCommandIntroducers = map[string]bool{
 	"if": true, "then": true, "elif": true, "else": true,
 	"do": true, "while": true, "until": true, "time": true,
@@ -812,41 +810,48 @@ func inlineCredentialAssignment(command string) string {
 					prevWasOption = false
 				}
 				token := strings.Trim(segment, "'\"(){}$`")
-				if token == "" {
-					continue
-				}
-				eq := strings.IndexByte(token, '=')
-				if eq > 0 && envAssignmentNamePattern.MatchString(token[:eq]) {
-					name := token[:eq]
-					if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone || shellZone {
-						return name
+				if token != "" {
+					eq := strings.IndexByte(token, '=')
+					if eq > 0 && envAssignmentNamePattern.MatchString(token[:eq]) {
+						name := token[:eq]
+						if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone || shellZone {
+							return name
+						}
+						// A non-rejected assignment operand does not move us past the
+						// command word.
+						prevWasOption = false
+					} else if assignmentWrapperWords[strings.ToLower(path.Base(token))] {
+						wrapperZone = true
+						commandStart = false
+						prevWasOption = false
+					} else if shellInterpreterWords[strings.ToLower(path.Base(token))] {
+						shellZone = true
+						commandStart = false
+						prevWasOption = false
+					} else if shellCommandIntroducers[strings.ToLower(token)] {
+						commandStart = true
+						wrapperZone = false
+						shellZone = false
+						prevWasOption = false
+					} else if strings.HasPrefix(token, "-") && (wrapperZone || shellZone) {
+						// Wrapper and interpreter options (env -i, sh -c) keep the zone open.
+						prevWasOption = true
+					} else if (wrapperZone || shellZone) && prevWasOption {
+						// A bare option operand keeps the wrapper or interpreter zone open.
+						prevWasOption = false
+					} else {
+						wrapperZone = false
+						shellZone = false
+						commandStart = false
+						prevWasOption = false
 					}
-					// A non-rejected assignment operand does not move us past the
-					// command word.
-					prevWasOption = false
-				} else if assignmentWrapperWords[strings.ToLower(path.Base(token))] {
-					wrapperZone = true
-					commandStart = false
-					prevWasOption = false
-				} else if shellInterpreterWords[strings.ToLower(path.Base(token))] {
-					shellZone = true
-					commandStart = false
-					prevWasOption = false
-				} else if shellCommandIntroducers[strings.ToLower(token)] {
+				}
+				if strings.HasSuffix(segment, "{") || strings.HasSuffix(segment, "(") || strings.HasSuffix(segment, ")") {
+					// Function bodies (f(){ ), brace groups ({ ), subshells (( ), and case
+					// arms (pat) ) all begin a fresh command after this token.
 					commandStart = true
 					wrapperZone = false
 					shellZone = false
-					prevWasOption = false
-				} else if strings.HasPrefix(token, "-") && (wrapperZone || shellZone) {
-					// Wrapper and interpreter options (env -i, sh -c) keep the zone open.
-					prevWasOption = true
-				} else if (wrapperZone || shellZone) && prevWasOption {
-					// A bare option operand keeps the wrapper or interpreter zone open.
-					prevWasOption = false
-				} else {
-					wrapperZone = false
-					shellZone = false
-					commandStart = false
 					prevWasOption = false
 				}
 			}
@@ -863,21 +868,22 @@ func inlineCredentialAssignment(command string) string {
 
 // commandReparsesTarget reports whether a command with a target placeholder
 // contains any whole-word `eval` token or passes a bare target placeholder as a
-// shell interpreter's command-string operand. Both constructs re-parse the
-// interpolated target as shell code, so the positional-parameter and quoting
-// defenses do not survive. eval remains position-independent; this deliberately
-// over-rejects the rare scanner that takes the literal string "eval" as an
-// argument rather than risking execution of an untrusted target.
+// shell interpreter's command-string operand, including an interpreter hidden
+// behind transparent launcher wrappers. Both constructs re-parse the interpolated
+// target as shell code, so the positional-parameter and quoting defenses do not
+// survive. eval remains position-independent; this deliberately over-rejects the
+// rare scanner that takes the literal string "eval" as an argument rather than
+// risking execution of an untrusted target.
 func commandReparsesTarget(command string) bool {
 	if !targetPlaceholderPattern.MatchString(command) {
 		return false
 	}
 	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
-		cmdWordSeen := false
+		awaitingCommandWord := true
 		interpreter := ""
 		sawCmdFlag := false
 		resetCommand := func() {
-			cmdWordSeen = false
+			awaitingCommandWord = true
 			interpreter = ""
 			sawCmdFlag = false
 		}
@@ -898,10 +904,19 @@ func commandReparsesTarget(command string) bool {
 				if lower == "eval" {
 					return true
 				}
-				if !cmdWordSeen {
-					cmdWordSeen = true
+				if awaitingCommandWord {
+					if launcherWords[lower] {
+						continue
+					}
+					eq := strings.IndexByte(token, '=')
+					if strings.HasPrefix(token, "-") || (eq > 0 && envAssignmentNamePattern.MatchString(token[:eq])) {
+						continue
+					}
+					awaitingCommandWord = false
 					if reparsingInterpreterWords[lower] {
 						interpreter = lower
+					} else {
+						interpreter = ""
 					}
 					continue
 				}
@@ -926,6 +941,14 @@ func commandReparsesTarget(command string) bool {
 		}
 	}
 	return false
+}
+
+// launcherWords exec their trailing arguments as a command, so the real
+// interpreter (sh -c ...) can hide behind one. Skip them plus their own
+// options and NAME=value assignments when locating the command word.
+var launcherWords = map[string]bool{
+	"env": true, "command": true, "exec": true, "sudo": true,
+	"nohup": true, "nice": true, "timeout": true, "stdbuf": true,
 }
 
 var reparsingInterpreterWords = map[string]bool{
