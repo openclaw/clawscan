@@ -805,10 +805,14 @@ func TestInlineCredentialAssignment(t *testing.T) {
 	// separators, or in wrapper zones that include options. Lowercase and
 	// mixed-case operand-style NAME=value tokens stay allowed.
 	for command, want := range map[string]string{
-		"API_TOKEN=sk-live scanner {{target}}":            "API_TOKEN",
-		"FOO=1 DB_PASSWORD=x scanner {{target}}":          "FOO",
-		"env API_TOKEN=sk-live scanner {{target}}":        "API_TOKEN",
-		"env 'API_TOKEN=sk-live' scanner {{target}}":      "API_TOKEN",
+		"API_TOKEN=sk-live scanner {{target}}":       "API_TOKEN",
+		"FOO=1 DB_PASSWORD=x scanner {{target}}":     "FOO",
+		"env API_TOKEN=sk-live scanner {{target}}":   "API_TOKEN",
+		"env 'API_TOKEN=sk-live' scanner {{target}}": "API_TOKEN",
+		// A backslash-escaped equals is the same assignment after the shell
+		// removes the backslash, so it must be detected as such.
+		`env API_TOKEN\=sk-live scanner {{target}}`:       "API_TOKEN",
+		`API_TOKEN\=sk-live scanner {{target}}`:           "API_TOKEN",
 		"export API_TOKEN=sk-live; scanner {{target}}":    "API_TOKEN",
 		"set API_TOKEN=sk-live && scanner {{target}}":     "API_TOKEN",
 		`set "API_TOKEN=sk-live" && scanner {{target}}`:   "API_TOKEN",
@@ -910,6 +914,15 @@ func TestCommandReparsesTarget(t *testing.T) {
 		"env myscanner {{target}}":                  false,
 		"sh -c scan.sh {{target}}":                  false,
 		"scanner {{target}}":                        false,
+		// A placeholder embedded in the first command-string operand still lands
+		// in the nested interpreter's code position, unlike a placeholder in a
+		// later operand which is only an inner positional parameter.
+		"sh -c echo-{{target}}":           true,
+		"sh -c {{target}}-scan":           true,
+		"bash -c pre-{{target}}-post":     true,
+		"env sh -c echo-{{target}}":       true,
+		"timeout 5 sh -c echo-{{target}}": true,
+		"sh -c myscanner {{target}}":      false,
 		// Conservative over-rejection: eval is a whole-word token even when
 		// the scanner intends it as a literal argument.
 		"myscanner --mode eval {{target}}": true,

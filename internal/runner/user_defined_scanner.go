@@ -817,9 +817,14 @@ func inlineCredentialAssignment(command string) string {
 				}
 				token := strings.Trim(segment, "'\"(){}$`")
 				if token != "" {
-					eq := strings.IndexByte(token, '=')
-					if eq > 0 && envAssignmentNamePattern.MatchString(token[:eq]) {
-						name := token[:eq]
+					// Derive the assignment name from a backslash-stripped view so
+					// a shell-escaped equals (env API_TOKEN\=sk-live) is recognized
+					// as the assignment the shell actually performs after removing
+					// the backslash, rather than a name that fails the regex.
+					assignment := strings.ReplaceAll(token, `\`, "")
+					eq := strings.IndexByte(assignment, '=')
+					if eq > 0 && envAssignmentNamePattern.MatchString(assignment[:eq]) {
+						name := assignment[:eq]
 						if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone || shellZone {
 							return name
 						}
@@ -873,13 +878,17 @@ func inlineCredentialAssignment(command string) string {
 }
 
 // commandReparsesTarget reports whether a command with a target placeholder
-// contains any whole-word `eval` token or passes a bare target placeholder as a
-// shell interpreter's command-string operand, including an interpreter hidden
-// behind transparent launcher wrappers. Both constructs re-parse the interpolated
-// target as shell code, so the positional-parameter and quoting defenses do not
-// survive. eval remains position-independent; this deliberately over-rejects the
-// rare scanner that takes the literal string "eval" as an argument rather than
-// risking execution of an untrusted target.
+// contains any whole-word `eval` token or embeds a target placeholder anywhere
+// in the first operand of a shell interpreter's command string, including an
+// interpreter hidden behind transparent launcher wrappers. A placeholder inside
+// that first operand (`sh -c {{target}}`, `sh -c echo-{{target}}`) is re-parsed
+// as shell code by the nested interpreter, so the positional-parameter and
+// quoting defenses do not survive; a placeholder in a later operand
+// (`sh -c scan.sh {{target}}`) is an inner positional parameter ($0/$1) that
+// the interpreter does not reparse, so only the first command-string operand is
+// inspected. eval remains position-independent; this deliberately over-rejects
+// the rare scanner that takes the literal string "eval" as an argument rather
+// than risking execution of an untrusted target.
 func commandReparsesTarget(command string) bool {
 	if !targetPlaceholderPattern.MatchString(command) {
 		return false
@@ -952,8 +961,12 @@ func commandReparsesTarget(command string) bool {
 					}
 					continue
 				}
+				// The placeholder is dangerous anywhere inside this first
+				// command-string operand, not only when the whole operand is the
+				// bare placeholder: `sh -c echo-{{target}}` still renders the
+				// target into the nested interpreter's code position.
 				placeholderOperand := strings.Trim(segment, "'\"()$`")
-				if bareTargetPlaceholderPattern.MatchString(placeholderOperand) {
+				if targetPlaceholderPattern.MatchString(placeholderOperand) {
 					return true
 				}
 				sawCmdFlag = false
@@ -1215,4 +1228,3 @@ func userDefinedScannerShell(goos string, sandboxMode string) judgeShellSpec {
 }
 
 var targetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
-var bareTargetPlaceholderPattern = regexp.MustCompile(`^\{\{\s*target\s*\}\}$`)
