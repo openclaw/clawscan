@@ -689,9 +689,9 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 // an operator-authored command, or "". It rejects secret-named assignments,
 // conventional ALL-UPPERCASE environment names, and any-case names in the
 // leading assignment run, at a new command start after ;, &, or | separators
-// wherever they appear, or in an assignment-wrapper zone. Separator handling
-// is not shell-quote-aware and therefore rejects conservatively. Wrapper
-// options keep that zone active.
+// wherever they appear or after a newline, or in an assignment-wrapper zone.
+// Separator handling is not shell-quote-aware and therefore rejects
+// conservatively. Wrapper options keep that zone active.
 // Inline values sit outside every redaction scope, so name-based carve-outs
 // let a bland credential name persist into evidence. Lowercase and mixed-case
 // NAME=value operands outside assignment position remain allowed. Grouping and
@@ -700,46 +700,50 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 func inlineCredentialAssignment(command string) string {
 	commandStart := true
 	wrapperZone := false
-	for _, field := range strings.Fields(command) {
-		// Split attached separators (true;NAME=v, a|b, x&&NAME=v): the
-		// shell treats each ;&| as a command boundary regardless of
-		// surrounding whitespace, so each segment is inspected as if it
-		// began a new token, and every boundary resets command-start.
-		segments := strings.FieldsFunc(field, func(r rune) bool {
-			return r == ';' || r == '&' || r == '|'
-		})
-		endsWithSeparator := strings.HasSuffix(field, ";") || strings.HasSuffix(field, "&") || strings.HasSuffix(field, "|")
-		for si, segment := range segments {
-			if si > 0 {
-				// Interior separator: the segment starts a new command.
+	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		commandStart = true
+		wrapperZone = false
+		for _, field := range strings.Fields(line) {
+			// Split attached separators (true;NAME=v, a|b, x&&NAME=v): the
+			// shell treats each ;&| as a command boundary regardless of
+			// surrounding whitespace, so each segment is inspected as if it
+			// began a new token, and every boundary resets command-start.
+			segments := strings.FieldsFunc(field, func(r rune) bool {
+				return r == ';' || r == '&' || r == '|'
+			})
+			endsWithSeparator := strings.HasSuffix(field, ";") || strings.HasSuffix(field, "&") || strings.HasSuffix(field, "|")
+			for si, segment := range segments {
+				if si > 0 {
+					// Interior separator: the segment starts a new command.
+					commandStart = true
+					wrapperZone = false
+				}
+				token := strings.Trim(segment, "'\"(){}$`")
+				if token == "" {
+					continue
+				}
+				eq := strings.IndexByte(token, '=')
+				if eq > 0 && envAssignmentNamePattern.MatchString(token[:eq]) {
+					name := token[:eq]
+					if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone {
+						return name
+					}
+					// A non-rejected assignment operand does not move us past the
+					// command word.
+				} else if assignmentWrapperWords[strings.ToLower(token)] {
+					wrapperZone = true
+					commandStart = false
+				} else if strings.HasPrefix(token, "-") && wrapperZone {
+					// Wrapper options (env -i, sudo -E) keep the zone open.
+				} else {
+					wrapperZone = false
+					commandStart = false
+				}
+			}
+			if endsWithSeparator {
 				commandStart = true
 				wrapperZone = false
 			}
-			token := strings.Trim(segment, "'\"(){}$`")
-			if token == "" {
-				continue
-			}
-			eq := strings.IndexByte(token, '=')
-			if eq > 0 && envAssignmentNamePattern.MatchString(token[:eq]) {
-				name := token[:eq]
-				if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone {
-					return name
-				}
-				// A non-rejected assignment operand does not move us past the
-				// command word.
-			} else if assignmentWrapperWords[strings.ToLower(token)] {
-				wrapperZone = true
-				commandStart = false
-			} else if strings.HasPrefix(token, "-") && wrapperZone {
-				// Wrapper options (env -i, sudo -E) keep the zone open.
-			} else {
-				wrapperZone = false
-				commandStart = false
-			}
-		}
-		if endsWithSeparator {
-			commandStart = true
-			wrapperZone = false
 		}
 	}
 	return ""

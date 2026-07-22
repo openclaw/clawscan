@@ -72,10 +72,16 @@ Skipped scanners do not fire gate rules. A scanner result with status `failed`
 also does not fire an exit-code rule; a nonzero command that still returned
 valid JSON has status `completed` and can fire one.
 
-The command must write JSON to stdout. ClawScan preserves valid stdout as the
-scanner's raw evidence; empty or non-JSON stdout produces a failed scanner
-result. Required environment variables are checked before any scanner starts.
-Artifacts record each requirement as only `present` or `missing`.
+The command must write valid UTF-8 JSON to stdout; empty, non-JSON, or
+invalid-UTF-8 stdout produces a failed scanner result. JSON objects with
+duplicate member names are also rejected rather than silently rewritten.
+ClawScan preserves accepted evidence byte-for-byte unless credential redaction
+fires: values from declared or visible credential variables, and undeclared
+variables with secret-like names, are structurally redacted and the JSON is
+re-serialized, so stored bytes can differ while the evidence remains
+semantically identical apart from the redacted values. Required environment
+variables are checked before any scanner starts. Artifacts record each
+requirement as only `present` or `missing`.
 
 User-defined scanners use the same execution path as built-in command-backed
 scanners. They run in the Docker sandbox by default, and declared `env` names
