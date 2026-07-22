@@ -689,8 +689,11 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 
 // shellInterpreterWords are commands whose operand is itself a shell
 // command; the first non-option operand after one is a nested command
-// start, so assignment-shaped tokens there must be rejected.
-var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true}
+// start, so assignment-shaped tokens there must be rejected. eval evaluates
+// its operand as shell code in the current shell, so it belongs here even
+// though it takes no -c option — its first operand directly begins the
+// nested command.
+var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true, "eval": true}
 
 // inlineCredentialAssignment reports the first rejected NAME=value token in
 // an operator-authored command, or "". It rejects secret-named assignments,

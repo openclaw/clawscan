@@ -77,8 +77,10 @@ duplicate member names are also rejected rather than silently rewritten.
 ClawScan preserves accepted evidence byte-for-byte unless credential redaction
 fires: values from declared or visible credential variables, and undeclared
 variables with secret-like names, are structurally redacted and the JSON is
-re-serialized, so stored bytes can differ while the evidence remains
-semantically identical apart from the redacted values. Required environment
+re-serialized, so stored bytes can differ from raw stdout. A string value that
+hides a secret under nested JSON string escapes is decoded to expose and redact
+it, so that value's escape sequences are normalized in the stored evidence; all
+other accepted evidence keeps its original values. Required environment
 variables are checked before any scanner starts. Artifacts record each
 requirement as only `present` or `missing`.
 
