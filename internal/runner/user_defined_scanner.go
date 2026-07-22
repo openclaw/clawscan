@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path"
 	"regexp"
 	"runtime"
 	"sort"
@@ -357,11 +358,12 @@ func secretFreeRune(secrets []string) string {
 
 func gateEligibleExitCode(exitCode *int) *int {
 	// Shells and docker run report a signal-killed child as 128+N (137 for
-	// SIGKILL/OOM, 143 for SIGTERM) with a normal ProcessState, and reserve
-	// 126/127 for not-executable/not-found. None of these are scanner
-	// verdicts: treating them as gate-eligible would let partial output from
-	// a killed scan pass an exit-code gate.
-	if exitCode == nil || *exitCode < 0 || *exitCode >= 126 {
+	// SIGKILL/OOM, 143 for SIGTERM) with a normal ProcessState. Docker reserves
+	// 125 for docker-run failure, and shells reserve 126/127 for
+	// not-executable/not-found. None of these are scanner verdicts: treating
+	// them as gate-eligible would let partial output from a failed scan pass an
+	// exit-code gate.
+	if exitCode == nil || *exitCode < 0 || *exitCode >= 125 {
 		return nil
 	}
 	return exitCode
@@ -685,13 +687,20 @@ var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // operand sets an environment variable in the child regardless of case.
 var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set": true, "setx": true, "sudo": true}
 
+// shellInterpreterWords are commands whose operand is itself a shell
+// command; the first non-option operand after one is a nested command
+// start, so assignment-shaped tokens there must be rejected.
+var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true}
+
 // inlineCredentialAssignment reports the first rejected NAME=value token in
 // an operator-authored command, or "". It rejects secret-named assignments,
 // conventional ALL-UPPERCASE environment names, and any-case names in the
 // leading assignment run, at a new command start after ;, &, or | separators
 // wherever they appear or after a newline, or in an assignment-wrapper zone.
-// Separator handling is not shell-quote-aware and therefore rejects
-// conservatively. Wrapper options keep that zone active.
+// The first operand of a shell interpreter word (sh, bash, and peers,
+// including path forms such as /bin/sh) is also treated as a nested command
+// start. Separator handling is not shell-quote-aware and therefore rejects
+// conservatively. Wrapper and shell-interpreter options keep their zones active.
 // Inline values sit outside every redaction scope, so name-based carve-outs
 // let a bland credential name persist into evidence. Lowercase and mixed-case
 // NAME=value operands outside assignment position remain allowed. Grouping and
@@ -700,9 +709,11 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 func inlineCredentialAssignment(command string) string {
 	commandStart := true
 	wrapperZone := false
+	shellZone := false
 	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
 		commandStart = true
 		wrapperZone = false
+		shellZone = false
 		for _, field := range strings.Fields(line) {
 			// Split attached separators (true;NAME=v, a|b, x&&NAME=v): the
 			// shell treats each ;&| as a command boundary regardless of
@@ -717,6 +728,7 @@ func inlineCredentialAssignment(command string) string {
 					// Interior separator: the segment starts a new command.
 					commandStart = true
 					wrapperZone = false
+					shellZone = false
 				}
 				token := strings.Trim(segment, "'\"(){}$`")
 				if token == "" {
@@ -725,7 +737,7 @@ func inlineCredentialAssignment(command string) string {
 				eq := strings.IndexByte(token, '=')
 				if eq > 0 && envAssignmentNamePattern.MatchString(token[:eq]) {
 					name := token[:eq]
-					if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone {
+					if isSecretEnvKey(name) || upperCaseEnvName(name) || commandStart || wrapperZone || shellZone {
 						return name
 					}
 					// A non-rejected assignment operand does not move us past the
@@ -733,16 +745,21 @@ func inlineCredentialAssignment(command string) string {
 				} else if assignmentWrapperWords[strings.ToLower(token)] {
 					wrapperZone = true
 					commandStart = false
-				} else if strings.HasPrefix(token, "-") && wrapperZone {
-					// Wrapper options (env -i, sudo -E) keep the zone open.
+				} else if shellInterpreterWords[strings.ToLower(path.Base(token))] {
+					shellZone = true
+					commandStart = false
+				} else if strings.HasPrefix(token, "-") && (wrapperZone || shellZone) {
+					// Wrapper and interpreter options (env -i, sh -c) keep the zone open.
 				} else {
 					wrapperZone = false
+					shellZone = false
 					commandStart = false
 				}
 			}
 			if endsWithSeparator {
 				commandStart = true
 				wrapperZone = false
+				shellZone = false
 			}
 		}
 	}

@@ -457,9 +457,10 @@ func TestUserDefinedScannerTreatsSignalStyleExitCodesAsFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Shells and docker report signal-killed children as 128+N (137 OOM/KILL,
-	// 143 TERM) and reserve 126/127; none are scanner verdicts, so partial
-	// valid JSON must not become completed evidence or satisfy a gate.
-	for _, code := range []int{126, 127, 137, 143} {
+	// 143 TERM), while docker run and shells reserve 125-127; none are scanner
+	// verdicts, so partial valid JSON must not become completed evidence or
+	// satisfy a gate.
+	for _, code := range []int{125, 126, 127, 137, 143} {
 		exitCode := code
 		commandRunner := &recordingCommandRunner{stdout: `{"findings":[]}`, stderr: "killed", err: errCommandFailed, exitCode: &exitCode}
 		result, err := (ExternalScannerRunner{
@@ -474,6 +475,17 @@ func TestUserDefinedScannerTreatsSignalStyleExitCodesAsFailed(t *testing.T) {
 		if result.ExitCode != nil {
 			t.Fatalf("exit %d: gate-eligible exit code = %v, want nil", code, *result.ExitCode)
 		}
+	}
+}
+
+func TestGateEligibleExitCodeBoundary(t *testing.T) {
+	eligible := 124
+	if got := gateEligibleExitCode(&eligible); got == nil || *got != eligible {
+		t.Fatalf("gateEligibleExitCode(124) = %v, want 124", got)
+	}
+	reserved := 125
+	if got := gateEligibleExitCode(&reserved); got != nil {
+		t.Fatalf("gateEligibleExitCode(125) = %d, want nil", *got)
 	}
 }
 
@@ -784,11 +796,17 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"scanner {{target}}\nout=report.json":             "out",
 		// Deliberate conservative rejection: without a real shell parser, the
 		// quoted ampersand cannot be distinguished from a command separator.
-		"scanner --url 'https://x.test/?a=b&c=d' {{target}}": "c",
-		"FOO=1&&scanner {{target}}":                          "FOO",
-		"env -i session=sk-live scanner {{target}}":          "session",
-		"sudo -E deploy_key=x scanner {{target}}":            "deploy_key",
-		"scanner -o mode=fast":                               "",
+		"scanner --url 'https://x.test/?a=b&c=d' {{target}}":    "c",
+		"FOO=1&&scanner {{target}}":                             "FOO",
+		"env -i session=sk-live scanner {{target}}":             "session",
+		"sudo -E deploy_key=x scanner {{target}}":               "deploy_key",
+		"scanner -o mode=fast":                                  "",
+		"sh -c 'session=sk-live-cred; scanner {{target}}'":      "session",
+		"/bin/sh -c 'session=sk-live-cred; scanner {{target}}'": "session",
+		"bash -lc 'session=sk-live-cred scanner'":               "session",
+		"sh -c 'scanner {{target}}'":                            "",
+		"sh -c 'scanner {{target}} mode=fast'":                  "",
+		"sh script.sh mode=fast":                                "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
