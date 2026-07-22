@@ -1204,6 +1204,12 @@ type judgeShellSpec struct {
 // RunContext.CommandRunner runs on the host even when Docker was requested —
 // and scopes which env values are scrubbed from persisted judge output.
 func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string, redactionSandboxMode string, exposedEnvNames []string) (*JudgeResult, error) {
+	// Same rule as user-defined scanners: inline credential literals in the
+	// judge command sit outside every redaction scope. sandbox.env is the
+	// supported channel for judge credentials.
+	if name := inlineCredentialAssignment(opts.Command); name != "" {
+		return nil, fmt.Errorf("judge command embeds an inline credential assignment (%s=...); pass it via --sandbox-env or profile sandbox.env instead", name)
+	}
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
 		return nil, err
@@ -2041,6 +2047,17 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 	if err != nil {
 		return result, err
 	}
+	// Every adapter's evidence must meet the same safety bar as
+	// user-defined output: duplicate JSON members and invalid UTF-8 defeat
+	// the structural redaction below, and re-encoding to repair them would
+	// silently rewrite evidence. Reject instead.
+	if len(result.Raw) > 0 && json.Valid(result.Raw) {
+		if reason := scannerEvidenceUnsafe(string(result.Raw)); reason != "" {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("Scanner %s output rejected: %s", name, reason)
+			result.Raw = nil
+		}
+	}
 	// Central redaction boundary: every adapter's persisted output — not
 	// just user-defined scanners' — must scrub declared credentials.
 	// A profile can hand a blandly named credential (SCANNER_ACCESS) to the
@@ -2281,13 +2298,22 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	// a backgrounded grandchild (`sleep 1h & wait` under /bin/sh) inherits
 	// the stdout/stderr pipes and would otherwise keep Run blocked past the
 	// deadline even after the direct child died.
-	configureCommandTreeKill(cmd)
+	killer := configureCommandTreeKill(cmd)
+	defer killer.release()
 	cmd.WaitDelay = 10 * time.Second
 	if runner.WaitDelay > 0 {
 		cmd.WaitDelay = runner.WaitDelay
 	}
-	err := cmd.Run()
-	timedOut := ctx.Err() == context.DeadlineExceeded
+	err := cmd.Start()
+	if err == nil {
+		killer.started(cmd)
+		err = cmd.Wait()
+	}
+	// Classify timeout by whether the kill path actually fired, not by
+	// re-reading ctx.Err(): a command that finished just before the
+	// deadline must not be reported timed out because the context timer
+	// fired while this goroutine was descheduled.
+	timedOut := killer.cancelFired() && ctx.Err() == context.DeadlineExceeded && err != nil
 	// WaitDelay expiry means the command exited but left descendants holding
 	// its output pipes (scanner printed {} and backgrounded a daemon). Those
 	// descendants inherited scanner credentials, so kill the whole tree, and
@@ -2295,9 +2321,7 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	// force-closing must not pass as a completed scan.
 	waitDelayExpired := errors.Is(err, exec.ErrWaitDelay)
 	if waitDelayExpired {
-		if cmd.Cancel != nil {
-			_ = cmd.Cancel()
-		}
+		killer.reapStragglers(cmd)
 		err = fmt.Errorf("command left background processes holding its output pipes; killed the process tree: %w", err)
 	}
 	if timedOut {

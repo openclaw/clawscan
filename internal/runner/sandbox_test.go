@@ -126,12 +126,51 @@ func TestDockerRunFailsClosedWhenScannerTargetVanishes(t *testing.T) {
 	}
 }
 
+func TestDockerRunPinsSymlinkTargetToPhysicalPath(t *testing.T) {
+	// A symlink target is resolved to its physical path before mounting,
+	// so a link swapped after validation redirects nothing — the bind
+	// source is already the real directory — and the scanner is handed the
+	// resolved path.
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link-to-skill")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	host := &recordingCommandRunner{stdout: "{}"}
+	runner := dockerCommandRunner{Host: host, Env: map[string]string{}, Image: DefaultSandboxImage}
+	if _, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", link}, "", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.calls) != 1 {
+		t.Fatalf("calls = %d", len(host.calls))
+	}
+	args := host.calls[0].args
+	joined := strings.Join(args, "\x00")
+	if strings.Contains(joined, "source="+link+",") {
+		t.Fatalf("symlink spelling used as mount source: %#v", args)
+	}
+	if !strings.Contains(joined, "source="+real+",") {
+		t.Fatalf("physical path not mounted: %#v", args)
+	}
+	if args[len(args)-1] != real {
+		t.Fatalf("positional target not rewritten to physical path: %#v", args)
+	}
+}
+
 func TestDockerRunTranslatesWindowsTargetToContainerPath(t *testing.T) {
 	// A Windows host path is not absolute inside the Linux runtime image;
 	// the target must be mounted at a stable POSIX path and the scanner
 	// handed that path instead. Use a real (POSIX) path with GOOS forced to
 	// windows so the stat succeeds while exercising the translation branch.
-	target := t.TempDir()
+	// Pre-resolve symlinks (macOS /var -> /private/var) so the runner's
+	// physical-path pinning does not change the spelling under test.
+	target, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	host := &recordingCommandRunner{stdout: "{}"}
 	runner := dockerCommandRunner{Host: host, Env: map[string]string{}, Image: DefaultSandboxImage, GOOS: "windows"}
 	if _, err := runner.Run("/bin/sh", []string{"-c", `scan "$1"`, "clawscan-target", target}, "", time.Minute); err != nil {

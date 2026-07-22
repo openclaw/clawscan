@@ -565,9 +565,33 @@ func TestUserDefinedScannerHostRedactionCoversStandardCredentialNames(t *testing
 }
 
 func TestUserDefinedScannerArtifactOmitsRenderedCommand(t *testing.T) {
-	// A user-defined command may embed inline credentials
-	// (API_TOKEN=sk-live scanner {{target}}); the rendered command line
-	// must never be persisted into artifact evidence.
+	// The rendered command line is operator-authored config and must never
+	// be persisted into artifact evidence; only the scanner ID is recorded.
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "scanner --secret-free {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(result.Command, " "); joined != "user-defined-scanner alpha" {
+		t.Fatalf("artifact command = %v, want scanner ID reference only", result.Command)
+	}
+}
+
+func TestUserDefinedScannerRejectsInlineCredentialAssignment(t *testing.T) {
+	// An inline credential literal (API_TOKEN=sk-live scanner ...) sits
+	// outside every redaction scope; the run must fail closed before the
+	// command executes, and the literal must not appear anywhere in the
+	// result.
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "alpha", Command: "API_TOKEN=sk-live-inline scanner {{target}}", Targets: []string{"skill"},
 	})
@@ -583,12 +607,18 @@ func TestUserDefinedScannerArtifactOmitsRenderedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(result.Command, " ")
-	if strings.Contains(joined, "sk-live-inline") {
-		t.Fatalf("inline credential persisted in artifact command: %v", result.Command)
+	if result.Status != "failed" || !strings.Contains(result.Error, "inline credential assignment") {
+		t.Fatalf("result = %q / %q, want inline-credential rejection", result.Status, result.Error)
 	}
-	if joined != "user-defined-scanner alpha" {
-		t.Fatalf("artifact command = %v, want scanner ID reference only", result.Command)
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("command ran despite inline credential: %#v", commandRunner.calls)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "sk-live-inline") {
+		t.Fatalf("inline credential leaked into result: %s", encoded)
 	}
 }
 
@@ -625,6 +655,81 @@ func TestUserDefinedScannerRejectsUnsafeEvidence(t *testing.T) {
 		if !strings.Contains(result.Error, "output rejected") {
 			t.Fatalf("%s: error = %q", name, result.Error)
 		}
+	}
+}
+
+func TestRedactScannerStdoutScrubsNestedJSONEncodings(t *testing.T) {
+	// A secret can hide one JSON-escaping layer down: a string node holding
+	// embedded JSON where the secret appears only via \u escapes. Neither
+	// the raw bytes nor the once-decoded string contain the literal.
+	env := map[string]string{"DEMO_TOKEN": "sekret"}
+	raw := `{"message":"{\"auth\":\"sekret\"}"}`
+	redacted := redactScannerStdout(raw, env, []string{"DEMO_TOKEN"})
+	if strings.Contains(redacted, "sekret") {
+		t.Fatalf("nested-encoded secret survived: %s", redacted)
+	}
+	// Two layers down (JSON in JSON in JSON) with mixed escaping.
+	raw = `{"outer":"{\"inner\":\"{\\\"auth\\\":\\\"\\u0073ekret\\\"}\"}"}`
+	redacted = redactScannerStdout(raw, env, []string{"DEMO_TOKEN"})
+	if strings.Contains(decodeJSONStringEscapes(decodeJSONStringEscapes(redacted)), "sekret") {
+		t.Fatalf("doubly nested secret survived: %s", redacted)
+	}
+}
+
+func TestRedactJSONStringsCanonicalNumberSecrets(t *testing.T) {
+	// A numeric secret emitted in an alternate spelling (1e3 for 1000,
+	// 1.0 for 1) reveals the same credential.
+	scrubber := newSecretScrubber([]string{"1000"})
+	node, changed := redactJSONStrings(json.Number("1e3"), scrubber)
+	if !changed || node == json.Number("1e3") {
+		t.Fatalf("alternate numeric spelling survived: %v", node)
+	}
+	// A non-numeric secret must never match numbers.
+	scrubber = newSecretScrubber([]string{"abc"})
+	if _, changed := redactJSONStrings(json.Number("123"), scrubber); changed {
+		t.Fatal("non-numeric secret matched a number")
+	}
+	// Unrelated numbers pass through.
+	scrubber = newSecretScrubber([]string{"1000"})
+	if _, changed := redactJSONStrings(json.Number("1001"), scrubber); changed {
+		t.Fatal("unrelated number scrubbed")
+	}
+}
+
+func TestInlineCredentialAssignment(t *testing.T) {
+	for command, want := range map[string]string{
+		"API_TOKEN=sk-live scanner {{target}}":          "API_TOKEN",
+		"FOO=1 DB_PASSWORD=x scanner {{target}}":        "DB_PASSWORD",
+		"scanner --token abc {{target}}":                "",
+		"scanner {{target}}":                            "",
+		"PATH=/usr/bin scanner {{target}}":              "",
+		"scanner --arg API_TOKEN=notleading {{target}}": "",
+	} {
+		if got := inlineCredentialAssignment(command); got != want {
+			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
+		}
+	}
+}
+
+func TestRunScannerRejectsUnsafeEvidenceFromAnyAdapter(t *testing.T) {
+	// The unsafe-evidence gate must hold at the central boundary, not just
+	// inside the user-defined adapter: a built-in scanner emitting
+	// duplicate JSON members would otherwise be decoded and re-encoded by
+	// redaction, silently dropping the earlier member.
+	commandRunner := &recordingCommandRunner{stdout: `{"x":1,"x":2}`}
+	result, err := (ExternalScannerRunner{
+		Registry: DefaultScannerRegistry(), CommandRunner: commandRunner,
+		Env:         map[string]string{"CI_TOKEN": "host-secret"},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("agentverus", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "duplicate JSON object members") {
+		t.Fatalf("result = %q / %q, want central unsafe-evidence rejection", result.Status, result.Error)
+	}
+	if len(result.Raw) != 0 {
+		t.Fatalf("unsafe evidence persisted: %s", result.Raw)
 	}
 }
 

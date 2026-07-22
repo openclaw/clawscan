@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -156,28 +158,47 @@ func dockerAvailable() error {
 }
 
 func (runner dockerCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
-	dockerArgs := []string{"run", "--rm", "--network", "bridge"}
+	// Name the container so a timeout can kill it: process-group
+	// cancellation only reaches the docker CLI client, while the container
+	// itself is owned by the daemon and would keep running — with
+	// allowlisted credentials and network access — after ClawScan reports
+	// failure.
+	containerName := clawscanContainerName()
+	dockerArgs := []string{"run", "--rm", "--name", containerName, "--network", "bridge"}
 	for _, name := range runner.EnvNames {
 		if strings.TrimSpace(runner.Env[name]) != "" {
 			dockerArgs = append(dockerArgs, "-e", name)
 		}
 	}
-	inference := mountInferenceArgs(command, args)
 	// The scan target must never use the writable-parent fallback below:
 	// if it disappears between the scanner's own existence check and this
-	// stat (rename, deletion), falling back would bind the surrounding host
-	// directory read-write into the container. Fail closed instead — and
-	// refuse to start the container at all: with no mount, image content
-	// at the same absolute path would be scanned and reported as the host
-	// target, producing evidence for the wrong subject.
+	// resolution (rename, deletion), falling back would bind the
+	// surrounding host directory read-write into the container. Fail
+	// closed instead — and refuse to start the container at all: with no
+	// mount, image content at the same absolute path would be scanned and
+	// reported as the host target, producing evidence for the wrong
+	// subject.
 	target := positionalScannerTarget(command, args)
 	if target != "" {
 		if clean := filepath.Clean(target); filepath.IsAbs(clean) {
-			if _, err := os.Stat(clean); err != nil {
+			// EvalSymlinks pins the physical path: mounting the resolved
+			// path means a symlink swapped in after this check redirects
+			// nothing — the bind source is already the real directory. A
+			// resolution failure is the vanished-target case.
+			resolved, err := filepath.EvalSymlinks(clean)
+			if err != nil {
 				return CommandOutput{}, fmt.Errorf("scan target vanished before sandbox start: %s", target)
+			}
+			if resolved != target {
+				args = rewritePositionalScannerTarget(args, target, resolved)
+				target = resolved
 			}
 		}
 	}
+	// Inference must run on the post-rewrite args: computing it earlier
+	// would leave the pre-resolution target spelling in the list, where the
+	// filter below cannot match it and it would gain its own mount.
+	inference := mountInferenceArgs(command, args)
 	if target != "" {
 		filtered := inference[:0:0]
 		for _, arg := range inference {
@@ -202,7 +223,24 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 		}
 		target = ""
 	}
-	for _, mount := range dockerMounts(cwd, inference, target) {
+	mounts := dockerMounts(cwd, inference, target)
+	// dockerMounts stats again; if the target vanished in the window since
+	// the resolution above, it silently omits the mount and the container
+	// would scan image content at the same absolute path. Verify the
+	// target's mount actually made it into the list.
+	if target != "" {
+		mounted := false
+		for _, mount := range mounts {
+			if strings.Contains(mount, dockerMountField("source", filepath.Clean(target))+",") {
+				mounted = true
+				break
+			}
+		}
+		if !mounted {
+			return CommandOutput{}, fmt.Errorf("scan target vanished before sandbox start: %s", target)
+		}
+	}
+	for _, mount := range mounts {
 		dockerArgs = append(dockerArgs, "--mount", mount)
 	}
 	if cwd != "" {
@@ -210,7 +248,26 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	}
 	dockerArgs = append(dockerArgs, runner.Image, command)
 	dockerArgs = append(dockerArgs, args...)
-	return runner.Host.Run("docker", dockerArgs, "", timeout)
+	output, err := runner.Host.Run("docker", dockerArgs, "", timeout)
+	if err != nil {
+		// The docker client died (timeout kill, crash) but the daemon may
+		// still be running the container. Best-effort kill by name; if the
+		// container already exited, `docker kill` is a harmless error.
+		_, _ = runner.Host.Run("docker", []string{"kill", containerName}, "", 30*time.Second)
+	}
+	return output, err
+}
+
+// clawscanContainerName returns a unique name for a sandbox container so
+// cleanup can address it through the daemon. Collisions only waste one run
+// (docker refuses the duplicate name), never kill someone else's container:
+// the random suffix makes reuse across concurrent runs vanishingly unlikely.
+func clawscanContainerName() string {
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Sprintf("clawscan-scan-%d", time.Now().UnixNano())
+	}
+	return "clawscan-scan-" + hex.EncodeToString(suffix)
 }
 
 // mountInferenceArgs drops the rendered shell program from mount inference:

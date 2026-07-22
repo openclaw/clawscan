@@ -79,6 +79,16 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 			}, nil
 		}
 	}
+	// Credentials must arrive through env: declarations, never inline in
+	// the command: an inline literal (INLINE_TOKEN=sk-live scanner ...)
+	// is outside every redaction scope, so a scanner echoing it would
+	// persist the secret into evidence. Fail closed before running.
+	if name := inlineCredentialAssignment(adapter.config.Command); name != "" {
+		return ScannerResult{
+			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Error: fmt.Sprintf("User-defined scanner %s command embeds an inline credential assignment (%s=...); declare it under env: and reference it as an environment variable instead", adapter.config.ID, name),
+		}, nil
+	}
 	shell := userDefinedScannerShell(runtime.GOOS, runner.SandboxMode)
 	targetReplacement := shell.quote(target)
 	usePositionalTarget := shell.command == "/bin/sh"
@@ -260,6 +270,28 @@ func (scrubber secretScrubber) scrub(value string) string {
 	return redacted
 }
 
+// scrubDeep scrubs value and then bounded re-decodings of it: a secret can
+// hide one JSON-escaping layer down ({"message":"{\"auth\":\"\\u0073ekret\"}"})
+// where neither the raw bytes nor the once-decoded string contain the
+// literal. Each decode layer that surfaces a secret is scrubbed in place;
+// losing the original escaping is acceptable, leaking is not.
+func (scrubber secretScrubber) scrubDeep(value string) string {
+	result := scrubber.scrub(value)
+	current := result
+	for depth := 0; depth < 4; depth++ {
+		decoded := decodeJSONStringEscapes(current)
+		if decoded == current {
+			break
+		}
+		if scrubber.containsSecret(decoded) {
+			decoded = scrubber.scrub(decoded)
+			result = decoded
+		}
+		current = decoded
+	}
+	return result
+}
+
 // redactionMarker picks the replacement sentinel. The preferred marker is
 // only used when no secret is a substring of it. Otherwise the marker is a
 // repeated rune absent from every secret, so the sentinel can neither
@@ -343,18 +375,12 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 	sort.Slice(secrets, func(i int, j int) bool {
 		return len(secrets[i]) > len(secrets[j])
 	})
-	scrubber := newSecretScrubber(secrets)
-	redacted := scrubber.scrub(value)
 	// JSON permits alternate encodings of the same string (a\/b for a/b,
-	// \u escapes) that byte replacement cannot enumerate. Decode escape
-	// sequences and, if a secret surfaces, return the scrubbed decoded text
-	// instead — losing the original escaping is acceptable, leaking is not.
-	if decoded := decodeJSONStringEscapes(redacted); decoded != redacted {
-		if scrubbed := scrubber.scrub(decoded); scrubbed != decoded {
-			return scrubbed
-		}
-	}
-	return redacted
+	// \u escapes) that byte replacement cannot enumerate, and a secret can
+	// hide multiple escaping layers down (JSON embedded in a JSON string).
+	// scrubDeep decodes to a bounded depth and scrubs whatever surfaces —
+	// losing the original escaping is acceptable, leaking is not.
+	return newSecretScrubber(secrets).scrubDeep(value)
 }
 
 // decodeJSONStringEscapes interprets JSON string escape sequences (\", \\,
@@ -583,6 +609,29 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 	return secrets
 }
 
+var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// inlineCredentialAssignment reports the first secret-named leading
+// VAR=value assignment in an operator-authored command, or "". Inline
+// credential literals sit outside every redaction scope (they are never in
+// the process env map), so a command echoing one would persist it into
+// evidence. Detection is best-effort by name: only leading POSIX-style
+// assignment words are scanned, and bland names evade the heuristic the
+// same way they do everywhere else — sandbox.env declarations remain the
+// supported channel for credentials.
+func inlineCredentialAssignment(command string) string {
+	for _, token := range strings.Fields(command) {
+		eq := strings.IndexByte(token, '=')
+		if eq <= 0 || !envAssignmentNamePattern.MatchString(token[:eq]) {
+			return ""
+		}
+		if isSecretEnvKey(token[:eq]) {
+			return token[:eq]
+		}
+	}
+	return ""
+}
+
 // nonCredentialSecretNamedEnvNames lists names isSecretEnvKey matches that
 // are well-known configuration switches, not credentials. Exempting by NAME
 // is deliberate: exempting by value (skipping "true" or "default") would
@@ -612,13 +661,18 @@ func nonCredentialSecretNamedEnv(name string) bool {
 func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {
 	switch typed := node.(type) {
 	case string:
-		redacted := scrubber.scrub(typed)
+		// scrubDeep also catches secrets one JSON-escaping layer down: a
+		// string node holding embedded JSON ("{\"auth\":\"\\u0073ekret\"}")
+		// never contains the secret's literal bytes.
+		redacted := scrubber.scrubDeep(typed)
 		return redacted, redacted != typed
 	case json.Number:
 		// A numeric-looking secret (PIN=1234) may be emitted unquoted; the
-		// scalar's exact text matching a secret is a leak like any other.
+		// scalar's exact text matching a secret is a leak like any other,
+		// and so is an alternate spelling of the same number (1e3 for a
+		// secret of 1000) — compare canonical values too.
 		for _, secret := range scrubber.secrets {
-			if string(typed) == secret {
+			if string(typed) == secret || sameCanonicalNumber(string(typed), secret) {
 				return scrubber.marker, true
 			}
 		}
@@ -686,6 +740,21 @@ func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {
 	default:
 		return node, false
 	}
+}
+
+// sameCanonicalNumber reports whether a JSON number token and a secret are
+// the same numeric value in different spellings (1e3 vs 1000, 1.0 vs 1).
+// Both sides must parse as numbers; a non-numeric secret never matches.
+func sameCanonicalNumber(token string, secret string) bool {
+	tokenValue, err := strconv.ParseFloat(token, 64)
+	if err != nil {
+		return false
+	}
+	secretValue, err := strconv.ParseFloat(secret, 64)
+	if err != nil {
+		return false
+	}
+	return tokenValue == secretValue
 }
 
 // collisionFreeKey returns candidate if no map entry holds it, otherwise
