@@ -977,7 +977,13 @@ func commandReparsesTarget(command string) bool {
 			return !reparses
 		case *syntax.CallExpr:
 			if len(node.Args) > 0 {
-				if _, ok := staticWord(node.Args[0]); !ok && nodeContainsTarget(command, node) {
+				// The command word is what actually executes. Fail closed if it
+				// IS the interpolated target (running the scanned artifact as a
+				// program) or is a dynamic word that could resolve to an
+				// interpreter while the target appears elsewhere in the call.
+				cmdWord := node.Args[0]
+				_, static := staticWord(cmdWord)
+				if nodeContainsTarget(command, cmdWord) || (!static && nodeContainsTarget(command, node)) {
 					reparses = true
 					return false
 				}

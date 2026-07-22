@@ -939,6 +939,9 @@ func TestCommandReparsesTarget(t *testing.T) {
 		"scanner $(date) {{target}}":                        false,
 		"powershell -File script.ps1 {{target}}":            false,
 		"sh -c scanner {{target}}":                          false,
+
+		"{{target}} -c 'echo scanner'": true, // target as command word executes the scanned artifact
+		"{{target}} --scan":            true, // target alone as the command
 	} {
 		if got := commandReparsesTarget(command); got != want {
 			t.Fatalf("commandReparsesTarget(%q) = %t, want %t", command, got, want)
