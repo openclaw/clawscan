@@ -15,11 +15,12 @@ import (
 // and cmd.Run would block on them long past the deadline. Each command
 // gets its own process group, and Cancel signals the group.
 type processTreeKiller struct {
+	cmd   *exec.Cmd
 	fired atomic.Bool
 }
 
 func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
-	killer := &processTreeKiller{}
+	killer := &processTreeKiller{cmd: cmd}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		killer.fired.Store(true)
@@ -44,13 +45,21 @@ func (killer *processTreeKiller) started(*exec.Cmd) {}
 // the direct child exited (WaitDelay expiry). The group is private to this
 // command, so the signal cannot reach unrelated processes.
 func (killer *processTreeKiller) reapStragglers(cmd *exec.Cmd) {
-	if cmd.Process != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	killer.cmd = cmd
+	killer.release()
 }
 
-// release frees platform resources; none are held on Unix.
-func (killer *processTreeKiller) release() {}
+// release reaps the private process group unconditionally. A scanner that
+// completed normally can still have detached a daemon (`sleep 300
+// </dev/null >/dev/null &`) that holds no pipes but inherited scanner
+// credentials; nothing may outlive the run. The group is private to this
+// command, so the signal cannot reach unrelated processes, and a dead
+// group is a harmless ESRCH.
+func (killer *processTreeKiller) release() {
+	if killer.cmd != nil && killer.cmd.Process != nil {
+		_ = syscall.Kill(-killer.cmd.Process.Pid, syscall.SIGKILL)
+	}
+}
 
 // cancelFired reports whether the kill path actually ran. The caller uses
 // this instead of re-reading ctx.Err() after Wait returns: a command that

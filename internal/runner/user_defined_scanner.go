@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"regexp"
 	"runtime"
@@ -39,6 +40,15 @@ func (adapter userDefinedScannerAdapter) ID() string { return adapter.config.ID 
 func (adapter userDefinedScannerAdapter) Requirements(_ map[string]string) []EnvRequirement {
 	requirements := make([]EnvRequirement, 0, len(adapter.config.Env))
 	for _, name := range adapter.config.Env {
+		// A malformed entry (API_TOKEN=sk-live) must not reach the
+		// missing-variable diagnostic verbatim: the text after = may be a
+		// live credential and the diagnostic prints EnvVar into terminal
+		// and CI logs. Run rejects the config; report only the name part.
+		if !envAssignmentNamePattern.MatchString(name) {
+			if eq := strings.IndexByte(name, '='); eq > 0 {
+				name = name[:eq]
+			}
+		}
 		requirements = append(requirements, EnvRequirement{EnvVar: name, Reason: adapter.config.ID + " scanner"})
 	}
 	return requirements
@@ -78,6 +88,15 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 				Error: fmt.Sprintf("User-defined scanner %s target does not exist: %s", adapter.config.ID, target),
 			}, nil
 		}
+	}
+	// env: entries must be bare variable names: `env: [API_TOKEN=sk-live]`
+	// would otherwise flow into the missing-variable diagnostic verbatim,
+	// leaking the inline value into terminal and CI logs.
+	if bad := invalidDeclaredEnvName(adapter.config.Env); bad != "" {
+		return ScannerResult{
+			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Error: fmt.Sprintf("User-defined scanner %s env entry %s is not a variable name; declare bare names and set values in the environment", adapter.config.ID, bad),
+		}, nil
 	}
 	// Credentials must arrive through env: declarations, never inline in
 	// the command: an inline literal (INLINE_TOKEN=sk-live scanner ...)
@@ -569,11 +588,37 @@ func commandVisibleEnv(env map[string]string, names []string, sandboxMode string
 	}
 	visible := make(map[string]string, len(names))
 	for _, name := range names {
-		if value, ok := env[name]; ok {
-			visible[name] = value
+		for key, value := range envEntriesForName(env, name) {
+			visible[key] = value
 		}
 	}
 	return visible
+}
+
+// envEntriesForName returns the env entries a declared name addresses,
+// keyed by their real spelling. On Windows environment names are
+// case-insensitive: a scanner declaring scanner_access receives the host's
+// SCANNER_ACCESS=secret, so redaction must see that value under either
+// spelling or the credential persists in evidence. Elsewhere names are
+// distinct and only the exact key matches.
+func envEntriesForName(env map[string]string, name string) map[string]string {
+	return envEntriesForNameOnGOOS(env, name, runtime.GOOS)
+}
+
+func envEntriesForNameOnGOOS(env map[string]string, name string, goos string) map[string]string {
+	entries := map[string]string{}
+	if value, ok := env[name]; ok {
+		entries[name] = value
+	}
+	if goos != "windows" {
+		return entries
+	}
+	for key, value := range env {
+		if strings.EqualFold(key, name) {
+			entries[key] = value
+		}
+	}
+	return entries
 }
 
 // scannerSecretValues collects the env values to scrub from scanner output:
@@ -592,7 +637,11 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 		secrets = append(secrets, secret)
 	}
 	for _, name := range declared {
-		add(env[name])
+		// Windows env names are case-insensitive: a declared
+		// scanner_access must also sweep the host's SCANNER_ACCESS value.
+		for _, value := range envEntriesForName(env, name) {
+			add(value)
+		}
 	}
 	for name, secret := range env {
 		// Exemptions are by name, never by value: DB_PASSWORD=default is a
@@ -611,23 +660,49 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 
 var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// inlineCredentialAssignment reports the first secret-named leading
-// VAR=value assignment in an operator-authored command, or "". Inline
-// credential literals sit outside every redaction scope (they are never in
-// the process env map), so a command echoing one would persist it into
-// evidence. Detection is best-effort by name: only leading POSIX-style
-// assignment words are scanned, and bland names evade the heuristic the
-// same way they do everywhere else — sandbox.env declarations remain the
-// supported channel for credentials.
+// inlineCredentialAssignment reports the first secret-named VAR=value
+// assignment in an operator-authored command, or "". Inline credential
+// literals sit outside every redaction scope (they are never in the
+// process env map), so a command echoing one would persist it into
+// evidence. Every token is scanned, not just leading assignment words:
+// `env API_TOKEN=x scanner`, `export API_TOKEN=x; scanner`, cmd.exe
+// `set API_TOKEN=x && scanner`, and mid-command assignments after && or ;
+// all carry the same literal. False positives (an argument that happens to
+// look like NAME=value with a secret-shaped name) are acceptable — the
+// error tells the operator to use env:/sandbox.env, which is the correct
+// channel anyway. Bland names still evade the heuristic the same way they
+// do everywhere else.
 func inlineCredentialAssignment(command string) string {
 	for _, token := range strings.Fields(command) {
+		token = strings.TrimRight(token, ";&|")
 		eq := strings.IndexByte(token, '=')
 		if eq <= 0 || !envAssignmentNamePattern.MatchString(token[:eq]) {
-			return ""
+			continue
 		}
 		if isSecretEnvKey(token[:eq]) {
 			return token[:eq]
 		}
+	}
+	return ""
+}
+
+// invalidDeclaredEnvName reports the name portion of a scanner env:
+// declaration that is not a bare variable name, or "". A misconfiguration
+// like `env: [API_TOKEN=sk-live]` must be rejected without ever echoing
+// the full entry — the value after = may be a live credential, and the
+// missing-variable diagnostic would otherwise print it verbatim.
+func invalidDeclaredEnvName(declared []string) string {
+	for _, name := range declared {
+		if envAssignmentNamePattern.MatchString(name) {
+			continue
+		}
+		if eq := strings.IndexByte(name, '='); eq > 0 {
+			return name[:eq] + "=..."
+		}
+		if len(name) > 64 {
+			name = name[:64] + "..."
+		}
+		return name
 	}
 	return ""
 }
@@ -744,17 +819,20 @@ func redactJSONStrings(node any, scrubber secretScrubber) (any, bool) {
 
 // sameCanonicalNumber reports whether a JSON number token and a secret are
 // the same numeric value in different spellings (1e3 vs 1000, 1.0 vs 1).
-// Both sides must parse as numbers; a non-numeric secret never matches.
+// Comparison is exact (arbitrary-precision rationals), not float64: two
+// distinct 17-digit integers that round to the same float must not be
+// conflated, or unrelated evidence would be scrubbed as a secret. Both
+// sides must parse as numbers; a non-numeric secret never matches.
 func sameCanonicalNumber(token string, secret string) bool {
-	tokenValue, err := strconv.ParseFloat(token, 64)
-	if err != nil {
+	tokenValue, ok := new(big.Rat).SetString(token)
+	if !ok {
 		return false
 	}
-	secretValue, err := strconv.ParseFloat(secret, 64)
-	if err != nil {
+	secretValue, ok := new(big.Rat).SetString(secret)
+	if !ok {
 		return false
 	}
-	return tokenValue == secretValue
+	return tokenValue.Cmp(secretValue) == 0
 }
 
 // collisionFreeKey returns candidate if no map entry holds it, otherwise

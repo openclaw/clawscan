@@ -63,18 +63,26 @@ func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
 	return killer
 }
 
-// started assigns the suspended child to the job, then resumes it. On any
-// failure the child is resumed anyway (a running scan beats a hung one)
-// and the job degrades to direct-process kill.
+// started assigns the suspended child to the job, then resumes it. If
+// assignment fails (incompatible parent-job environment), the job handle
+// is dropped BEFORE the child resumes: cancellation must not "succeed" by
+// terminating an empty job while the unassigned command and its
+// descendants keep running with scanner credentials. With no job, Cancel
+// and reapStragglers fall back to direct-process kill.
 func (killer *processTreeKiller) started(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
 	pid := uint32(cmd.Process.Pid)
 	if killer.job != 0 {
+		assigned := false
 		if handle, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid); err == nil {
-			_ = windows.AssignProcessToJobObject(killer.job, handle)
+			assigned = windows.AssignProcessToJobObject(killer.job, handle) == nil
 			_ = windows.CloseHandle(handle)
+		}
+		if !assigned {
+			_ = windows.CloseHandle(killer.job)
+			killer.job = 0
 		}
 	}
 	resumeMainThread(pid)

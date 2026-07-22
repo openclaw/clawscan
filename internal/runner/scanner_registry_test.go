@@ -697,13 +697,23 @@ func TestRedactJSONStringsCanonicalNumberSecrets(t *testing.T) {
 }
 
 func TestInlineCredentialAssignment(t *testing.T) {
+	// Every token is scanned: wrapper spellings (env, export, cmd.exe set,
+	// post-;/&& assignments) carry the same inline literal as a leading
+	// assignment word. A secret-named NAME=value anywhere is rejected;
+	// false positives route the operator to env:/sandbox.env, which is the
+	// correct channel regardless.
 	for command, want := range map[string]string{
-		"API_TOKEN=sk-live scanner {{target}}":          "API_TOKEN",
-		"FOO=1 DB_PASSWORD=x scanner {{target}}":        "DB_PASSWORD",
-		"scanner --token abc {{target}}":                "",
-		"scanner {{target}}":                            "",
-		"PATH=/usr/bin scanner {{target}}":              "",
-		"scanner --arg API_TOKEN=notleading {{target}}": "",
+		"API_TOKEN=sk-live scanner {{target}}":           "API_TOKEN",
+		"FOO=1 DB_PASSWORD=x scanner {{target}}":         "DB_PASSWORD",
+		"env API_TOKEN=sk-live scanner {{target}}":       "API_TOKEN",
+		"export API_TOKEN=sk-live; scanner {{target}}":   "API_TOKEN",
+		"set API_TOKEN=sk-live && scanner {{target}}":    "API_TOKEN",
+		"scanner --arg API_TOKEN=inline {{target}}":      "API_TOKEN",
+		"scanner --token abc {{target}}":                 "",
+		"scanner {{target}}":                             "",
+		"PATH=/usr/bin scanner {{target}}":               "",
+		"scanner --url 'https://x.test/?a=b' {{target}}": "",
+		"scanner --retries=3 --api-version=2 {{target}}": "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -730,6 +740,76 @@ func TestRunScannerRejectsUnsafeEvidenceFromAnyAdapter(t *testing.T) {
 	}
 	if len(result.Raw) != 0 {
 		t.Fatalf("unsafe evidence persisted: %s", result.Raw)
+	}
+}
+
+func TestEnvEntriesForNameWindowsIsCaseInsensitive(t *testing.T) {
+	// Windows env names are case-insensitive: a scanner declaring
+	// scanner_access receives the host's SCANNER_ACCESS value, so both
+	// redaction scoping and the secret sweep must see it under either
+	// spelling. Elsewhere only the exact key matches.
+	env := map[string]string{"SCANNER_ACCESS": "secret-value"}
+	windows := envEntriesForNameOnGOOS(env, "scanner_access", "windows")
+	if windows["SCANNER_ACCESS"] != "secret-value" {
+		t.Fatalf("windows lookup missed case-folded name: %v", windows)
+	}
+	linux := envEntriesForNameOnGOOS(env, "scanner_access", "linux")
+	if len(linux) != 0 {
+		t.Fatalf("non-windows lookup must be exact: %v", linux)
+	}
+}
+
+func TestUserDefinedScannerRejectsMalformedEnvDeclaration(t *testing.T) {
+	// env: [API_TOKEN=sk-live] is a misconfiguration; the run must fail
+	// without echoing the inline value anywhere (the missing-variable
+	// diagnostic would otherwise print it into terminal and CI logs).
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "scanner {{target}}",
+		Env: []string{"API_TOKEN=sk-live-declared"}, Targets: []string{"skill"},
+	})
+	requirements := adapter.Requirements(nil)
+	for _, req := range requirements {
+		if strings.Contains(req.EnvVar, "sk-live-declared") {
+			t.Fatalf("requirement echoes inline value: %v", requirements)
+		}
+	}
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "not a variable name") {
+		t.Fatalf("result = %q / %q, want malformed-env rejection", result.Status, result.Error)
+	}
+	if strings.Contains(result.Error, "sk-live-declared") {
+		t.Fatalf("rejection echoes inline value: %s", result.Error)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("command ran despite malformed env: %#v", commandRunner.calls)
+	}
+}
+
+func TestSameCanonicalNumberIsExact(t *testing.T) {
+	// float64 rounding must not conflate distinct 17-digit integers —
+	// that would scrub unrelated evidence as a secret.
+	if sameCanonicalNumber("9007199254740993", "9007199254740992") {
+		t.Fatal("distinct integers conflated by float rounding")
+	}
+	if !sameCanonicalNumber("1e3", "1000") {
+		t.Fatal("equal values in different spellings must match")
+	}
+	if !sameCanonicalNumber("1.0", "1") {
+		t.Fatal("1.0 and 1 must match")
+	}
+	if sameCanonicalNumber("123", "abc") {
+		t.Fatal("non-numeric secret matched")
 	}
 }
 
