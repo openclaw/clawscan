@@ -876,6 +876,11 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"readonly access=sk-live; export access; scanner {{target}}":    "access",
 		"declare token=sk-live scanner {{target}}":                      "token",
 		"local db=sk-live scanner":                                      "db",
+
+		"env 'API-TOKEN=sk-live' scanner {{target}}":                     "API-TOKEN",
+		"env -S 'SCANNER_ACCESS=sk-live scanner' {{target}}":             "SCANNER_ACCESS",
+		"env --split-string='SCANNER_ACCESS=sk-live scanner' {{target}}": "SCANNER_ACCESS",
+		"env -u UNUSED scanner mode=fast":                                "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -927,6 +932,13 @@ func TestCommandReparsesTarget(t *testing.T) {
 		"myscanner --mode eval {{target}}": false,
 		"myscanner --mode=eval {{target}}": false,
 		"eval scanner --static":            false,
+
+		"$(printf eval) {{target}}":                         true,
+		"powershell -NoProfile -Command scanner {{target}}": true,
+		"cmd /c scanner {{target}}":                         true,
+		"scanner $(date) {{target}}":                        false,
+		"powershell -File script.ps1 {{target}}":            false,
+		"sh -c scanner {{target}}":                          false,
 	} {
 		if got := commandReparsesTarget(command); got != want {
 			t.Fatalf("commandReparsesTarget(%q) = %t, want %t", command, got, want)

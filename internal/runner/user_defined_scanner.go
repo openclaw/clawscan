@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -802,7 +803,7 @@ func inlineCredentialAssignmentAtDepth(command string, depth int) string {
 			base := strings.ToLower(path.Base(commandWord))
 			switch {
 			case runCommandAssignmentWrappers[base]:
-				found = runCommandWrapperAssignment(base, node.Args[1:])
+				found = runCommandWrapperAssignment(base, node.Args[1:], depth)
 			case declarationAssignmentWrappers[base]:
 				found = declarationWrapperAssignment(node.Args[1:])
 			case base == "eval":
@@ -836,9 +837,10 @@ func inlineCredentialAssignmentAtDepth(command string, depth int) string {
 	return found
 }
 
-func runCommandWrapperAssignment(base string, args []*syntax.Word) string {
+func runCommandWrapperAssignment(base string, args []*syntax.Word, depth int) string {
 	expectValue := false
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		word, ok := staticWord(arg)
 		if !ok {
 			return ""
@@ -847,13 +849,42 @@ func runCommandWrapperAssignment(base string, args []*syntax.Word) string {
 			expectValue = false
 			continue
 		}
+		if base == "env" {
+			switch {
+			case word == "-S" || word == "--split-string":
+				if i+1 >= len(args) {
+					return ""
+				}
+				if splitContent, ok := staticWord(args[i+1]); ok {
+					if name := inlineCredentialAssignmentAtDepth(splitContent, depth+1); name != "" {
+						return name
+					}
+				}
+				i++
+				continue
+			case strings.HasPrefix(word, "-S") && len(word) > len("-S"):
+				if name := inlineCredentialAssignmentAtDepth(strings.TrimPrefix(word, "-S"), depth+1); name != "" {
+					return name
+				}
+				continue
+			case strings.HasPrefix(word, "--split-string="):
+				if name := inlineCredentialAssignmentAtDepth(strings.TrimPrefix(word, "--split-string="), depth+1); name != "" {
+					return name
+				}
+				continue
+			}
+		}
 		if strings.HasPrefix(word, "-") {
 			if base == "env" && envOptionsWithValues[word] && !strings.ContainsRune(word, '=') {
 				expectValue = true
 			}
 			continue
 		}
-		if name, ok := leadingAssignmentName(word); ok {
+		assignmentName := leadingAssignmentName
+		if base == "env" {
+			assignmentName = envAssignmentName
+		}
+		if name, ok := assignmentName(word); ok {
 			return name
 		}
 		return ""
@@ -877,6 +908,14 @@ func declarationWrapperAssignment(args []*syntax.Word) string {
 func leadingAssignmentName(word string) (string, bool) {
 	eq := strings.IndexByte(word, '=')
 	if eq <= 0 || !envAssignmentNamePattern.MatchString(word[:eq]) {
+		return "", false
+	}
+	return word[:eq], true
+}
+
+func envAssignmentName(word string) (string, bool) {
+	eq := strings.IndexByte(word, '=')
+	if eq <= 0 || strings.HasPrefix(word, "-") || strings.IndexFunc(word[:eq], unicode.IsSpace) >= 0 {
 		return "", false
 	}
 	return word[:eq], true
@@ -937,20 +976,45 @@ func commandReparsesTarget(command string) bool {
 			reparses = nodeContainsTarget(command, node)
 			return !reparses
 		case *syntax.CallExpr:
+			if len(node.Args) > 0 {
+				if _, ok := staticWord(node.Args[0]); !ok && nodeContainsTarget(command, node) {
+					reparses = true
+					return false
+				}
+			}
 			interpreter, args, eval := reparsingCommand(node)
 			if eval {
 				reparses = true
 				return false
 			}
 			if interpreter != "" {
-				if operand := commandStringOperand(interpreter, args); operand != nil {
-					reparses = nodeContainsTarget(command, operand)
-				}
+				reparses = interpreterReparsesTarget(command, interpreter, args)
 			}
 		}
 		return !reparses
 	})
 	return reparses
+}
+
+func interpreterReparsesTarget(command string, interpreter string, args []*syntax.Word) bool {
+	for i := 1; i < len(args); i++ {
+		word, ok := staticWord(args[i])
+		if !ok || !isCommandStringFlag(interpreter, word) || i+1 >= len(args) {
+			continue
+		}
+		switch interpreter {
+		case "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh":
+			for _, arg := range args[i+1:] {
+				if nodeContainsTarget(command, arg) {
+					return true
+				}
+			}
+			return false
+		default:
+			return nodeContainsTarget(command, args[i+1])
+		}
+	}
+	return false
 }
 
 func reparsingCommand(call *syntax.CallExpr) (interpreter string, args []*syntax.Word, eval bool) {
