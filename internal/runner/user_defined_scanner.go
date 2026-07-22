@@ -741,7 +741,13 @@ var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // assignmentWrapperWords are command words whose following NAME=value
 // operand sets an environment variable in the child regardless of case.
-var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set": true, "setx": true, "sudo": true}
+// readonly, declare, local, and typeset are assignment-taking shell builtins:
+// `readonly access=v` binds access inside the child shell, outside every
+// redaction scope, so the operand must be rejected like an env/export one.
+var assignmentWrapperWords = map[string]bool{
+	"env": true, "export": true, "set": true, "setx": true, "sudo": true,
+	"readonly": true, "declare": true, "local": true, "typeset": true,
+}
 
 // shellInterpreterWords are commands whose operand is itself a shell
 // command; the first non-option operand after one is a nested command
@@ -905,7 +911,10 @@ func commandReparsesTarget(command string) bool {
 					return true
 				}
 				if awaitingCommandWord {
-					if launcherWords[lower] {
+					// Launchers (env, sudo) and shell reserved words (if, then, do,
+					// !) both precede the real command word rather than being it, so
+					// skip them to reach the interpreter behind `then sh -c ...`.
+					if launcherWords[lower] || shellCommandIntroducers[lower] {
 						continue
 					}
 					eq := strings.IndexByte(token, '=')

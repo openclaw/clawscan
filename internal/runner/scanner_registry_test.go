@@ -871,6 +871,9 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"f(){ access=sk-live; }; f {{target}}":                          "access",
 		"case $x in a) db=sk-live ;; esac":                              "db",
 		"(cd dir && scanner mode=fast)":                                 "",
+		"readonly access=sk-live; export access; scanner {{target}}":    "access",
+		"declare token=sk-live scanner {{target}}":                      "token",
+		"local db=sk-live scanner":                                      "db",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -894,6 +897,9 @@ func TestCommandReparsesTarget(t *testing.T) {
 		"env NAME=v sh -c {{target}}":               true,
 		"env -i sh -c {{target}}":                   true,
 		"/usr/bin/env sh -c {{target}}":             true,
+		"if true; then sh -c {{target}}; fi":        true,
+		"while :; do bash -c {{target}}; done":      true,
+		"if true; then myscanner {{target}}; fi":    false,
 		"sh -c 'myscanner {{target}} | jq .'":       false,
 		"sh -c 'scan {{target}} | jq'":              false,
 		"myscanner -c {{target}}":                   false,
