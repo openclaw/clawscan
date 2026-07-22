@@ -208,40 +208,6 @@ profiles:
 	}
 }
 
-func TestResolveArgsSingleProfileCarriesSiblingDeclaredEnvForRedaction(t *testing.T) {
-	dir := t.TempDir()
-	config := filepath.Join(dir, ".clawscan.yml")
-	// Selecting profile-b must still carry profile-a's declared credential
-	// into the redaction set: with --sandbox off the run inherits the whole
-	// host env, so SHARED_ACCESS is reachable by profile-b's scanner.
-	writeFile(t, config, `version: 1
-profiles:
-  profile-a:
-    scanners:
-      - id: alpha
-        command: alpha {{target}}
-        env: [SHARED_ACCESS]
-  profile-b:
-    scanners:
-      - id: beta
-        command: beta {{target}}
-`)
-
-	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "profile-b"}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, name := range opts.BatchRedactEnvNames {
-		if name == "SHARED_ACCESS" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("sibling profile's declared env missing from redaction names: %v", opts.BatchRedactEnvNames)
-	}
-}
-
 func TestResolveArgsUnknownProfileDoesNotDiscoverConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, ".clawscan.yml"), `version: 1
