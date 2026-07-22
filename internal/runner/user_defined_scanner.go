@@ -100,6 +100,12 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 			Error: fmt.Sprintf("User-defined scanner %s command embeds an inline environment assignment (%s=...); its value cannot be redacted — declare it under env: and reference it as an environment variable instead", adapter.config.ID, name),
 		}, nil
 	}
+	if commandEvalReparsesTarget(adapter.config.Command) {
+		return ScannerResult{
+			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Error: fmt.Sprintf("User-defined scanner %s runs eval with a target placeholder; eval re-parses its operand, so a target containing shell metacharacters would execute — remove eval or drop the {{target}} placeholder", adapter.config.ID),
+		}, nil
+	}
 	shell := userDefinedScannerShell(runtime.GOOS, runner.SandboxMode)
 	targetReplacement := shell.quote(target)
 	usePositionalTarget := shell.command == "/bin/sh"
@@ -753,7 +759,7 @@ func inlineCredentialAssignment(command string) string {
 					// A non-rejected assignment operand does not move us past the
 					// command word.
 					prevWasOption = false
-				} else if assignmentWrapperWords[strings.ToLower(token)] {
+				} else if assignmentWrapperWords[strings.ToLower(path.Base(token))] {
 					wrapperZone = true
 					commandStart = false
 					prevWasOption = false
@@ -783,6 +789,43 @@ func inlineCredentialAssignment(command string) string {
 		}
 	}
 	return ""
+}
+
+// commandEvalReparsesTarget reports whether the command runs `eval` as a
+// command word while also interpolating a target placeholder. eval re-parses
+// its operand, so an interpolated target containing shell metacharacters would
+// be executed; the positional-parameter and quoting defenses do not survive
+// that re-parse. Conservative: any eval command word plus any target
+// placeholder is rejected, even when the placeholder is not eval's operand.
+func commandEvalReparsesTarget(command string) bool {
+	if !targetPlaceholderPattern.MatchString(command) {
+		return false
+	}
+	commandStart := true
+	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		commandStart = true
+		for _, field := range strings.Fields(line) {
+			segments := strings.FieldsFunc(field, func(r rune) bool { return r == ';' || r == '&' || r == '|' })
+			endsWithSeparator := strings.HasSuffix(field, ";") || strings.HasSuffix(field, "&") || strings.HasSuffix(field, "|")
+			for si, segment := range segments {
+				if si > 0 {
+					commandStart = true
+				}
+				token := strings.Trim(segment, "'\"(){}$`")
+				if token == "" {
+					continue
+				}
+				if commandStart && strings.ToLower(path.Base(token)) == "eval" {
+					return true
+				}
+				commandStart = false
+			}
+			if endsWithSeparator {
+				commandStart = true
+			}
+		}
+	}
+	return false
 }
 
 // upperCaseEnvName reports whether name looks like a conventional
@@ -827,24 +870,23 @@ func sanitizedDeclaredEnvNames(declared []string) []string {
 // the full entry — the value after = may be a live credential, and the
 // missing-variable diagnostic would otherwise print it verbatim.
 func invalidDeclaredEnvName(declared []string) string {
-	for _, name := range declared {
+	for i, name := range declared {
 		if envAssignmentNamePattern.MatchString(name) {
 			continue
 		}
 		if eq := strings.IndexByte(name, '='); eq >= 0 {
 			return name[:eq] + "=..."
 		}
-		if len(name) > 64 {
-			name = name[:64] + "..."
-		}
-		return name
+		// A malformed entry with no '=' may itself be a pasted credential
+		// (env: [sk-live-...]); never echo it. Identify it by position.
+		return fmt.Sprintf("#%d", i+1)
 	}
 	return ""
 }
 
-// InvalidUserDefinedEnvName reports the offending entry of a user-defined
-// scanner env: list that is not a bare variable name, truncated so a value
-// after = is never echoed, or "" when all entries are valid.
+// InvalidUserDefinedEnvName reports a safe descriptor for the offending entry
+// of a user-defined scanner env: list that is not a bare variable name, or ""
+// when all entries are valid.
 func InvalidUserDefinedEnvName(declared []string) string {
 	return invalidDeclaredEnvName(declared)
 }

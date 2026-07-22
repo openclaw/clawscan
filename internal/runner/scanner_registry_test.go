@@ -843,6 +843,8 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"env -u UNUSED session=sk-live-cred scanner {{target}}":         "session",
 		"env -u UNUSED PASSWORD=x scanner":                              "PASSWORD",
 		"sudo -E deploy_key=x scanner {{target}}":                       "deploy_key",
+		"/usr/bin/env access=sk-live-cred scanner {{target}}":           "access",
+		"/usr/bin/sudo API_TOKEN=x scanner":                             "API_TOKEN",
 		"sudo scanner --flag mode=fast":                                 "",
 		"sudo -E scanner":                                               "",
 		"env -i scanner mode=fast":                                      "mode",
@@ -861,6 +863,44 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
 		}
+	}
+}
+
+func TestCommandEvalReparsesTarget(t *testing.T) {
+	for command, want := range map[string]bool{
+		"eval scanner {{target}}":          true,
+		"/bin/eval scanner {{target}}":     true,
+		"scanner {{target}}":               false,
+		"myscanner --mode eval {{target}}": false,
+		"eval scanner --static":            false,
+	} {
+		if got := commandEvalReparsesTarget(command); got != want {
+			t.Fatalf("commandEvalReparsesTarget(%q) = %t, want %t", command, got, want)
+		}
+	}
+}
+
+func TestUserDefinedScannerRejectsEvalTargetPlaceholder(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "eval scanner {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "runs eval with a target placeholder") {
+		t.Fatalf("result = %q / %q, want eval-target rejection", result.Status, result.Error)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("command ran despite eval-target rejection: %#v", commandRunner.calls)
 	}
 }
 
@@ -944,6 +984,9 @@ func TestUserDefinedScannerRejectsMalformedEnvDeclaration(t *testing.T) {
 	// env: [API_TOKEN=sk-live] is a misconfiguration; the run must fail
 	// without echoing the inline value anywhere (the missing-variable
 	// diagnostic would otherwise print it into terminal and CI logs).
+	if got := invalidDeclaredEnvName([]string{"API_TOKEN=sk-live"}); got != "API_TOKEN=..." {
+		t.Fatalf("invalidDeclaredEnvName() = %q, want API_TOKEN=...", got)
+	}
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "alpha", Command: "scanner {{target}}",
 		Env: []string{"API_TOKEN=sk-live-declared"}, Targets: []string{"skill"},
@@ -971,6 +1014,38 @@ func TestUserDefinedScannerRejectsMalformedEnvDeclaration(t *testing.T) {
 	}
 	if strings.Contains(result.Error, "sk-live-declared") {
 		t.Fatalf("rejection echoes inline value: %s", result.Error)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("command ran despite malformed env: %#v", commandRunner.calls)
+	}
+}
+
+func TestUserDefinedScannerRejectsMalformedBareEnvDeclarationWithoutEchoingIt(t *testing.T) {
+	const pastedCredential = "sk-live-production-token"
+	if got := invalidDeclaredEnvName([]string{pastedCredential}); got != "#1" {
+		t.Fatalf("invalidDeclaredEnvName() = %q, want #1", got)
+	}
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "alpha", Command: "scanner {{target}}",
+		Env: []string{pastedCredential}, Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Error, "env entry #1 is not a variable name") {
+		t.Fatalf("result = %q / %q, want positional malformed-env rejection", result.Status, result.Error)
+	}
+	if strings.Contains(result.Error, pastedCredential) {
+		t.Fatalf("rejection echoes pasted credential: %s", result.Error)
 	}
 	if len(commandRunner.calls) != 0 {
 		t.Fatalf("command ran despite malformed env: %#v", commandRunner.calls)
