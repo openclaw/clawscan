@@ -2095,7 +2095,7 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	raw := strings.TrimSpace(output.Stdout)
+	raw := output.Stdout
 	if runErr != nil {
 		message := commandError(runErr, output.Stderr, runner.Env)
 		if json.Valid([]byte(raw)) {
@@ -2611,6 +2611,15 @@ func CredentialEnvName(name string) bool {
 }
 
 func credentialEnvNameOnGOOS(name string, goos string) bool {
+	// A name the registry documents as a non-credential configuration switch
+	// (PASSWORD_STORE_ENABLE_EXTENSIONS) is not a credential even though its
+	// name matches the secret-name heuristic; classifying it as one would sweep
+	// its plain value (a boolean/length) out of legitimate evidence. Explicit
+	// user-defined env: declarations stay credentials via the declared[name]
+	// and scanner.Env branches at the call sites, not here.
+	if nonCredentialSecretNamedEnv(name) {
+		return false
+	}
 	if isSecretEnvKey(name) {
 		return true
 	}

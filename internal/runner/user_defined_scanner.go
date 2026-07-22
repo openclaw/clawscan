@@ -163,17 +163,17 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	// unrelated host secret's value (CI_TOKEN=clean) would corrupt evidence
 	// without preventing any leak. --sandbox off keeps the full host env.
 	visibleEnv := commandVisibleEnv(runner.Env, scrubNames, runner.SandboxMode)
-	trimmed := strings.TrimSpace(output.Stdout)
+	stdout := output.Stdout
 	// Evidence is rejected outright — not repaired — when structural
 	// redaction cannot see everything the raw bytes hold: invalid UTF-8
 	// defeats byte-exact secret comparison after decoding, and duplicate
 	// object members hide earlier values from the decoded walk while
 	// re-encoding would silently rewrite the evidence.
 	evidenceUnsafe := ""
-	if json.Valid([]byte(trimmed)) {
-		evidenceUnsafe = scannerEvidenceUnsafe(trimmed)
+	if json.Valid([]byte(stdout)) {
+		evidenceUnsafe = scannerEvidenceUnsafe(stdout)
 	}
-	raw := redactScannerStdout(trimmed, visibleEnv, scrubNames)
+	raw := redactScannerStdout(stdout, visibleEnv, scrubNames)
 	if evidenceUnsafe != "" {
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
@@ -700,7 +700,11 @@ var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": tru
 // The first operand of a shell interpreter word (sh, bash, and peers,
 // including path forms such as /bin/sh) is also treated as a nested command
 // start. Separator handling is not shell-quote-aware and therefore rejects
-// conservatively. Wrapper and shell-interpreter options keep their zones active.
+// conservatively. Wrapper and shell-interpreter options and the bare operand
+// immediately following an option keep their zones active. This conservatively
+// over-rejects a no-argument option before the real command when a later
+// NAME=value is intended as an ordinary operand (env -i scanner mode=fast);
+// operators can move the assignment or drop the wrapper.
 // Inline values sit outside every redaction scope, so name-based carve-outs
 // let a bland credential name persist into evidence. Lowercase and mixed-case
 // NAME=value operands outside assignment position remain allowed. Grouping and
@@ -710,10 +714,12 @@ func inlineCredentialAssignment(command string) string {
 	commandStart := true
 	wrapperZone := false
 	shellZone := false
+	prevWasOption := false
 	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
 		commandStart = true
 		wrapperZone = false
 		shellZone = false
+		prevWasOption = false
 		for _, field := range strings.Fields(line) {
 			// Split attached separators (true;NAME=v, a|b, x&&NAME=v): the
 			// shell treats each ;&| as a command boundary regardless of
@@ -729,6 +735,7 @@ func inlineCredentialAssignment(command string) string {
 					commandStart = true
 					wrapperZone = false
 					shellZone = false
+					prevWasOption = false
 				}
 				token := strings.Trim(segment, "'\"(){}$`")
 				if token == "" {
@@ -742,24 +749,33 @@ func inlineCredentialAssignment(command string) string {
 					}
 					// A non-rejected assignment operand does not move us past the
 					// command word.
+					prevWasOption = false
 				} else if assignmentWrapperWords[strings.ToLower(token)] {
 					wrapperZone = true
 					commandStart = false
+					prevWasOption = false
 				} else if shellInterpreterWords[strings.ToLower(path.Base(token))] {
 					shellZone = true
 					commandStart = false
+					prevWasOption = false
 				} else if strings.HasPrefix(token, "-") && (wrapperZone || shellZone) {
 					// Wrapper and interpreter options (env -i, sh -c) keep the zone open.
+					prevWasOption = true
+				} else if (wrapperZone || shellZone) && prevWasOption {
+					// A bare option operand keeps the wrapper or interpreter zone open.
+					prevWasOption = false
 				} else {
 					wrapperZone = false
 					shellZone = false
 					commandStart = false
+					prevWasOption = false
 				}
 			}
 			if endsWithSeparator {
 				commandStart = true
 				wrapperZone = false
 				shellZone = false
+				prevWasOption = false
 			}
 		}
 	}

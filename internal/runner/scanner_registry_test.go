@@ -671,6 +671,47 @@ func TestUserDefinedScannerRejectsUnsafeEvidence(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerPreservesStdoutBytesAndRejectsNonJSONWhitespace(t *testing.T) {
+	for name, test := range map[string]struct {
+		stdout     string
+		wantStatus string
+		wantRaw    string
+	}{
+		"leading-nbsp": {
+			stdout:     "\u00a0{}",
+			wantStatus: "failed",
+		},
+		"trailing-newline": {
+			stdout:     "{\"ok\":true}\n",
+			wantStatus: "completed",
+			wantRaw:    "{\"ok\":true}\n",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+				ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
+			})
+			registry, err := NewScannerRegistry(adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := (ExternalScannerRunner{
+				Registry: registry, CommandRunner: &recordingCommandRunner{stdout: test.stdout},
+				Env: map[string]string{}, SandboxMode: SandboxModeOff,
+			}).RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != test.wantStatus {
+				t.Fatalf("status = %q, want %q (error = %q)", result.Status, test.wantStatus, result.Error)
+			}
+			if string(result.Raw) != test.wantRaw {
+				t.Fatalf("raw = %q, want %q", result.Raw, test.wantRaw)
+			}
+		})
+	}
+}
+
 func TestRedactScannerStdoutScrubsNestedJSONEncodings(t *testing.T) {
 	// A secret can hide one JSON-escaping layer down: a string node holding
 	// embedded JSON where the secret appears only via \u escapes. Neither
@@ -799,7 +840,12 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"scanner --url 'https://x.test/?a=b&c=d' {{target}}":    "c",
 		"FOO=1&&scanner {{target}}":                             "FOO",
 		"env -i session=sk-live scanner {{target}}":             "session",
+		"env -u UNUSED session=sk-live-cred scanner {{target}}": "session",
+		"env -u UNUSED PASSWORD=x scanner":                      "PASSWORD",
 		"sudo -E deploy_key=x scanner {{target}}":               "deploy_key",
+		"sudo scanner --flag mode=fast":                         "",
+		"sudo -E scanner":                                       "",
+		"env -i scanner mode=fast":                              "mode",
 		"scanner -o mode=fast":                                  "",
 		"sh -c 'session=sk-live-cred; scanner {{target}}'":      "session",
 		"/bin/sh -c 'session=sk-live-cred; scanner {{target}}'": "session",

@@ -3,7 +3,6 @@ package runner
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -23,7 +22,7 @@ func (runner ExternalScannerRunner) runSocket(target string, startedAt string) (
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	raw := strings.TrimSpace(output.Stdout)
+	raw := output.Stdout
 	if runErr != nil {
 		message := scannerCommandError(runErr, output.Stderr, runner.Env)
 		if json.Valid([]byte(raw)) {

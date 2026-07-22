@@ -1751,6 +1751,17 @@ func TestCredentialEnvNameWindowsFoldsOptionalEnvCase(t *testing.T) {
 	}
 }
 
+func TestCredentialEnvName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"PASSWORD_STORE_ENABLE_EXTENSIONS": false,
+		"API_TOKEN":                        true,
+	} {
+		if got := CredentialEnvName(name); got != want {
+			t.Errorf("CredentialEnvName(%q) = %t, want %t", name, got, want)
+		}
+	}
+}
+
 func TestRunProfileBatchRedactsSiblingProfileCredentials(t *testing.T) {
 	// A --config batch shares one host environment across profiles under
 	// --sandbox off, so profile B's scanner can emit the blandly named
