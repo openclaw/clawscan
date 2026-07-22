@@ -665,11 +665,17 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 		seen[secret] = true
 		secrets = append(secrets, secret)
 	}
+	addWithJSONLeaves := func(secret string) {
+		add(secret)
+		for _, leaf := range jsonSecretLeaves(secret) {
+			add(leaf)
+		}
+	}
 	for _, name := range declared {
 		// Windows env names are case-insensitive: a declared
 		// scanner_access must also sweep the host's SCANNER_ACCESS value.
 		for _, value := range envEntriesForName(env, name) {
-			add(value)
+			addWithJSONLeaves(value)
 		}
 	}
 	for name, secret := range env {
@@ -678,13 +684,49 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 		// persist it unredacted. Names isSecretEnvKey over-matches are
 		// listed in nonCredentialSecretNamedEnv instead.
 		if isSecretEnvKey(name) && !nonCredentialSecretNamedEnv(name) {
-			add(secret)
+			addWithJSONLeaves(secret)
 		}
 	}
 	sort.Slice(secrets, func(i int, j int) bool {
 		return len(secrets[i]) > len(secrets[j])
 	})
 	return secrets
+}
+
+// jsonSecretLeaves returns the string leaf values of secret when secret is a
+// JSON object or array, so a structurally re-emitted JSON credential
+// ({"token":"sk-live"} surfacing as {"auth":{"token":"sk-live"}}) is redacted
+// leaf by leaf. Only strings of length >= 5 are returned: shorter scalars,
+// numbers, and booleans would over-redact legitimate evidence.
+func jsonSecretLeaves(secret string) []string {
+	trimmed := strings.TrimSpace(secret)
+	if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') || !json.Valid([]byte(trimmed)) {
+		return nil
+	}
+	var doc any
+	if err := json.Unmarshal([]byte(trimmed), &doc); err != nil {
+		return nil
+	}
+	var leaves []string
+	var walk func(any)
+	walk = func(node any) {
+		switch value := node.(type) {
+		case map[string]any:
+			for _, child := range value {
+				walk(child)
+			}
+		case []any:
+			for _, child := range value {
+				walk(child)
+			}
+		case string:
+			if len(value) >= 5 {
+				leaves = append(leaves, value)
+			}
+		}
+	}
+	walk(doc)
+	return leaves
 }
 
 var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -701,11 +743,22 @@ var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set":
 // nested command.
 var shellInterpreterWords = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true, "eval": true}
 
+// shellCommandIntroducers are reserved words after which a new command
+// begins, so an assignment immediately following one is at command-start
+// (if VAR=v; then VAR=v; while VAR=v). Recognizing them conservatively —
+// not a full grammar — keeps the guard from missing assignments inside
+// compound commands.
+var shellCommandIntroducers = map[string]bool{
+	"if": true, "then": true, "elif": true, "else": true,
+	"do": true, "while": true, "until": true, "time": true,
+}
+
 // inlineCredentialAssignment reports the first rejected NAME=value token in
 // an operator-authored command, or "". It rejects secret-named assignments,
 // conventional ALL-UPPERCASE environment names, and any-case names in the
 // leading assignment run, at a new command start after ;, &, or | separators
-// wherever they appear or after a newline, or in an assignment-wrapper zone.
+// wherever they appear or after a newline, after shell reserved words that
+// introduce a command list, or in an assignment-wrapper zone.
 // The first operand of a shell interpreter word (sh, bash, and peers,
 // including path forms such as /bin/sh) is also treated as a nested command
 // start. Separator handling is not shell-quote-aware and therefore rejects
@@ -767,6 +820,11 @@ func inlineCredentialAssignment(command string) string {
 					shellZone = true
 					commandStart = false
 					prevWasOption = false
+				} else if shellCommandIntroducers[strings.ToLower(token)] {
+					commandStart = true
+					wrapperZone = false
+					shellZone = false
+					prevWasOption = false
 				} else if strings.HasPrefix(token, "-") && (wrapperZone || shellZone) {
 					// Wrapper and interpreter options (env -i, sh -c) keep the zone open.
 					prevWasOption = true
@@ -791,37 +849,22 @@ func inlineCredentialAssignment(command string) string {
 	return ""
 }
 
-// commandEvalReparsesTarget reports whether the command runs `eval` as a
-// command word while also interpolating a target placeholder. eval re-parses
-// its operand, so an interpolated target containing shell metacharacters would
-// be executed; the positional-parameter and quoting defenses do not survive
-// that re-parse. Conservative: any eval command word plus any target
-// placeholder is rejected, even when the placeholder is not eval's operand.
+// commandEvalReparsesTarget reports whether the command contains any whole-word
+// `eval` token while also interpolating a target placeholder. eval re-parses its
+// operand, so an interpolated target containing shell metacharacters would be
+// executed; the positional-parameter and quoting defenses do not survive that
+// re-parse. This deliberately over-rejects a scanner that takes the literal
+// string "eval" as an argument, which is rare and safer than missing a re-parse
+// of the untrusted target.
 func commandEvalReparsesTarget(command string) bool {
 	if !targetPlaceholderPattern.MatchString(command) {
 		return false
 	}
-	commandStart := true
-	for _, line := range strings.FieldsFunc(command, func(r rune) bool { return r == '\n' || r == '\r' }) {
-		commandStart = true
-		for _, field := range strings.Fields(line) {
-			segments := strings.FieldsFunc(field, func(r rune) bool { return r == ';' || r == '&' || r == '|' })
-			endsWithSeparator := strings.HasSuffix(field, ";") || strings.HasSuffix(field, "&") || strings.HasSuffix(field, "|")
-			for si, segment := range segments {
-				if si > 0 {
-					commandStart = true
-				}
-				token := strings.Trim(segment, "'\"(){}$`")
-				if token == "" {
-					continue
-				}
-				if commandStart && strings.ToLower(path.Base(token)) == "eval" {
-					return true
-				}
-				commandStart = false
-			}
-			if endsWithSeparator {
-				commandStart = true
+	for _, field := range strings.Fields(command) {
+		for _, segment := range strings.FieldsFunc(field, func(r rune) bool { return r == ';' || r == '&' || r == '|' }) {
+			token := strings.Trim(segment, "'\"(){}$`")
+			if token != "" && strings.ToLower(path.Base(token)) == "eval" {
+				return true
 			}
 		}
 	}

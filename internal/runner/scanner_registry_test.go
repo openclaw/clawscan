@@ -859,6 +859,10 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"eval 'PASSWORD=x scanner'":                                     "PASSWORD",
 		"eval scanner {{target}}":                                       "",
 		"eval scanner mode=fast":                                        "",
+		"if true; then scannerAccess=sk-" + "live-cred; fi":             "scannerAccess",
+		"while :; do access=sk-" + "live-cred scanner; done":            "access",
+		"if x=1; then scanner; fi":                                      "x",
+		"scanner --then mode=fast":                                      "",
 	} {
 		if got := inlineCredentialAssignment(command); got != want {
 			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
@@ -868,10 +872,15 @@ func TestInlineCredentialAssignment(t *testing.T) {
 
 func TestCommandEvalReparsesTarget(t *testing.T) {
 	for command, want := range map[string]bool{
-		"eval scanner {{target}}":          true,
-		"/bin/eval scanner {{target}}":     true,
-		"scanner {{target}}":               false,
-		"myscanner --mode eval {{target}}": false,
+		"if true; then eval scanner {{target}}; fi": true,
+		"while :; do eval scanner {{target}}; done": true,
+		"eval scanner {{target}}":                   true,
+		"/bin/eval scanner {{target}}":              true,
+		"scanner {{target}}":                        false,
+		// Conservative over-rejection: eval is a whole-word token even when
+		// the scanner intends it as a literal argument.
+		"myscanner --mode eval {{target}}": true,
+		"myscanner --mode=eval {{target}}": false,
 		"eval scanner --static":            false,
 	} {
 		if got := commandEvalReparsesTarget(command); got != want {
@@ -1505,6 +1514,41 @@ func TestScannerSecretValuesExemptsByNameNeverByValue(t *testing.T) {
 	}
 	if !strings.Contains(got, "real-secret") {
 		t.Fatalf("real secret missing from sweep: %v", secrets)
+	}
+}
+
+func TestScannerSecretValuesIncludesJSONCredentialLeaves(t *testing.T) {
+	credential := "sk-" + "live-cred"
+	jsonCredential := `{"to` + `ken":"` + credential + `"}`
+	env := map[string]string{"SCANNER_ACCESS": jsonCredential}
+	secrets := scannerSecretValues(env, []string{"SCANNER_ACCESS"})
+	got := strings.Join(secrets, "\n")
+	for _, want := range []string{jsonCredential, credential} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("secret %q missing from %v", want, secrets)
+		}
+	}
+}
+
+func TestRedactScannerStdoutScrubsReemittedJSONCredentialLeaves(t *testing.T) {
+	credential := "sk-" + "live-cred"
+	env := map[string]string{"SCANNER_ACCESS": `{"to` + `ken":"` + credential + `"}`}
+	redacted := redactScannerStdout(`{"auth":{"to`+`ken":"`+credential+`"}}`, env, []string{"SCANNER_ACCESS"})
+	if strings.Contains(redacted, credential) {
+		t.Fatalf("JSON credential leaf survived redaction: %s", redacted)
+	}
+	if !strings.Contains(redacted, "[redacted]") {
+		t.Fatalf("expected redaction marker: %s", redacted)
+	}
+}
+
+func TestScannerSecretValuesExcludesShortJSONCredentialLeaves(t *testing.T) {
+	env := map[string]string{"X": `{"v":"ab"}`}
+	secrets := scannerSecretValues(env, []string{"X"})
+	for _, secret := range secrets {
+		if secret == "ab" {
+			t.Fatalf("short JSON credential leaf was included: %v", secrets)
+		}
 	}
 }
 
