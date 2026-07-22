@@ -2,7 +2,6 @@ FROM python:3.12-slim
 
 ARG SKILLSPECTOR_REF=8f37cfa1ebc2d5748a58f7005a1101230ce27f87
 ARG AIG_SKILL_SCAN_VERSION=0.2.1
-ARG RELYABLE_REF=f7e1712a96073c717b13048a8652efb471f40c70
 ARG CISCO_AI_SKILL_SCANNER_VERSION=2.0.12
 ARG SNYK_AGENT_SCAN_VERSION=0.5.12
 ARG CLAUDE_CODE_VERSION=2.1.193
@@ -26,9 +25,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip uv \
       "cisco-ai-skill-scanner==${CISCO_AI_SKILL_SCANNER_VERSION}" \
     && uv tool install "aig-skill-scan==${AIG_SKILL_SCAN_VERSION}" \
     && uv tool install "snyk-agent-scan==${SNYK_AGENT_SCAN_VERSION}" \
-    && ln -sf /root/.local/bin/snyk-agent-scan /usr/local/bin/snyk-agent-scan \
-    && uv tool install "git+https://github.com/veriker/relyable.git@${RELYABLE_REF}" --with pytest \
-    && ln -sf /root/.local/bin/relyable-scan /usr/local/bin/relyable-scan
+    && ln -sf /root/.local/bin/snyk-agent-scan /usr/local/bin/snyk-agent-scan
 
 RUN ln -sf /root/.local/bin/aig-skill-scan /usr/local/bin/aig-skill-scan
 

@@ -123,6 +123,43 @@ func TestRelyableScannerFailsOnEmptyOrInvalidStdout(t *testing.T) {
 	}
 }
 
+func TestRelyableScannerHintsWhenExecutableMissing(t *testing.T) {
+	// relyable-scan is deliberately not preinstalled in the runtime image, so
+	// the not-found failure is the one operators will actually hit; it must
+	// point at the derived-image / clawscan install paths.
+	runner := ExternalScannerRunner{
+		CommandRunner: &relyableRecordingCommandRunner{
+			stderr: `exec: "relyable-scan": executable file not found in $PATH`,
+			err:    errors.New("exit status 127"),
+		},
+		SandboxMode: SandboxModeDocker,
+	}
+	result, err := runner.runRelyable("/workspace/skill", "2026-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q", result.Status)
+	}
+	for _, want := range []string{"--sandbox-image", "clawscan install relyable"} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("error %q missing hint %q", result.Error, want)
+		}
+	}
+
+	// Any other failure must stay un-hinted.
+	plain := ExternalScannerRunner{
+		CommandRunner: &relyableRecordingCommandRunner{err: errors.New("exit status 1"), stderr: "boom"},
+	}
+	plainResult, err := plain.runRelyable("/workspace/skill", "2026-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plainResult.Error, "--sandbox-image") {
+		t.Fatalf("unexpected hint on unrelated failure: %q", plainResult.Error)
+	}
+}
+
 func TestRelyableScannerRegistered(t *testing.T) {
 	registry := DefaultScannerRegistry()
 	if !registry.Contains("relyable") {

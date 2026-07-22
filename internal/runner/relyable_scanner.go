@@ -37,6 +37,9 @@ func (runner ExternalScannerRunner) runRelyable(target string, startedAt string)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
 		message := commandError(runErr, output.Stderr, runner.Env)
+		if strings.Contains(message, "executable file not found") {
+			message += " (relyable-scan is not preinstalled in the default clawscan-runtime image: pass --sandbox-image with a derived image that installs it, or install it on the host with `clawscan install relyable` — see docs/scanners.md#relyable-and-the-sandbox)"
+		}
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status:      "completed",
