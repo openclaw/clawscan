@@ -608,7 +608,7 @@ func TestUserDefinedScannerRejectsInlineCredentialAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "failed" || !strings.Contains(result.Error, "inline credential assignment") {
+	if result.Status != "failed" || !strings.Contains(result.Error, "inline environment assignment") {
 		t.Fatalf("result = %q / %q, want inline-credential rejection", result.Status, result.Error)
 	}
 	if len(commandRunner.calls) != 0 {
@@ -677,6 +677,30 @@ func TestRedactScannerStdoutScrubsNestedJSONEncodings(t *testing.T) {
 	}
 }
 
+func TestScrubDeepReachesArbitraryEncodingDepth(t *testing.T) {
+	secret := "sk-deep-layer-credential"
+	value := secret
+	for range 6 {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value = string(encoded)
+	}
+
+	redacted := newSecretScrubber([]string{secret}).scrubDeep(value)
+	for layer := 0; ; layer++ {
+		if strings.Contains(redacted, secret) {
+			t.Fatalf("layer %d contains secret", layer)
+		}
+		decoded := decodeJSONStringEscapes(redacted)
+		if decoded == redacted {
+			break
+		}
+		redacted = decoded
+	}
+}
+
 func TestRedactJSONStringsCanonicalNumberSecrets(t *testing.T) {
 	// A numeric secret emitted in an alternate spelling (1e3 for 1000,
 	// 1.0 for 1) reveals the same credential.
@@ -698,14 +722,12 @@ func TestRedactJSONStringsCanonicalNumberSecrets(t *testing.T) {
 }
 
 func TestInlineCredentialAssignment(t *testing.T) {
-	// Every token is scanned: wrapper spellings (env, export, cmd.exe set,
-	// post-;/&& assignments) carry the same inline literal as a leading
-	// assignment word. A secret-named NAME=value anywhere is rejected;
-	// false positives route the operator to env:/sandbox.env, which is the
-	// correct channel regardless.
+	// Secret-named and uppercase assignments are rejected anywhere, while
+	// any-case assignments are rejected in a leading run or after wrappers.
+	// Lowercase and mixed-case operand-style NAME=value tokens stay allowed.
 	for command, want := range map[string]string{
 		"API_TOKEN=sk-live scanner {{target}}":           "API_TOKEN",
-		"FOO=1 DB_PASSWORD=x scanner {{target}}":         "DB_PASSWORD",
+		"FOO=1 DB_PASSWORD=x scanner {{target}}":         "FOO",
 		"env API_TOKEN=sk-live scanner {{target}}":       "API_TOKEN",
 		"env 'API_TOKEN=sk-live' scanner {{target}}":     "API_TOKEN",
 		"export API_TOKEN=sk-live; scanner {{target}}":   "API_TOKEN",
@@ -714,8 +736,12 @@ func TestInlineCredentialAssignment(t *testing.T) {
 		"scanner --arg API_TOKEN=inline {{target}}":      "API_TOKEN",
 		"scanner --token abc {{target}}":                 "",
 		"scanner {{target}}":                             "",
-		"PATH=/usr/bin scanner {{target}}":               "",
-		"scanner --header 'PATH=/usr/bin'":               "",
+		"PATH=/usr/bin scanner {{target}}":               "PATH",
+		"scanner --header 'PATH=/usr/bin'":               "PATH",
+		"SCANNER_ACCESS=sk-live scanner {{target}}":      "SCANNER_ACCESS",
+		"env myapp_token=x scanner {{target}}":           "myapp_token",
+		"scanner --set output=json {{target}}":           "",
+		"scanner --build-arg mode=fast":                  "",
 		"scanner --url 'https://x.test/?a=b' {{target}}": "",
 		"scanner --retries=3 --api-version=2 {{target}}": "",
 	} {

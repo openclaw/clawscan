@@ -4503,7 +4503,7 @@ func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// An inline credential assignment in the judge command is rejected up
+	// An inline environment assignment in the judge command is rejected up
 	// front: the literal sits outside every redaction scope.
 	opts, err := ParseArgs([]string{
 		target,
@@ -4520,7 +4520,7 @@ func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
 		Env:           map[string]string{"OPENAI_API_KEY": "present"},
 		ScannerRunner: scannerRunner,
 	})
-	if err == nil || !strings.Contains(err.Error(), "inline credential assignment") {
+	if err == nil || !strings.Contains(err.Error(), "inline environment assignment") {
 		t.Fatalf("err = %v, want inline-credential rejection", err)
 	}
 	// A credential-free judge command runs, and its rendered form is still

@@ -89,14 +89,14 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 			Error: fmt.Sprintf("User-defined scanner %s env entry %s is not a variable name; declare bare names and set values in the environment", adapter.config.ID, bad),
 		}, nil
 	}
-	// Credentials must arrive through env: declarations, never inline in
-	// the command: an inline literal (INLINE_TOKEN=sk-live scanner ...)
-	// is outside every redaction scope, so a scanner echoing it would
-	// persist the secret into evidence. Fail closed before running.
+	// Environment assignments must arrive through env: declarations, never
+	// inline in the command: an inline literal (INLINE_TOKEN=sk-live scanner
+	// ...) is outside every redaction scope, so a scanner echoing it would
+	// persist the value into evidence. Fail closed before running.
 	if name := inlineCredentialAssignment(adapter.config.Command); name != "" {
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			Error: fmt.Sprintf("User-defined scanner %s command embeds an inline credential assignment (%s=...); declare it under env: and reference it as an environment variable instead", adapter.config.ID, name),
+			Error: fmt.Sprintf("User-defined scanner %s command embeds an inline environment assignment (%s=...); its value cannot be redacted — declare it under env: and reference it as an environment variable instead", adapter.config.ID, name),
 		}, nil
 	}
 	shell := userDefinedScannerShell(runtime.GOOS, runner.SandboxMode)
@@ -280,7 +280,7 @@ func (scrubber secretScrubber) scrub(value string) string {
 	return redacted
 }
 
-// scrubDeep scrubs value and then bounded re-decodings of it: a secret can
+// scrubDeep scrubs value and then decodes it to a fixed point: a secret can
 // hide one JSON-escaping layer down ({"message":"{\"auth\":\"\\u0073ekret\"}"})
 // where neither the raw bytes nor the once-decoded string contain the
 // literal. Each decode layer that surfaces a secret is scrubbed in place;
@@ -288,10 +288,14 @@ func (scrubber secretScrubber) scrub(value string) string {
 func (scrubber secretScrubber) scrubDeep(value string) string {
 	result := scrubber.scrub(value)
 	current := result
-	for depth := 0; depth < 4; depth++ {
+	// Decode to a fixed point. Termination is guaranteed: every escape
+	// decodeJSONStringEscapes rewrites (\", \\, \/, \uXXXX) strictly
+	// shrinks the string, and unknown escapes pass through unchanged, so
+	// decoded != current implies len(decoded) < len(current).
+	for {
 		decoded := decodeJSONStringEscapes(current)
 		if decoded == current {
-			break
+			return result
 		}
 		if scrubber.containsSecret(decoded) {
 			decoded = scrubber.scrub(decoded)
@@ -299,7 +303,6 @@ func (scrubber secretScrubber) scrubDeep(value string) string {
 		}
 		current = decoded
 	}
-	return result
 }
 
 // redactionMarker picks the replacement sentinel. The preferred marker is
@@ -388,7 +391,7 @@ func redactDeclaredEnvValues(value string, env map[string]string, declared []str
 	// JSON permits alternate encodings of the same string (a\/b for a/b,
 	// \u escapes) that byte replacement cannot enumerate, and a secret can
 	// hide multiple escaping layers down (JSON embedded in a JSON string).
-	// scrubDeep decodes to a bounded depth and scrubs whatever surfaces —
+	// scrubDeep decodes to a fixed point and scrubs whatever surfaces —
 	// losing the original escaping is acceptable, leaking is not.
 	return newSecretScrubber(secrets).scrubDeep(value)
 }
@@ -662,32 +665,52 @@ func scannerSecretValues(env map[string]string, declared []string) []string {
 
 var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// inlineCredentialAssignment reports the first secret-named VAR=value
-// assignment in an operator-authored command, or "". Quoted assignment
-// forms are caught conservatively too. Inline credential
-// literals sit outside every redaction scope (they are never in the
-// process env map), so a command echoing one would persist it into
-// evidence. Every token is scanned, not just leading assignment words:
-// `env API_TOKEN=x scanner`, `export API_TOKEN=x; scanner`, cmd.exe
-// `set API_TOKEN=x && scanner`, and mid-command assignments after && or ;
-// all carry the same literal. False positives (an argument that happens to
-// look like NAME=value with a secret-shaped name) are acceptable — the
-// error tells the operator to use env:/sandbox.env, which is the correct
-// channel anyway. Bland names still evade the heuristic the same way they
-// do everywhere else.
+// assignmentWrapperWords are command words whose following NAME=value
+// operand sets an environment variable in the child regardless of case.
+var assignmentWrapperWords = map[string]bool{"env": true, "export": true, "set": true, "setx": true, "sudo": true}
+
+// inlineCredentialAssignment reports the first rejected NAME=value token in
+// an operator-authored command, or "". It rejects secret-named assignments,
+// conventional ALL-UPPERCASE environment names, and any-case names in the
+// leading assignment run or immediately after an assignment wrapper. Inline
+// values sit outside every redaction scope, so name-based carve-outs let a
+// bland credential name persist into evidence. Lowercase and mixed-case
+// NAME=value operands outside assignment position remain allowed.
 func inlineCredentialAssignment(command string) string {
-	for _, token := range strings.Fields(command) {
-		token = strings.TrimRight(token, ";&|")
-		token = strings.Trim(token, `'"`)
+	tokens := strings.Fields(command)
+	assignmentRun := true
+	previous := ""
+	for _, raw := range tokens {
+		token := strings.Trim(strings.TrimRight(raw, ";&|"), `'"`)
 		eq := strings.IndexByte(token, '=')
-		if eq <= 0 || !envAssignmentNamePattern.MatchString(token[:eq]) {
-			continue
+		isAssignment := eq > 0 && envAssignmentNamePattern.MatchString(token[:eq])
+		if isAssignment {
+			name := token[:eq]
+			afterWrapper := assignmentWrapperWords[strings.ToLower(previous)]
+			if isSecretEnvKey(name) || upperCaseEnvName(name) || assignmentRun || afterWrapper {
+				return name
+			}
+		} else {
+			assignmentRun = false
 		}
-		if isSecretEnvKey(token[:eq]) {
-			return token[:eq]
-		}
+		previous = token
 	}
 	return ""
+}
+
+// upperCaseEnvName reports whether name looks like a conventional
+// environment variable: at least one letter and no lowercase letters.
+func upperCaseEnvName(name string) bool {
+	hasLetter := false
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' {
+			return false
+		}
+		if r >= 'A' && r <= 'Z' {
+			hasLetter = true
+		}
+	}
+	return hasLetter
 }
 
 // sanitizedDeclaredEnvNames returns the adapter's env: declarations with any

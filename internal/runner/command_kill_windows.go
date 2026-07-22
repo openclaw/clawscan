@@ -42,15 +42,13 @@ func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
 			_ = windows.CloseHandle(job)
 		}
 	}
-	// CREATE_SUSPENDED closes the assignment race: the child cannot spawn
-	// grandchildren outside the job before AssignProcessToJobObject runs.
-	if killer.job != 0 {
-		if cmd.SysProcAttr == nil {
-			cmd.SysProcAttr = &syscall.SysProcAttr{}
-		}
-		cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
-		killer.suspended = true
+	// CREATE_SUSPENDED closes the assignment race and guarantees that a
+	// containment failure can kill the child before it executes anything.
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	killer.suspended = true
 	cmd.Cancel = func() error {
 		killer.fired.Store(true)
 		if killer.job != 0 {
@@ -66,27 +64,28 @@ func configureCommandTreeKill(cmd *exec.Cmd) *processTreeKiller {
 	return killer
 }
 
-// started assigns the suspended child to the job, then resumes it. If
-// assignment fails (incompatible parent-job environment), the job handle
-// is dropped BEFORE the child resumes: cancellation must not "succeed" by
-// terminating an empty job while the unassigned command and its
-// descendants keep running with scanner credentials. With no job, Cancel
-// and reapStragglers fall back to direct-process kill.
+// started assigns the suspended child to the job, then resumes it. It
+// guarantees either full job containment or a dead child plus an error, so a
+// command can never run uncontained with scanner credentials.
 func (killer *processTreeKiller) started(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
+	if killer.job == 0 {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("process containment unavailable (job object creation failed); killed the sandboxed command rather than run it uncontained")
+	}
 	pid := uint32(cmd.Process.Pid)
-	if killer.job != 0 {
-		assigned := false
-		if handle, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid); err == nil {
-			assigned = windows.AssignProcessToJobObject(killer.job, handle) == nil
-			_ = windows.CloseHandle(handle)
-		}
-		if !assigned {
-			_ = windows.CloseHandle(killer.job)
-			killer.job = 0
-		}
+	assigned := false
+	if handle, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid); err == nil {
+		assigned = windows.AssignProcessToJobObject(killer.job, handle) == nil
+		_ = windows.CloseHandle(handle)
+	}
+	if !assigned {
+		_ = cmd.Process.Kill()
+		_ = windows.CloseHandle(killer.job)
+		killer.job = 0
+		return fmt.Errorf("failed to assign sandboxed command to its job object; killed it rather than run it uncontained")
 	}
 	if !killer.suspended {
 		return nil
