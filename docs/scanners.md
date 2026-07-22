@@ -90,6 +90,8 @@ value if they must be redacted. Required environment
 variables are checked before any scanner starts. Artifacts record each
 requirement as only `present` or `missing`.
 
+Scanner credentials must be supplied through environment variables declared under `env:` (or the sandbox env allowlist), never written inline in the command. ClawScan can only redact values it was told about via declared env vars; a secret written directly into the command — whether as an inline `NAME=value` assignment or as a flag value such as `--token sk-live` — is outside every redaction scope and can leak into saved evidence if the scanner echoes its arguments. Inline `NAME=value` assignments are rejected outright; flag-form secrets are the operator's responsibility, so keep all credentials in the environment.
+
 User-defined scanners use the same execution path as built-in command-backed
 scanners. They run in the Docker sandbox by default, and declared `env` names
 are added to its environment allowlist. Use `--sandbox off` only when you
