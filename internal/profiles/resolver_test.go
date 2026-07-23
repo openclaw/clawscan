@@ -1021,6 +1021,47 @@ profiles:
 	}
 }
 
+func TestResolveArgsRejectsInlineUserDefinedScannerEnvValue(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: my-scanner {{target}}
+        env:
+          - API_TOKEN=sk-live-secret
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	want := `User-defined scanner my-scanner in profile review has an invalid env entry "API_TOKEN"; declare bare variable names and set values in the environment, not inline`
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	if err != nil && strings.Contains(err.Error(), "sk-live-secret") {
+		t.Fatalf("error leaked the inline env value: %v", err)
+	}
+}
+
+func TestResolveArgsAllowsBareUserDefinedScannerEnvName(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: my-scanner {{target}}
+        env:
+          - API_TOKEN
+`)
+
+	if _, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir); err != nil {
+		t.Fatalf("bare env name rejected: %v", err)
+	}
+}
+
 func TestResolveArgsRejectsQuotedUserDefinedScannerTargetPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")
