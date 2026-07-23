@@ -63,6 +63,36 @@ func unsafeWindowsShellTarget(target string) bool {
 	return strings.ContainsAny(target, "%\"!")
 }
 
+// sanitizedDeclaredEnvNames returns bare variable names from declared env
+// entries, dropping any accidental =value suffix so an inline value is never
+// mistaken for a name.
+func sanitizedDeclaredEnvNames(env []string) []string {
+	names := make([]string, 0, len(env))
+	for _, entry := range env {
+		name := entry
+		if i := strings.IndexByte(entry, '='); i >= 0 {
+			name = entry[:i]
+		}
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// redactDeclaredEnvValues scrubs the values of a user-defined scanner's declared
+// env vars from free-text output. A scanner's env: entries exist to hand it
+// secrets, so whatever their spelling their values must never be persisted, even
+// when the name evades the secret-name heuristic.
+func redactDeclaredEnvValues(message string, env map[string]string, names []string) string {
+	for _, name := range names {
+		if value := env[name]; value != "" {
+			message = strings.ReplaceAll(message, value, "[redacted]")
+		}
+	}
+	return message
+}
+
 func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
 	shell := userDefinedScannerShell(runtime.GOOS, runner.SandboxMode)
 	targetReplacement := shell.quote(target)
@@ -109,6 +139,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
 		message := commandError(runErr, output.Stderr, runner.Env)
+		message = redactDeclaredEnvValues(message, runner.Env, sanitizedDeclaredEnvNames(adapter.config.Env))
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,

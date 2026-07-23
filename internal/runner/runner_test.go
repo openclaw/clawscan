@@ -901,6 +901,55 @@ func TestUserDefinedScannerUsesIsolatedCwd(t *testing.T) {
 	}
 }
 
+func TestSanitizedDeclaredEnvNamesStripsValues(t *testing.T) {
+	env := []string{"SECRET_KEY=value", "TOKEN", "EMPTY="}
+	names := sanitizedDeclaredEnvNames(env)
+	if len(names) != 3 || names[0] != "SECRET_KEY" || names[1] != "TOKEN" || names[2] != "EMPTY" {
+		t.Fatalf("names = %#v", names)
+	}
+}
+
+func TestRedactDeclaredEnvValuesRemovesSecrets(t *testing.T) {
+	env := map[string]string{"SECRET_KEY": "my-secret-value"}
+	names := []string{"SECRET_KEY"}
+	message := "Error: my-secret-value failed"
+	result := redactDeclaredEnvValues(message, env, names)
+	if result != "Error: [redacted] failed" {
+		t.Fatalf("result = %q", result)
+	}
+}
+
+func TestUserDefinedScannerRedactsDeclaredEnvInError(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "test", Command: "test {{target}}", Targets: []string{"skill"},
+		Env: []string{"DECLARED_SECRET"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{
+		stderr: "Error: my-declared-secret-value failed",
+		err:    errCommandFailed,
+	}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{"DECLARED_SECRET": "my-declared-secret-value"},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("test", t.TempDir()+"/file.txt", "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q", result.Status)
+	}
+	if !strings.Contains(result.Error, "[redacted]") {
+		t.Fatalf("error = %q, should contain [redacted]", result.Error)
+	}
+	if strings.Contains(result.Error, "my-declared-secret-value") {
+		t.Fatalf("error = %q, should not contain secret value", result.Error)
+	}
+}
+
 func TestUnsafeWindowsShellTargetDetectsInjectionCharacters(t *testing.T) {
 	unsafe := []string{
 		`%PATH%`,
