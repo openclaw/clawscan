@@ -4531,29 +4531,12 @@ func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// An inline environment assignment in the judge command is rejected up
-	// front: the literal sits outside every redaction scope.
-	opts, err := ParseArgs([]string{
-		target,
-		"--scanner", "skillspector",
-		"--judge", "SECRET_TOKEN=supersecret printf '{\"ok\":true}\\n' > {{ output }}",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	scannerRunner := staticScannerRunner{results: map[string]ScannerResult{
 		"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 	}}
-	_, err = Run(opts, RunContext{
-		Env:           map[string]string{"OPENAI_API_KEY": "present"},
-		ScannerRunner: scannerRunner,
-	})
-	if err == nil || !strings.Contains(err.Error(), "inline environment assignment") {
-		t.Fatalf("err = %v, want inline-credential rejection", err)
-	}
 	// A credential-free judge command runs, and its rendered form is still
 	// never persisted into the artifact.
-	opts, err = ParseArgs([]string{
+	opts, err := ParseArgs([]string{
 		target,
 		"--scanner", "skillspector",
 		"--judge", "printf '{\"ok\":true}\\n' > {{ output }}",

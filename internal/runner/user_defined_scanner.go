@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -91,16 +90,6 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Error: fmt.Sprintf("User-defined scanner %s env entry %s is not a variable name; declare bare names and set values in the environment", adapter.config.ID, bad),
-		}, nil
-	}
-	// Environment assignments must arrive through env: declarations, never
-	// inline in the command: an inline literal (INLINE_TOKEN=sk-live scanner
-	// ...) is outside every redaction scope, so a scanner echoing it would
-	// persist the value into evidence. Fail closed before running.
-	if name := inlineCredentialAssignment(adapter.config.Command); name != "" {
-		return ScannerResult{
-			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			Error: fmt.Sprintf("User-defined scanner %s command embeds an inline environment assignment (%s=...); its value cannot be redacted — declare it under env: and reference it as an environment variable instead", adapter.config.ID, name),
 		}, nil
 	}
 	if commandReparsesTarget(adapter.config.Command) {
@@ -366,7 +355,7 @@ func secretFreeRune(secrets []string) string {
 }
 
 func gateEligibleExitCode(exitCode *int) *int {
-	// Shells and docker run report a signal-killed child as 128+N (137 for
+	// Shells and docker report a signal-killed child as 128+N (137 for
 	// SIGKILL/OOM, 143 for SIGTERM) with a normal ProcessState. Docker reserves
 	// 125 for docker-run failure, and shells reserve 126/127 for
 	// not-executable/not-found. None of these are scanner verdicts: treating
@@ -742,216 +731,6 @@ func jsonSecretLeaves(secret string) []string {
 
 var envAssignmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-const shellAnalysisDepthLimit = 10
-
-var runCommandAssignmentWrappers = map[string]bool{"env": true, "sudo": true}
-
-var declarationAssignmentWrappers = map[string]bool{
-	"export": true, "set": true, "setx": true, "readonly": true,
-	"declare": true, "local": true, "typeset": true,
-}
-
-var envOptionsWithValues = map[string]bool{
-	"-u": true, "-C": true, "-S": true,
-	"--unset": true, "--chdir": true, "--split-string": true,
-}
-
-var inlineAssignmentInterpreterWords = map[string]bool{
-	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "ash": true,
-}
-
-// inlineCredentialAssignment reports the first NAME=value expression that the
-// shell or a known assignment wrapper evaluates as an assignment, or "".
-// Parsing the shell grammar keeps ordinary scanner arguments such as mode=fast
-// and quoted separators out of assignment position.
-func inlineCredentialAssignment(command string) string {
-	return inlineCredentialAssignmentAtDepth(command, 0)
-}
-
-func inlineCredentialAssignmentAtDepth(command string, depth int) string {
-	if depth >= shellAnalysisDepthLimit {
-		return ""
-	}
-	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
-	if err != nil {
-		// A bash-grammar parse failure means the default-path /bin/sh rejects
-		// the command too (sh grammar is a subset of bash), so the scanner
-		// never runs and no inline value can leak. Treat as no assignment.
-		return ""
-	}
-
-	found := ""
-	syntax.Walk(file, func(node syntax.Node) bool {
-		if found != "" {
-			return false
-		}
-		switch node := node.(type) {
-		case *syntax.CallExpr:
-			for _, assignment := range node.Assigns {
-				if assignment.Name != nil {
-					found = assignment.Name.Value
-					return false
-				}
-			}
-			if len(node.Args) == 0 {
-				return true
-			}
-			commandWord, ok := staticWord(node.Args[0])
-			if !ok {
-				return true
-			}
-			base := strings.ToLower(path.Base(commandWord))
-			switch {
-			case runCommandAssignmentWrappers[base]:
-				found = runCommandWrapperAssignment(base, node.Args[1:], depth)
-			case declarationAssignmentWrappers[base]:
-				found = declarationWrapperAssignment(node.Args[1:])
-			case base == "eval":
-				parts := make([]string, 0, len(node.Args)-1)
-				for _, arg := range node.Args[1:] {
-					text, ok := staticWord(arg)
-					if !ok {
-						return false
-					}
-					parts = append(parts, text)
-				}
-				found = inlineCredentialAssignmentAtDepth(strings.Join(parts, " "), depth+1)
-				return false
-			case inlineAssignmentInterpreterWords[base]:
-				if operand := commandStringOperand(base, node.Args); operand != nil {
-					if text, ok := staticWord(operand); ok {
-						found = inlineCredentialAssignmentAtDepth(text, depth+1)
-					}
-				}
-			}
-		case *syntax.DeclClause:
-			for _, assignment := range node.Args {
-				if !assignment.Naked && assignment.Name != nil {
-					found = assignment.Name.Value
-					return false
-				}
-			}
-		}
-		return found == ""
-	})
-	return found
-}
-
-func runCommandWrapperAssignment(base string, args []*syntax.Word, depth int) string {
-	expectValue := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		word, ok := staticWord(arg)
-		if !ok {
-			return ""
-		}
-		if expectValue {
-			expectValue = false
-			continue
-		}
-		if base == "env" {
-			switch {
-			case word == "-S" || word == "--split-string":
-				if i+1 >= len(args) {
-					return ""
-				}
-				if splitContent, ok := staticWord(args[i+1]); ok {
-					if name := inlineCredentialAssignmentAtDepth(splitContent, depth+1); name != "" {
-						return name
-					}
-				}
-				i++
-				continue
-			case strings.HasPrefix(word, "-S") && len(word) > len("-S"):
-				if name := inlineCredentialAssignmentAtDepth(strings.TrimPrefix(word, "-S"), depth+1); name != "" {
-					return name
-				}
-				continue
-			case strings.HasPrefix(word, "--split-string="):
-				if name := inlineCredentialAssignmentAtDepth(strings.TrimPrefix(word, "--split-string="), depth+1); name != "" {
-					return name
-				}
-				continue
-			}
-		}
-		if strings.HasPrefix(word, "-") {
-			if base == "env" && envOptionsWithValues[word] && !strings.ContainsRune(word, '=') {
-				expectValue = true
-			}
-			continue
-		}
-		assignmentName := leadingAssignmentName
-		if base == "env" {
-			assignmentName = envAssignmentName
-		}
-		if name, ok := assignmentName(word); ok {
-			return name
-		}
-		return ""
-	}
-	return ""
-}
-
-func declarationWrapperAssignment(args []*syntax.Word) string {
-	for _, arg := range args {
-		word, ok := staticWord(arg)
-		if !ok || strings.HasPrefix(word, "-") {
-			continue
-		}
-		if name, ok := leadingAssignmentName(word); ok {
-			return name
-		}
-	}
-	return ""
-}
-
-func leadingAssignmentName(word string) (string, bool) {
-	eq := strings.IndexByte(word, '=')
-	if eq <= 0 || !envAssignmentNamePattern.MatchString(word[:eq]) {
-		return "", false
-	}
-	return word[:eq], true
-}
-
-func envAssignmentName(word string) (string, bool) {
-	eq := strings.IndexByte(word, '=')
-	if eq <= 0 || strings.HasPrefix(word, "-") || strings.IndexFunc(word[:eq], unicode.IsSpace) >= 0 {
-		return "", false
-	}
-	return word[:eq], true
-}
-
-func staticWord(word *syntax.Word) (string, bool) {
-	var text strings.Builder
-	if !appendStaticWordParts(&text, word.Parts, false) {
-		return "", false
-	}
-	return text.String(), true
-}
-
-func appendStaticWordParts(text *strings.Builder, parts []syntax.WordPart, quoted bool) bool {
-	for _, part := range parts {
-		switch part := part.(type) {
-		case *syntax.Lit:
-			for i := 0; i < len(part.Value); i++ {
-				if part.Value[i] == '\\' && !quoted && i+1 < len(part.Value) {
-					i++
-				}
-				text.WriteByte(part.Value[i])
-			}
-		case *syntax.SglQuoted:
-			text.WriteString(part.Value)
-		case *syntax.DblQuoted:
-			if !appendStaticWordParts(text, part.Parts, true) {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 // commandReparsesTarget reports whether a target placeholder is evaluated by
 // eval, a shell interpreter's command-string operand, or command substitution.
 func commandReparsesTarget(command string) bool {
@@ -1057,19 +836,6 @@ func reparsingCommand(call *syntax.CallExpr) (interpreter string, args []*syntax
 	return "", nil, false
 }
 
-func commandStringOperand(interpreter string, args []*syntax.Word) *syntax.Word {
-	for i := 1; i < len(args); i++ {
-		word, ok := staticWord(args[i])
-		if !ok {
-			continue
-		}
-		if isCommandStringFlag(interpreter, word) && i+1 < len(args) {
-			return args[i+1]
-		}
-	}
-	return nil
-}
-
 func nodeContainsTarget(command string, node syntax.Node) bool {
 	start, end := int(node.Pos().Offset()), int(node.End().Offset())
 	return start >= 0 && end >= start && end <= len(command) && targetPlaceholderPattern.MatchString(command[start:end])
@@ -1100,6 +866,37 @@ func isCommandStringFlag(interpreter string, token string) bool {
 	default:
 		return !strings.HasPrefix(token, "--") && strings.HasPrefix(token, "-") && strings.ContainsRune(token[1:], 'c')
 	}
+}
+
+func staticWord(word *syntax.Word) (string, bool) {
+	var text strings.Builder
+	if !appendStaticWordParts(&text, word.Parts, false) {
+		return "", false
+	}
+	return text.String(), true
+}
+
+func appendStaticWordParts(text *strings.Builder, parts []syntax.WordPart, quoted bool) bool {
+	for _, part := range parts {
+		switch part := part.(type) {
+		case *syntax.Lit:
+			for i := 0; i < len(part.Value); i++ {
+				if part.Value[i] == '\\' && !quoted && i+1 < len(part.Value) {
+					i++
+				}
+				text.WriteByte(part.Value[i])
+			}
+		case *syntax.SglQuoted:
+			text.WriteString(part.Value)
+		case *syntax.DblQuoted:
+			if !appendStaticWordParts(text, part.Parts, true) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // sanitizedDeclaredEnvNames returns the adapter's env: declarations with any

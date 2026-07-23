@@ -1204,12 +1204,6 @@ type judgeShellSpec struct {
 // RunContext.CommandRunner runs on the host even when Docker was requested —
 // and scopes which env values are scrubbed from persisted judge output.
 func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string, redactionSandboxMode string, exposedEnvNames []string) (*JudgeResult, error) {
-	// Same rule as user-defined scanners: inline environment assignments in
-	// the judge command sit outside every redaction scope. sandbox.env is the
-	// supported channel for judge credentials.
-	if name := inlineCredentialAssignment(opts.Command); name != "" {
-		return nil, fmt.Errorf("judge command embeds an inline environment assignment (%s=...); its value cannot be redacted — pass it via --sandbox-env or profile sandbox.env instead", name)
-	}
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
 		return nil, err

@@ -601,11 +601,10 @@ func TestUserDefinedScannerArtifactOmitsRenderedCommand(t *testing.T) {
 	}
 }
 
-func TestUserDefinedScannerRejectsInlineCredentialAssignment(t *testing.T) {
-	// An inline credential literal (API_TOKEN=sk-live scanner ...) sits
-	// outside every redaction scope; the run must fail closed before the
-	// command executes, and the literal must not appear anywhere in the
-	// result.
+func TestUserDefinedScannerAllowsInlineCredentialAssignment(t *testing.T) {
+	// Inline credential literals on the command line are the operator's
+	// responsibility (the same as flag-form secrets); ClawScan no longer
+	// blocks them. The command runs.
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "alpha", Command: "API_TOKEN=sk-live-inline scanner {{target}}", Targets: []string{"skill"},
 	})
@@ -621,18 +620,11 @@ func TestUserDefinedScannerRejectsInlineCredentialAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "failed" || !strings.Contains(result.Error, "inline environment assignment") {
-		t.Fatalf("result = %q / %q, want inline-credential rejection", result.Status, result.Error)
+	if result.Status == "failed" {
+		t.Fatalf("inline credential should no longer block; got failed: %q", result.Error)
 	}
-	if len(commandRunner.calls) != 0 {
-		t.Fatalf("command ran despite inline credential: %#v", commandRunner.calls)
-	}
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "sk-live-inline") {
-		t.Fatalf("inline credential leaked into result: %s", encoded)
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("command should have run once, got calls = %#v", commandRunner.calls)
 	}
 }
 
@@ -796,95 +788,6 @@ func TestRedactJSONStringsCanonicalNumberSecrets(t *testing.T) {
 	scrubber = newSecretScrubber([]string{"1000"})
 	if _, changed := redactJSONStrings(json.Number("1001"), scrubber); changed {
 		t.Fatal("unrelated number scrubbed")
-	}
-}
-
-func TestInlineCredentialAssignment(t *testing.T) {
-	// Secret-named and uppercase assignments are rejected anywhere, while
-	// any-case assignments are rejected in a leading run, after command
-	// separators, or in wrapper zones that include options. Lowercase and
-	// mixed-case operand-style NAME=value tokens stay allowed.
-	for command, want := range map[string]string{
-		"API_TOKEN=sk-live scanner {{target}}":       "API_TOKEN",
-		"FOO=1 DB_PASSWORD=x scanner {{target}}":     "FOO",
-		"env API_TOKEN=sk-live scanner {{target}}":   "API_TOKEN",
-		"env 'API_TOKEN=sk-live' scanner {{target}}": "API_TOKEN",
-		// env sees the escaped equals after the shell removes the backslash.
-		`env API_TOKEN\=sk-live scanner {{target}}`:       "API_TOKEN",
-		`API_TOKEN\=sk-live scanner {{target}}`:           "",
-		"export API_TOKEN=sk-live; scanner {{target}}":    "API_TOKEN",
-		"set API_TOKEN=sk-live && scanner {{target}}":     "API_TOKEN",
-		`set "API_TOKEN=sk-live" && scanner {{target}}`:   "API_TOKEN",
-		"scanner --arg API_TOKEN=inline {{target}}":       "",
-		"scanner --token abc {{target}}":                  "",
-		"scanner {{target}}":                              "",
-		"PATH=/usr/bin scanner {{target}}":                "PATH",
-		"scanner --header 'PATH=/usr/bin'":                "",
-		"SCANNER_ACCESS=sk-live scanner {{target}}":       "SCANNER_ACCESS",
-		"env myapp_token=x scanner {{target}}":            "myapp_token",
-		"scanner --set output=json {{target}}":            "",
-		"scanner --build-arg mode=fast":                   "",
-		"scanner --url 'https://x.test/?a=b' {{target}}":  "",
-		"scanner --retries=3 --api-version=2 {{target}}":  "",
-		"(API_TOKEN=sk-live; printf x); : {{target}}":     "API_TOKEN",
-		"(api_token=sk-live; scanner {{target}})":         "api_token",
-		"`API_TOKEN=sk-live` scanner {{target}}":          "API_TOKEN",
-		"scanner --filter '(mode=fast)'":                  "",
-		"true; session=sk-live scanner {{target}}":        "session",
-		"true;session=sk-live scanner {{target}}":         "session",
-		"true&&session=sk-live scanner {{target}}":        "session",
-		"scanner {{target}}|session=sk-live post":         "session",
-		"scanner {{target}} && session=sk-live scanner2":  "session",
-		"true\nsession=sk-live-cred scanner {{target}}":   "session",
-		"true\r\nsession=sk-live-cred scanner {{target}}": "session",
-		"scanner {{target}} \\\n  --flag value":           "",
-		"scanner {{target}}\nout=report.json":             "out",
-		// The quoted ampersand is correctly treated as a literal.
-		"scanner --url 'https://x.test/?a=b&c=d' {{target}}":            "",
-		"FOO=1&&scanner {{target}}":                                     "FOO",
-		"env -i session=sk-live scanner {{target}}":                     "session",
-		"env -u UNUSED session=sk-live-cred scanner {{target}}":         "session",
-		"env -u UNUSED PASSWORD=x scanner":                              "PASSWORD",
-		"sudo -E deploy_key=x scanner {{target}}":                       "deploy_key",
-		"/usr/bin/env access=sk-live-cred scanner {{target}}":           "access",
-		"/usr/bin/sudo API_TOKEN=x scanner":                             "API_TOKEN",
-		"sudo scanner --flag mode=fast":                                 "",
-		"sudo -E scanner":                                               "",
-		"env -i scanner mode=fast":                                      "",
-		"scanner -o mode=fast":                                          "",
-		"sh -c 'session=sk-live-cred; scanner {{target}}'":              "session",
-		"/bin/sh -c 'session=sk-live-cred; scanner {{target}}'":         "session",
-		"bash -lc 'session=sk-live-cred scanner'":                       "session",
-		"sh -c 'scanner {{target}}'":                                    "",
-		"sh -c 'scanner {{target}} mode=fast'":                          "",
-		"sh script.sh mode=fast":                                        "",
-		"eval 'access=sk-live-cred; export access'; scanner {{target}}": "access",
-		"eval 'PASSWORD=x scanner'":                                     "PASSWORD",
-		"eval scanner {{target}}":                                       "",
-		"eval scanner mode=fast":                                        "",
-		"if true; then scannerAccess=sk-" + "live-cred; fi":             "scannerAccess",
-		"while :; do access=sk-" + "live-cred scanner; done":            "access",
-		"if x=1; then scanner; fi":                                      "x",
-		"scanner --then mode=fast":                                      "",
-		"! access=sk-live scanner {{target}}":                           "access",
-		"scanner --flag && ! db=secret run":                             "db",
-		"scanner !notanassignment":                                      "",
-		"scanner mode=fast":                                             "",
-		"f(){ access=sk-live; }; f {{target}}":                          "access",
-		"case $x in a) db=sk-live ;; esac":                              "db",
-		"(cd dir && scanner mode=fast)":                                 "",
-		"readonly access=sk-live; export access; scanner {{target}}":    "access",
-		"declare token=sk-live scanner {{target}}":                      "token",
-		"local db=sk-live scanner":                                      "db",
-
-		"env 'API-TOKEN=sk-live' scanner {{target}}":                     "API-TOKEN",
-		"env -S 'SCANNER_ACCESS=sk-live scanner' {{target}}":             "SCANNER_ACCESS",
-		"env --split-string='SCANNER_ACCESS=sk-live scanner' {{target}}": "SCANNER_ACCESS",
-		"env -u UNUSED scanner mode=fast":                                "",
-	} {
-		if got := inlineCredentialAssignment(command); got != want {
-			t.Fatalf("inlineCredentialAssignment(%q) = %q, want %q", command, got, want)
-		}
 	}
 }
 
