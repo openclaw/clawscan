@@ -186,7 +186,7 @@ profiles:
     scanners:
       - id: alpha
         command: alpha {{target}}
-        env: [SHARED_ACCESS]
+        secretEnv: [SHARED_ACCESS]
   profile-b:
     scanners:
       - id: beta

@@ -286,7 +286,7 @@ func TestUserDefinedScannerSkipsExistenceCheckForURLTargets(t *testing.T) {
 
 func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
+		ID: "demo", Command: "demo {{target}}", SecretEnv: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -311,7 +311,7 @@ func TestUserDefinedScannerRedactsDeclaredEnvOnFailure(t *testing.T) {
 
 func TestUserDefinedScannerRedactsDeclaredEnvInRawJSON(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
+		ID: "demo", Command: "demo {{target}}", SecretEnv: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -951,7 +951,7 @@ func TestEnvValueForNameFindsNonEmptyExactMatch(t *testing.T) {
 func TestUserDefinedScannerInfoSanitizesMalformedEnvEntries(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "alpha", Command: "scanner {{target}}",
-		Env: []string{"API_TOKEN=sk-live-info-leak", "=sk-live-eqzero", "GOOD_NAME"}, Targets: []string{"skill"},
+		SecretEnv: []string{"API_TOKEN=sk-live-info-leak", "=sk-live-eqzero", "GOOD_NAME"}, Targets: []string{"skill"},
 	})
 	want := []string{"API_TOKEN", "GOOD_NAME"}
 	if got := adapter.Info().RequiredEnv; !reflect.DeepEqual(got, want) {
@@ -1226,7 +1226,7 @@ func TestUserDefinedScannerRedactsEscapedUndeclaredSecretsFromErrors(t *testing.
 
 func TestUserDefinedScannerRedactsAlternateEncodedSecretsFromErrors(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", SecretEnv: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -1368,7 +1368,7 @@ func TestRedactScannerStdoutMarkerSubstringSecrets(t *testing.T) {
 
 func TestUserDefinedScannerMarkerSubstringSecretInErrors(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "alpha", Command: "alpha {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
+		ID: "alpha", Command: "alpha {{target}}", SecretEnv: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
@@ -1526,7 +1526,7 @@ func TestJSONSecretLeavesIncludesNumericCredential(t *testing.T) {
 
 func TestUserDefinedScannerRedactsNumericJSONCredentialLeaf(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "demo", Command: "demo {{target}}", Env: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
+		ID: "demo", Command: "demo {{target}}", SecretEnv: []string{"SCANNER_ACCESS"}, Targets: []string{"skill"},
 	})
 	registry, err := NewScannerRegistry(adapter)
 	if err != nil {
