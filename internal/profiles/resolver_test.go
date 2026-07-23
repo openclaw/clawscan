@@ -1097,6 +1097,44 @@ profiles:
 	}
 }
 
+func TestResolveArgsRejectsUserDefinedScannerWithoutTargetPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: my-scanner --scan
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	want := "User-defined scanner my-scanner in profile review must include an active {{target}} placeholder outside shell quotes and comments so the scanner receives the target"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+func TestResolveArgsRejectsUserDefinedScannerWithOnlyCommentedTargetPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: |-
+          # scans {{target}}
+          my-scanner --scan
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	want := "User-defined scanner my-scanner in profile review must include an active {{target}} placeholder outside shell quotes and comments so the scanner receives the target"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
 func TestResolveArgsSupportsAliasedScannerEntries(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")

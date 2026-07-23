@@ -976,8 +976,14 @@ func validateProfile(name string, profile Profile) error {
 				return fmt.Errorf("User-defined scanner %s in profile %s has an invalid env entry %q; declare bare variable names and set values in the environment, not inline", scanner.ID, name, bad)
 			}
 		}
-		if scanner.custom && !scannerTargetPlaceholdersAreUnquoted(scanner.Command) {
-			return fmt.Errorf("User-defined scanner %s in profile %s must use {{target}} outside shell quotes", scanner.ID, name)
+		if scanner.custom {
+			allUnquoted, activeCount := scannerTargetPlaceholderState(scanner.Command)
+			if !allUnquoted {
+				return fmt.Errorf("User-defined scanner %s in profile %s must use {{target}} outside shell quotes", scanner.ID, name)
+			}
+			if activeCount == 0 {
+				return fmt.Errorf("User-defined scanner %s in profile %s must include an active {{target}} placeholder outside shell quotes and comments so the scanner receives the target", scanner.ID, name)
+			}
 		}
 		if scanner.custom && runner.DefaultScannerRegistry().Contains(scanner.ID) {
 			return fmt.Errorf("User-defined scanner %s collides with a built-in scanner ID", scanner.ID)
@@ -1037,7 +1043,12 @@ func overlappingExitCodeRules(block *profileExitCodeRule, warn *profileExitCodeR
 	return 0, false
 }
 
-func scannerTargetPlaceholdersAreUnquoted(command string) bool {
+// scannerTargetPlaceholderState reports whether every {{target}} placeholder in
+// command sits outside shell quotes (allUnquoted), and how many placeholders are
+// active — outside both quotes and comments (activeCount). A command with zero
+// active placeholders can complete without ever receiving the target.
+func scannerTargetPlaceholderState(command string) (allUnquoted bool, activeCount int) {
+	allUnquoted = true
 	matches := scannerTargetPlaceholderPattern.FindAllStringIndex(command, -1)
 	matchIndex := 0
 	quote := byte(0)
@@ -1045,8 +1056,12 @@ func scannerTargetPlaceholdersAreUnquoted(command string) bool {
 	comment := false
 	for index := 0; index < len(command); index++ {
 		if matchIndex < len(matches) && index == matches[matchIndex][0] {
-			if !comment && quote != 0 {
-				return false
+			if !comment {
+				if quote != 0 {
+					allUnquoted = false
+				} else {
+					activeCount++
+				}
 			}
 			index = matches[matchIndex][1] - 1
 			matchIndex++
@@ -1080,7 +1095,7 @@ func scannerTargetPlaceholdersAreUnquoted(command string) bool {
 			quote = 0
 		}
 	}
-	return true
+	return allUnquoted, activeCount
 }
 
 func shellCommentCanStart(command string, index int) bool {
