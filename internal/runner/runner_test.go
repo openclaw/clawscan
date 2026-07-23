@@ -870,6 +870,37 @@ func TestRunnableBenchmarkScannersFiltersUnsupportedTargetKind(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerUsesIsolatedCwd(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "test", Command: "test {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	targetDir := t.TempDir()
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("test", filepath.Join(targetDir, "file.txt"), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	cwd := commandRunner.calls[0].cwd
+	if cwd == "" || cwd == targetDir || strings.HasPrefix(cwd, targetDir) {
+		t.Fatalf("cwd = %q should be isolated, not targetdir = %q", cwd, targetDir)
+	}
+	if !strings.Contains(cwd, "clawscan-scanner-") {
+		t.Fatalf("cwd = %q should contain clawscan-scanner prefix", cwd)
+	}
+}
+
 func TestUnsafeWindowsShellTargetDetectsInjectionCharacters(t *testing.T) {
 	unsafe := []string{
 		`%PATH%`,
