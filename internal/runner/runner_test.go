@@ -849,6 +849,27 @@ func TestValidateRequirements(t *testing.T) {
 	}
 }
 
+func TestRunnableBenchmarkScannersFiltersUnsupportedTargetKind(t *testing.T) {
+	skillScanner := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "skillscan", Command: "run {{target}}", Targets: []string{"skill"},
+	})
+	urlScanner := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "urlscan", Command: "run {{target}}", Targets: []string{"url"},
+	})
+	registry, err := NewScannerRegistry(skillScanner, urlScanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		Scanners:        []string{"skillscan", "urlscan"},
+		ScannerRegistry: registry,
+	}
+	runnable := runnableBenchmarkScanners(opts, "skill")
+	if len(runnable) != 1 || runnable[0] != "skillscan" {
+		t.Fatalf("runnable = %#v, want [skillscan]", runnable)
+	}
+}
+
 func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
