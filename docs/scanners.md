@@ -33,6 +33,8 @@ profiles:
         command: my-scanner --json {{target}}
         env:
           - MY_SCANNER_TOKEN
+        secretEnv:
+          - MY_SECRET_KEY
         targets:
           - skill
           - plugin
@@ -47,7 +49,8 @@ that config-backed run and accept these fields:
 | --- | --- | --- |
 | `id` | yes | Scanner ID using lowercase letters, digits, `_`, and `-`, starting with a letter or digit, at most 64 characters. It must not match a built-in scanner ID or a reserved Windows device name such as `con`, `nul`, or `com1`. |
 | `command` | yes | Shell command to execute. Unquoted `{{target}}` is replaced with the safely passed resolved target; do not wrap the placeholder in shell quotes. |
-| `env` | no | Required environment variable names. Values stay in the process environment and are never stored in the config or artifact. |
+| `env` | no | Environment variable names passed through to the scanner. Values are shown in output unless the name itself looks like a credential (e.g., ends with `_TOKEN` or `_PASSWORD`), in which case the heuristic backstop redacts them. |
+| `secretEnv` | no | Environment variable names passed through to the scanner and always redacted from persisted output, regardless of name. Use this for credentials and sensitive values. |
 | `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
 | `gate` | no | Exit-code policy with optional `blockOnExitCode` and `warnOnExitCode` rules. |
 
@@ -90,10 +93,10 @@ value if they must be redacted. Required environment
 variables are checked before any scanner starts. Artifacts record each
 requirement as only `present` or `missing`.
 
-Scanner credentials should be supplied through environment variables declared under `env:` (or the sandbox env allowlist). ClawScan can only redact values it was told about via declared env vars; a secret written directly into the command — whether as an inline `NAME=value` assignment or as a flag value such as `--token sk-live` — is outside every redaction scope and can leak into saved evidence if the scanner echoes its arguments. ClawScan does not block either form; keeping all credentials in declared environment variables is the operator's responsibility.
+Scanner credentials should be supplied through environment variables. Use `secretEnv:` to declare environment variables that must always be redacted, even if their names don't look like credentials. Use `env:` for non-secret configuration that should appear in output; credential-named variables (e.g., `MY_TOKEN`, `API_KEY`) in `env:` are still redacted as a safety backstop. ClawScan can only redact values it was told about via declared env vars; a secret written directly into the command — whether as an inline `NAME=value` assignment or as a flag value such as `--token sk-live` — is outside every redaction scope and can leak into saved evidence if the scanner echoes its arguments. ClawScan does not block either form; keeping all credentials in declared environment variables is the operator's responsibility.
 
 User-defined scanners use the same execution path as built-in command-backed
-scanners. They run in the Docker sandbox by default, and declared `env` names
+scanners. They run in the Docker sandbox by default, and declared `env` and `secretEnv` names
 are added to its environment allowlist. Use `--sandbox off` only when you
 intentionally want the command to run on the host. User-defined scanners are
 local to the resolved config and do not appear in the built-in `clawscan

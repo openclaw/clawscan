@@ -19,10 +19,11 @@ import (
 )
 
 type UserDefinedScannerConfig struct {
-	ID      string
-	Command string
-	Env     []string
-	Targets []string
+	ID        string
+	Command   string
+	Env       []string
+	SecretEnv []string
+	Targets   []string
 }
 
 func NewUserDefinedScanner(config UserDefinedScannerConfig) ScannerAdapter {
@@ -41,15 +42,15 @@ type userDefinedScannerAdapter struct {
 func (adapter userDefinedScannerAdapter) ID() string { return adapter.config.ID }
 
 func (adapter userDefinedScannerAdapter) Requirements(_ map[string]string) []EnvRequirement {
-	requirements := make([]EnvRequirement, 0, len(adapter.config.Env))
-	for _, name := range sanitizedDeclaredEnvNames(adapter.config.Env) {
+	requirements := make([]EnvRequirement, 0, len(adapter.config.Env)+len(adapter.config.SecretEnv))
+	for _, name := range sanitizedDeclaredEnvNames(append(append([]string(nil), adapter.config.Env...), adapter.config.SecretEnv...)) {
 		requirements = append(requirements, EnvRequirement{EnvVar: name, Reason: adapter.config.ID + " scanner"})
 	}
 	return requirements
 }
 
 func (adapter userDefinedScannerAdapter) Info() ScannerInfo {
-	return ScannerInfo{ID: adapter.config.ID, DisplayName: adapter.config.ID, RequiredEnv: sanitizedDeclaredEnvNames(adapter.config.Env)}
+	return ScannerInfo{ID: adapter.config.ID, DisplayName: adapter.config.ID, RequiredEnv: sanitizedDeclaredEnvNames(append(append([]string(nil), adapter.config.Env...), adapter.config.SecretEnv...))}
 }
 
 func (adapter userDefinedScannerAdapter) InstallPlan() InstallPlan {
@@ -63,11 +64,11 @@ func (adapter userDefinedScannerAdapter) SupportsTargetKind(kind string) bool {
 func (adapter userDefinedScannerAdapter) CommandBacked() bool { return true }
 
 // DeclaredCredentialEnv lists env vars that are credentials by declaration:
-// whatever their spelling, a user-defined scanner's env: entries exist to
-// hand the command secrets, so their values must always be redacted from
-// persisted output.
+// only secretEnv: entries are credentials-by-declaration and always
+// redacted; plain env: entries are passed through and shown unless the
+// name-heuristic backstop (isSecretEnvKey) classifies them as a credential.
 func (adapter userDefinedScannerAdapter) DeclaredCredentialEnv() []string {
-	return sanitizedDeclaredEnvNames(adapter.config.Env)
+	return sanitizedDeclaredEnvNames(adapter.config.SecretEnv)
 }
 
 func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
@@ -83,13 +84,19 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 			}, nil
 		}
 	}
-	// env: entries must be bare variable names: `env: [API_TOKEN=sk-live]`
+	// env: and secretEnv: entries must be bare variable names: `env: [API_TOKEN=sk-live]`
 	// would otherwise flow into the missing-variable diagnostic verbatim,
 	// leaking the inline value into terminal and CI logs.
 	if bad := invalidDeclaredEnvName(adapter.config.Env); bad != "" {
 		return ScannerResult{
 			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Error: fmt.Sprintf("User-defined scanner %s env entry %s is not a variable name; declare bare names and set values in the environment", adapter.config.ID, bad),
+		}, nil
+	}
+	if bad := invalidDeclaredEnvName(adapter.config.SecretEnv); bad != "" {
+		return ScannerResult{
+			Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Error: fmt.Sprintf("User-defined scanner %s secretEnv entry %s is not a variable name; declare bare names and set values in the environment", adapter.config.ID, bad),
 		}, nil
 	}
 	if commandReparsesTarget(adapter.config.Command) {
@@ -152,15 +159,16 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	// so structural redaction of decoded strings suffices — and byte-level
 	// replacement must not run first, or a short secret like "1" would corrupt
 	// non-string JSON tokens and flip a healthy scan to failed.
-	// Scrub this adapter's declared env plus everything else exposed to
-	// scanners this run (sandbox allowlist, other adapters' credentials):
-	// under Docker every scanner sees the whole passthrough set, and a name
-	// like BETA_LICENSE evades the isSecretEnvKey heuristic.
-	scrubNames := append(append([]string(nil), adapter.config.Env...), runner.ExposedEnvNames...)
-	// Under Docker only allowlisted names reach the container; scrubbing an
-	// unrelated host secret's value (CI_TOKEN=clean) would corrupt evidence
-	// without preventing any leak. --sandbox off keeps the full host env.
-	visibleEnv := commandVisibleEnv(runner.Env, scrubNames, runner.SandboxMode)
+	// reachableNames narrows redaction's env view to what the scanner can
+	// actually see (Docker allowlist), so the name-heuristic backstop still
+	// catches a secret-named plain env: value. Both buckets are reachable.
+	reachableNames := append(append(append([]string(nil), adapter.config.Env...), adapter.config.SecretEnv...), runner.ExposedEnvNames...)
+	// scrubNames are the force-redacted credentials: secretEnv plus run-wide
+	// declared credentials. Plain env: is intentionally excluded so non-secret
+	// config stays in evidence; secret-named env: is still caught via the
+	// heuristic sweep inside scannerSecretValues over visibleEnv.
+	scrubNames := append(append([]string(nil), adapter.config.SecretEnv...), runner.ExposedEnvNames...)
+	visibleEnv := commandVisibleEnv(runner.Env, reachableNames, runner.SandboxMode)
 	stdout := output.Stdout
 	// Evidence is rejected outright — not repaired — when structural
 	// redaction cannot see everything the raw bytes hold: invalid UTF-8
@@ -180,7 +188,9 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	}
 	if runErr != nil {
 		// Failure text needs the same coverage as stdout: declared env plus
-		// everything exposed to scanners this run, whatever the spelling.
+		// everything exposed to scanners this run. secretEnv: and env: values
+		// both reach the scanner, but only secretEnv: values are force-redacted;
+		// env: values are shown unless the heuristic backstop catches them.
 		// commandError's own secret-named sweep must also use the visible
 		// env: pre-scrubbing with the whole host env would corrupt Docker
 		// diagnostics matching an unexposed host value by coincidence.

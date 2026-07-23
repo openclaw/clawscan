@@ -43,12 +43,13 @@ func (profile Profile) ScannerIDs() []string {
 }
 
 type ProfileScanner struct {
-	ID      string
-	Command string
-	Env     []string
-	Targets []string
-	Gate    *ProfileScannerGate
-	custom  bool
+	ID        string
+	Command   string
+	Env       []string
+	SecretEnv []string
+	Targets   []string
+	Gate      *ProfileScannerGate
+	custom    bool
 }
 
 type ProfileScannerGate struct {
@@ -153,34 +154,35 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 	case yaml.MappingNode:
 		for index := 0; index < len(node.Content); index += 2 {
 			switch node.Content[index].Value {
-			case "id", "command", "env", "targets", "gate":
+			case "id", "command", "env", "secretEnv", "targets", "gate":
 			default:
 				return fmt.Errorf("field %s not found in type profiles.ProfileScanner", node.Content[index].Value)
 			}
 		}
 		for index := 0; index < len(node.Content); index += 2 {
-			if node.Content[index].Value != "env" {
+			if node.Content[index].Value != "env" && node.Content[index].Value != "secretEnv" {
 				continue
 			}
 			envNode := node.Content[index+1]
 			nullScalar := envNode.Kind == yaml.ScalarNode && (envNode.Tag == "!!null" || envNode.Value == "")
 			if envNode.Kind != yaml.SequenceNode && !nullScalar {
-				return errors.New("scanner env must be a list of variable names")
+				return fmt.Errorf("scanner %s must be a list of variable names", node.Content[index].Value)
 			}
 			if envNode.Kind == yaml.SequenceNode {
 				for entryIndex, entry := range envNode.Content {
 					if entry.Kind != yaml.ScalarNode {
-						return fmt.Errorf("scanner env entry #%d must be a variable name", entryIndex+1)
+						return fmt.Errorf("scanner %s entry #%d must be a variable name", node.Content[index].Value, entryIndex+1)
 					}
 				}
 			}
 		}
 		var value struct {
-			ID      string              `yaml:"id"`
-			Command string              `yaml:"command"`
-			Env     []string            `yaml:"env,omitempty"`
-			Targets []string            `yaml:"targets,omitempty"`
-			Gate    *ProfileScannerGate `yaml:"gate,omitempty"`
+			ID        string              `yaml:"id"`
+			Command   string              `yaml:"command"`
+			Env       []string            `yaml:"env,omitempty"`
+			SecretEnv []string            `yaml:"secretEnv,omitempty"`
+			Targets   []string            `yaml:"targets,omitempty"`
+			Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
 		}
 		if err := node.Decode(&value); err != nil {
 			return err
@@ -188,6 +190,7 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 		scanner.ID = value.ID
 		scanner.Command = value.Command
 		scanner.Env = value.Env
+		scanner.SecretEnv = value.SecretEnv
 		scanner.Targets = value.Targets
 		scanner.Gate = value.Gate
 		scanner.custom = true
@@ -202,12 +205,13 @@ func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
 		return scanner.ID, nil
 	}
 	return struct {
-		ID      string              `yaml:"id"`
-		Command string              `yaml:"command"`
-		Env     []string            `yaml:"env,omitempty"`
-		Targets []string            `yaml:"targets,omitempty"`
-		Gate    *ProfileScannerGate `yaml:"gate,omitempty"`
-	}{scanner.ID, scanner.Command, scanner.Env, scanner.Targets, scanner.Gate}, nil
+		ID        string              `yaml:"id"`
+		Command   string              `yaml:"command"`
+		Env       []string            `yaml:"env,omitempty"`
+		SecretEnv []string            `yaml:"secretEnv,omitempty"`
+		Targets   []string            `yaml:"targets,omitempty"`
+		Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
+	}{scanner.ID, scanner.Command, scanner.Env, scanner.SecretEnv, scanner.Targets, scanner.Gate}, nil
 }
 
 func profileScannerIDs(scanners []ProfileScanner) []string {
@@ -227,12 +231,15 @@ func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, 
 		if bad := runner.InvalidUserDefinedEnvName(scanner.Env); bad != "" {
 			return runner.ScannerRegistry{}, fmt.Errorf("scanner %s env entry %s is not a variable name; declare bare names and set values in the environment", scanner.ID, bad)
 		}
+		if bad := runner.InvalidUserDefinedEnvName(scanner.SecretEnv); bad != "" {
+			return runner.ScannerRegistry{}, fmt.Errorf("scanner %s secretEnv entry %s is not a variable name; declare bare names and set values in the environment", scanner.ID, bad)
+		}
 		targets := append([]string(nil), scanner.Targets...)
 		if len(targets) == 0 {
 			targets = []string{"skill", "url"}
 		}
 		adapter := runner.NewUserDefinedScanner(runner.UserDefinedScannerConfig{
-			ID: scanner.ID, Command: scanner.Command, Env: scanner.Env, Targets: targets,
+			ID: scanner.ID, Command: scanner.Command, Env: scanner.Env, SecretEnv: scanner.SecretEnv, Targets: targets,
 		})
 		var err error
 		registry, err = registry.WithAdapters(adapter)
@@ -244,7 +251,7 @@ func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, 
 }
 
 // declaredEnvNames unions the env var names every profile in the registry
-// declares (scanner env plus sandbox passthrough). A single-profile run
+// declares (scanner secretEnv plus sandbox passthrough). A single-profile run
 // with --sandbox off inherits the full host environment, so a blandly
 // named credential declared only by a sibling profile in the same config
 // must still be redacted from persisted output.
@@ -260,9 +267,9 @@ func (registry ProfileRegistry) declaredEnvNames() []string {
 	}
 	for _, resolved := range registry.profiles {
 		for _, scanner := range resolved.profile.Scanners {
-			// scanner env: entries are credentials by declaration whatever
-			// their spelling.
-			for _, name := range scanner.Env {
+			// scanner secretEnv: entries are credentials by declaration
+			// whatever their spelling.
+			for _, name := range scanner.SecretEnv {
 				add(name)
 			}
 		}
