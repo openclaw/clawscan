@@ -290,6 +290,11 @@ var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_sche
 var scannerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 var scannerTargetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
 
+// envVarNamePattern matches a bare environment variable name. Declared scanner
+// env entries must be names only; an inline value (API_TOKEN=secret) would leak
+// into requirement diagnostics, the artifact env map, and the Docker sandbox.
+var envVarNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // maxScannerIDLength bounds user-defined scanner IDs so <id>.json evidence file
 // names stay within filesystem limits.
 const maxScannerIDLength = 64
@@ -926,6 +931,31 @@ func resolveJudgePaths(command string, configDir string) string {
 	})
 }
 
+// invalidDeclaredEnvName returns the sanitized name of the first declared env
+// entry that is not a bare, valid variable name, or "" if all entries are
+// valid. It returns only the portion before any "=", never the value, so an
+// inline secret (API_TOKEN=sk-live) is not echoed into diagnostics.
+func invalidDeclaredEnvName(env []string) string {
+	for _, entry := range env {
+		if envVarNamePattern.MatchString(entry) {
+			continue
+		}
+		name := entry
+		if i := strings.IndexByte(entry, '='); i >= 0 {
+			name = entry[:i]
+		}
+		name = strings.TrimSpace(name)
+		if i := strings.IndexByte(name, ' '); i >= 0 {
+			name = name[:i]
+		}
+		if name == "" {
+			return "(empty)"
+		}
+		return name
+	}
+	return ""
+}
+
 func validateProfile(name string, profile Profile) error {
 	seen := map[string]bool{}
 	for _, scanner := range profile.Scanners {
@@ -940,6 +970,11 @@ func validateProfile(name string, profile Profile) error {
 		}
 		if scanner.custom && strings.TrimSpace(scanner.Command) == "" {
 			return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)
+		}
+		if scanner.custom {
+			if bad := invalidDeclaredEnvName(scanner.Env); bad != "" {
+				return fmt.Errorf("User-defined scanner %s in profile %s has an invalid env entry %q; declare bare variable names and set values in the environment, not inline", scanner.ID, name, bad)
+			}
 		}
 		if scanner.custom && !scannerTargetPlaceholdersAreUnquoted(scanner.Command) {
 			return fmt.Errorf("User-defined scanner %s in profile %s must use {{target}} outside shell quotes", scanner.ID, name)
