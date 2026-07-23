@@ -71,6 +71,16 @@ func (adapter userDefinedScannerAdapter) DeclaredCredentialEnv() []string {
 	return sanitizedDeclaredEnvNames(adapter.config.SecretEnv)
 }
 
+// DeclaredNonCredentialEnv lists plain env: entries. These are passed through
+// to the scanner and shown in evidence, so redaction must exempt them from its
+// fail-closed default (CredentialEnvName treats every unknown name as a
+// credential). A plain env: name whose spelling looks secret (isSecretEnvKey)
+// is still redacted at the call site as a backstop, and secretEnv: never
+// appears here, so a name declared as both credential and plain stays redacted.
+func (adapter userDefinedScannerAdapter) DeclaredNonCredentialEnv() []string {
+	return sanitizedDeclaredEnvNames(adapter.config.Env)
+}
+
 func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error) {
 	// A missing local target must fail here, before mount inference: Docker
 	// mount fallback binds a missing path's parent read-write (so scanners

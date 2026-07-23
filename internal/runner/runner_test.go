@@ -1381,7 +1381,7 @@ func TestRunHostRedactionCoversSkippedScannersEnv(t *testing.T) {
 		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
 	})
 	pluginOnly := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_LICENSE"}, Targets: []string{"plugin"},
+		ID: "plugin-only", Command: "plugin-only {{target}}", SecretEnv: []string{"BETA_LICENSE"}, Targets: []string{"plugin"},
 	})
 	registry, err := NewScannerRegistry(alpha, pluginOnly)
 	if err != nil {
@@ -1605,7 +1605,7 @@ func TestRunDockerRedactionSkipsNonRunnableScannerCredentials(t *testing.T) {
 		ID: "alpha", Command: "alpha {{target}}", Targets: []string{"skill"},
 	})
 	pluginOnly := NewUserDefinedScanner(UserDefinedScannerConfig{
-		ID: "plugin-only", Command: "plugin-only {{target}}", Env: []string{"BETA_LICENSE"}, Targets: []string{"plugin"},
+		ID: "plugin-only", Command: "plugin-only {{target}}", SecretEnv: []string{"BETA_LICENSE"}, Targets: []string{"plugin"},
 	})
 	registry, err := NewScannerRegistry(alpha, pluginOnly)
 	if err != nil {

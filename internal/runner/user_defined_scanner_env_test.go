@@ -49,6 +49,109 @@ func TestSecretEnvScrubbedPlainEnvShownEndToEnd(t *testing.T) {
 	}
 }
 
+// TestSecretEnvSplitHonoredThroughComputedExposedEnvNames closes the gap the
+// other end-to-end tests leave open: they never set ExposedEnvNames, so they
+// miss that a real run populates it from redactionEnvNames — whose fail-closed
+// CredentialEnvName default would otherwise redact the plain env value the
+// reachability union (env+secretEnv) feeds into the sweep. This test computes
+// ExposedEnvNames exactly as the runner does and asserts the plain value still
+// shows while the secretEnv value is scrubbed, in both sandbox modes.
+func TestSecretEnvSplitHonoredThroughComputedExposedEnvNames(t *testing.T) {
+	scanner := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID:        "alpha",
+		Command:   "alpha {{target}}",
+		Env:       []string{"MODE"},
+		SecretEnv: []string{"BETA_LICENSE"},
+		Targets:   []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(scanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"MODE": "fastmode-shown", "BETA_LICENSE": "beta-secret-xyz"}
+	opts := Options{Scanners: []string{"alpha"}, ScannerRegistry: registry}
+	for _, mode := range []string{SandboxModeOff, SandboxModeDocker} {
+		exposed := redactionEnvNames(opts, env, mode)
+		run := ExternalScannerRunner{
+			Registry:        registry,
+			CommandRunner:   &recordingCommandRunner{stdout: `{"mode":"fastmode-shown","license":"beta-secret-xyz"}`},
+			Env:             env,
+			SandboxMode:     mode,
+			ExposedEnvNames: exposed,
+		}
+		result, err := run.RunScanner("alpha", t.TempDir(), "2026-07-21T00:00:00Z")
+		if err != nil {
+			t.Fatalf("mode %s: %v", mode, err)
+		}
+		if strings.Contains(string(result.Raw), "beta-secret-xyz") {
+			t.Fatalf("mode %s: secretEnv value leaked into evidence: %s", mode, result.Raw)
+		}
+		if !strings.Contains(string(result.Raw), "fastmode-shown") {
+			t.Fatalf("mode %s: plain env value scrubbed from evidence via ExposedEnvNames %v: %s", mode, exposed, result.Raw)
+		}
+	}
+}
+
+// TestRedactionEnvNamesExemptsPlainNonSecretEnv pins the redaction-set filter:
+// a plain env: name that is not credential-spelled is excluded (shown), while a
+// secret-named plain env and a secretEnv name are included (redacted).
+func TestRedactionEnvNamesExemptsPlainNonSecretEnv(t *testing.T) {
+	scanner := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID:        "alpha",
+		Command:   "alpha {{target}}",
+		Env:       []string{"TEAMNAME", "MY_TOKEN"},
+		SecretEnv: []string{"APIKEY"},
+		Targets:   []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(scanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Scanners: []string{"alpha"}, ScannerRegistry: registry}
+	env := map[string]string{"TEAMNAME": "acme", "MY_TOKEN": "sk-tok", "APIKEY": "sk-live"}
+	for _, mode := range []string{SandboxModeOff, SandboxModeDocker} {
+		got := map[string]bool{}
+		for _, name := range redactionEnvNames(opts, env, mode) {
+			got[name] = true
+		}
+		if got["TEAMNAME"] {
+			t.Fatalf("mode %s: plain non-secret env TEAMNAME must be exempt from redaction, got %v", mode, got)
+		}
+		if !got["MY_TOKEN"] {
+			t.Fatalf("mode %s: secret-named plain env MY_TOKEN must stay redacted, got %v", mode, got)
+		}
+		if !got["APIKEY"] {
+			t.Fatalf("mode %s: secretEnv APIKEY must stay redacted, got %v", mode, got)
+		}
+	}
+}
+
+// TestDeclaredNonCredentialEnvOnlyIncludesPlainEnv: the plain-env declaration
+// surface (which drives the redaction exemption) lists env entries only, never
+// secretEnv entries.
+func TestDeclaredNonCredentialEnvOnlyIncludesPlainEnv(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID:        "test-scanner",
+		Command:   "test {{target}}",
+		Env:       []string{"CONFIG_VAR", "TEAMNAME"},
+		SecretEnv: []string{"API_KEY"},
+	})
+	declarer, ok := adapter.(interface{ DeclaredNonCredentialEnv() []string })
+	if !ok {
+		t.Fatalf("adapter %T does not expose DeclaredNonCredentialEnv", adapter)
+	}
+	got := map[string]bool{}
+	for _, name := range declarer.DeclaredNonCredentialEnv() {
+		got[name] = true
+	}
+	if !got["CONFIG_VAR"] || !got["TEAMNAME"] {
+		t.Fatalf("DeclaredNonCredentialEnv() = %v, want CONFIG_VAR and TEAMNAME", got)
+	}
+	if got["API_KEY"] {
+		t.Fatalf("DeclaredNonCredentialEnv() must not include secretEnv entries: %v", got)
+	}
+}
+
 // TestSecretNamedPlainEnvStillScrubbedByBackstop verifies the safety net: a
 // secret-NAMED value placed in plain env (not secretEnv) is still redacted by
 // the isSecretEnvKey heuristic, so a migration cannot silently un-redact it.

@@ -432,9 +432,19 @@ func redactionEnvNames(opts Options, env map[string]string, sandboxMode string) 
 	// credentials — except explicit user-defined env: declarations, which
 	// are credentials whatever their name.
 	declared := declaredCredentialEnvNames(opts)
+	// Plain env: declarations are operator-chosen configuration, shown in
+	// evidence. They reach the redaction sweep via the reachability set
+	// (Requirements/RequiredEnv union env+secretEnv), so exempt them from the
+	// fail-closed CredentialEnvName default below. A plain name that is also a
+	// credential by declaration (declared) or by spelling (isSecretEnvKey) is
+	// not exempt: it stays redacted as a backstop.
+	plain := declaredNonCredentialEnvNames(opts)
 	names := collected[:0]
 	seen := map[string]bool{}
 	for _, name := range collected {
+		if plain[name] && !declared[name] && !isSecretEnvKey(name) {
+			continue
+		}
 		if declared[name] || CredentialEnvName(name) {
 			names = append(names, name)
 			seen[name] = true
@@ -478,6 +488,32 @@ func declaredCredentialEnvNames(opts Options) map[string]bool {
 		}
 	}
 	return declared
+}
+
+// declaredNonCredentialEnvNames collects plain env: declarations across the
+// resolved registry. These names are exempt from redaction's fail-closed
+// default so their values stay visible in evidence; see redactionEnvNames.
+func declaredNonCredentialEnvNames(opts Options) map[string]bool {
+	type nonCredentialDeclarer interface {
+		DeclaredNonCredentialEnv() []string
+	}
+	plain := map[string]bool{}
+	registry := registryForOptions(opts)
+	for _, id := range registry.IDs() {
+		adapter, ok := registry.Adapter(id)
+		if !ok {
+			continue
+		}
+		if declarer, ok := adapter.(nonCredentialDeclarer); ok {
+			for _, name := range declarer.DeclaredNonCredentialEnv() {
+				name = strings.TrimSpace(name)
+				if name != "" {
+					plain[name] = true
+				}
+			}
+		}
+	}
+	return plain
 }
 
 // collectEnvNames gathers env var names in scope for a run. wholeRegistry
