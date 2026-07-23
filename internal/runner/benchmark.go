@@ -191,6 +191,20 @@ type huggingFaceRow struct {
 	Row OpenClawBenchmarkRow `json:"row"`
 }
 
+// runnableBenchmarkScanners filters requested scanners to those supporting the
+// benchmark's per-case target kind, so requirement validation does not abort on
+// a scanner (e.g. url-only) that would never run against these cases anyway.
+func runnableBenchmarkScanners(opts Options, kind string) []string {
+	registry := registryForOptions(opts)
+	runnable := make([]string, 0, len(opts.Scanners))
+	for _, id := range opts.Scanners {
+		if scannerSupportsTargetKindInRegistry(registry, id, kind) {
+			runnable = append(runnable, id)
+		}
+	}
+	return runnable
+}
+
 func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if opts.Benchmark == nil {
 		return BenchmarkArtifact{}, errors.New("missing benchmark options")
@@ -210,7 +224,9 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 		env = EnvMap(os.Environ())
 	}
 	applyRuntimeEnvDefaults(opts, env)
-	if err := ValidateRequirements(opts, env); err != nil {
+	requirementOpts := opts
+	requirementOpts.Scanners = runnableBenchmarkScanners(opts, "skill")
+	if err := ValidateRequirements(requirementOpts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
 	if opts.Benchmark.IDsSource != "" {
