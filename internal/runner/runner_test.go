@@ -870,6 +870,30 @@ func TestRunnableBenchmarkScannersFiltersUnsupportedTargetKind(t *testing.T) {
 	}
 }
 
+func TestUnsafeWindowsShellTargetDetectsInjectionCharacters(t *testing.T) {
+	unsafe := []string{
+		`%PATH%`,
+		`!DELAYED!`,
+		`skill" & calc.exe`,
+		`C:\skills\a"b`,
+	}
+	for _, target := range unsafe {
+		if !unsafeWindowsShellTarget(target) {
+			t.Errorf("unsafeWindowsShellTarget(%q) = false, want true", target)
+		}
+	}
+	safe := []string{
+		`https://example.com/skill`,
+		`C:\skills\my-skill`,
+		`./local/skill`,
+	}
+	for _, target := range safe {
+		if unsafeWindowsShellTarget(target) {
+			t.Errorf("unsafeWindowsShellTarget(%q) = true, want false", target)
+		}
+	}
+}
+
 func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
