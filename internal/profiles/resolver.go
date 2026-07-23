@@ -283,8 +283,16 @@ type cliIntent struct {
 }
 
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
-var scannerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// scannerIDPattern restricts user-defined scanner IDs to lowercase. IDs are
+// lowercased when used as evidence file names, so allowing uppercase would let
+// two case-distinct IDs (Foo and foo) collide on the same output file.
+var scannerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 var scannerTargetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
+
+// maxScannerIDLength bounds user-defined scanner IDs so <id>.json evidence file
+// names stay within filesystem limits.
+const maxScannerIDLength = 64
 
 type ResolvedRunSet struct {
 	Options     []runner.Options
@@ -925,7 +933,10 @@ func validateProfile(name string, profile Profile) error {
 			return fmt.Errorf("User-defined scanner in profile %s must include a non-empty id", name)
 		}
 		if scanner.custom && !scannerIDPattern.MatchString(scanner.ID) {
-			return fmt.Errorf("User-defined scanner %s in profile %s has invalid id; use letters, digits, underscores, and hyphens, starting with a letter or digit", scanner.ID, name)
+			return fmt.Errorf("User-defined scanner %s in profile %s has invalid id; use lowercase letters, digits, underscores, and hyphens, starting with a letter or digit", scanner.ID, name)
+		}
+		if scanner.custom && len(scanner.ID) > maxScannerIDLength {
+			return fmt.Errorf("User-defined scanner id in profile %s is %d characters; scanner IDs are used as file names and must be at most %d characters", name, len(scanner.ID), maxScannerIDLength)
 		}
 		if scanner.custom && strings.TrimSpace(scanner.Command) == "" {
 			return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)

@@ -981,7 +981,42 @@ profiles:
 `)
 
 	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
-	if err == nil || err.Error() != "User-defined scanner foo=bar in profile review has invalid id; use letters, digits, underscores, and hyphens, starting with a letter or digit" {
+	if err == nil || err.Error() != "User-defined scanner foo=bar in profile review has invalid id; use lowercase letters, digits, underscores, and hyphens, starting with a letter or digit" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveArgsRejectsUppercaseUserDefinedScannerID(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: Foo
+        command: scanner {{target}}
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || err.Error() != "User-defined scanner Foo in profile review has invalid id; use lowercase letters, digits, underscores, and hyphens, starting with a letter or digit" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveArgsRejectsOversizedUserDefinedScannerID(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	longID := strings.Repeat("a", 65)
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: `+longID+`
+        command: scanner {{target}}
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || err.Error() != "User-defined scanner id in profile review is 65 characters; scanner IDs are used as file names and must be at most 64 characters" {
 		t.Fatalf("err = %v", err)
 	}
 }
