@@ -62,6 +62,7 @@ type profileExitCodeRule struct {
 }
 
 func (rule *profileExitCodeRule) UnmarshalYAML(node *yaml.Node) error {
+	node = resolvedYAMLNode(node)
 	switch node.Kind {
 	case yaml.ScalarNode:
 		if node.Tag == "!!str" && node.Value == "nonzero" {
@@ -70,11 +71,11 @@ func (rule *profileExitCodeRule) UnmarshalYAML(node *yaml.Node) error {
 		}
 		if node.Tag == "!!int" {
 			var code int
-			if err := node.Decode(&code); err == nil && code >= 0 {
+			if err := node.Decode(&code); err == nil && code >= 0 && code <= runner.MaxGateExitCode {
 				rule.Codes = []int{code}
 				return nil
 			}
-			return errors.New("exit-code gate rule must contain only non-negative integers")
+			return fmt.Errorf("exit-code gate rule must contain only integers from 0 through %d", runner.MaxGateExitCode)
 		}
 	case yaml.SequenceNode:
 		if len(node.Content) == 0 {
@@ -82,19 +83,20 @@ func (rule *profileExitCodeRule) UnmarshalYAML(node *yaml.Node) error {
 		}
 		codes := make([]int, 0, len(node.Content))
 		for _, item := range node.Content {
+			item = resolvedYAMLNode(item)
 			if item.Kind != yaml.ScalarNode || item.Tag != "!!int" {
-				return errors.New("exit-code gate rule must contain only non-negative integers")
+				return fmt.Errorf("exit-code gate rule must contain only integers from 0 through %d", runner.MaxGateExitCode)
 			}
 			var code int
-			if err := item.Decode(&code); err != nil || code < 0 {
-				return errors.New("exit-code gate rule must contain only non-negative integers")
+			if err := item.Decode(&code); err != nil || code < 0 || code > runner.MaxGateExitCode {
+				return fmt.Errorf("exit-code gate rule must contain only integers from 0 through %d", runner.MaxGateExitCode)
 			}
 			codes = append(codes, code)
 		}
 		rule.Codes = codes
 		return nil
 	}
-	return errors.New(`exit-code gate rule must be a non-negative integer, a list of non-negative integers, or "nonzero"`)
+	return fmt.Errorf(`exit-code gate rule must be an integer from 0 through %d, a list of those integers, or "nonzero"`, runner.MaxGateExitCode)
 }
 
 func (rule profileExitCodeRule) MarshalYAML() (interface{}, error) {
@@ -112,12 +114,20 @@ func (rule profileExitCodeRule) MarshalYAML() (interface{}, error) {
 }
 
 func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
+	node = resolvedYAMLNode(node)
 	if node.Kind != yaml.MappingNode {
 		return errors.New("scanner gate must be an object")
+	}
+	if len(node.Content) == 0 {
+		return errors.New("scanner gate must include blockOnExitCode or warnOnExitCode")
 	}
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
 		case "blockOnExitCode", "warnOnExitCode":
+			value := resolvedYAMLNode(node.Content[index+1])
+			if value.Tag == "!!null" {
+				return fmt.Errorf("scanner gate %s must not be null", node.Content[index].Value)
+			}
 		default:
 			return fmt.Errorf("field %s not found in type profiles.ProfileScannerGate", node.Content[index].Value)
 		}
@@ -137,6 +147,12 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 		for index := 0; index < len(node.Content); index += 2 {
 			switch node.Content[index].Value {
 			case "id", "command", "env", "targets", "gate":
+				if node.Content[index].Value == "gate" {
+					gateNode := resolvedYAMLNode(node.Content[index+1])
+					if gateNode.Kind != yaml.MappingNode {
+						return errors.New("scanner gate must be an object")
+					}
+				}
 			default:
 				return fmt.Errorf("field %s not found in type profiles.ProfileScanner", node.Content[index].Value)
 			}
@@ -161,6 +177,13 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 	default:
 		return fmt.Errorf("scanner entry must be a string or object")
 	}
+}
+
+func resolvedYAMLNode(node *yaml.Node) *yaml.Node {
+	for node != nil && node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+	return node
 }
 
 func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
@@ -206,10 +229,14 @@ func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, 
 	return registry, nil
 }
 
-func profileGateRules(scanners []ProfileScanner) map[string]runner.ScannerGatePolicy {
+func profileGateRules(scanners []ProfileScanner, selectedScannerIDs []string) map[string]runner.ScannerGatePolicy {
 	rules := map[string]runner.ScannerGatePolicy{}
+	selected := make(map[string]bool, len(selectedScannerIDs))
+	for _, scannerID := range selectedScannerIDs {
+		selected[scannerID] = true
+	}
 	for _, scanner := range scanners {
-		if scanner.Gate == nil {
+		if scanner.Gate == nil || !selected[scanner.ID] {
 			continue
 		}
 		policy := runner.ScannerGatePolicy{}
@@ -386,7 +413,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		return ResolvedRunSet{}, err
 	}
 	opts.Profile = profileName
-	opts.GateRules = profileGateRules(selected.profile.Scanners)
+	opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 	opts.ConfigSource = configSource
 	opts.DiscoverConfig = intent.discoverConfig
 	if opts.Judge != nil {
@@ -488,7 +515,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 			return ResolvedRunSet{}, err
 		}
 		opts.Profile = profileName
-		opts.GateRules = profileGateRules(selected.profile.Scanners)
+		opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 		opts.ConfigSource = filepath.Clean(projectPath)
 		opts.OutputPath = ""
 		opts.JSON = false

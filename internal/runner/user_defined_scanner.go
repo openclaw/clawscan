@@ -105,7 +105,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 }
 
 func gateEligibleExitCode(exitCode *int) *int {
-	if exitCode == nil || *exitCode < 0 {
+	if exitCode == nil || *exitCode < 0 || *exitCode > MaxGateExitCode {
 		return nil
 	}
 	return exitCode

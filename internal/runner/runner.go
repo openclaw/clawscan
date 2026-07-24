@@ -47,6 +47,10 @@ type ExitCodeRule struct {
 	Nonzero bool
 }
 
+// MaxGateExitCode excludes shell and container runtime infrastructure failures
+// from scanner verdict policy.
+const MaxGateExitCode = 124
+
 func (rule ExitCodeRule) Matches(exitCode int) bool {
 	if rule.Nonzero {
 		return exitCode != 0
@@ -467,7 +471,12 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 		artifact.Context = json.RawMessage(context)
 	}
+	scanned := make(map[string]bool, len(opts.Scanners))
 	for _, scanner := range opts.Scanners {
+		if scanned[scanner] {
+			continue
+		}
+		scanned[scanner] = true
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
 		result, err := scannerResult(opts, scanner, target, scannerStartedAt, scannerRunner)
@@ -2146,11 +2155,12 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
+	timedOut := ctx.Err() == context.DeadlineExceeded
+	if timedOut {
 		err = fmt.Errorf("command timed out after %s", timeout)
 	}
 	output := CommandOutput{Stdout: stdout.String(), Stderr: stderr.String()}
-	if cmd.ProcessState != nil {
+	if !timedOut && cmd.ProcessState != nil {
 		exitCode := cmd.ProcessState.ExitCode()
 		if exitCode >= 0 {
 			output.ExitCode = &exitCode
@@ -2215,7 +2225,12 @@ func validateGateRuleScanners(opts Options) error {
 }
 
 func evaluateGate(artifact *Artifact, opts Options) {
+	evaluated := make(map[string]bool, len(opts.Scanners))
 	for _, scanner := range opts.Scanners {
+		if evaluated[scanner] {
+			continue
+		}
+		evaluated[scanner] = true
 		result := artifact.Scanners[scanner]
 		if result.Status != "completed" || result.ExitCode == nil {
 			continue

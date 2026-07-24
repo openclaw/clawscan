@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1139,6 +1140,9 @@ func TestNewArtifactAlwaysIncludesPassingGate(t *testing.T) {
 	if !bytes.Contains(raw, []byte(`"gate":"pass"`)) {
 		t.Fatalf("artifact omitted gate: %s", raw)
 	}
+	if !bytes.Contains(raw, []byte(`"gateRules":[]`)) {
+		t.Fatalf("artifact gateRules default is not an empty array: %s", raw)
+	}
 }
 
 func TestRunWritesScannerOnlyArtifact(t *testing.T) {
@@ -1298,6 +1302,26 @@ func TestRunBlockGateBeatsWarnAcrossScanners(t *testing.T) {
 	}
 }
 
+func TestRunRepeatedScannerFlagFiresGateRuleOnce(t *testing.T) {
+	target := t.TempDir()
+	scannerRunner := &gateScannerRunner{results: gateResults(2)}
+	artifact, err := Run(Options{
+		Target: target, Scanners: []string{"clawscan-static", "clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{
+			"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}},
+		},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: scannerRunner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 1 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+	if scannerRunner.calls != 1 {
+		t.Fatalf("scanner ran %d times", scannerRunner.calls)
+	}
+}
+
 func TestRunRejectsGateRuleForUnrequestedScannerBeforeScanning(t *testing.T) {
 	scannerRunner := &gateScannerRunner{results: gateResults(0)}
 	_, err := Run(Options{
@@ -1309,6 +1333,60 @@ func TestRunRejectsGateRuleForUnrequestedScannerBeforeScanning(t *testing.T) {
 	}
 	if scannerRunner.calls != 0 {
 		t.Fatalf("scanner ran %d times", scannerRunner.calls)
+	}
+}
+
+func TestDefaultCommandRunnerCapturesProcessExitCode(t *testing.T) {
+	const helperEnv = "CLAWSCAN_TEST_COMMAND_MODE"
+	switch os.Getenv(helperEnv) {
+	case "exit":
+		os.Exit(7)
+	case "timeout":
+		time.Sleep(time.Minute)
+		return
+	}
+	env := EnvMap(os.Environ())
+	env[helperEnv] = "exit"
+	output, err := (defaultCommandRunner{Env: env}).Run(
+		os.Args[0],
+		[]string{"-test.run=^TestDefaultCommandRunnerCapturesProcessExitCode$"},
+		"",
+		time.Minute,
+	)
+	if err == nil {
+		t.Fatal("helper process unexpectedly succeeded")
+	}
+	if output.ExitCode == nil || *output.ExitCode != 7 {
+		t.Fatalf("exit code = %#v", output.ExitCode)
+	}
+
+	env[helperEnv] = "timeout"
+	output, err = (defaultCommandRunner{Env: env}).Run(
+		os.Args[0],
+		[]string{"-test.run=^TestDefaultCommandRunnerCapturesProcessExitCode$"},
+		"",
+		time.Second,
+	)
+	if err == nil || !strings.Contains(err.Error(), "command timed out") {
+		t.Fatalf("err = %v", err)
+	}
+	if output.ExitCode != nil {
+		t.Fatalf("timed-out command exit code = %d", *output.ExitCode)
+	}
+
+	if runtime.GOOS != "windows" {
+		output, err = (defaultCommandRunner{Env: env}).Run(
+			"/bin/sh",
+			[]string{"-c", "kill -TERM $$"},
+			"",
+			time.Minute,
+		)
+		if err == nil {
+			t.Fatal("signaled helper process unexpectedly succeeded")
+		}
+		if output.ExitCode != nil {
+			t.Fatalf("signaled command exit code = %d", *output.ExitCode)
+		}
 	}
 }
 
