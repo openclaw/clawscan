@@ -202,6 +202,9 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	benchmarkOpts := *opts.Benchmark
 	benchmarkOpts.ID = adapter.ID()
 	opts.Benchmark = &benchmarkOpts
+	if err := validateGateRuleScanners(opts); err != nil {
+		return BenchmarkArtifact{}, err
+	}
 	if opts.Benchmark.PredictionsOutputPath != "" && !adapter.SupportsPredictionsOutput() {
 		return BenchmarkArtifact{}, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
 	}
