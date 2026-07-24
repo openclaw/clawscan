@@ -28,7 +28,11 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 		timeout = 20 * time.Minute
 	}
 
-	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	cwd := ""
+	if runner.SandboxMode == SandboxModeDocker {
+		cwd = resultDir
+	}
+	output, runErr := runner.CommandRunner.Run(command, args, cwd, timeout)
 	raw, readErr := os.ReadFile(resultPath)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if readErr != nil {

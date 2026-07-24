@@ -74,6 +74,10 @@ profiles:
       env:
         - OPENAI_API_KEY
         - CODEX_API_KEY
+      mounts:
+        - /opt/scanner-rules
+        - path: /var/cache/clawscan
+          write: true
     judge:
       command: >
         codex exec --cd {{ workspace }}
@@ -81,3 +85,8 @@ profiles:
         --output-last-message {{ output }}
         - < {{ prompt:./prompt.md }}
 ```
+
+Sandbox mounts must use existing absolute host paths. A string mount is
+read-only; set `write: true` only for a directory the scanner genuinely needs
+to modify. The CLI equivalents are repeatable `--sandbox-mount /path` and
+`--sandbox-mount /path:rw`.
