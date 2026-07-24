@@ -45,7 +45,7 @@ that config-backed run and accept these fields:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | Scanner ID using letters, digits, `_`, and `-`, starting with a letter or digit. It must not match a built-in scanner ID. |
+| `id` | yes | Scanner ID using lowercase letters, digits, `_`, and `-`, starting with a letter or digit, at most 64 characters. It must not match a built-in scanner ID. |
 | `command` | yes | Shell command to execute. Unquoted `{{target}}` is replaced with the safely passed resolved target; do not wrap the placeholder in shell quotes. |
 | `env` | no | Required environment variable names. Values stay in the process environment and are never stored in the config or artifact. |
 | `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
@@ -73,6 +73,13 @@ The command must write JSON to stdout. ClawScan preserves valid stdout as the
 scanner's raw evidence; empty or non-JSON stdout produces a failed scanner
 result. Required environment variables are checked before any scanner starts.
 Artifacts record each requirement as only `present` or `missing`.
+
+> **Do not print secrets into evidence.** Because ClawScan stores the scanner's
+> stdout verbatim as raw evidence, any secret the scanner writes into its own
+> JSON output is persisted as-is. ClawScan redacts declared `env` values from
+> scanner *error* text, but it cannot redact inside raw evidence without
+> corrupting it. A user-defined scanner must not echo its API keys, tokens, or
+> other credentials into the JSON report it emits.
 
 User-defined scanners use the same execution path as built-in command-backed
 scanners. They run in the Docker sandbox by default, and declared `env` names
