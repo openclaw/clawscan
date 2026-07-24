@@ -28,8 +28,8 @@ func NewProfileRegistry(profiles map[string]resolvedProfile) (ProfileRegistry, e
 			return ProfileRegistry{}, err
 		}
 		for _, scanner := range profile.profile.Scanners {
-			if !runner.DefaultScannerRegistry().Contains(scanner) {
-				return ProfileRegistry{}, unknownScannerInProfileError(id, scanner)
+			if !scanner.custom && !runner.DefaultScannerRegistry().Contains(scanner.ID) {
+				return ProfileRegistry{}, unknownScannerInProfileError(id, scanner.ID)
 			}
 		}
 		registry.profiles[id] = profile

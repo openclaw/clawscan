@@ -30,12 +30,101 @@ type Config struct {
 }
 
 type Profile struct {
-	Scanners       []string          `yaml:"scanners"`
+	Scanners       []ProfileScanner  `yaml:"scanners"`
 	ScannerResults map[string]string `yaml:"scannerResults,omitempty"`
 	Output         string            `yaml:"output,omitempty"`
 	JSON           bool              `yaml:"json,omitempty"`
 	Sandbox        *Sandbox          `yaml:"sandbox,omitempty"`
 	Judge          *Judge            `yaml:"judge,omitempty"`
+}
+
+func (profile Profile) ScannerIDs() []string {
+	return profileScannerIDs(profile.Scanners)
+}
+
+type ProfileScanner struct {
+	ID      string
+	Command string
+	Env     []string
+	Targets []string
+	custom  bool
+}
+
+func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if err := node.Decode(&scanner.ID); err != nil {
+			return err
+		}
+		return nil
+	case yaml.MappingNode:
+		for index := 0; index < len(node.Content); index += 2 {
+			switch node.Content[index].Value {
+			case "id", "command", "env", "targets":
+			default:
+				return fmt.Errorf("field %s not found in type profiles.ProfileScanner", node.Content[index].Value)
+			}
+		}
+		var value struct {
+			ID      string   `yaml:"id"`
+			Command string   `yaml:"command"`
+			Env     []string `yaml:"env,omitempty"`
+			Targets []string `yaml:"targets,omitempty"`
+		}
+		if err := node.Decode(&value); err != nil {
+			return err
+		}
+		scanner.ID = value.ID
+		scanner.Command = value.Command
+		scanner.Env = value.Env
+		scanner.Targets = value.Targets
+		scanner.custom = true
+		return nil
+	default:
+		return fmt.Errorf("scanner entry must be a string or object")
+	}
+}
+
+func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
+	if !scanner.custom {
+		return scanner.ID, nil
+	}
+	return struct {
+		ID      string   `yaml:"id"`
+		Command string   `yaml:"command"`
+		Env     []string `yaml:"env,omitempty"`
+		Targets []string `yaml:"targets,omitempty"`
+	}{scanner.ID, scanner.Command, scanner.Env, scanner.Targets}, nil
+}
+
+func profileScannerIDs(scanners []ProfileScanner) []string {
+	ids := make([]string, 0, len(scanners))
+	for _, scanner := range scanners {
+		ids = append(ids, scanner.ID)
+	}
+	return ids
+}
+
+func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, error) {
+	registry := runner.DefaultScannerRegistry()
+	for _, scanner := range scanners {
+		if !scanner.custom {
+			continue
+		}
+		targets := append([]string(nil), scanner.Targets...)
+		if len(targets) == 0 {
+			targets = []string{"skill", "url"}
+		}
+		adapter := runner.NewUserDefinedScanner(runner.UserDefinedScannerConfig{
+			ID: scanner.ID, Command: scanner.Command, Env: scanner.Env, Targets: targets,
+		})
+		var err error
+		registry, err = registry.WithAdapters(adapter)
+		if err != nil {
+			return runner.ScannerRegistry{}, err
+		}
+	}
+	return registry, nil
 }
 
 type Sandbox struct {
@@ -90,6 +179,8 @@ type cliIntent struct {
 }
 
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
+var scannerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+var scannerTargetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
 
 type ResolvedRunSet struct {
 	Options     []runner.Options
@@ -182,7 +273,11 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
-	opts, err := runner.ParseArgs(finalArgs)
+	scannerRegistry, err := profileScannerRegistry(selected.profile.Scanners)
+	if err != nil {
+		return ResolvedRunSet{}, err
+	}
+	opts, err := runner.ParseArgsWithRegistry(finalArgs, scannerRegistry)
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
@@ -279,7 +374,11 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
-		opts, err := runner.ParseArgs(finalArgs)
+		scannerRegistry, err := profileScannerRegistry(selected.profile.Scanners)
+		if err != nil {
+			return ResolvedRunSet{}, err
+		}
+		opts, err := runner.ParseArgsWithRegistry(finalArgs, scannerRegistry)
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
@@ -610,7 +709,7 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	}
 
 	profile := selected.profile
-	scanners := append([]string{}, profile.Scanners...)
+	scanners := profileScannerIDs(profile.Scanners)
 	if len(intent.scanners) > 0 {
 		scanners = append([]string{}, intent.scanners...)
 	}
@@ -716,12 +815,92 @@ func resolveJudgePaths(command string, configDir string) string {
 func validateProfile(name string, profile Profile) error {
 	seen := map[string]bool{}
 	for _, scanner := range profile.Scanners {
-		if seen[scanner] {
-			return fmt.Errorf("Duplicate scanner in profile %s: %s", name, scanner)
+		if scanner.custom && strings.TrimSpace(scanner.ID) == "" {
+			return fmt.Errorf("User-defined scanner in profile %s must include a non-empty id", name)
 		}
-		seen[scanner] = true
+		if scanner.custom && !scannerIDPattern.MatchString(scanner.ID) {
+			return fmt.Errorf("User-defined scanner %s in profile %s has invalid id; use letters, digits, underscores, and hyphens, starting with a letter or digit", scanner.ID, name)
+		}
+		if scanner.custom && strings.TrimSpace(scanner.Command) == "" {
+			return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)
+		}
+		if scanner.custom && !scannerTargetPlaceholdersAreUnquoted(scanner.Command) {
+			return fmt.Errorf("User-defined scanner %s in profile %s must use {{target}} outside shell quotes", scanner.ID, name)
+		}
+		if scanner.custom && runner.DefaultScannerRegistry().Contains(scanner.ID) {
+			return fmt.Errorf("User-defined scanner %s collides with a built-in scanner ID", scanner.ID)
+		}
+		for _, target := range scanner.Targets {
+			switch target {
+			case "skill", "plugin", "url":
+			default:
+				return fmt.Errorf("User-defined scanner %s in profile %s has unsupported target kind: %s", scanner.ID, name, target)
+			}
+		}
+		if seen[scanner.ID] {
+			return fmt.Errorf("Duplicate scanner in profile %s: %s", name, scanner.ID)
+		}
+		seen[scanner.ID] = true
 	}
 	return nil
+}
+
+func scannerTargetPlaceholdersAreUnquoted(command string) bool {
+	matches := scannerTargetPlaceholderPattern.FindAllStringIndex(command, -1)
+	matchIndex := 0
+	quote := byte(0)
+	escaped := false
+	comment := false
+	for index := 0; index < len(command); index++ {
+		if matchIndex < len(matches) && index == matches[matchIndex][0] {
+			if !comment && quote != 0 {
+				return false
+			}
+			index = matches[matchIndex][1] - 1
+			matchIndex++
+			continue
+		}
+		character := command[index]
+		if comment {
+			if character == '\n' {
+				comment = false
+			}
+			continue
+		}
+		if escaped {
+			escaped = false
+			continue
+		}
+		if character == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote == 0 {
+			if character == '#' && shellCommentCanStart(command, index) {
+				comment = true
+				continue
+			}
+			switch character {
+			case '\'', '"', '`':
+				quote = character
+			}
+		} else if character == quote {
+			quote = 0
+		}
+	}
+	return true
+}
+
+func shellCommentCanStart(command string, index int) bool {
+	if index == 0 {
+		return true
+	}
+	switch command[index-1] {
+	case ' ', '\t', '\r', '\n', ';', '|', '&', '(', ')':
+		return true
+	default:
+		return false
+	}
 }
 
 func unknownProfileError(profile string, available []string) error {

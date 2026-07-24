@@ -7,8 +7,8 @@ import (
 
 func TestProfileRegistryReturnsSortedIDs(t *testing.T) {
 	registry, err := NewProfileRegistry(map[string]resolvedProfile{
-		"review":  {profile: Profile{Scanners: []string{"snyk"}}},
-		"clawhub": {profile: Profile{Scanners: []string{"skillspector"}}},
+		"review":  {profile: Profile{Scanners: []ProfileScanner{{ID: "snyk"}}}},
+		"clawhub": {profile: Profile{Scanners: []ProfileScanner{{ID: "skillspector"}}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +26,7 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	if !ok {
 		t.Fatal("missing clawhub profile")
 	}
-	if got := strings.Join(clawhub.profile.Scanners, ","); got != "skillspector,clawscan-static" {
+	if got := strings.Join(profileScannerIDs(clawhub.profile.Scanners), ","); got != "skillspector,clawscan-static" {
 		t.Fatalf("clawhub scanners = %q", got)
 	}
 	if clawhub.configDir != "clawhub" {
@@ -46,7 +46,7 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	if !ok {
 		t.Fatal("missing clawhub-aig profile")
 	}
-	if got := strings.Join(candidate.profile.Scanners, ","); got != "skillspector,aig" {
+	if got := strings.Join(profileScannerIDs(candidate.profile.Scanners), ","); got != "skillspector,aig" {
 		t.Fatalf("clawhub-aig scanners = %q", got)
 	}
 	if candidate.configDir != "clawhub" {
@@ -71,7 +71,7 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 
 func TestProfileRegistryRejectsUnknownScannerReferences(t *testing.T) {
 	_, err := NewProfileRegistry(map[string]resolvedProfile{
-		"bad": {profile: Profile{Scanners: []string{"missing-scanner"}}},
+		"bad": {profile: Profile{Scanners: []ProfileScanner{{ID: "missing-scanner"}}}},
 	})
 	if err == nil || err.Error() != "Profile bad references unknown scanner: missing-scanner" {
 		t.Fatalf("err = %v", err)
@@ -91,7 +91,7 @@ func TestInspectProfilesReturnsBuiltIns(t *testing.T) {
 	if !ok {
 		t.Fatal("missing clawhub profile")
 	}
-	if got := strings.Join(clawhub.Profile.Scanners, ","); got != "skillspector,clawscan-static" {
+	if got := strings.Join(profileScannerIDs(clawhub.Profile.Scanners), ","); got != "skillspector,clawscan-static" {
 		t.Fatalf("clawhub scanners = %q", got)
 	}
 	if clawhub.Source != "built-in" {

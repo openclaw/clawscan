@@ -253,7 +253,7 @@ func isURLTarget(input string) bool {
 func runnableScanners(opts Options, kind string) []string {
 	var out []string
 	for _, scanner := range opts.Scanners {
-		if opts.ScannerResultPaths[scanner] == "" && !scannerSupportsTargetKind(scanner, kind) {
+		if opts.ScannerResultPaths[scanner] == "" && !scannerSupportsTargetKindInRegistry(registryForOptions(opts), scanner, kind) {
 			continue
 		}
 		out = append(out, scanner)
@@ -265,7 +265,11 @@ func runnableScanners(opts Options, kind string) []string {
 // target of the given kind. Unknown scanner IDs are permitted here so the
 // scanner runner can still emit its own skipped result for them.
 func scannerSupportsTargetKind(scanner string, kind string) bool {
-	adapter, ok := DefaultScannerRegistry().Adapter(scanner)
+	return scannerSupportsTargetKindInRegistry(DefaultScannerRegistry(), scanner, kind)
+}
+
+func scannerSupportsTargetKindInRegistry(registry ScannerRegistry, scanner string, kind string) bool {
+	adapter, ok := registry.Adapter(scanner)
 	if !ok {
 		return true
 	}

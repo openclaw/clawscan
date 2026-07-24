@@ -1,10 +1,14 @@
 package profiles
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openclaw/clawscan/internal/runner"
 )
@@ -572,6 +576,12 @@ func TestResolveArgsRejectsUnsupportedVersionAndUnknownFields(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "field defaultProfile not found") {
 		t.Fatalf("err = %v", err)
 	}
+
+	writeFile(t, config, "version: 1\nprofiles:\n  review:\n    scanners:\n      - id: custom\n        command: custom {{target}}\n        token: example\n")
+	_, err = ResolveArgs([]string{"./skill", "--config", config}, dir)
+	if err == nil || !strings.Contains(err.Error(), "field token not found") {
+		t.Fatalf("err = %v", err)
+	}
 }
 
 func TestResolveArgsUnknownProfileListsAvailableProfiles(t *testing.T) {
@@ -738,6 +748,471 @@ profiles:
 	}
 }
 
+func TestResolveArgsParsesUserDefinedScannerAlongsideBuiltIn(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - clawscan-static
+      - id: my-scanner
+        command: my-scanner --json {{target}}
+        env:
+          - MY_SCANNER_TOKEN
+        targets:
+          - plugin
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static,my-scanner" {
+		t.Fatalf("scanners = %q", got)
+	}
+	adapter, ok := opts.ScannerRegistry.Adapter("my-scanner")
+	if !ok {
+		t.Fatal("custom scanner missing from run registry")
+	}
+	if adapter.SupportsTargetKind("skill") {
+		t.Fatal("plugin-only custom scanner unexpectedly supports skill targets")
+	}
+	if !adapter.SupportsTargetKind("plugin") {
+		t.Fatal("plugin-only custom scanner does not support plugin targets")
+	}
+}
+
+func TestResolveArgsRejectsUserDefinedScannerIDCollision(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: clawscan-static
+        command: custom-static {{target}}
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || err.Error() != "User-defined scanner clawscan-static collides with a built-in scanner ID" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveArgsRejectsIncompleteUserDefinedScanner(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		entry   string
+		wantErr string
+	}{
+		{name: "missing id", entry: "command: scanner {{target}}", wantErr: "User-defined scanner in profile review must include a non-empty id"},
+		{name: "missing command", entry: "id: my-scanner", wantErr: "User-defined scanner my-scanner in profile review must include a non-empty command"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, ".clawscan.yml")
+			writeFile(t, config, "version: 1\nprofiles:\n  review:\n    scanners:\n      - "+test.entry+"\n")
+
+			_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+			if err == nil || err.Error() != test.wantErr {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveArgsRejectsUnknownUserDefinedScannerTarget(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: my-scanner {{target}}
+        targets:
+          - package
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || err.Error() != "User-defined scanner my-scanner in profile review has unsupported target kind: package" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveArgsRejectsInvalidUserDefinedScannerID(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: foo=bar
+        command: scanner {{target}}
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || err.Error() != "User-defined scanner foo=bar in profile review has invalid id; use letters, digits, underscores, and hyphens, starting with a letter or digit" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveArgsRejectsQuotedUserDefinedScannerTargetPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: my-scanner "{{target}}"
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || err.Error() != "User-defined scanner my-scanner in profile review must use {{target}} outside shell quotes" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveArgsAllowsApostropheInShellCommentBeforeTargetPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: |-
+          # don't quote the target here
+          my-scanner {{target}}
+`)
+
+	if _, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveArgsSupportsAliasedScannerEntries(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  templates:
+    scanners:
+      - &builtin clawscan-static
+      - &custom
+        id: my-scanner
+        command: my-scanner {{target}}
+  review:
+    scanners:
+      - *builtin
+      - *custom
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static,my-scanner" {
+		t.Fatalf("scanners = %q", got)
+	}
+}
+
+func TestUserDefinedScannerRunsThroughDockerAndPreservesRawJSON(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: fixture-scanner
+        command: fixture-scan --json {{target}}
+`)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, ok := opts.ScannerRegistry.Adapter("fixture-scanner")
+	if !ok || !adapter.SupportsTargetKind("skill") || !adapter.SupportsTargetKind("url") || adapter.SupportsTargetKind("plugin") {
+		t.Fatalf("default target support is incorrect: adapter=%#v ok=%v", adapter, ok)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{"scanner":"fixture","findings":[]}`}
+	artifact, err := runner.Run(opts, runner.RunContext{
+		Env:                map[string]string{},
+		HostCommandRunner:  commandRunner,
+		DockerAvailability: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["fixture-scanner"]
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if !bytes.Equal(result.Raw, []byte(`{"scanner":"fixture","findings":[]}`)) {
+		t.Fatalf("raw = %s", result.Raw)
+	}
+	if commandRunner.command != "docker" {
+		t.Fatalf("command = %q", commandRunner.command)
+	}
+	joined := strings.Join(commandRunner.args, " ")
+	if !strings.Contains(joined, "fixture-scan --json") || !strings.Contains(joined, target) || strings.Contains(joined, "{{target}}") {
+		t.Fatalf("docker args = %#v", commandRunner.args)
+	}
+}
+
+func TestUserDefinedScannerRequiresDockerBeforeExecution(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: fixture-scanner
+        command: fixture-scan {{target}}
+`)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	dockerErr := errors.New("docker probe failed")
+	_, err = runner.Run(opts, runner.RunContext{
+		Env: map[string]string{}, HostCommandRunner: commandRunner,
+		DockerAvailability: func() error { return dockerErr },
+	})
+	if !errors.Is(err, dockerErr) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("scanner executed before Docker gating: %#v", commandRunner.calls)
+	}
+}
+
+func TestUserDefinedScannerRegistrySurvivesDiscoveredTargetBatch(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "skills", "alpha", "SKILL.md"), "# Alpha\n")
+	writeFile(t, filepath.Join(dir, "skills", "beta", "SKILL.md"), "# Beta\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: fixture-scanner
+        command: fixture-scan {{target}}
+`)
+	opts, err := ResolveArgs([]string{"--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	result, err := runner.RunTargets(opts, runner.RunContext{
+		Env: map[string]string{}, CommandRunner: commandRunner,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Batch == nil || len(result.Batch.Runs) != 2 || len(commandRunner.calls) != 2 {
+		t.Fatalf("batch = %#v calls = %#v", result.Batch, commandRunner.calls)
+	}
+	for _, run := range result.Batch.Runs {
+		if run.Scanners["fixture-scanner"].Status != "completed" {
+			t.Fatalf("run = %#v", run)
+		}
+	}
+}
+
+func TestUserDefinedScannerRegistriesStayIsolatedAcrossProfileBatch(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeFile(t, filepath.Join(target, "SKILL.md"), "# Demo\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  alpha:
+    scanners:
+      - id: fixture-scanner
+        command: alpha-scan {{target}}
+  beta:
+    scanners:
+      - id: fixture-scanner
+        command: beta-scan {{target}}
+`)
+	resolved, err := ResolveRunSet([]string{target, "--config", config}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	batch, err := runner.RunProfileBatch(resolved.Options, runner.RunContext{
+		Env: map[string]string{}, CommandRunner: commandRunner,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Runs) != 2 || len(commandRunner.calls) != 2 {
+		t.Fatalf("batch = %#v calls = %#v", batch, commandRunner.calls)
+	}
+	joined := strings.Join([]string{
+		strings.Join(commandRunner.calls[0].args, " "),
+		strings.Join(commandRunner.calls[1].args, " "),
+	}, "\n")
+	if !strings.Contains(joined, "alpha-scan") || !strings.Contains(joined, "beta-scan") {
+		t.Fatalf("profile registries were not isolated: %s", joined)
+	}
+}
+
+func TestUserDefinedScannerMissingEnvFailsBeforeExecution(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: credentialed-scanner
+        command: credentialed-scan {{target}}
+        env:
+          - MY_SCANNER_TOKEN
+`)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	_, err = runner.Run(opts, runner.RunContext{
+		Env:                map[string]string{},
+		HostCommandRunner:  commandRunner,
+		DockerAvailability: func() error { return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "MY_SCANNER_TOKEN") {
+		t.Fatalf("err = %v", err)
+	}
+	if commandRunner.command != "" {
+		t.Fatalf("scanner executed before env validation: %q %#v", commandRunner.command, commandRunner.args)
+	}
+}
+
+func TestUserDefinedScannerEnvIsAllowlistedAndRecordedByPresenceOnly(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: credentialed-scanner
+        command: credentialed-scan {{target}}
+        env:
+          - MY_SCANNER_TOKEN
+`)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	missingBatch, err := runner.RunProfileBatch([]runner.Options{opts}, runner.RunContext{
+		Env: map[string]string{}, CommandRunner: commandRunner,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missingBatch.Env["MY_SCANNER_TOKEN"] != "missing" || len(missingBatch.Errors) != 1 {
+		t.Fatalf("missing batch = %#v", missingBatch)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("scanner executed with missing env: %#v", commandRunner.calls)
+	}
+
+	const envValue = "test-value-123"
+	artifact, err := runner.Run(opts, runner.RunContext{
+		Env:                map[string]string{"MY_SCANNER_TOKEN": envValue},
+		HostCommandRunner:  commandRunner,
+		DockerAvailability: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Env["MY_SCANNER_TOKEN"] != "present" {
+		t.Fatalf("env = %#v", artifact.Env)
+	}
+	encoded, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(envValue)) {
+		t.Fatalf("artifact leaked env value: %s", encoded)
+	}
+	joined := strings.Join(commandRunner.args, "\x00")
+	if !strings.Contains(joined, "\x00-e\x00MY_SCANNER_TOKEN\x00") {
+		t.Fatalf("docker args missing env allowlist name: %#v", commandRunner.args)
+	}
+	if strings.Contains(joined, envValue) {
+		t.Fatalf("docker args leaked env value: %#v", commandRunner.args)
+	}
+}
+
+func TestUserDefinedPluginScannerSkipsSkillTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: plugin-scanner
+        command: plugin-scan {{target}}
+        env:
+          - PLUGIN_SCANNER_TOKEN
+        targets:
+          - plugin
+`)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	dockerChecked := false
+	artifact, err := runner.Run(opts, runner.RunContext{
+		Env:               map[string]string{},
+		HostCommandRunner: commandRunner,
+		DockerAvailability: func() error {
+			dockerChecked = true
+			return errors.New("Docker should not be required")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["plugin-scanner"]
+	if result.Status != "skipped" || !strings.Contains(result.Error, "does not support skill targets") {
+		t.Fatalf("result = %#v", result)
+	}
+	if commandRunner.command != "" {
+		t.Fatalf("unsupported scanner executed: %q %#v", commandRunner.command, commandRunner.args)
+	}
+	if dockerChecked {
+		t.Fatal("Docker availability was checked for a scanner that can only skip")
+	}
+}
+
 func TestResolveArgsRejectsProfileWithoutScannersUnlessCLIOverrides(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")
@@ -769,4 +1244,26 @@ func writeFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type profileCommandRunner struct {
+	command string
+	args    []string
+	calls   []profileCommandCall
+	stdout  string
+}
+
+type profileCommandCall struct {
+	command string
+	args    []string
+}
+
+func (commandRunner *profileCommandRunner) Run(command string, args []string, _ string, _ time.Duration) (runner.CommandOutput, error) {
+	commandRunner.command = command
+	commandRunner.args = append([]string(nil), args...)
+	commandRunner.calls = append(commandRunner.calls, profileCommandCall{
+		command: command,
+		args:    append([]string(nil), args...),
+	})
+	return runner.CommandOutput{Stdout: commandRunner.stdout}, nil
 }

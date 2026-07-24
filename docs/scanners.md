@@ -17,6 +17,53 @@ clawscan scanners
 clawscan scanners skillspector
 ```
 
+## User-defined scanners
+
+A trusted config can mix built-in scanner IDs with user-defined command
+scanners. The config schema uses the existing `profiles.<name>.scanners` list:
+
+```yaml
+version: 1
+
+profiles:
+  review:
+    scanners:
+      - clawscan-static
+      - id: my-scanner
+        command: my-scanner --json {{target}}
+        env:
+          - MY_SCANNER_TOKEN
+        targets:
+          - skill
+          - plugin
+```
+
+String entries select built-in scanners. Object entries define a scanner for
+that config-backed run and accept these fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `id` | yes | Scanner ID using letters, digits, `_`, and `-`, starting with a letter or digit. It must not match a built-in scanner ID. |
+| `command` | yes | Shell command to execute. Unquoted `{{target}}` is replaced with the safely passed resolved target; do not wrap the placeholder in shell quotes. |
+| `env` | no | Required environment variable names. Values stay in the process environment and are never stored in the config or artifact. |
+| `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
+
+The command must write JSON to stdout. ClawScan preserves valid stdout as the
+scanner's raw evidence; empty or non-JSON stdout produces a failed scanner
+result. Required environment variables are checked before any scanner starts.
+Artifacts record each requirement as only `present` or `missing`.
+
+User-defined scanners use the same execution path as built-in command-backed
+scanners. They run in the Docker sandbox by default, and declared `env` names
+are added to its environment allowlist. Use `--sandbox off` only when you
+intentionally want the command to run on the host. User-defined scanners are
+local to the resolved config and do not appear in the built-in `clawscan
+scanners` catalog.
+
+> **Trust boundary:** only load user-defined scanners from config files you
+> control. A scanner entry is executable code. The default sandbox limits its
+> host access, but does not make an untrusted command safe to run.
+
 ## Target kinds
 
 Clawscan classifies each explicit target before dispatching scanners and records
