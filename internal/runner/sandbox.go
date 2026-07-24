@@ -18,16 +18,23 @@ const (
 )
 
 type SandboxOptions struct {
-	Mode  string
-	Image string
-	Env   []string
+	Mode   string
+	Image  string
+	Env    []string
+	Mounts []SandboxMount
+}
+
+type SandboxMount struct {
+	Path  string `json:"path"`
+	Write bool   `json:"write,omitempty"`
 }
 
 type SandboxMetadata struct {
-	Mode    string   `json:"mode"`
-	Image   string   `json:"image,omitempty"`
-	Network string   `json:"network,omitempty"`
-	Env     []string `json:"env,omitempty"`
+	Mode    string         `json:"mode"`
+	Image   string         `json:"image,omitempty"`
+	Network string         `json:"network,omitempty"`
+	Env     []string       `json:"env,omitempty"`
+	Mounts  []SandboxMount `json:"mounts,omitempty"`
 }
 
 type resolvedSandbox struct {
@@ -40,6 +47,7 @@ type dockerCommandRunner struct {
 	Env      map[string]string
 	Image    string
 	EnvNames []string
+	Mounts   []SandboxMount
 }
 
 func resolveSandbox(opts Options, env map[string]string) (resolvedSandbox, error) {
@@ -84,6 +92,7 @@ func sandboxMetadata(opts Options, env map[string]string) (SandboxMetadata, erro
 		metadata.Image = sandbox.Image
 		metadata.Network = "on"
 		metadata.Env = sandboxEnvNames(opts, env)
+		metadata.Mounts = append([]SandboxMount(nil), opts.Sandbox.Mounts...)
 	}
 	return metadata, nil
 }
@@ -106,11 +115,24 @@ func sandboxMetadataForOptionList(optsList []Options, env map[string]string) San
 		if next.Mode != first.Mode ||
 			next.Image != first.Image ||
 			next.Network != first.Network ||
-			strings.Join(next.Env, "\x00") != strings.Join(first.Env, "\x00") {
+			strings.Join(next.Env, "\x00") != strings.Join(first.Env, "\x00") ||
+			!sandboxMountsEqual(next.Mounts, first.Mounts) {
 			return SandboxMetadata{Mode: "mixed"}
 		}
 	}
 	return first
+}
+
+func sandboxMountsEqual(left []SandboxMount, right []SandboxMount) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func commandRunnerForOptions(opts Options, ctx RunContext, env map[string]string) (CommandRunner, SandboxMetadata, error) {
@@ -142,6 +164,7 @@ func commandRunnerForOptions(opts Options, ctx RunContext, env map[string]string
 		Env:      env,
 		Image:    metadata.Image,
 		EnvNames: metadata.Env,
+		Mounts:   opts.Sandbox.Mounts,
 	}, metadata, nil
 }
 
@@ -159,7 +182,7 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 			dockerArgs = append(dockerArgs, "-e", name)
 		}
 	}
-	for _, mount := range dockerMounts(cwd, args) {
+	for _, mount := range dockerMounts(cwd, args, runner.Mounts) {
 		dockerArgs = append(dockerArgs, "--mount", mount)
 	}
 	if cwd != "" {
@@ -170,7 +193,7 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	return runner.Host.Run("docker", dockerArgs, "", timeout)
 }
 
-func dockerMounts(cwd string, args []string) []string {
+func dockerMounts(cwd string, args []string, extra []SandboxMount) []string {
 	mounts := map[string]bool{}
 	add := func(path string, readOnly bool) {
 		if path == "" {
@@ -182,16 +205,18 @@ func dockerMounts(cwd string, args []string) []string {
 		}
 		if existing, err := os.Stat(clean); err == nil {
 			mounts[clean] = readOnly || !existing.IsDir()
-			return
-		}
-		parent := filepath.Dir(clean)
-		if parent != "." && parent != clean {
-			mounts[parent] = false
 		}
 	}
 	add(cwd, false)
 	for _, arg := range args {
 		add(arg, true)
+	}
+	for _, mount := range extra {
+		clean := filepath.Clean(mount.Path)
+		if !filepath.IsAbs(clean) {
+			continue
+		}
+		mounts[clean] = !mount.Write
 	}
 	sources := make([]string, 0, len(mounts))
 	for source := range mounts {

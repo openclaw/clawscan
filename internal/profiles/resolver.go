@@ -232,9 +232,51 @@ func profileGateRules(scanners []ProfileScanner) map[string]runner.ScannerGatePo
 }
 
 type Sandbox struct {
-	Mode  string   `yaml:"mode,omitempty"`
-	Image string   `yaml:"image,omitempty"`
-	Env   []string `yaml:"env,omitempty"`
+	Mode   string         `yaml:"mode,omitempty"`
+	Image  string         `yaml:"image,omitempty"`
+	Env    []string       `yaml:"env,omitempty"`
+	Mounts []SandboxMount `yaml:"mounts,omitempty"`
+}
+
+type SandboxMount struct {
+	Path  string
+	Write bool
+}
+
+func (m *SandboxMount) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		return node.Decode(&m.Path)
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); i += 2 {
+			switch node.Content[i].Value {
+			case "path", "write":
+			default:
+				return fmt.Errorf("field %s not found in type profiles.SandboxMount", node.Content[i].Value)
+			}
+		}
+		var v struct {
+			Path  string `yaml:"path"`
+			Write bool   `yaml:"write"`
+		}
+		if err := node.Decode(&v); err != nil {
+			return err
+		}
+		m.Path, m.Write = v.Path, v.Write
+		return nil
+	default:
+		return fmt.Errorf("sandbox mount must be a string or object")
+	}
+}
+
+func (m SandboxMount) MarshalYAML() (interface{}, error) {
+	if !m.Write {
+		return m.Path, nil
+	}
+	return struct {
+		Path  string `yaml:"path"`
+		Write bool   `yaml:"write"`
+	}{Path: m.Path, Write: m.Write}, nil
 }
 
 type Judge struct {
@@ -268,6 +310,7 @@ type cliIntent struct {
 	sandboxImage         string
 	sandboxImageSet      bool
 	sandboxEnv           []string
+	sandboxMounts        []SandboxMount
 	benchmark            string
 	benchmarkSet         bool
 	split                string
@@ -606,6 +649,7 @@ func mergeSandbox(defaults *Sandbox, override *Sandbox) Sandbox {
 	if defaults != nil {
 		out = *defaults
 		out.Env = append([]string(nil), defaults.Env...)
+		out.Mounts = append([]SandboxMount(nil), defaults.Mounts...)
 	}
 	if override != nil {
 		if override.Mode != "" {
@@ -616,6 +660,9 @@ func mergeSandbox(defaults *Sandbox, override *Sandbox) Sandbox {
 		}
 		if len(override.Env) > 0 {
 			out.Env = append(out.Env, override.Env...)
+		}
+		if len(override.Mounts) > 0 {
+			out.Mounts = append(out.Mounts, override.Mounts...)
 		}
 	}
 	out.Env = dedupeStrings(out.Env)
@@ -746,6 +793,17 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 				return cliIntent{}, err
 			}
 			intent.sandboxEnv = append(intent.sandboxEnv, value)
+			i = next
+		case "--sandbox-mount":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			mount, err := parseSandboxMountFlag(value)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.sandboxMounts = append(intent.sandboxMounts, mount)
 			i = next
 		case "--split":
 			value, next, err := readValue(args, i, arg)
@@ -891,6 +949,10 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	for _, envVar := range selected.sandbox.Env {
 		args = append(args, "--sandbox-env", envVar)
 	}
+	args, err := appendSandboxMountArgs(args, selected.sandbox.Mounts)
+	if err != nil {
+		return nil, nil, err
+	}
 	if intent.sandboxSet {
 		args = append(args, "--sandbox", intent.sandbox)
 	}
@@ -900,7 +962,42 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	for _, envVar := range intent.sandboxEnv {
 		args = append(args, "--sandbox-env", envVar)
 	}
+	args, err = appendSandboxMountArgs(args, intent.sandboxMounts)
+	if err != nil {
+		return nil, nil, err
+	}
 	return args, selected.files, nil
+}
+
+func parseSandboxMountFlag(value string) (SandboxMount, error) {
+	if i := strings.LastIndexByte(value, ':'); i >= 0 {
+		suffix := value[i+1:]
+		if suffix == "rw" || suffix == "write" {
+			path := value[:i]
+			if strings.TrimSpace(path) == "" {
+				return SandboxMount{}, fmt.Errorf("--sandbox-mount requires a path before %q", ":"+suffix)
+			}
+			return SandboxMount{Path: path, Write: true}, nil
+		}
+	}
+	return SandboxMount{Path: value, Write: false}, nil
+}
+
+func appendSandboxMountArgs(args []string, mounts []SandboxMount) ([]string, error) {
+	for _, mount := range mounts {
+		if !filepath.IsAbs(mount.Path) {
+			return nil, fmt.Errorf("sandbox mount path must be absolute: %q", mount.Path)
+		}
+		if _, err := os.Stat(mount.Path); err != nil {
+			return nil, fmt.Errorf("sandbox mount path does not exist: %q", mount.Path)
+		}
+		value := mount.Path
+		if mount.Write {
+			value += ":rw"
+		}
+		args = append(args, "--sandbox-mount", value)
+	}
+	return args, nil
 }
 
 func shouldUseProfileJudge(intent cliIntent) bool {

@@ -678,6 +678,65 @@ profiles:
 	}
 }
 
+func TestResolveArgsSupportsSandboxMountConfig(t *testing.T) {
+	dir := t.TempDir()
+	readOnlyDir := t.TempDir()
+	writableDir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, "version: 1\n"+
+		"sandbox:\n"+
+		"  mounts:\n"+
+		"    - "+readOnlyDir+"\n"+
+		"    - path: "+writableDir+"\n"+
+		"      write: true\n"+
+		"profiles:\n"+
+		"  review:\n"+
+		"    scanners:\n"+
+		"      - clawscan-static\n")
+
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []runner.SandboxMount{
+		{Path: readOnlyDir},
+		{Path: writableDir, Write: true},
+	}
+	if !reflect.DeepEqual(opts.Sandbox.Mounts, want) {
+		t.Fatalf("sandbox mounts = %#v, want %#v", opts.Sandbox.Mounts, want)
+	}
+}
+
+func TestResolveArgsValidatesSandboxMountConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{name: "relative", path: "relative/rules", wantErr: "must be absolute"},
+		{name: "missing", path: filepath.Join(t.TempDir(), "missing"), wantErr: "does not exist"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, ".clawscan.yml")
+			writeFile(t, config, "version: 1\n"+
+				"sandbox:\n"+
+				"  mounts:\n"+
+				"    - "+test.path+"\n"+
+				"profiles:\n"+
+				"  review:\n"+
+				"    scanners:\n"+
+				"      - clawscan-static\n")
+
+			_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("err = %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveArgsRejectsUnrequestedScannerResultAfterOverrides(t *testing.T) {
 	_, err := ResolveArgs([]string{
 		"./skill",

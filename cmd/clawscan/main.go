@@ -593,6 +593,7 @@ Core flags:
   --sandbox <docker|off>      Command sandbox mode. Defaults to docker.
   --sandbox-image <image>     Docker runtime image. Defaults to %s or CLAWSCAN_SANDBOX_IMAGE.
   --sandbox-env <name>        Allow an env var through the Docker sandbox. Repeat for multiple vars.
+  --sandbox-mount <path[:rw]>  Bind-mount a host dir into the Docker sandbox (read-only; append :rw for writable). Repeat for multiple.
 
 Benchmark command flags:
   --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for clawhub-security-signals.

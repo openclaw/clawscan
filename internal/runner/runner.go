@@ -365,6 +365,17 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 			}
 			opts.Sandbox.Env = append(opts.Sandbox.Env, value)
 			i = next
+		case "--sandbox-mount":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			mount, err := parseSandboxMountFlag(value)
+			if err != nil {
+				return Options{}, err
+			}
+			opts.Sandbox.Mounts = append(opts.Sandbox.Mounts, mount)
+			i = next
 		default:
 			return Options{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
@@ -385,6 +396,22 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 		opts.Judge = &JudgeOptions{Command: judge}
 	}
 	return opts, nil
+}
+
+// parseSandboxMountFlag parses a --sandbox-mount value: "<path>" is read-only,
+// "<path>:rw" or "<path>:write" is writable.
+func parseSandboxMountFlag(value string) (SandboxMount, error) {
+	if i := strings.LastIndexByte(value, ':'); i >= 0 {
+		suffix := value[i+1:]
+		if suffix == "rw" || suffix == "write" {
+			path := value[:i]
+			if strings.TrimSpace(path) == "" {
+				return SandboxMount{}, fmt.Errorf("--sandbox-mount requires a path before %q", ":"+suffix)
+			}
+			return SandboxMount{Path: path, Write: true}, nil
+		}
+	}
+	return SandboxMount{Path: value, Write: false}, nil
 }
 
 func ValidateRequirements(opts Options, env map[string]string) error {
@@ -2028,6 +2055,8 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		scanTarget = "artifact"
 		cwd = resultDir
 		resultName = "skillspector-report-0.json"
+	} else if runner.SandboxMode == SandboxModeDocker {
+		cwd = resultDir
 	}
 	resultPath := filepath.Join(resultDir, resultName)
 	args = append(args, "scan", scanTarget, "--format", "json", "--output", resultPath)
