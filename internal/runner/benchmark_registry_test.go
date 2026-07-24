@@ -58,6 +58,37 @@ func TestRunBenchmarkRejectsUnsupportedBenchmarkThroughRegistry(t *testing.T) {
 	}
 }
 
+func TestRunBenchmarkExecutesUserDefinedScannerFromRunRegistry(t *testing.T) {
+	custom := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "fixture-scanner", Command: "fixture-scan {{target}}", Targets: []string{targetKindSkill},
+	})
+	registry, err := DefaultScannerRegistry().WithAdapters(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := benchmarkTestOptions(t, "clawhub-security-signals", "eval_holdout", 0, 0, "")
+	opts.Scanners = []string{"fixture-scanner"}
+	opts.ScannerRegistry = registry
+	commandRunner := &recordingCommandRunner{stdout: `{"verdict":"clean"}`}
+	artifact, err := RunBenchmark(opts, RunContext{
+		Env: map[string]string{}, CommandRunner: commandRunner,
+		BenchmarkClient: staticBenchmarkClient{rows: []OpenClawBenchmarkRow{{
+			ID: "row-1", SkillSlug: "owner/demo", SkillVersion: "1.0.0",
+			SkillMDContent: "# Demo\n", ClawScanVerdict: "clean",
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commandRunner.calls) != 1 || !strings.Contains(commandRunner.calls[0].args[1], "fixture-scan") {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	result := artifact.Cases[0].Run.Scanners["fixture-scanner"]
+	if result.Status != "completed" || string(result.Raw) != `{"verdict":"clean"}` {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 type stubBenchmarkAdapter struct {
 	id      string
 	aliases []string

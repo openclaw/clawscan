@@ -3,6 +3,7 @@ package profiles
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -965,6 +966,110 @@ profiles:
 	}
 }
 
+func TestUserDefinedScannerRequiresDockerBeforeExecution(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: fixture-scanner
+        command: fixture-scan {{target}}
+`)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	dockerErr := errors.New("docker probe failed")
+	_, err = runner.Run(opts, runner.RunContext{
+		Env: map[string]string{}, HostCommandRunner: commandRunner,
+		DockerAvailability: func() error { return dockerErr },
+	})
+	if !errors.Is(err, dockerErr) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("scanner executed before Docker gating: %#v", commandRunner.calls)
+	}
+}
+
+func TestUserDefinedScannerRegistrySurvivesDiscoveredTargetBatch(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "skills", "alpha", "SKILL.md"), "# Alpha\n")
+	writeFile(t, filepath.Join(dir, "skills", "beta", "SKILL.md"), "# Beta\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: fixture-scanner
+        command: fixture-scan {{target}}
+`)
+	opts, err := ResolveArgs([]string{"--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	result, err := runner.RunTargets(opts, runner.RunContext{
+		Env: map[string]string{}, CommandRunner: commandRunner,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Batch == nil || len(result.Batch.Runs) != 2 || len(commandRunner.calls) != 2 {
+		t.Fatalf("batch = %#v calls = %#v", result.Batch, commandRunner.calls)
+	}
+	for _, run := range result.Batch.Runs {
+		if run.Scanners["fixture-scanner"].Status != "completed" {
+			t.Fatalf("run = %#v", run)
+		}
+	}
+}
+
+func TestUserDefinedScannerRegistriesStayIsolatedAcrossProfileBatch(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeFile(t, filepath.Join(target, "SKILL.md"), "# Demo\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  alpha:
+    scanners:
+      - id: fixture-scanner
+        command: alpha-scan {{target}}
+  beta:
+    scanners:
+      - id: fixture-scanner
+        command: beta-scan {{target}}
+`)
+	resolved, err := ResolveRunSet([]string{target, "--config", config}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	batch, err := runner.RunProfileBatch(resolved.Options, runner.RunContext{
+		Env: map[string]string{}, CommandRunner: commandRunner,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Runs) != 2 || len(commandRunner.calls) != 2 {
+		t.Fatalf("batch = %#v calls = %#v", batch, commandRunner.calls)
+	}
+	joined := strings.Join([]string{
+		strings.Join(commandRunner.calls[0].args, " "),
+		strings.Join(commandRunner.calls[1].args, " "),
+	}, "\n")
+	if !strings.Contains(joined, "alpha-scan") || !strings.Contains(joined, "beta-scan") {
+		t.Fatalf("profile registries were not isolated: %s", joined)
+	}
+}
+
 func TestUserDefinedScannerMissingEnvFailsBeforeExecution(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
@@ -1019,13 +1124,21 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	missingArtifact := runner.NewArtifact(opts, target, "start", "complete", map[string]string{})
-	if missingArtifact.Env["MY_SCANNER_TOKEN"] != "missing" {
-		t.Fatalf("missing env = %#v", missingArtifact.Env)
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	missingBatch, err := runner.RunProfileBatch([]runner.Options{opts}, runner.RunContext{
+		Env: map[string]string{}, CommandRunner: commandRunner,
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missingBatch.Env["MY_SCANNER_TOKEN"] != "missing" || len(missingBatch.Errors) != 1 {
+		t.Fatalf("missing batch = %#v", missingBatch)
+	}
+	if len(commandRunner.calls) != 0 {
+		t.Fatalf("scanner executed with missing env: %#v", commandRunner.calls)
 	}
 
 	const envValue = "test-value-123"
-	commandRunner := &profileCommandRunner{stdout: `{}`}
 	artifact, err := runner.Run(opts, runner.RunContext{
 		Env:                map[string]string{"MY_SCANNER_TOKEN": envValue},
 		HostCommandRunner:  commandRunner,
@@ -1076,10 +1189,14 @@ profiles:
 		t.Fatal(err)
 	}
 	commandRunner := &profileCommandRunner{stdout: `{}`}
+	dockerChecked := false
 	artifact, err := runner.Run(opts, runner.RunContext{
-		Env:                map[string]string{},
-		HostCommandRunner:  commandRunner,
-		DockerAvailability: func() error { return nil },
+		Env:               map[string]string{},
+		HostCommandRunner: commandRunner,
+		DockerAvailability: func() error {
+			dockerChecked = true
+			return errors.New("Docker should not be required")
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1090,6 +1207,9 @@ profiles:
 	}
 	if commandRunner.command != "" {
 		t.Fatalf("unsupported scanner executed: %q %#v", commandRunner.command, commandRunner.args)
+	}
+	if dockerChecked {
+		t.Fatal("Docker availability was checked for a scanner that can only skip")
 	}
 }
 
@@ -1129,11 +1249,21 @@ func writeFile(t *testing.T, path string, content string) {
 type profileCommandRunner struct {
 	command string
 	args    []string
+	calls   []profileCommandCall
 	stdout  string
+}
+
+type profileCommandCall struct {
+	command string
+	args    []string
 }
 
 func (commandRunner *profileCommandRunner) Run(command string, args []string, _ string, _ time.Duration) (runner.CommandOutput, error) {
 	commandRunner.command = command
 	commandRunner.args = append([]string(nil), args...)
+	commandRunner.calls = append(commandRunner.calls, profileCommandCall{
+		command: command,
+		args:    append([]string(nil), args...),
+	})
 	return runner.CommandOutput{Stdout: commandRunner.stdout}, nil
 }

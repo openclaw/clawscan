@@ -171,6 +171,36 @@ func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRejectsMissingOrInvalidJSON(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		stdout string
+	}{
+		{name: "empty"},
+		{name: "invalid", stdout: "not json"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+				ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+			})
+			registry, err := NewScannerRegistry(adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := (ExternalScannerRunner{
+				Registry: registry, CommandRunner: &recordingCommandRunner{stdout: test.stdout},
+				Env: map[string]string{}, SandboxMode: SandboxModeOff,
+			}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != "failed" || len(result.Raw) != 0 || !strings.Contains(result.Error, "returned invalid JSON") {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
 func TestUserDefinedScannerInterpolatesDollarTargetLiterally(t *testing.T) {
 	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
 		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
