@@ -43,6 +43,7 @@ scanner_completed: 2
 scanner_failed: 0
 scanner_skipped: 0
 issues_found: 2
+gate: pass
 errors: 0
 full_results: /tmp/clawscan-csv-summarizer.json
 ```

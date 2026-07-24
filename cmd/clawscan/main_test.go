@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openclaw/clawscan/internal/runner"
 )
 
 func TestRunCommandPrintsHelp(t *testing.T) {
@@ -508,6 +511,86 @@ func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "clawscan-results", outputPath)); err != nil {
 		t.Fatalf("scanner output file missing: %v", err)
+	}
+}
+
+func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
+	artifact := runner.Artifact{
+		Gate: "block",
+		GateRules: []runner.FiredGateRule{
+			{Scanner: "my-scanner", Rule: "blockOnExitCode", ExitCode: 3, Action: "block"},
+		},
+		Scanners: map[string]runner.ScannerResult{},
+	}
+	var output strings.Builder
+	printRunSummary(&output, runner.RunTargetsResult{Single: &artifact}, "")
+	if !strings.Contains(output.String(), "gate: block (my-scanner exit 3 -> block)") {
+		t.Fatalf("summary missing gate rule:\n%s", output.String())
+	}
+}
+
+func TestPrintRunSummaryKeepsBlockAcrossBatchOrder(t *testing.T) {
+	for _, runs := range [][]runner.Artifact{
+		{{Gate: "warn", Scanners: map[string]runner.ScannerResult{}}, {Gate: "block", Scanners: map[string]runner.ScannerResult{}}},
+		{{Gate: "block", Scanners: map[string]runner.ScannerResult{}}, {Gate: "warn", Scanners: map[string]runner.ScannerResult{}}},
+	} {
+		summary := summarizeRunTargets(runner.RunTargetsResult{Batch: &runner.BatchArtifact{Runs: runs}})
+		if summary.Gate != "block" {
+			t.Fatalf("gate = %q for runs %#v", summary.Gate, runs)
+		}
+	}
+}
+
+func TestRunCommandAppliesRecordOnlyExitCodeGate(t *testing.T) {
+	for _, exitCode := range []int{0, 3} {
+		t.Run(fmt.Sprintf("exit-%d", exitCode), func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "skill")
+			writeSkill(t, target, "# Gate\n")
+			config := filepath.Join(dir, ".clawscan.yml")
+			writeFile(t, config, fmt.Sprintf(`version: 1
+profiles:
+  review:
+    scanners:
+      - id: demo-scanner
+        command: |
+          printf '{"ok":true}\n'
+          test -d {{target}}
+          exit %d
+        gate:
+          blockOnExitCode: %d
+`, exitCode, exitCode))
+			artifactPath := filepath.Join(dir, "artifact.json")
+
+			stdout := captureStdout(t, func() {
+				if err := run([]string{
+					target, "--config", config, "--profile", "review",
+					"--sandbox", "off", "--output", artifactPath,
+				}, []string{}); err != nil {
+					t.Fatal(err)
+				}
+			})
+
+			raw, err := os.ReadFile(artifactPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var artifact runner.Artifact
+			if err := json.Unmarshal(raw, &artifact); err != nil {
+				t.Fatal(err)
+			}
+			result := artifact.Scanners["demo-scanner"]
+			if result.Status != "completed" || result.ExitCode == nil || *result.ExitCode != exitCode {
+				t.Fatalf("scanner result = %#v", result)
+			}
+			if artifact.Gate != "block" || len(artifact.GateRules) != 1 {
+				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+			}
+			wantSummary := fmt.Sprintf("gate: block (demo-scanner exit %d -> block)", exitCode)
+			if !strings.Contains(stdout, wantSummary) {
+				t.Fatalf("summary missing %q:\n%s", wantSummary, stdout)
+			}
+		})
 	}
 }
 

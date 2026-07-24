@@ -337,6 +337,15 @@ func printRunSummary(w io.Writer, result runner.RunTargetsResult, outputPath str
 		fmt.Fprintf(w, "scanner_other: %d\n", summary.ScannerOther)
 	}
 	fmt.Fprintf(w, "issues_found: %d\n", summary.IssuesFound)
+	fmt.Fprintf(w, "gate: %s", summary.Gate)
+	if len(summary.GateRules) > 0 {
+		details := make([]string, 0, len(summary.GateRules))
+		for _, rule := range summary.GateRules {
+			details = append(details, fmt.Sprintf("%s exit %d -> %s", rule.Scanner, rule.ExitCode, rule.Action))
+		}
+		fmt.Fprintf(w, " (%s)", strings.Join(details, ", "))
+	}
+	fmt.Fprintln(w)
 	if summary.HasJudge {
 		fmt.Fprintf(w, "judge_completed: %d\n", summary.JudgeCompleted)
 		fmt.Fprintf(w, "judge_failed: %d\n", summary.JudgeFailed)
@@ -404,6 +413,8 @@ type runSummary struct {
 	ScannerSkipped   int
 	ScannerOther     int
 	IssuesFound      int
+	Gate             string
+	GateRules        []runner.FiredGateRule
 	HasJudge         bool
 	JudgeCompleted   int
 	JudgeFailed      int
@@ -415,7 +426,7 @@ type runSummary struct {
 }
 
 func summarizeRunTargets(result runner.RunTargetsResult) runSummary {
-	var summary runSummary
+	summary := runSummary{Gate: "pass"}
 	if result.Batch != nil {
 		summary.Profile = result.Batch.Profile
 		summary.Profiles = result.Batch.Summary.ProfileCount
@@ -436,6 +447,10 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 		summary.Profile = artifact.Profile
 	}
 	summary.Targets++
+	summary.GateRules = append(summary.GateRules, artifact.GateRules...)
+	if artifact.Gate == "block" || (artifact.Gate == "warn" && summary.Gate == "pass") {
+		summary.Gate = artifact.Gate
+	}
 	for _, result := range artifact.Scanners {
 		switch result.Status {
 		case "completed":

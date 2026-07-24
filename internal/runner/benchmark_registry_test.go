@@ -69,7 +69,11 @@ func TestRunBenchmarkExecutesUserDefinedScannerFromRunRegistry(t *testing.T) {
 	opts := benchmarkTestOptions(t, "clawhub-security-signals", "eval_holdout", 0, 0, "")
 	opts.Scanners = []string{"fixture-scanner"}
 	opts.ScannerRegistry = registry
-	commandRunner := &recordingCommandRunner{stdout: `{"verdict":"clean"}`}
+	opts.GateRules = map[string]ScannerGatePolicy{
+		"fixture-scanner": {BlockOnExitCode: &ExitCodeRule{Codes: []int{3}}},
+	}
+	exitCode := 3
+	commandRunner := &recordingCommandRunner{stdout: `{"verdict":"clean"}`, err: errCommandFailed, exitCode: &exitCode}
 	artifact, err := RunBenchmark(opts, RunContext{
 		Env: map[string]string{}, CommandRunner: commandRunner,
 		BenchmarkClient: staticBenchmarkClient{rows: []OpenClawBenchmarkRow{{
@@ -87,6 +91,37 @@ func TestRunBenchmarkExecutesUserDefinedScannerFromRunRegistry(t *testing.T) {
 	if result.Status != "completed" || string(result.Raw) != `{"verdict":"clean"}` {
 		t.Fatalf("result = %#v", result)
 	}
+	if artifact.Cases[0].Run.Gate != "block" || len(artifact.Cases[0].Run.GateRules) != 1 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Cases[0].Run.Gate, artifact.Cases[0].Run.GateRules)
+	}
+}
+
+func TestRunBenchmarkRejectsUnrequestedGateScannerBeforeDatasetIO(t *testing.T) {
+	opts := benchmarkTestOptions(t, "clawhub-security-signals", "eval_holdout", 0, 0, "")
+	opts.GateRules = map[string]ScannerGatePolicy{
+		"absent-scanner": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}},
+	}
+	_, err := RunBenchmark(opts, RunContext{
+		Env:             map[string]string{},
+		BenchmarkClient: panicBenchmarkClient{},
+	})
+	if err == nil || err.Error() != "gate rule references scanner absent-scanner, but it was not requested" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type panicBenchmarkClient struct{}
+
+func (panicBenchmarkClient) FetchOpenClawRows(string, string, int, int) ([]OpenClawBenchmarkRow, error) {
+	panic("benchmark client called before gate validation")
+}
+
+func (panicBenchmarkClient) FetchSkillTrustBenchRows(string, string, int, int) ([]SkillTrustBenchRow, error) {
+	panic("benchmark client called before gate validation")
+}
+
+func (panicBenchmarkClient) MaterializeSkillTrustBenchRow(string, SkillTrustBenchRow) (string, error) {
+	panic("benchmark client called before gate validation")
 }
 
 type stubBenchmarkAdapter struct {

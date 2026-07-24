@@ -39,6 +39,33 @@ type Options struct {
 	JSON               bool
 	Judge              *JudgeOptions
 	Sandbox            SandboxOptions
+	GateRules          map[string]ScannerGatePolicy
+}
+
+type ExitCodeRule struct {
+	Codes   []int
+	Nonzero bool
+}
+
+// MaxGateExitCode excludes shell and container runtime infrastructure failures
+// from scanner verdict policy.
+const MaxGateExitCode = 124
+
+func (rule ExitCodeRule) Matches(exitCode int) bool {
+	if rule.Nonzero {
+		return exitCode != 0
+	}
+	for _, code := range rule.Codes {
+		if code == exitCode {
+			return true
+		}
+	}
+	return false
+}
+
+type ScannerGatePolicy struct {
+	BlockOnExitCode *ExitCodeRule
+	WarnOnExitCode  *ExitCodeRule
 }
 
 type BenchmarkOptions struct {
@@ -83,8 +110,9 @@ type CommandRunner interface {
 }
 
 type CommandOutput struct {
-	Stdout string
-	Stderr string
+	Stdout   string
+	Stderr   string
+	ExitCode *int
 }
 
 type Artifact struct {
@@ -100,7 +128,16 @@ type Artifact struct {
 	Env          map[string]string        `json:"env"`
 	Sandbox      SandboxMetadata          `json:"sandbox"`
 	Scanners     map[string]ScannerResult `json:"scanners"`
+	Gate         string                   `json:"gate"`
+	GateRules    []FiredGateRule          `json:"gateRules"`
 	Judge        *JudgeResult             `json:"judge"`
+}
+
+type FiredGateRule struct {
+	Scanner  string `json:"scanner"`
+	Rule     string `json:"rule"`
+	ExitCode int    `json:"exitCode"`
+	Action   string `json:"action"`
 }
 
 type RunTargetsResult struct {
@@ -159,6 +196,7 @@ type ScannerResult struct {
 	Command     []string        `json:"command"`
 	Error       string          `json:"error"`
 	OutputPath  string          `json:"outputPath,omitempty"`
+	ExitCode    *int            `json:"exitCode,omitempty"`
 	Raw         json.RawMessage `json:"raw"`
 }
 
@@ -371,6 +409,9 @@ func ValidateRequirements(opts Options, env map[string]string) error {
 }
 
 func Run(opts Options, ctx RunContext) (Artifact, error) {
+	if err := validateGateRuleScanners(opts); err != nil {
+		return Artifact{}, err
+	}
 	env := ctx.Env
 	if env == nil {
 		env = EnvMap(os.Environ())
@@ -430,7 +471,12 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		}
 		artifact.Context = json.RawMessage(context)
 	}
+	scanned := make(map[string]bool, len(opts.Scanners))
 	for _, scanner := range opts.Scanners {
+		if scanned[scanner] {
+			continue
+		}
+		scanned[scanner] = true
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
 		result, err := scannerResult(opts, scanner, target, scannerStartedAt, scannerRunner)
@@ -440,6 +486,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		result.DurationMs = time.Since(scannerTimerStarted).Milliseconds()
 		artifact.Scanners[scanner] = result
 	}
+	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
 		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode)
 		if err != nil {
@@ -2108,10 +2155,18 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
+	timedOut := ctx.Err() == context.DeadlineExceeded
+	if timedOut {
 		err = fmt.Errorf("command timed out after %s", timeout)
 	}
-	return CommandOutput{Stdout: stdout.String(), Stderr: stderr.String()}, err
+	output := CommandOutput{Stdout: stdout.String(), Stderr: stderr.String()}
+	if !timedOut && cmd.ProcessState != nil {
+		exitCode := cmd.ProcessState.ExitCode()
+		if exitCode >= 0 {
+			output.ExitCode = &exitCode
+		}
+	}
+	return output, err
 }
 
 func NewArtifact(opts Options, resolvedPath string, startedAt string, completedAt string, env map[string]string) Artifact {
@@ -2145,7 +2200,56 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 		Env:         envPresence(opts, env),
 		Sandbox:     mustSandboxMetadata(opts, env),
 		Scanners:    scanners,
+		Gate:        "pass",
+		GateRules:   []FiredGateRule{},
 		Judge:       nil,
+	}
+}
+
+func validateGateRuleScanners(opts Options) error {
+	requested := make(map[string]bool, len(opts.Scanners))
+	for _, scanner := range opts.Scanners {
+		requested[scanner] = true
+	}
+	var unrequested []string
+	for scanner := range opts.GateRules {
+		if !requested[scanner] {
+			unrequested = append(unrequested, scanner)
+		}
+	}
+	if len(unrequested) == 0 {
+		return nil
+	}
+	sort.Strings(unrequested)
+	return fmt.Errorf("gate rule references scanner %s, but it was not requested", unrequested[0])
+}
+
+func evaluateGate(artifact *Artifact, opts Options) {
+	evaluated := make(map[string]bool, len(opts.Scanners))
+	for _, scanner := range opts.Scanners {
+		if evaluated[scanner] {
+			continue
+		}
+		evaluated[scanner] = true
+		result := artifact.Scanners[scanner]
+		if result.Status != "completed" || result.ExitCode == nil {
+			continue
+		}
+		policy := opts.GateRules[scanner]
+		if policy.BlockOnExitCode != nil && policy.BlockOnExitCode.Matches(*result.ExitCode) {
+			artifact.GateRules = append(artifact.GateRules, FiredGateRule{
+				Scanner: scanner, Rule: "blockOnExitCode", ExitCode: *result.ExitCode, Action: "block",
+			})
+			artifact.Gate = "block"
+		}
+		if policy.WarnOnExitCode != nil && policy.WarnOnExitCode.Matches(*result.ExitCode) {
+			artifact.GateRules = append(artifact.GateRules, FiredGateRule{
+				Scanner: scanner, Rule: "warnOnExitCode", ExitCode: *result.ExitCode, Action: "warn",
+			})
+			if artifact.Gate == "pass" {
+				artifact.Gate = "warn"
+			}
+		}
 	}
 }
 

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openclaw/clawscan/internal/runner"
+	"gopkg.in/yaml.v3"
 )
 
 func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
@@ -783,6 +785,229 @@ profiles:
 	}
 }
 
+func TestResolveArgsParsesUserDefinedScannerExitCodeGateRules(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: blocker
+        command: blocker {{target}}
+        gate:
+          blockOnExitCode: nonzero
+      - id: warner
+        command: warner {{target}}
+        gate:
+          warnOnExitCode: [1, 2, 3]
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := opts.GateRules["blocker"].BlockOnExitCode
+	if block == nil || !block.Nonzero {
+		t.Fatalf("block rule = %#v", block)
+	}
+	warn := opts.GateRules["warner"].WarnOnExitCode
+	if warn == nil || !reflect.DeepEqual(warn.Codes, []int{1, 2, 3}) {
+		t.Fatalf("warn rule = %#v", warn)
+	}
+}
+
+func TestResolveArgsAcceptsSingleExitCodeGateRule(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: blocker
+        command: blocker {{target}}
+        gate:
+          blockOnExitCode: 7
+`)
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := opts.GateRules["blocker"].BlockOnExitCode.Codes; !reflect.DeepEqual(got, []int{7}) {
+		t.Fatalf("codes = %#v", got)
+	}
+}
+
+func TestProfileScannerExitCodeGateRulesRoundTripYAML(t *testing.T) {
+	scanner := ProfileScanner{
+		ID: "demo", Command: "demo {{target}}", custom: true,
+		Gate: &ProfileScannerGate{
+			BlockOnExitCode: &profileExitCodeRule{Nonzero: true},
+			WarnOnExitCode:  &profileExitCodeRule{Codes: []int{0}},
+		},
+	}
+	encoded, err := yaml.Marshal(scanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ProfileScanner
+	if err := yaml.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("round trip failed for %s: %v", encoded, err)
+	}
+	if decoded.Gate == nil || !decoded.Gate.BlockOnExitCode.Nonzero || !reflect.DeepEqual(decoded.Gate.WarnOnExitCode.Codes, []int{0}) {
+		t.Fatalf("decoded scanner = %#v from %s", decoded, encoded)
+	}
+}
+
+func TestResolveArgsRejectsInvalidExitCodeGateRules(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules string
+		want  string
+	}{
+		{name: "negative", rules: "blockOnExitCode: -1", want: "must contain only integers from 0 through 124"},
+		{name: "reserved scalar", rules: "blockOnExitCode: 125", want: "must contain only integers from 0 through 124"},
+		{name: "reserved list member", rules: "blockOnExitCode: [1, 125]", want: "must contain only integers from 0 through 124"},
+		{name: "non integer", rules: "blockOnExitCode: nope", want: `must be an integer from 0 through 124, a list of those integers, or "nonzero"`},
+		{name: "empty list", rules: "blockOnExitCode: []", want: "must not be an empty list"},
+		{name: "null rule", rules: "blockOnExitCode: null", want: "scanner gate blockOnExitCode must not be null"},
+		{name: "empty gate", rules: "{}", want: "scanner gate must include blockOnExitCode or warnOnExitCode"},
+		{name: "null gate", rules: "null", want: "scanner gate must be an object"},
+		{name: "block nonzero overlap", rules: "blockOnExitCode: nonzero\n          warnOnExitCode: [0, 2]", want: "blockOnExitCode and warnOnExitCode both claim exit code 2"},
+		{name: "warn nonzero overlap", rules: "blockOnExitCode: [0, 2]\n          warnOnExitCode: nonzero", want: "blockOnExitCode and warnOnExitCode both claim exit code 2"},
+		{name: "both nonzero overlap", rules: "blockOnExitCode: nonzero\n          warnOnExitCode: nonzero", want: "blockOnExitCode and warnOnExitCode both claim exit code 1"},
+		{name: "list overlap", rules: "blockOnExitCode: [1, 2]\n          warnOnExitCode: [2, 3]", want: "blockOnExitCode and warnOnExitCode both claim exit code 2"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, ".clawscan.yml")
+			writeFile(t, config, "version: 1\nprofiles:\n  review:\n    scanners:\n      - id: demo\n        command: demo {{target}}\n        gate:\n          "+test.rules+"\n")
+			_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveArgsAcceptsAliasedExitCodeGateRule(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: blocker
+        command: blocker {{target}}
+        gate:
+          blockOnExitCode: &shared-code 7
+      - id: warner
+        command: warner {{target}}
+        gate:
+          warnOnExitCode: *shared-code
+`)
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := opts.GateRules["warner"].WarnOnExitCode.Codes; !reflect.DeepEqual(got, []int{7}) {
+		t.Fatalf("aliased codes = %#v", got)
+	}
+}
+
+func TestResolveArgsRejectsGateAliasToNull(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: demo
+        command: demo {{target}}
+        env: &empty null
+        gate: *empty
+`)
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err == nil || !strings.Contains(err.Error(), "scanner gate must be an object") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGateRuleForProfileScannerExcludedByCLIOverrideIsDropped(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeFile(t, filepath.Join(target, "SKILL.md"), "# Demo\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: absent-scanner
+        command: absent {{target}}
+        gate:
+          blockOnExitCode: nonzero
+`)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review", "--scanner", "clawscan-static", "--sandbox", "off"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.GateRules) != 0 {
+		t.Fatalf("gate rules = %#v", opts.GateRules)
+	}
+	commandRunner := &profileCommandRunner{stdout: `{}`}
+	artifact, err := runner.Run(opts, runner.RunContext{Env: map[string]string{}, CommandRunner: commandRunner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+
+	benchmark, err := ResolveBenchmarkRunSet("clawhub-security-signals", []string{
+		"--config", config, "--profile", "review", "--scanner", "clawscan-static", "--sandbox", "off",
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := benchmark.Options[0].GateRules; len(got) != 0 {
+		t.Fatalf("benchmark gate rules = %#v", got)
+	}
+}
+
+func TestAllProfilesCLIOverrideDropsExcludedGateRules(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  alpha:
+    scanners:
+      - id: alpha-scanner
+        command: alpha {{target}}
+        gate:
+          blockOnExitCode: nonzero
+  beta:
+    scanners:
+      - id: beta-scanner
+        command: beta {{target}}
+        gate:
+          warnOnExitCode: 2
+`)
+	resolved, err := ResolveRunSet([]string{
+		"--config", config, "--scanner", "clawscan-static", "--sandbox", "off",
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved.AllProfiles || len(resolved.Options) != 2 {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+	for _, opts := range resolved.Options {
+		if len(opts.GateRules) != 0 {
+			t.Fatalf("%s gate rules = %#v", opts.Profile, opts.GateRules)
+		}
+	}
+}
+
 func TestResolveArgsRejectsUserDefinedScannerIDCollision(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")
@@ -1042,14 +1267,33 @@ profiles:
     scanners:
       - id: fixture-scanner
         command: alpha-scan {{target}}
+        gate:
+          blockOnExitCode: 3
   beta:
     scanners:
       - id: fixture-scanner
         command: beta-scan {{target}}
+        gate:
+          warnOnExitCode: nonzero
 `)
 	resolved, err := ResolveRunSet([]string{target, "--config", config}, dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, opts := range resolved.Options {
+		policy := opts.GateRules["fixture-scanner"]
+		switch opts.Profile {
+		case "alpha":
+			if policy.BlockOnExitCode == nil || !reflect.DeepEqual(policy.BlockOnExitCode.Codes, []int{3}) {
+				t.Fatalf("alpha gate policy = %#v", policy)
+			}
+		case "beta":
+			if policy.WarnOnExitCode == nil || !policy.WarnOnExitCode.Nonzero {
+				t.Fatalf("beta gate policy = %#v", policy)
+			}
+		default:
+			t.Fatalf("unexpected profile %q", opts.Profile)
+		}
 	}
 	commandRunner := &profileCommandRunner{stdout: `{}`}
 	batch, err := runner.RunProfileBatch(resolved.Options, runner.RunContext{
@@ -1183,6 +1427,8 @@ profiles:
           - PLUGIN_SCANNER_TOKEN
         targets:
           - plugin
+        gate:
+          blockOnExitCode: nonzero
 `)
 	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review"}, dir)
 	if err != nil {
@@ -1204,6 +1450,9 @@ profiles:
 	result := artifact.Scanners["plugin-scanner"]
 	if result.Status != "skipped" || !strings.Contains(result.Error, "does not support skill targets") {
 		t.Fatalf("result = %#v", result)
+	}
+	if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
 	}
 	if commandRunner.command != "" {
 		t.Fatalf("unsupported scanner executed: %q %#v", commandRunner.command, commandRunner.args)

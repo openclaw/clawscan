@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,7 +157,10 @@ func TestUserDefinedScannerPreservesValidJSONOnCommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandRunner := &recordingCommandRunner{stdout: `{"findings":["detected"]}`, stderr: "findings detected", err: errCommandFailed}
+	exitCode := 2
+	commandRunner := &recordingCommandRunner{
+		stdout: `{"findings":["detected"]}`, stderr: "findings detected", err: errCommandFailed, exitCode: &exitCode,
+	}
 	result, err := (ExternalScannerRunner{
 		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
 	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
@@ -195,6 +199,51 @@ func TestUserDefinedScannerRejectsMissingOrInvalidJSON(t *testing.T) {
 				t.Fatal(err)
 			}
 			if result.Status != "failed" || len(result.Raw) != 0 || !strings.Contains(result.Error, "returned invalid JSON") {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestUserDefinedScannerRecordsExitCode(t *testing.T) {
+	exitCode := 2
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`, err: errCommandFailed, exitCode: &exitCode}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 2 {
+		t.Fatalf("exit code = %#v", result.ExitCode)
+	}
+}
+
+func TestUserDefinedScannerPreservesEvidenceWithoutGatingInfrastructureExitCodes(t *testing.T) {
+	for _, exitCode := range []int{-1, 125, 126, 127, 137} {
+		t.Run(fmt.Sprint(exitCode), func(t *testing.T) {
+			adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+				ID: "demo", Command: "demo {{target}}", Targets: []string{"skill"},
+			})
+			registry, err := NewScannerRegistry(adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			commandRunner := &recordingCommandRunner{stdout: `{}`, err: errCommandFailed, exitCode: &exitCode}
+			result, err := (ExternalScannerRunner{
+				Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+			}).RunScanner("demo", t.TempDir(), "2026-07-21T00:00:00Z")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != "completed" || result.ExitCode != nil || string(result.Raw) != `{}` {
 				t.Fatalf("result = %#v", result)
 			}
 		})
