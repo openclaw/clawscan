@@ -58,6 +58,29 @@ func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
 	}
 }
 
+func TestCiscoScannerUsesResultDirAsDockerSandboxCWD(t *testing.T) {
+	commandRunner := &ciscoRecordingCommandRunner{output: `{"scanner":"cisco","findings":[]}`}
+	result, err := (ExternalScannerRunner{
+		CommandRunner: commandRunner,
+		Env:           map[string]string{},
+		SandboxMode:   SandboxModeDocker,
+	}).runCisco(t.TempDir(), "2026-07-24T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	call := commandRunner.calls[0]
+	outputPath := argValue(call.args, "--output")
+	if call.cwd == "" || call.cwd != filepath.Dir(outputPath) {
+		t.Fatalf("cwd = %q, output path = %q", call.cwd, outputPath)
+	}
+}
+
 func TestCiscoScannerEnablesUpstreamAnalyzersFromEnv(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")

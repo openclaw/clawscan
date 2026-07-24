@@ -133,6 +133,8 @@ func TestParseArgsSupportsSandboxFlags(t *testing.T) {
 		"--sandbox-image", "ghcr.io/acme/runtime:v1",
 		"--sandbox-env", "OPENAI_API_KEY",
 		"--sandbox-env", "ANTHROPIC_API_KEY",
+		"--sandbox-mount", "/opt/rules",
+		"--sandbox-mount", "/var/cache:rw",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -145,6 +147,82 @@ func TestParseArgsSupportsSandboxFlags(t *testing.T) {
 	}
 	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,ANTHROPIC_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
+	}
+	wantMounts := []SandboxMount{{Path: "/opt/rules"}, {Path: "/var/cache", Write: true}}
+	if !reflect.DeepEqual(opts.Sandbox.Mounts, wantMounts) {
+		t.Fatalf("sandbox mounts = %#v, want %#v", opts.Sandbox.Mounts, wantMounts)
+	}
+}
+
+func TestParseSandboxMountFlag(t *testing.T) {
+	tests := []struct {
+		value string
+		want  SandboxMount
+	}{
+		{value: "/opt/rules", want: SandboxMount{Path: "/opt/rules"}},
+		{value: "/var/cache:rw", want: SandboxMount{Path: "/var/cache", Write: true}},
+		{value: "/var/cache:write", want: SandboxMount{Path: "/var/cache", Write: true}},
+	}
+	for _, test := range tests {
+		t.Run(test.value, func(t *testing.T) {
+			got, err := parseSandboxMountFlag(test.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("mount = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestDockerMountsDropsWritableParentForMissingPath(t *testing.T) {
+	mounts := dockerMounts("", []string{"-c", "run", "clawscan-target", "/bin/definitely-missing-xyz"}, nil)
+	for _, mount := range mounts {
+		if strings.Contains(mount, "source=/bin,") || strings.Contains(mount, "source=/bin/definitely-missing-xyz,") {
+			t.Fatalf("unexpected mount for missing path or its parent: %q", mount)
+		}
+	}
+}
+
+func TestDockerMountsMountsTargetReadOnlyWithoutWritableParent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(target, []byte("# demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mounts := dockerMounts("", []string{"-c", "scan", "clawscan-target", target}, nil)
+
+	sawTargetReadOnly := false
+	for _, mount := range mounts {
+		// The security property this replaces: an existing target must not make
+		// its parent directory a writable bind mount, and the target itself is
+		// read-only.
+		if strings.Contains(mount, "source="+dir+",") {
+			t.Fatalf("target parent dir must not be mounted, got %q", mount)
+		}
+		if strings.Contains(mount, "source="+target+",") {
+			if !strings.Contains(mount, ",readonly") {
+				t.Fatalf("target must be mounted read-only, got %q", mount)
+			}
+			sawTargetReadOnly = true
+		}
+	}
+	if !sawTargetReadOnly {
+		t.Fatalf("expected the target file to be mounted read-only, got %#v", mounts)
+	}
+}
+
+func TestDockerMountsAddsExplicitMounts(t *testing.T) {
+	dir := t.TempDir()
+	readOnly := "type=bind,source=" + dir + ",target=" + dir + ",readonly"
+	writable := "type=bind,source=" + dir + ",target=" + dir
+
+	if got := dockerMounts("", nil, []SandboxMount{{Path: dir}}); !reflect.DeepEqual(got, []string{readOnly}) {
+		t.Fatalf("read-only mounts = %#v, want %#v", got, []string{readOnly})
+	}
+	if got := dockerMounts("", nil, []SandboxMount{{Path: dir, Write: true}}); !reflect.DeepEqual(got, []string{writable}) {
+		t.Fatalf("writable mounts = %#v, want %#v", got, []string{writable})
 	}
 }
 
@@ -1509,6 +1587,32 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	}
 	if containsArg(call.args, "--no-llm") {
 		t.Fatalf("unexpected default --no-llm opt-out: %#v", call.args)
+	}
+}
+
+func TestSkillSpectorUsesResultDirAsDockerSandboxCWD(t *testing.T) {
+	commandRunner := &recordingCommandRunner{
+		writeOutput: `{"status":"clean","findings":[]}`,
+	}
+	result, err := (ExternalScannerRunner{
+		CommandRunner:       commandRunner,
+		Env:                 map[string]string{},
+		SandboxMode:         SandboxModeDocker,
+		SkillSpectorCommand: []string{"skillspector"},
+	}).runSkillSpector(t.TempDir(), "2026-07-24T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	call := commandRunner.calls[0]
+	outputPath := argValue(call.args, "--output")
+	if call.cwd == "" || call.cwd != filepath.Dir(outputPath) {
+		t.Fatalf("cwd = %q, output path = %q", call.cwd, outputPath)
 	}
 }
 
