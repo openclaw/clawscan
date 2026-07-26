@@ -924,6 +924,32 @@ func TestUserDefinedScannerUsesIsolatedCwd(t *testing.T) {
 	if !strings.Contains(cwd, "clawscan-scanner-") {
 		t.Fatalf("cwd = %q should contain clawscan-scanner prefix", cwd)
 	}
+	if _, err := os.Stat(cwd); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("isolated cwd still exists after scanner completed: %q, err = %v", cwd, err)
+	}
+}
+
+func TestUserDefinedScannerLeavesDockerCwdIsolated(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "test", Command: "test {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeDocker,
+	}).RunScanner("test", filepath.Join(t.TempDir(), "file.txt"), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 1 || commandRunner.calls[0].cwd != "" {
+		t.Fatalf("Docker scanner cwd = %#v, want empty container-default cwd", commandRunner.calls)
+	}
 }
 
 func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
