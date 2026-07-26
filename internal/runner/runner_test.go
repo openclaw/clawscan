@@ -952,6 +952,44 @@ func TestUserDefinedScannerLeavesDockerCwdIsolated(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerMountsDockerTargetReadOnly(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "test", Command: "test {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry,
+		CommandRunner: dockerCommandRunner{
+			Host: hostRunner, Image: "test-image",
+		},
+		Env: map[string]string{}, SandboxMode: SandboxModeDocker,
+	}).RunScanner("test", target, "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(hostRunner.calls) != 1 || hostRunner.calls[0].command != "docker" {
+		t.Fatalf("Docker calls = %#v", hostRunner.calls)
+	}
+	args := hostRunner.calls[0].args
+	if !containsMount(args, target, true) {
+		t.Fatalf("Docker args missing read-only target mount %q: %#v", target, args)
+	}
+	if containsArg(args, "-w") {
+		t.Fatalf("Docker args unexpectedly set a target-derived working directory: %#v", args)
+	}
+}
+
 func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
