@@ -895,6 +895,101 @@ func TestUnsafeWindowsShellTargetDetectsInjectionCharacters(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerUsesIsolatedCwd(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "test", Command: "test {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	targetDir := t.TempDir()
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeOff,
+	}).RunScanner("test", filepath.Join(targetDir, "file.txt"), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("calls = %#v", commandRunner.calls)
+	}
+	cwd := commandRunner.calls[0].cwd
+	if cwd == "" || cwd == targetDir || strings.HasPrefix(cwd, targetDir) {
+		t.Fatalf("cwd = %q should be isolated, not targetdir = %q", cwd, targetDir)
+	}
+	if !strings.Contains(cwd, "clawscan-scanner-") {
+		t.Fatalf("cwd = %q should contain clawscan-scanner prefix", cwd)
+	}
+	if _, err := os.Stat(cwd); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("isolated cwd still exists after scanner completed: %q, err = %v", cwd, err)
+	}
+}
+
+func TestUserDefinedScannerLeavesDockerCwdIsolated(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "test", Command: "test {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner, Env: map[string]string{}, SandboxMode: SandboxModeDocker,
+	}).RunScanner("test", filepath.Join(t.TempDir(), "file.txt"), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(commandRunner.calls) != 1 || commandRunner.calls[0].cwd != "" {
+		t.Fatalf("Docker scanner cwd = %#v, want empty container-default cwd", commandRunner.calls)
+	}
+}
+
+func TestUserDefinedScannerMountsDockerTargetReadOnly(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "skill")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID: "test", Command: "test {{target}}", Targets: []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostRunner := &recordingCommandRunner{stdout: `{}`}
+	result, err := (ExternalScannerRunner{
+		Registry: registry,
+		CommandRunner: dockerCommandRunner{
+			Host: hostRunner, Image: "test-image",
+		},
+		Env: map[string]string{}, SandboxMode: SandboxModeDocker,
+	}).RunScanner("test", target, "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(hostRunner.calls) != 1 || hostRunner.calls[0].command != "docker" {
+		t.Fatalf("Docker calls = %#v", hostRunner.calls)
+	}
+	args := hostRunner.calls[0].args
+	if !containsMount(args, target, true) {
+		t.Fatalf("Docker args missing read-only target mount %q: %#v", target, args)
+	}
+	if containsArg(args, "-w") {
+		t.Fatalf("Docker args unexpectedly set a target-derived working directory: %#v", args)
+	}
+}
+
 func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",

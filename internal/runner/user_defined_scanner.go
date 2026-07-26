@@ -3,9 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -89,7 +87,23 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	output, runErr := runner.CommandRunner.Run(shell.command, args, userDefinedScannerCWD(target), timeout)
+	// Never run with a target-derived working directory: it would hand the
+	// scanner writable access to files next to the target (a writable bind
+	// mount under Docker). Host runs get a fresh isolated dir; Docker runs keep
+	// "" so nothing is mounted and the container workdir is already isolated.
+	cwd := ""
+	if runner.SandboxMode != SandboxModeDocker {
+		isolated, err := os.MkdirTemp("", "clawscan-scanner-")
+		if err != nil {
+			return ScannerResult{
+				Status: "failed", StartedAt: startedAt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Error: fmt.Sprintf("User-defined scanner %s could not create an isolated working directory: %v", adapter.config.ID, err),
+			}, nil
+		}
+		defer os.RemoveAll(isolated)
+		cwd = isolated
+	}
+	output, runErr := runner.CommandRunner.Run(shell.command, args, cwd, timeout)
 	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
@@ -133,15 +147,3 @@ func userDefinedScannerShell(goos string, sandboxMode string) judgeShellSpec {
 }
 
 var targetPlaceholderPattern = regexp.MustCompile(`\{\{\s*target\s*\}\}`)
-
-func userDefinedScannerCWD(target string) string {
-	parsed, err := url.Parse(target)
-	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
-		return ""
-	}
-	info, err := os.Stat(target)
-	if err == nil && info.IsDir() {
-		return target
-	}
-	return filepath.Dir(target)
-}
