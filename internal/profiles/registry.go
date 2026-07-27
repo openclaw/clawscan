@@ -124,5 +124,5 @@ func (registry ProfileRegistry) IDs() []string {
 }
 
 func sandboxIsZero(sandbox Sandbox) bool {
-	return sandbox.Mode == "" && sandbox.Image == "" && len(sandbox.Env) == 0
+	return sandbox.Mode == "" && sandbox.Image == "" && len(sandbox.Env) == 0 && len(sandbox.Mounts) == 0
 }
