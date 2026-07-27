@@ -32,6 +32,8 @@ profiles:
       - id: my-scanner
         command: my-scanner --json {{target}}
         env:
+          - MY_SCANNER_MODE
+        secretEnv:
           - MY_SCANNER_TOKEN
         targets:
           - skill
@@ -47,7 +49,8 @@ that config-backed run and accept these fields:
 | --- | --- | --- |
 | `id` | yes | Scanner ID using letters, digits, `_`, and `-`, starting with a letter or digit. It must not match a built-in scanner ID. |
 | `command` | yes | Shell command to execute. Unquoted `{{target}}` is replaced with the safely passed resolved target; do not wrap the placeholder in shell quotes. |
-| `env` | no | Required environment variable names. Values stay in the process environment and are never stored in the config or artifact. |
+| `env` | no | Required non-secret environment variable names passed to the scanner. Their values are not automatically redacted from scanner error text. |
+| `secretEnv` | no | Required secret environment variable names passed to the scanner. Their values are redacted from scanner error text regardless of how the names are spelled. |
 | `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
 | `gate` | no | Exit-code policy with optional `blockOnExitCode` and `warnOnExitCode` rules. |
 
@@ -86,11 +89,14 @@ result. Required environment variables are checked before any scanner starts.
 Artifacts record each requirement as only `present` or `missing`.
 
 User-defined scanners use the same execution path as built-in command-backed
-scanners. They run in the Docker sandbox by default, and declared `env` names
-are added to its environment allowlist. Use `--sandbox off` only when you
-intentionally want the command to run on the host. User-defined scanners are
-local to the resolved config and do not appear in the built-in `clawscan
-scanners` catalog.
+scanners. They run in the Docker sandbox by default, and declared `env` and
+`secretEnv` names are added to its environment allowlist. Put every sensitive
+value in `secretEnv`; values declared only in `env` are treated as non-secret
+and may appear in scanner error text. ClawScan preserves valid scanner stdout
+as raw JSON evidence, so scanner authors must not print secrets into that JSON.
+Use `--sandbox off` only when you intentionally want the command to run on the
+host. User-defined scanners are local to the resolved config and do not appear
+in the built-in `clawscan scanners` catalog.
 
 > **Trust boundary:** only load user-defined scanners from config files you
 > control. A scanner entry is executable code. The default sandbox limits its
