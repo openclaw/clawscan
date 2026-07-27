@@ -32,6 +32,12 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
+	if got := len(opts.GateRules["skillspector"].JSONRules); got != 3 {
+		t.Fatalf("skillspector JSON gate rules = %#v", opts.GateRules["skillspector"].JSONRules)
+	}
+	if got := len(opts.GateRules["clawscan-static"].JSONRules); got != 1 {
+		t.Fatalf("static JSON gate rules = %#v", opts.GateRules["clawscan-static"].JSONRules)
+	}
 	if opts.Judge == nil {
 		t.Fatal("expected embedded clawhub judge")
 	}
@@ -78,6 +84,9 @@ func TestResolveArgsUsesEmbeddedClawHubAIGCandidateProfile(t *testing.T) {
 
 	if got := strings.Join(candidate.Scanners, ","); got != "skillspector,aig" {
 		t.Fatalf("scanners = %q", got)
+	}
+	if got := len(candidate.GateRules["skillspector"].JSONRules); got != 3 {
+		t.Fatalf("skillspector JSON gate rules = %#v", candidate.GateRules["skillspector"].JSONRules)
 	}
 	if candidate.Judge == nil || clawhub.Judge == nil {
 		t.Fatal("missing embedded ClawHub judge")
@@ -880,6 +889,294 @@ profiles:
 	}
 }
 
+func TestResolveArgsAttachesDeclarativeJSONRulesToBuiltInScanner(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: skillspector
+        gate:
+          rules:
+            - id: do-not-install
+              path: risk_assessment.recommendation
+              equals: DO_NOT_INSTALL
+              action: block
+          blockOnExitCode: 1
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector" {
+		t.Fatalf("scanners = %q", got)
+	}
+	rules := opts.GateRules["skillspector"].JSONRules
+	if len(rules) != 1 {
+		t.Fatalf("JSON gate rules = %#v", rules)
+	}
+	if rule := rules[0]; rule.ID != "do-not-install" || !reflect.DeepEqual(rule.Paths, []string{"risk_assessment.recommendation"}) ||
+		rule.Action != "block" || !bytes.Equal(rule.Equals, []byte(`"DO_NOT_INSTALL"`)) || rule.Exists {
+		t.Fatalf("JSON gate rule = %#v", rule)
+	}
+	if got := opts.GateRules["skillspector"].BlockOnExitCode.Codes; !reflect.DeepEqual(got, []int{1}) {
+		t.Fatalf("exit-code policy = %#v", opts.GateRules["skillspector"])
+	}
+	adapter, ok := opts.ScannerRegistry.Adapter("skillspector")
+	if !ok || adapter.ID() != "skillspector" {
+		t.Fatalf("built-in scanner adapter = %#v, present = %v", adapter, ok)
+	}
+}
+
+func TestResolveArgsAttachesDeclarativeJSONRulesToCommandScanner(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: third-party
+        command: third-party --json {{target}}
+        gate:
+          rules:
+            - id: critical-risk
+              path: result.risk
+              equals: critical
+              action: block
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := opts.GateRules["third-party"].JSONRules
+	if len(rules) != 1 || rules[0].ID != "critical-risk" || !reflect.DeepEqual(rules[0].Paths, []string{"result.risk"}) {
+		t.Fatalf("JSON gate rules = %#v", rules)
+	}
+}
+
+func TestResolveArgsPreservesExactJSONGateNumber(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: skillspector
+        gate:
+          rules:
+            - id: exact-sequence
+              path: result.sequence
+              equals: 9007199254740993.0
+              action: block
+`)
+
+	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := opts.GateRules["skillspector"].JSONRules
+	if len(rules) != 1 || !bytes.Equal(rules[0].Equals, []byte(`9007199254740993.0`)) {
+		t.Fatalf("JSON gate rules = %#v", rules)
+	}
+}
+
+func TestEmbeddedClawHubGateCoversSupportedSkillSpectorShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+		want string
+		path string
+	}{
+		{
+			name: "top-level recommendation",
+			raw:  json.RawMessage(`{"recommendation":"do-not-install","issues":[]}`),
+			want: "block",
+			path: "risk_recommendation|riskRecommendation|recommendation",
+		},
+		{
+			name: "null recommendation alias falls through",
+			raw:  json.RawMessage(`{"risk_recommendation":null,"recommendation":"DO_NOT_INSTALL","issues":[]}`),
+			want: "block",
+			path: "risk_recommendation|riskRecommendation|recommendation",
+		},
+		{
+			name: "nested recommendation behind empty top-level alias",
+			raw:  json.RawMessage(`{"recommendation":"","risk_assessment":{"recommendation":"DO_NOT_INSTALL"},"issues":[]}`),
+			want: "block",
+			path: "risk_assessment.recommendation|risk_recommendation|riskRecommendation",
+		},
+		{
+			name: "risk recommendation has precedence",
+			raw:  json.RawMessage(`{"recommendation":"SAFE","risk_recommendation":"DO_NOT_INSTALL","issues":[]}`),
+			want: "block",
+			path: "risk_recommendation|riskRecommendation|recommendation",
+		},
+		{
+			name: "empty preferred recommendation group falls back to nested",
+			raw:  json.RawMessage(`{"risk_recommendation":"","recommendation":"SAFE","risk_assessment":{"recommendation":"DO_NOT_INSTALL"},"issues":[]}`),
+			want: "block",
+			path: "risk_assessment.recommendation|risk_recommendation|riskRecommendation",
+		},
+		{
+			name: "camel-case report",
+			raw:  json.RawMessage(`{"riskAssessment":{"recommendation":"CAUTION"},"filteredFindings":[{"severity":"CRITICAL"}]}`),
+			want: "block",
+			path: "filteredFindings[].severity|risk_severity|level",
+		},
+		{
+			name: "alternate issue fields",
+			raw:  json.RawMessage(`{"findings":[{"level":"high"}]}`),
+			want: "warn",
+			path: "findings[].severity|risk_severity|level",
+		},
+		{
+			name: "empty filtered findings override raw findings",
+			raw:  json.RawMessage(`{"filtered_findings":[],"findings":[{"severity":"CRITICAL"}]}`),
+			want: "pass",
+		},
+		{
+			name: "null filtered findings fall through to raw findings",
+			raw:  json.RawMessage(`{"filtered_findings":null,"findings":[{"severity":"CRITICAL"}]}`),
+			want: "block",
+			path: "findings[].severity|risk_severity|level",
+		},
+		{
+			name: "nonmatching filtered findings override raw findings",
+			raw:  json.RawMessage(`{"filtered_findings":[{"severity":"LOW"}],"findings":[{"severity":"CRITICAL"}]}`),
+			want: "pass",
+		},
+		{
+			name: "finding field aliases resolve per item",
+			raw:  json.RawMessage(`{"filtered_findings":[{"severity":"LOW"},{"risk_severity":"CRITICAL"}]}`),
+			want: "block",
+			path: "filtered_findings[].severity|risk_severity|level",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--sandbox", "off"}, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts.Judge = nil
+			artifact, err := runner.Run(opts, runner.RunContext{
+				Env: map[string]string{},
+				ScannerRunner: profileScannerResultRunner{results: map[string]runner.ScannerResult{
+					"skillspector":    {Status: "completed", Raw: test.raw},
+					"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{"findings":[]}`)},
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Gate != test.want {
+				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+			}
+			if test.path == "" && len(artifact.GateRules) != 0 {
+				t.Fatalf("gate rules = %#v", artifact.GateRules)
+			}
+			if test.path != "" && (len(artifact.GateRules) != 1 || artifact.GateRules[0].Path != test.path) {
+				t.Fatalf("gate rules = %#v", artifact.GateRules)
+			}
+		})
+	}
+}
+
+func TestCommandScannerDeclarativeJSONRuleGatesUnchangedOutput(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeFile(t, filepath.Join(target, "SKILL.md"), "# Demo\n")
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: third-party
+        command: third-party --json {{target}}
+        gate:
+          rules:
+            - id: critical-risk
+              path: result.risk
+              equals: critical
+              action: block
+`)
+
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review", "--sandbox", "off"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"result":{"risk":"critical"},"scanner":"third-party"}`
+	artifact, err := runner.Run(opts, runner.RunContext{
+		Env: map[string]string{}, CommandRunner: &profileCommandRunner{stdout: raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 1 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+	rule := artifact.GateRules[0]
+	if rule.Scanner != "third-party" || rule.Rule != "critical-risk" || rule.Path != "result.risk" ||
+		!bytes.Equal(rule.Value, []byte(`"critical"`)) || rule.Action != "block" {
+		t.Fatalf("gate rule = %#v", rule)
+	}
+	if got := string(artifact.Scanners["third-party"].Raw); got != raw {
+		t.Fatalf("raw scanner output changed\nwant %s\ngot  %s", raw, got)
+	}
+}
+
+func TestResolveArgsRejectsInvalidDeclarativeJSONGateRules(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules string
+		want  string
+	}{
+		{name: "empty rules", rules: "[]", want: "scanner gate rules must not be empty"},
+		{name: "null rules", rules: "null", want: "scanner gate rules must not be null"},
+		{name: "missing id", rules: "[{path: result.risk, equals: critical, action: block}]", want: "JSON gate rule id must not be empty"},
+		{name: "missing path", rules: "[{id: critical-risk, equals: critical, action: block}]", want: "JSON gate rule critical-risk path must not be empty"},
+		{name: "empty path list", rules: "[{id: critical-risk, path: [], equals: critical, action: block}]", want: "JSON gate rule critical-risk path list must not be empty"},
+		{name: "boolean path", rules: "[{id: critical-risk, path: true, equals: critical, action: block}]", want: "JSON gate rule critical-risk path must be a string or list of strings"},
+		{name: "number in path list", rules: "[{id: critical-risk, path: [result.risk, 7], equals: critical, action: block}]", want: "JSON gate rule critical-risk path must be a string or list of strings"},
+		{name: "invalid path", rules: `[{id: critical-risk, path: "findings[0].severity", equals: critical, action: block}]`, want: "JSON gate rule critical-risk path"},
+		{name: "duplicate path", rules: "[{id: critical-risk, path: [result.risk, result.risk], equals: critical, action: block}]", want: "JSON gate rule critical-risk has duplicate path"},
+		{name: "missing action", rules: "[{id: critical-risk, path: result.risk, equals: critical}]", want: "JSON gate rule critical-risk action must be warn or block"},
+		{name: "invalid action", rules: "[{id: critical-risk, path: result.risk, equals: critical, action: pass}]", want: "JSON gate rule critical-risk action must be warn or block"},
+		{name: "missing predicate", rules: "[{id: critical-risk, path: result.risk, action: block}]", want: "JSON gate rule critical-risk must include exactly one of equals or exists: true"},
+		{name: "two predicates", rules: "[{id: critical-risk, path: result.risk, equals: critical, exists: true, action: block}]", want: "JSON gate rule critical-risk must include exactly one of equals or exists: true"},
+		{name: "false exists", rules: "[{id: critical-risk, path: result.risk, exists: false, action: block}]", want: "JSON gate rule critical-risk exists must be true"},
+		{name: "string exists", rules: `[{id: critical-risk, path: result.risk, exists: "true", action: block}]`, want: "JSON gate rule critical-risk exists must be true"},
+		{name: "false exists with equals", rules: "[{id: critical-risk, path: result.risk, equals: critical, exists: false, action: block}]", want: "JSON gate rule critical-risk exists must be true"},
+		{name: "null equals", rules: "[{id: critical-risk, path: result.risk, equals: null, action: block}]", want: "JSON gate rule critical-risk equals must be a string, number, or boolean"},
+		{name: "object equals", rules: "[{id: critical-risk, path: result.risk, equals: {severity: critical}, action: block}]", want: "JSON gate rule critical-risk equals must be a string, number, or boolean"},
+		{name: "invalid tagged boolean", rules: "[{id: critical-risk, path: result.risk, equals: !!bool nope, action: block}]", want: "JSON gate rule critical-risk equals must be a boolean"},
+		{name: "boolean tagged as number", rules: "[{id: critical-risk, path: result.risk, equals: !!float true, action: block}]", want: "JSON gate rule critical-risk equals must be a finite JSON number"},
+		{name: "float tagged as integer", rules: "[{id: critical-risk, path: result.risk, equals: !!int 1.5, action: block}]", want: "JSON gate rule critical-risk equals must be a JSON integer"},
+		{name: "non-finite number", rules: "[{id: critical-risk, path: result.risk, equals: .nan, action: block}]", want: "JSON gate rule critical-risk equals must be a finite JSON number"},
+		{name: "invalid normalize", rules: "[{id: critical-risk, path: result.risk, equals: critical, normalize: lowercase, action: block}]", want: "JSON gate rule critical-risk normalize must be identifier"},
+		{name: "normalize number", rules: "[{id: critical-risk, path: result.risk, equals: 7, normalize: identifier, action: block}]", want: "JSON gate rule critical-risk normalize requires a string equals value"},
+		{name: "normalize exists", rules: "[{id: critical-risk, path: result.risk, exists: true, normalize: identifier, action: block}]", want: "JSON gate rule critical-risk normalize requires a string equals value"},
+		{name: "invalid fallback", rules: "[{id: critical-risk, path: result.risk, equals: critical, fallback: value, action: block}]", want: "JSON gate rule critical-risk fallback must be root"},
+		{name: "unknown field", rules: "[{id: critical-risk, path: result.risk, equals: critical, action: block, message: nope}]", want: "field message not found"},
+		{name: "duplicate field", rules: "[{id: critical-risk, path: result.risk, equals: high, equals: critical, action: block}]", want: "JSON gate rule critical-risk has duplicate field equals"},
+		{name: "duplicate id", rules: "[{id: risk, path: result.risk, equals: high, action: warn}, {id: risk, path: result.risk, equals: critical, action: block}]", want: "duplicate JSON gate rule id risk"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, ".clawscan.yml")
+			writeFile(t, config, "version: 1\nprofiles:\n  review:\n    scanners:\n      - id: demo\n        command: demo {{target}}\n        gate:\n          rules: "+test.rules+"\n")
+			_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
 func TestResolveArgsAcceptsSingleExitCodeGateRule(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, ".clawscan.yml")
@@ -934,7 +1231,7 @@ func TestResolveArgsRejectsInvalidExitCodeGateRules(t *testing.T) {
 		{name: "non integer", rules: "blockOnExitCode: nope", want: `must be an integer from 0 through 124, a list of those integers, or "nonzero"`},
 		{name: "empty list", rules: "blockOnExitCode: []", want: "must not be an empty list"},
 		{name: "null rule", rules: "blockOnExitCode: null", want: "scanner gate blockOnExitCode must not be null"},
-		{name: "empty gate", rules: "{}", want: "scanner gate must include blockOnExitCode or warnOnExitCode"},
+		{name: "empty gate", rules: "{}", want: "scanner gate must include blockOnExitCode, warnOnExitCode, or rules"},
 		{name: "null gate", rules: "null", want: "scanner gate must be an object"},
 		{name: "block nonzero overlap", rules: "blockOnExitCode: nonzero\n          warnOnExitCode: [0, 2]", want: "blockOnExitCode and warnOnExitCode both claim exit code 2"},
 		{name: "warn nonzero overlap", rules: "blockOnExitCode: [0, 2]\n          warnOnExitCode: nonzero", want: "blockOnExitCode and warnOnExitCode both claim exit code 2"},
@@ -1730,6 +2027,17 @@ type profileCommandRunner struct {
 type profileCommandCall struct {
 	command string
 	args    []string
+}
+
+type profileScannerResultRunner struct {
+	results map[string]runner.ScannerResult
+}
+
+func (scannerRunner profileScannerResultRunner) RunScanner(name string, _ string, startedAt string) (runner.ScannerResult, error) {
+	result := scannerRunner.results[name]
+	result.StartedAt = startedAt
+	result.CompletedAt = startedAt
+	return result, nil
 }
 
 func (commandRunner *profileCommandRunner) Run(command string, args []string, _ string, _ time.Duration) (runner.CommandOutput, error) {

@@ -243,7 +243,7 @@ func TestUserDefinedScannerPreservesEvidenceWithoutGatingInfrastructureExitCodes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != "completed" || result.ExitCode != nil || string(result.Raw) != `{}` {
+			if result.Status != "failed" || result.ExitCode != nil || string(result.Raw) != `{}` {
 				t.Fatalf("result = %#v", result)
 			}
 		})

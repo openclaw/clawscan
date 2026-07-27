@@ -3,6 +3,7 @@ package profiles
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +23,8 @@ var builtinFiles embed.FS
 var builtinProfileConfigPaths = []string{
 	"clawhub/clawscan.yml",
 }
+
+var jsonIntegerPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 
 type Config struct {
 	Version  int                `yaml:"version"`
@@ -50,11 +53,26 @@ type ProfileScanner struct {
 	Targets   []string
 	Gate      *ProfileScannerGate
 	custom    bool
+	mapping   bool
 }
 
 type ProfileScannerGate struct {
-	BlockOnExitCode *profileExitCodeRule `yaml:"blockOnExitCode,omitempty"`
-	WarnOnExitCode  *profileExitCodeRule `yaml:"warnOnExitCode,omitempty"`
+	BlockOnExitCode *profileExitCodeRule  `yaml:"blockOnExitCode,omitempty"`
+	WarnOnExitCode  *profileExitCodeRule  `yaml:"warnOnExitCode,omitempty"`
+	Rules           []profileJSONGateRule `yaml:"rules,omitempty"`
+}
+
+type profileJSONGateRule struct {
+	ID         string     `yaml:"id"`
+	Paths      []string   `yaml:"-"`
+	Equals     *yaml.Node `yaml:"equals,omitempty"`
+	Exists     bool       `yaml:"exists,omitempty"`
+	Normalize  string     `yaml:"normalize,omitempty"`
+	Fallback   string     `yaml:"fallback,omitempty"`
+	Action     string     `yaml:"action"`
+	equalsSet  bool
+	existsSet  bool
+	equalsJSON json.RawMessage
 }
 
 type profileExitCodeRule struct {
@@ -114,17 +132,181 @@ func (rule profileExitCodeRule) MarshalYAML() (interface{}, error) {
 	}
 }
 
+func (rule *profileJSONGateRule) UnmarshalYAML(node *yaml.Node) error {
+	node = resolvedYAMLNode(node)
+	if node.Kind != yaml.MappingNode {
+		return errors.New("JSON gate rule must be an object")
+	}
+	seenFields := make(map[string]bool, len(node.Content)/2)
+	for index := 0; index < len(node.Content); index += 2 {
+		key := node.Content[index].Value
+		if seenFields[key] {
+			return fmt.Errorf("JSON gate rule %s has duplicate field %s", rule.ID, key)
+		}
+		seenFields[key] = true
+		value := resolvedYAMLNode(node.Content[index+1])
+		switch key {
+		case "id":
+			if err := value.Decode(&rule.ID); err != nil {
+				return err
+			}
+		case "path":
+			switch value.Kind {
+			case yaml.ScalarNode:
+				if value.Tag != "!!str" {
+					return fmt.Errorf("JSON gate rule %s path must be a string or list of strings", rule.ID)
+				}
+				rule.Paths = []string{value.Value}
+			case yaml.SequenceNode:
+				if len(value.Content) == 0 {
+					return fmt.Errorf("JSON gate rule %s path list must not be empty", rule.ID)
+				}
+				rule.Paths = make([]string, 0, len(value.Content))
+				for _, pathNode := range value.Content {
+					pathNode = resolvedYAMLNode(pathNode)
+					if pathNode.Kind != yaml.ScalarNode || pathNode.Tag != "!!str" {
+						return fmt.Errorf("JSON gate rule %s path must be a string or list of strings", rule.ID)
+					}
+					rule.Paths = append(rule.Paths, pathNode.Value)
+				}
+			default:
+				return fmt.Errorf("JSON gate rule %s path must be a string or list of strings", rule.ID)
+			}
+		case "action":
+			if err := value.Decode(&rule.Action); err != nil {
+				return err
+			}
+		case "equals":
+			if value.Kind != yaml.ScalarNode || value.Tag == "!!null" {
+				return fmt.Errorf("JSON gate rule %s equals must be a string, number, or boolean", rule.ID)
+			}
+			switch value.Tag {
+			case "!!str":
+				rule.equalsJSON, _ = json.Marshal(value.Value)
+			case "!!bool":
+				var parsed bool
+				if err := value.Decode(&parsed); err != nil {
+					return fmt.Errorf("JSON gate rule %s equals must be a boolean", rule.ID)
+				}
+				rule.equalsJSON, _ = json.Marshal(parsed)
+			case "!!int":
+				if !validJSONGateNumber(value.Value) {
+					return fmt.Errorf("JSON gate rule %s equals must be a finite JSON number", rule.ID)
+				}
+				if !jsonIntegerPattern.MatchString(value.Value) {
+					return fmt.Errorf("JSON gate rule %s equals must be a JSON integer", rule.ID)
+				}
+				rule.equalsJSON = append(json.RawMessage(nil), value.Value...)
+			case "!!float":
+				if !validJSONGateNumber(value.Value) {
+					return fmt.Errorf("JSON gate rule %s equals must be a finite JSON number", rule.ID)
+				}
+				rule.equalsJSON = append(json.RawMessage(nil), value.Value...)
+			default:
+				return fmt.Errorf("JSON gate rule %s equals must be a string, number, or boolean", rule.ID)
+			}
+			rule.Equals = value
+			rule.equalsSet = true
+		case "exists":
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
+				return fmt.Errorf("JSON gate rule %s exists must be true", rule.ID)
+			}
+			rule.existsSet = true
+			if err := value.Decode(&rule.Exists); err != nil {
+				return err
+			}
+		case "normalize":
+			if err := value.Decode(&rule.Normalize); err != nil {
+				return err
+			}
+		case "fallback":
+			if err := value.Decode(&rule.Fallback); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("field %s not found in type profiles.profileJSONGateRule", key)
+		}
+	}
+	if strings.TrimSpace(rule.ID) == "" {
+		return errors.New("JSON gate rule id must not be empty")
+	}
+	if len(rule.Paths) == 0 {
+		return fmt.Errorf("JSON gate rule %s path must not be empty", rule.ID)
+	}
+	seenPaths := map[string]bool{}
+	for _, path := range rule.Paths {
+		if err := runner.ValidateJSONGatePath(path); err != nil {
+			return fmt.Errorf("JSON gate rule %s path %q is invalid: %w", rule.ID, path, err)
+		}
+		if seenPaths[path] {
+			return fmt.Errorf("JSON gate rule %s has duplicate path %q", rule.ID, path)
+		}
+		seenPaths[path] = true
+	}
+	if rule.Action != "warn" && rule.Action != "block" {
+		return fmt.Errorf("JSON gate rule %s action must be warn or block", rule.ID)
+	}
+	if rule.existsSet && !rule.Exists {
+		return fmt.Errorf("JSON gate rule %s exists must be true", rule.ID)
+	}
+	if rule.equalsSet == rule.existsSet {
+		return fmt.Errorf("JSON gate rule %s must include exactly one of equals or exists: true", rule.ID)
+	}
+	if rule.Normalize != "" && rule.Normalize != "identifier" {
+		return fmt.Errorf("JSON gate rule %s normalize must be identifier", rule.ID)
+	}
+	if rule.Normalize != "" && (!rule.equalsSet || rule.Equals.Tag != "!!str") {
+		return fmt.Errorf("JSON gate rule %s normalize requires a string equals value", rule.ID)
+	}
+	if rule.Fallback != "" && rule.Fallback != "root" {
+		return fmt.Errorf("JSON gate rule %s fallback must be root", rule.ID)
+	}
+	return nil
+}
+
+func validJSONGateNumber(value string) bool {
+	if !json.Valid([]byte(value)) {
+		return false
+	}
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+	var parsed any
+	if err := decoder.Decode(&parsed); err != nil {
+		return false
+	}
+	_, ok := parsed.(json.Number)
+	return ok
+}
+
+func (rule profileJSONGateRule) MarshalYAML() (interface{}, error) {
+	var path any
+	if len(rule.Paths) == 1 {
+		path = rule.Paths[0]
+	} else {
+		path = append([]string(nil), rule.Paths...)
+	}
+	return struct {
+		ID        string     `yaml:"id"`
+		Path      any        `yaml:"path"`
+		Equals    *yaml.Node `yaml:"equals,omitempty"`
+		Exists    bool       `yaml:"exists,omitempty"`
+		Normalize string     `yaml:"normalize,omitempty"`
+		Fallback  string     `yaml:"fallback,omitempty"`
+		Action    string     `yaml:"action"`
+	}{rule.ID, path, rule.Equals, rule.Exists, rule.Normalize, rule.Fallback, rule.Action}, nil
+}
+
 func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
 	node = resolvedYAMLNode(node)
 	if node.Kind != yaml.MappingNode {
 		return errors.New("scanner gate must be an object")
 	}
 	if len(node.Content) == 0 {
-		return errors.New("scanner gate must include blockOnExitCode or warnOnExitCode")
+		return errors.New("scanner gate must include blockOnExitCode, warnOnExitCode, or rules")
 	}
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
-		case "blockOnExitCode", "warnOnExitCode":
+		case "blockOnExitCode", "warnOnExitCode", "rules":
 			value := resolvedYAMLNode(node.Content[index+1])
 			if value.Tag == "!!null" {
 				return fmt.Errorf("scanner gate %s must not be null", node.Content[index].Value)
@@ -134,7 +316,23 @@ func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 	type plainGate ProfileScannerGate
-	return node.Decode((*plainGate)(gate))
+	if err := node.Decode((*plainGate)(gate)); err != nil {
+		return err
+	}
+	if gate.Rules != nil && len(gate.Rules) == 0 {
+		return errors.New("scanner gate rules must not be empty")
+	}
+	seenRuleIDs := map[string]bool{}
+	for _, rule := range gate.Rules {
+		if seenRuleIDs[rule.ID] {
+			return fmt.Errorf("duplicate JSON gate rule id %s", rule.ID)
+		}
+		seenRuleIDs[rule.ID] = true
+	}
+	if gate.BlockOnExitCode == nil && gate.WarnOnExitCode == nil && len(gate.Rules) == 0 {
+		return errors.New("scanner gate must include blockOnExitCode, warnOnExitCode, or rules")
+	}
+	return nil
 }
 
 func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
@@ -148,6 +346,9 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 		for index := 0; index < len(node.Content); index += 2 {
 			switch node.Content[index].Value {
 			case "id", "command", "env", "secretEnv", "targets", "gate":
+				if node.Content[index].Value == "command" {
+					scanner.custom = true
+				}
 				if node.Content[index].Value == "gate" {
 					gateNode := resolvedYAMLNode(node.Content[index+1])
 					if gateNode.Kind != yaml.MappingNode {
@@ -175,7 +376,7 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 		scanner.SecretEnv = value.SecretEnv
 		scanner.Targets = value.Targets
 		scanner.Gate = value.Gate
-		scanner.custom = true
+		scanner.mapping = true
 		return nil
 	default:
 		return fmt.Errorf("scanner entry must be a string or object")
@@ -190,12 +391,12 @@ func resolvedYAMLNode(node *yaml.Node) *yaml.Node {
 }
 
 func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
-	if !scanner.custom {
+	if !scanner.mapping && !scanner.custom {
 		return scanner.ID, nil
 	}
 	return struct {
 		ID        string              `yaml:"id"`
-		Command   string              `yaml:"command"`
+		Command   string              `yaml:"command,omitempty"`
 		Env       []string            `yaml:"env,omitempty"`
 		SecretEnv []string            `yaml:"secretEnv,omitempty"`
 		Targets   []string            `yaml:"targets,omitempty"`
@@ -254,7 +455,13 @@ func profileGateRules(scanners []ProfileScanner, selectedScannerIDs []string) ma
 				Codes: append([]int(nil), scanner.Gate.WarnOnExitCode.Codes...), Nonzero: scanner.Gate.WarnOnExitCode.Nonzero,
 			}
 		}
-		if policy.BlockOnExitCode == nil && policy.WarnOnExitCode == nil {
+		for _, rule := range scanner.Gate.Rules {
+			policy.JSONRules = append(policy.JSONRules, runner.JSONGateRule{
+				ID: rule.ID, Paths: append([]string(nil), rule.Paths...), Equals: append(json.RawMessage(nil), rule.equalsJSON...), Exists: rule.Exists, Normalize: rule.Normalize,
+				Fallback: rule.Fallback, Action: rule.Action,
+			})
+		}
+		if policy.BlockOnExitCode == nil && policy.WarnOnExitCode == nil && len(policy.JSONRules) == 0 {
 			continue
 		}
 		rules[scanner.ID] = policy
@@ -1087,6 +1294,20 @@ func invalidDeclaredEnvName(env []string) string {
 func validateProfile(name string, profile Profile) error {
 	seen := map[string]bool{}
 	for _, scanner := range profile.Scanners {
+		if scanner.mapping && strings.TrimSpace(scanner.ID) == "" {
+			if scanner.custom {
+				return fmt.Errorf("User-defined scanner in profile %s must include a non-empty id", name)
+			}
+			return fmt.Errorf("Scanner object in profile %s must include a non-empty id", name)
+		}
+		if scanner.mapping && !scanner.custom {
+			if !runner.DefaultScannerRegistry().Contains(scanner.ID) {
+				return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)
+			}
+			if len(scanner.Env) > 0 || len(scanner.SecretEnv) > 0 || len(scanner.Targets) > 0 {
+				return fmt.Errorf("Built-in scanner reference %s in profile %s accepts only id and gate", scanner.ID, name)
+			}
+		}
 		if scanner.custom && strings.TrimSpace(scanner.ID) == "" {
 			return fmt.Errorf("User-defined scanner in profile %s must include a non-empty id", name)
 		}

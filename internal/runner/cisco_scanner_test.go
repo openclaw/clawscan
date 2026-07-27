@@ -163,10 +163,12 @@ func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	const ciscoJSON = `{"scanner":"cisco","findings":[{"id":"pipeline-risk"}]}`
+	exitCode := 1
 	runner := &ciscoRecordingCommandRunner{
-		output: ciscoJSON,
-		stderr: "high severity findings",
-		err:    errors.New("exit status 1"),
+		output:   ciscoJSON,
+		stderr:   "high severity findings",
+		err:      errors.New("exit status 1"),
+		exitCode: &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
@@ -182,6 +184,9 @@ func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
 	result := artifact.Scanners["cisco"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if result.ExitCode == nil || *result.ExitCode != exitCode {
+		t.Fatalf("exit code = %#v", result.ExitCode)
 	}
 	if !strings.Contains(result.Error, "exit status 1") || !strings.Contains(result.Error, "high severity findings") {
 		t.Fatalf("error = %q", result.Error)
@@ -279,10 +284,11 @@ func TestRunDispatchesCiscoScannerInsteadOfGenericSkipped(t *testing.T) {
 }
 
 type ciscoRecordingCommandRunner struct {
-	calls  []commandCall
-	output string
-	stderr string
-	err    error
+	calls    []commandCall
+	output   string
+	stderr   string
+	err      error
+	exitCode *int
 }
 
 func (r *ciscoRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
@@ -295,7 +301,7 @@ func (r *ciscoRecordingCommandRunner) Run(command string, args []string, cwd str
 			}
 		}
 	}
-	return CommandOutput{Stderr: r.stderr}, r.err
+	return CommandOutput{Stderr: r.stderr, ExitCode: r.exitCode}, r.err
 }
 
 func argValue(args []string, name string) string {

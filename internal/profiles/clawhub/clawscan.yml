@@ -3,8 +3,46 @@ version: 1
 profiles:
   clawhub:
     scanners:
-      - skillspector
-      - clawscan-static
+      - id: skillspector
+        gate:
+          rules: &skillspector-gate-rules
+            - id: do-not-install
+              path:
+                - risk_recommendation|riskRecommendation|recommendation
+                - risk_assessment.recommendation|risk_recommendation|riskRecommendation
+                - riskAssessment.recommendation|risk_recommendation|riskRecommendation
+              equals: DO_NOT_INSTALL
+              normalize: identifier
+              action: block
+            - id: critical-finding
+              path:
+                - filtered_findings[].severity|risk_severity|level
+                - filteredFindings[].severity|risk_severity|level
+                - findings[].severity|risk_severity|level
+                - issues[].severity|risk_severity|level
+                - vulnerabilities[].severity|risk_severity|level
+              equals: CRITICAL
+              normalize: identifier
+              fallback: root
+              action: block
+            - id: high-finding
+              path:
+                - filtered_findings[].severity|risk_severity|level
+                - filteredFindings[].severity|risk_severity|level
+                - findings[].severity|risk_severity|level
+                - issues[].severity|risk_severity|level
+                - vulnerabilities[].severity|risk_severity|level
+              equals: HIGH
+              normalize: identifier
+              fallback: root
+              action: warn
+      - id: clawscan-static
+        gate:
+          rules:
+            - id: any-finding
+              path: findings[]
+              exists: true
+              action: warn
     sandbox:
       env:
         - OPENAI_API_KEY
@@ -29,7 +67,9 @@ profiles:
         - < {{ prompt:prompt.md }}
   clawhub-aig:
     scanners:
-      - skillspector
+      - id: skillspector
+        gate:
+          rules: *skillspector-gate-rules
       - aig
     sandbox:
       env:

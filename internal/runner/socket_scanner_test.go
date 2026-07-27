@@ -92,10 +92,12 @@ func TestSocketScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	const socketJSON = `{"id":"scan_123","status":"failed","alerts":[]}`
+	exitCode := 1
 	runner := &socketRecordingCommandRunner{
-		stdout: socketJSON,
-		stderr: "policy violation",
-		err:    errors.New("exit status 1"),
+		stdout:   socketJSON,
+		stderr:   "policy violation",
+		err:      errors.New("exit status 1"),
+		exitCode: &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "socket"})
 	if err != nil {
@@ -111,6 +113,9 @@ func TestSocketScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 	result := artifact.Scanners["socket"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if result.ExitCode == nil || *result.ExitCode != exitCode {
+		t.Fatalf("exit code = %#v", result.ExitCode)
 	}
 	if !strings.Contains(result.Error, "exit status 1") || !strings.Contains(result.Error, "policy violation") {
 		t.Fatalf("error = %q", result.Error)
@@ -251,13 +256,14 @@ func TestSocketScannerResultFixtureSkipsTokenRequirement(t *testing.T) {
 }
 
 type socketRecordingCommandRunner struct {
-	calls  []commandCall
-	stdout string
-	stderr string
-	err    error
+	calls    []commandCall
+	stdout   string
+	stderr   string
+	err      error
+	exitCode *int
 }
 
 func (r *socketRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	r.calls = append(r.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
-	return CommandOutput{Stdout: r.stdout, Stderr: r.stderr}, r.err
+	return CommandOutput{Stdout: r.stdout, Stderr: r.stderr, ExitCode: r.exitCode}, r.err
 }

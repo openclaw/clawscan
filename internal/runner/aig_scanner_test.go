@@ -181,10 +181,12 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 
 func TestAIGScannerCompletesNonZeroExitWithValidSARIF(t *testing.T) {
 	target := createAIGTestSkill(t)
+	exitCode := 1
 	commandRunner := &aigRecordingCommandRunner{
-		output: aigSARIF,
-		stderr: "findings require review",
-		err:    errors.New("exit status 1"),
+		output:   aigSARIF,
+		stderr:   "findings require review",
+		err:      errors.New("exit status 1"),
+		exitCode: &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
 	if err != nil {
@@ -200,6 +202,9 @@ func TestAIGScannerCompletesNonZeroExitWithValidSARIF(t *testing.T) {
 	result := artifact.Scanners["aig"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if result.ExitCode == nil || *result.ExitCode != exitCode {
+		t.Fatalf("exit code = %#v", result.ExitCode)
 	}
 	if !strings.Contains(result.Error, "exit status 1") || !strings.Contains(result.Error, "findings require review") {
 		t.Fatalf("error = %q", result.Error)
@@ -343,10 +348,11 @@ func createAIGTestSkill(t *testing.T) string {
 }
 
 type aigRecordingCommandRunner struct {
-	calls  []commandCall
-	output string
-	stderr string
-	err    error
+	calls    []commandCall
+	output   string
+	stderr   string
+	err      error
+	exitCode *int
 }
 
 func (runner *aigRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
@@ -359,7 +365,7 @@ func (runner *aigRecordingCommandRunner) Run(command string, args []string, cwd 
 			}
 		}
 	}
-	return CommandOutput{Stderr: runner.stderr}, runner.err
+	return CommandOutput{Stderr: runner.stderr, ExitCode: runner.exitCode}, runner.err
 }
 
 type aigDockerRecordingCommandRunner struct {

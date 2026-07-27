@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/url"
 	"os"
 	"os/exec"
@@ -66,6 +67,17 @@ func (rule ExitCodeRule) Matches(exitCode int) bool {
 type ScannerGatePolicy struct {
 	BlockOnExitCode *ExitCodeRule
 	WarnOnExitCode  *ExitCodeRule
+	JSONRules       []JSONGateRule
+}
+
+type JSONGateRule struct {
+	ID        string
+	Paths     []string
+	Equals    json.RawMessage
+	Exists    bool
+	Normalize string
+	Fallback  string
+	Action    string
 }
 
 type BenchmarkOptions struct {
@@ -134,10 +146,12 @@ type Artifact struct {
 }
 
 type FiredGateRule struct {
-	Scanner  string `json:"scanner"`
-	Rule     string `json:"rule"`
-	ExitCode int    `json:"exitCode"`
-	Action   string `json:"action"`
+	Scanner  string          `json:"scanner"`
+	Rule     string          `json:"rule"`
+	ExitCode *int            `json:"exitCode,omitempty"`
+	Path     string          `json:"path,omitempty"`
+	Value    json.RawMessage `json:"value,omitempty"`
+	Action   string          `json:"action"`
 }
 
 type RunTargetsResult struct {
@@ -1984,17 +1998,19 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 		timeout = 20 * time.Minute
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
 		message := commandError(runErr, output.Stderr, runner.Env)
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
-				Status:      "completed",
+				Status:      commandScannerResultStatus(output, runErr),
 				StartedAt:   startedAt,
 				CompletedAt: completedAt,
 				Command:     fullCommand,
 				Error:       message,
+				ExitCode:    exitCode,
 				Raw:         json.RawMessage(raw),
 			}, nil
 		}
@@ -2033,6 +2049,7 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 		CompletedAt: completedAt,
 		Command:     fullCommand,
 		Error:       "",
+		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
 	}, nil
 }
@@ -2078,6 +2095,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		timeout = 20 * time.Minute
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, cwd, timeout)
+	exitCode := gateEligibleExitCode(output.ExitCode)
 	raw, readErr := os.ReadFile(resultPath)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if runErr != nil {
@@ -2090,15 +2108,17 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 					CompletedAt: completedAt,
 					Command:     fullCommand,
 					Error:       message + ": SkillSpector scanner returned invalid JSON",
+					ExitCode:    exitCode,
 					Raw:         nil,
 				}, nil
 			}
 			return ScannerResult{
-				Status:      "completed",
+				Status:      commandScannerResultStatus(output, runErr),
 				StartedAt:   startedAt,
 				CompletedAt: completedAt,
 				Command:     fullCommand,
 				Error:       message,
+				ExitCode:    exitCode,
 				Raw:         json.RawMessage(raw),
 			}, nil
 		}
@@ -2108,6 +2128,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 			CompletedAt: completedAt,
 			Command:     fullCommand,
 			Error:       message,
+			ExitCode:    exitCode,
 			Raw:         nil,
 		}, nil
 	}
@@ -2118,6 +2139,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 			CompletedAt: completedAt,
 			Command:     fullCommand,
 			Error:       "SkillSpector scanner did not write JSON output.",
+			ExitCode:    exitCode,
 			Raw:         nil,
 		}, nil
 	}
@@ -2128,6 +2150,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 			CompletedAt: completedAt,
 			Command:     fullCommand,
 			Error:       "SkillSpector scanner returned invalid JSON",
+			ExitCode:    exitCode,
 			Raw:         nil,
 		}, nil
 	}
@@ -2137,6 +2160,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		CompletedAt: completedAt,
 		Command:     fullCommand,
 		Error:       "",
+		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
 	}, nil
 }
@@ -2261,24 +2285,290 @@ func evaluateGate(artifact *Artifact, opts Options) {
 		}
 		evaluated[scanner] = true
 		result := artifact.Scanners[scanner]
-		if result.Status != "completed" || result.ExitCode == nil {
+		if result.Status != "completed" {
 			continue
 		}
 		policy := opts.GateRules[scanner]
+		if len(policy.JSONRules) > 0 {
+			evaluateJSONGateRules(artifact, scanner, result.Raw, policy.JSONRules)
+		}
+		if result.ExitCode == nil {
+			continue
+		}
 		if policy.BlockOnExitCode != nil && policy.BlockOnExitCode.Matches(*result.ExitCode) {
 			artifact.GateRules = append(artifact.GateRules, FiredGateRule{
-				Scanner: scanner, Rule: "blockOnExitCode", ExitCode: *result.ExitCode, Action: "block",
+				Scanner: scanner, Rule: "blockOnExitCode", ExitCode: result.ExitCode, Action: "block",
 			})
-			artifact.Gate = "block"
+			setGateAction(artifact, "block")
 		}
 		if policy.WarnOnExitCode != nil && policy.WarnOnExitCode.Matches(*result.ExitCode) {
 			artifact.GateRules = append(artifact.GateRules, FiredGateRule{
-				Scanner: scanner, Rule: "warnOnExitCode", ExitCode: *result.ExitCode, Action: "warn",
+				Scanner: scanner, Rule: "warnOnExitCode", ExitCode: result.ExitCode, Action: "warn",
 			})
-			if artifact.Gate == "pass" {
-				artifact.Gate = "warn"
+			setGateAction(artifact, "warn")
+		}
+	}
+}
+
+func evaluateJSONGateRules(artifact *Artifact, scanner string, raw json.RawMessage, rules []JSONGateRule) {
+	if len(raw) == 0 {
+		return
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var document any
+	if err := decoder.Decode(&document); err != nil {
+		return
+	}
+
+	for _, rule := range rules {
+		matched := false
+		matchedPath := ""
+		var matchedValue json.RawMessage
+		expected, equalsOK := decodeJSONGateScalar(rule.Equals)
+		for _, path := range rule.Paths {
+			values, present, emptyArray, rootPresent := jsonGatePathValues(document, path)
+			if !present {
+				if rule.Fallback == "root" && rootPresent {
+					break
+				}
+				continue
+			}
+			if rule.Exists {
+				for _, value := range values {
+					if jsonGateValueIsNonEmpty(value) {
+						matched = true
+						matchedPath = path
+						break
+					}
+				}
+				if matched || emptyArray || rule.Fallback == "root" && rootPresent {
+					break
+				}
+				continue
+			}
+			authoritative := emptyArray || rule.Fallback == "root" && rootPresent
+			if equalsOK {
+				for _, value := range values {
+					if !jsonGateValueIsNonEmpty(value) {
+						continue
+					}
+					authoritative = true
+					if jsonGateValuesEqual(value, expected, rule.Normalize) {
+						matched = true
+						matchedPath = path
+						matchedValue, _ = json.Marshal(value)
+						break
+					}
+				}
+			}
+			if matched || authoritative {
+				break
 			}
 		}
+		if !matched {
+			continue
+		}
+		artifact.GateRules = append(artifact.GateRules, FiredGateRule{
+			Scanner: scanner,
+			Rule:    rule.ID,
+			Path:    matchedPath,
+			Value:   matchedValue,
+			Action:  rule.Action,
+		})
+		setGateAction(artifact, rule.Action)
+	}
+}
+
+func ValidateJSONGatePath(path string) error {
+	if path == "" {
+		return errors.New("path must not be empty")
+	}
+	for _, segment := range strings.Split(path, ".") {
+		if _, _, ok := parseJSONGatePathSegment(segment); !ok {
+			return errors.New("path must use dotted object fields with optional [] array traversal")
+		}
+	}
+	return nil
+}
+
+func jsonGatePathValues(document any, path string) ([]any, bool, bool, bool) {
+	values := []any{document}
+	rootPresent := false
+	for index, segment := range strings.Split(path, ".") {
+		if len(values) == 0 {
+			return nil, true, true, rootPresent
+		}
+		keys, array, _ := parseJSONGatePathSegment(segment)
+		next := make([]any, 0)
+		present := false
+		rootKeyPresent := false
+		for _, value := range values {
+			object, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			if array {
+				child, ok := object[keys[0]]
+				if !ok || child == nil {
+					continue
+				}
+				rootKeyPresent = true
+				items, ok := child.([]any)
+				if ok {
+					present = true
+					next = append(next, items...)
+				}
+				continue
+			}
+
+			for _, key := range keys {
+				child, ok := object[key]
+				if !ok || child == nil {
+					continue
+				}
+				rootKeyPresent = true
+				present = true
+				next = append(next, child)
+				break
+			}
+		}
+		if index == 0 {
+			rootPresent = rootKeyPresent
+		}
+		if !present {
+			return nil, false, false, rootPresent
+		}
+		values = next
+	}
+	return values, true, len(values) == 0, rootPresent
+}
+
+func parseJSONGatePathSegment(segment string) ([]string, bool, bool) {
+	array := strings.HasSuffix(segment, "[]")
+	base := strings.TrimSuffix(segment, "[]")
+	if base == "" || strings.ContainsAny(base, "[]") {
+		return nil, false, false
+	}
+	keys := strings.Split(base, "|")
+	if array && len(keys) > 1 {
+		return nil, false, false
+	}
+	for _, key := range keys {
+		if key == "" {
+			return nil, false, false
+		}
+	}
+	return keys, array, true
+}
+
+func jsonGateValueIsNonEmpty(value any) bool {
+	if value == nil {
+		return false
+	}
+	switch value := value.(type) {
+	case string:
+		return strings.TrimSpace(value) != ""
+	case []any:
+		return len(value) > 0
+	case map[string]any:
+		return len(value) > 0
+	default:
+		return true
+	}
+}
+
+func decodeJSONGateScalar(raw json.RawMessage) (any, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	switch value.(type) {
+	case string, bool, json.Number:
+		return value, true
+	default:
+		return nil, false
+	}
+}
+
+func jsonGateValuesEqual(actual any, expected any, normalize string) bool {
+	switch expected := expected.(type) {
+	case string:
+		actual, ok := actual.(string)
+		if ok && normalize == "identifier" {
+			actual = normalizeJSONGateIdentifier(actual)
+			expected = normalizeJSONGateIdentifier(expected)
+		}
+		return ok && actual == expected
+	case bool:
+		actual, ok := actual.(bool)
+		return ok && actual == expected
+	case json.Number:
+		actual, ok := actual.(json.Number)
+		if !ok {
+			return false
+		}
+		actualNegative, actualDigits, actualExponent, actualOK := canonicalJSONGateNumber(actual)
+		expectedNegative, expectedDigits, expectedExponent, expectedOK := canonicalJSONGateNumber(expected)
+		return actualOK && expectedOK &&
+			actualNegative == expectedNegative &&
+			actualDigits == expectedDigits &&
+			actualExponent.Cmp(expectedExponent) == 0
+	default:
+		return false
+	}
+}
+
+func canonicalJSONGateNumber(value json.Number) (bool, string, *big.Int, bool) {
+	text := value.String()
+	negative := strings.HasPrefix(text, "-")
+	if negative {
+		text = strings.TrimPrefix(text, "-")
+	}
+	mantissa := text
+	exponentText := ""
+	if index := strings.IndexAny(text, "eE"); index >= 0 {
+		mantissa = text[:index]
+		exponentText = text[index+1:]
+	}
+	exponent := new(big.Int)
+	if exponentText != "" {
+		if _, ok := exponent.SetString(exponentText, 10); !ok {
+			return false, "", nil, false
+		}
+	}
+	integer, fraction, hasFraction := strings.Cut(mantissa, ".")
+	digits := integer
+	if hasFraction {
+		digits += fraction
+		exponent.Sub(exponent, big.NewInt(int64(len(fraction))))
+	}
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" {
+		return false, "0", new(big.Int), true
+	}
+	trimmed := strings.TrimRight(digits, "0")
+	exponent.Add(exponent, big.NewInt(int64(len(digits)-len(trimmed))))
+	return negative, trimmed, exponent, true
+}
+
+func normalizeJSONGateIdentifier(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	return strings.NewReplacer(" ", "_", "-", "_").Replace(value)
+}
+
+func commandScannerResultStatus(output CommandOutput, runErr error) string {
+	if runErr != nil && gateEligibleExitCode(output.ExitCode) == nil {
+		return "failed"
+	}
+	return "completed"
+}
+
+func setGateAction(artifact *Artifact, action string) {
+	if action == "block" || action == "warn" && artifact.Gate == "pass" {
+		artifact.Gate = action
 	}
 }
 

@@ -17,7 +17,7 @@ clawscan scanners
 clawscan scanners skillspector
 ```
 
-## User-defined scanners
+## Profile scanner configuration
 
 A trusted config can mix built-in scanner IDs with user-defined command
 scanners. The config schema uses the existing `profiles.<name>.scanners` list:
@@ -28,7 +28,24 @@ version: 1
 profiles:
   review:
     scanners:
-      - clawscan-static
+      - id: skillspector
+        gate:
+          rules:
+            - id: do-not-install
+              path: risk_assessment.recommendation
+              equals: DO_NOT_INSTALL
+              action: block
+            - id: critical-finding
+              path: filtered_findings[].severity
+              equals: CRITICAL
+              action: block
+      - id: clawscan-static
+        gate:
+          rules:
+            - id: any-finding
+              path: findings[]
+              exists: true
+              action: warn
       - id: my-scanner
         command: my-scanner --json {{target}}
         env:
@@ -39,11 +56,21 @@ profiles:
           - skill
           - plugin
         gate:
+          rules:
+            - id: high-risk
+              path: result.risk
+              equals: high
+              action: warn
           blockOnExitCode: nonzero
 ```
 
-String entries select built-in scanners. Object entries define a scanner for
-that config-backed run and accept these fields:
+String entries select built-in scanners without gate policy. An object with a
+registered built-in `id` and no `command` selects that built-in and can attach
+gate rules. The rules inspect its existing JSON output; the scanner does not
+need to implement ClawScan-specific policy or change its exit codes.
+
+An object with a `command` defines a user-provided scanner for that
+config-backed run. The same JSON rules work for built-in and command scanners:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -52,7 +79,58 @@ that config-backed run and accept these fields:
 | `env` | no | Required non-secret environment variable names passed to the scanner. Their values are not automatically redacted from scanner error text. |
 | `secretEnv` | no | Required secret environment variable names passed to the scanner. Their values are redacted from scanner error text regardless of how the names are spelled. |
 | `targets` | no | Supported target kinds: `skill`, `plugin`, and/or `url`. Defaults to `skill` and `url`. |
-| `gate` | no | Exit-code policy with optional `blockOnExitCode` and `warnOnExitCode` rules. |
+| `gate` | no | JSON and/or exit-code policy applied after the scanner completes. |
+
+### JSON gate rules
+
+`gate.rules` evaluates the scanner's raw JSON without rewriting it. Every rule
+has:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `id` | yes | Stable name reported in `gateRules`; IDs must be unique within one scanner gate. |
+| `path` | yes | One path or an ordered list of aliases. Paths use dotted object fields, with `[]` after a field to traverse every array item. Separate alternative field names with the pipe character. Array indexes and other expression syntax are not supported. |
+| `action` | yes | `warn` or `block`. |
+| `equals` | one condition | Matches a string, number, or boolean exactly. String comparison is case-sensitive. |
+| `exists` | one condition | Must be `true`; matches when the path resolves to at least one value. |
+| `normalize` | no | `identifier` makes string `equals` matching case-insensitive and treats spaces and hyphens like underscores. It cannot be used with numbers, booleans, or `exists`. |
+| `fallback` | no | `root` makes the first path whose root field exists authoritative, even when a nested field is missing. Use this when a preferred filtered collection must override legacy raw collections. |
+
+Specify exactly one of `equals` or `exists: true`. A rule fires at most once,
+even when several paths or array items match. The fired artifact records the
+path that matched. A path list is an ordered fallback: ClawScan evaluates the
+first path with a non-empty value and ignores later aliases, whether or not its
+value matches. Empty strings and `null` fall through to the next alias. An
+explicitly empty traversed array remains authoritative, letting a preferred
+filtered result override legacy raw-result fields. Missing paths, empty arrays,
+and type mismatches do not fire. Within one path segment, `|` alternatives are
+resolved separately for each object, using the first present field; if that
+field is empty, the rule can still fall through to the next path. For
+`fallback: root`, a present root field prevents later path aliases from being
+consulted. For example, `findings[].severity|risk_severity` checks `severity`
+and then `risk_severity` on each finding. An immutable third-party scanner can
+be gated without a wrapper:
+
+```yaml
+scanners:
+  - id: third-party
+    command: third-party scan --json {{target}}
+    gate:
+      rules:
+        - id: critical-risk
+          path:
+            - result.risk
+            - result.risk_level
+          equals: critical
+          normalize: identifier
+          action: block
+        - id: any-policy-violation
+          path: result.violations[]
+          exists: true
+          action: warn
+```
+
+### Exit-code rules
 
 Each exit-code rule accepts one integer from 0 through 124, a list such as
 `[1, 2, 3]`, or the string `nonzero`. The block and warning rules may not
@@ -66,22 +144,27 @@ gate:
   warnOnExitCode: 1
 ```
 
+JSON and exit-code rules can be combined on the same scanner. A gate-eligible
+process exit code is preserved alongside raw JSON, and all fired rules
+participate in the same strongest-action decision.
+
 After every selected scanner finishes, ClawScan records the strongest fired
 action as the top-level artifact `gate`: `block` wins over `warn`, and an
 artifact with no fired rules records `"gate": "pass"`. Each fired rule is also
-listed in `gateRules` with its scanner ID, rule name, exit code, and action.
-Gate actions are record-only: `block` does not stop later scanners or the
-judge, and it does not change ClawScan's process exit status. For enforcement,
-inspect `gate` and `gateRules` on a single run, `runs[].gate` and
+listed in `gateRules` with its scanner ID, rule ID, and action. Exit-code rules
+include `exitCode`; JSON rules include `path` and, for `equals`, the matched
+`value`. Gate actions are record-only: `block` does not stop later scanners or
+the judge, and it does not change ClawScan's process exit status. For
+enforcement, inspect `gate` and `gateRules` on a single run, `runs[].gate` and
 `runs[].gateRules` in a batch, or `cases[].run.gate` and
 `cases[].run.gateRules` in a benchmark. The human scan summary aggregates the
 strongest batch action; the benchmark summary does not aggregate gate actions.
 
-Skipped scanners do not fire gate rules. A scanner result with status `failed`
-also does not fire an exit-code rule; a nonzero command that still returned
-valid JSON has status `completed` and can fire one. Valid JSON from a timeout,
-signal, or reserved infrastructure exit is still preserved, but its omitted
-`exitCode` means it cannot fire a gate rule.
+Skipped or failed scanners do not fire gate rules. A nonzero command that still
+returned valid JSON has status `completed` and can fire both JSON and exit-code
+rules. Valid JSON from a timeout, signal, or reserved infrastructure exit is
+still preserved, but the failed scanner does not fire gate rules and its
+`exitCode` is omitted.
 
 The command must write JSON to stdout. ClawScan preserves valid stdout as the
 scanner's raw evidence; empty or non-JSON stdout produces a failed scanner

@@ -221,7 +221,11 @@ profiles:
 		"profiles:",
 		"clawhub:",
 		"clawhub-aig:",
-		"- skillspector",
+		"- id: skillspector",
+		"id: do-not-install",
+		"- risk_assessment.recommendation",
+		"equals: DO_NOT_INSTALL",
+		"normalize: identifier",
 		"- aig",
 	} {
 		if !strings.Contains(stdout, want) {
@@ -515,10 +519,11 @@ func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
 }
 
 func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
+	exitCode := 3
 	artifact := runner.Artifact{
 		Gate: "block",
 		GateRules: []runner.FiredGateRule{
-			{Scanner: "my-scanner", Rule: "blockOnExitCode", ExitCode: 3, Action: "block"},
+			{Scanner: "my-scanner", Rule: "blockOnExitCode", ExitCode: &exitCode, Action: "block"},
 		},
 		Scanners: map[string]runner.ScannerResult{},
 	}
@@ -526,6 +531,27 @@ func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
 	printRunSummary(&output, runner.RunTargetsResult{Single: &artifact}, "")
 	if !strings.Contains(output.String(), "gate: block (my-scanner exit 3 -> block)") {
 		t.Fatalf("summary missing gate rule:\n%s", output.String())
+	}
+}
+
+func TestPrintRunSummaryIncludesDeclarativeJSONGateRule(t *testing.T) {
+	artifact := runner.Artifact{
+		Gate: "warn",
+		GateRules: []runner.FiredGateRule{
+			{
+				Scanner: "skillspector",
+				Rule:    "high-finding",
+				Path:    "filtered_findings[].severity",
+				Value:   json.RawMessage(`"HIGH"`),
+				Action:  "warn",
+			},
+		},
+		Scanners: map[string]runner.ScannerResult{},
+	}
+	var output strings.Builder
+	printRunSummary(&output, runner.RunTargetsResult{Single: &artifact}, "")
+	if !strings.Contains(output.String(), `gate: warn (skillspector high-finding filtered_findings[].severity="HIGH" -> warn)`) {
+		t.Fatalf("summary missing declarative JSON gate rule:\n%s", output.String())
 	}
 }
 
