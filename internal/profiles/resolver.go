@@ -43,12 +43,13 @@ func (profile Profile) ScannerIDs() []string {
 }
 
 type ProfileScanner struct {
-	ID      string
-	Command string
-	Env     []string
-	Targets []string
-	Gate    *ProfileScannerGate
-	custom  bool
+	ID        string
+	Command   string
+	Env       []string
+	SecretEnv []string
+	Targets   []string
+	Gate      *ProfileScannerGate
+	custom    bool
 }
 
 type ProfileScannerGate struct {
@@ -146,7 +147,7 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 	case yaml.MappingNode:
 		for index := 0; index < len(node.Content); index += 2 {
 			switch node.Content[index].Value {
-			case "id", "command", "env", "targets", "gate":
+			case "id", "command", "env", "secretEnv", "targets", "gate":
 				if node.Content[index].Value == "gate" {
 					gateNode := resolvedYAMLNode(node.Content[index+1])
 					if gateNode.Kind != yaml.MappingNode {
@@ -158,11 +159,12 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 			}
 		}
 		var value struct {
-			ID      string              `yaml:"id"`
-			Command string              `yaml:"command"`
-			Env     []string            `yaml:"env,omitempty"`
-			Targets []string            `yaml:"targets,omitempty"`
-			Gate    *ProfileScannerGate `yaml:"gate,omitempty"`
+			ID        string              `yaml:"id"`
+			Command   string              `yaml:"command"`
+			Env       []string            `yaml:"env,omitempty"`
+			SecretEnv []string            `yaml:"secretEnv,omitempty"`
+			Targets   []string            `yaml:"targets,omitempty"`
+			Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
 		}
 		if err := node.Decode(&value); err != nil {
 			return err
@@ -170,6 +172,7 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 		scanner.ID = value.ID
 		scanner.Command = value.Command
 		scanner.Env = value.Env
+		scanner.SecretEnv = value.SecretEnv
 		scanner.Targets = value.Targets
 		scanner.Gate = value.Gate
 		scanner.custom = true
@@ -191,12 +194,13 @@ func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
 		return scanner.ID, nil
 	}
 	return struct {
-		ID      string              `yaml:"id"`
-		Command string              `yaml:"command"`
-		Env     []string            `yaml:"env,omitempty"`
-		Targets []string            `yaml:"targets,omitempty"`
-		Gate    *ProfileScannerGate `yaml:"gate,omitempty"`
-	}{scanner.ID, scanner.Command, scanner.Env, scanner.Targets, scanner.Gate}, nil
+		ID        string              `yaml:"id"`
+		Command   string              `yaml:"command"`
+		Env       []string            `yaml:"env,omitempty"`
+		SecretEnv []string            `yaml:"secretEnv,omitempty"`
+		Targets   []string            `yaml:"targets,omitempty"`
+		Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
+	}{scanner.ID, scanner.Command, scanner.Env, scanner.SecretEnv, scanner.Targets, scanner.Gate}, nil
 }
 
 func profileScannerIDs(scanners []ProfileScanner) []string {
@@ -218,7 +222,7 @@ func profileScannerRegistry(scanners []ProfileScanner) (runner.ScannerRegistry, 
 			targets = []string{"skill", "url"}
 		}
 		adapter := runner.NewUserDefinedScanner(runner.UserDefinedScannerConfig{
-			ID: scanner.ID, Command: scanner.Command, Env: scanner.Env, Targets: targets,
+			ID: scanner.ID, Command: scanner.Command, Env: scanner.Env, SecretEnv: scanner.SecretEnv, Targets: targets,
 		})
 		var err error
 		registry, err = registry.WithAdapters(adapter)
@@ -1001,6 +1005,9 @@ func validateProfile(name string, profile Profile) error {
 		if scanner.custom {
 			if bad := invalidDeclaredEnvName(scanner.Env); bad != "" {
 				return fmt.Errorf("User-defined scanner %s in profile %s has an invalid env entry %q; declare bare variable names and set values in the environment, not inline", scanner.ID, name, bad)
+			}
+			if bad := invalidDeclaredEnvName(scanner.SecretEnv); bad != "" {
+				return fmt.Errorf("User-defined scanner %s in profile %s has an invalid secretEnv entry %q; declare bare variable names and set values in the environment, not inline", scanner.ID, name, bad)
 			}
 		}
 		if scanner.custom {

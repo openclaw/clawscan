@@ -11,10 +11,11 @@ import (
 )
 
 type UserDefinedScannerConfig struct {
-	ID      string
-	Command string
-	Env     []string
-	Targets []string
+	ID        string
+	Command   string
+	Env       []string
+	SecretEnv []string
+	Targets   []string
 }
 
 func NewUserDefinedScanner(config UserDefinedScannerConfig) ScannerAdapter {
@@ -33,15 +34,19 @@ type userDefinedScannerAdapter struct {
 func (adapter userDefinedScannerAdapter) ID() string { return adapter.config.ID }
 
 func (adapter userDefinedScannerAdapter) Requirements(_ map[string]string) []EnvRequirement {
-	requirements := make([]EnvRequirement, 0, len(adapter.config.Env))
-	for _, name := range adapter.config.Env {
+	names := userDefinedScannerEnvNames(adapter.config)
+	requirements := make([]EnvRequirement, 0, len(names))
+	for _, name := range names {
 		requirements = append(requirements, EnvRequirement{EnvVar: name, Reason: adapter.config.ID + " scanner"})
 	}
 	return requirements
 }
 
 func (adapter userDefinedScannerAdapter) Info() ScannerInfo {
-	return ScannerInfo{ID: adapter.config.ID, DisplayName: adapter.config.ID, RequiredEnv: append([]string(nil), adapter.config.Env...)}
+	return ScannerInfo{
+		ID: adapter.config.ID, DisplayName: adapter.config.ID,
+		RequiredEnv: userDefinedScannerEnvNames(adapter.config),
+	}
 }
 
 func (adapter userDefinedScannerAdapter) InstallPlan() InstallPlan {
@@ -108,7 +113,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
-		message := commandError(runErr, output.Stderr, runner.Env)
+		message := commandErrorForEnvNames(runErr, output.Stderr, runner.Env, adapter.config.SecretEnv)
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
 				Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
@@ -130,6 +135,18 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 		Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
 		ExitCode: exitCode, Raw: json.RawMessage(raw),
 	}, nil
+}
+
+func userDefinedScannerEnvNames(config UserDefinedScannerConfig) []string {
+	names := make([]string, 0, len(config.Env)+len(config.SecretEnv))
+	seen := make(map[string]bool, cap(names))
+	for _, name := range append(append([]string(nil), config.Env...), config.SecretEnv...) {
+		if !seen[name] {
+			names = append(names, name)
+			seen[name] = true
+		}
+	}
+	return names
 }
 
 func gateEligibleExitCode(exitCode *int) *int {

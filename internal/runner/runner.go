@@ -2284,22 +2284,50 @@ func envMapToEnviron(env map[string]string) []string {
 }
 
 func commandError(runErr error, stderr string, env map[string]string) string {
-	message := redactEnvValues(runErr.Error(), env)
-	if strings.TrimSpace(stderr) != "" {
-		message += ": " + redactEnvValues(strings.TrimSpace(stderr), env)
+	names := make([]string, 0)
+	for key := range env {
+		if isSecretEnvKey(key) {
+			names = append(names, key)
+		}
+	}
+	return commandErrorForEnvNames(runErr, stderr, env, names)
+}
+
+func commandErrorForEnvNames(runErr error, stderr string, env map[string]string, names []string) string {
+	message := redactEnvValuesForNames(runErr.Error(), env, names)
+	redactedStderr := strings.TrimSpace(redactEnvValuesForNames(stderr, env, names))
+	if redactedStderr != "" {
+		message += ": " + redactedStderr
 	}
 	return message
 }
 
 func redactEnvValues(value string, env map[string]string) string {
-	if value == "" || len(env) == 0 {
+	names := make([]string, 0)
+	for key := range env {
+		if isSecretEnvKey(key) {
+			names = append(names, key)
+		}
+	}
+	return redactEnvValuesForNames(value, env, names)
+}
+
+func redactEnvValuesForNames(value string, env map[string]string, names []string) string {
+	if value == "" || len(env) == 0 || len(names) == 0 {
 		return value
 	}
-	secrets := make([]string, 0)
-	for key, secret := range env {
-		if strings.TrimSpace(secret) == "" || !isSecretEnvKey(key) {
+	secretSet := make(map[string]bool, len(names))
+	for _, name := range names {
+		secret := env[name]
+		trimmed := strings.TrimSpace(secret)
+		if trimmed == "" {
 			continue
 		}
+		secretSet[secret] = true
+		secretSet[trimmed] = true
+	}
+	secrets := make([]string, 0, len(secretSet))
+	for secret := range secretSet {
 		secrets = append(secrets, secret)
 	}
 	sort.Slice(secrets, func(i int, j int) bool {

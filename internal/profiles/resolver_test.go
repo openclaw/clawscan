@@ -761,6 +761,8 @@ profiles:
       - id: my-scanner
         command: my-scanner --json {{target}}
         env:
+          - MY_SCANNER_MODE
+        secretEnv:
           - MY_SCANNER_TOKEN
         targets:
           - plugin
@@ -782,6 +784,9 @@ profiles:
 	}
 	if !adapter.SupportsTargetKind("plugin") {
 		t.Fatal("plugin-only custom scanner does not support plugin targets")
+	}
+	if got := adapter.Info().RequiredEnv; !reflect.DeepEqual(got, []string{"MY_SCANNER_MODE", "MY_SCANNER_TOKEN"}) {
+		t.Fatalf("required env = %#v", got)
 	}
 }
 
@@ -1138,6 +1143,29 @@ profiles:
 	}
 	if err != nil && strings.Contains(err.Error(), "sk-live-secret") {
 		t.Fatalf("error leaked the inline env value: %v", err)
+	}
+}
+
+func TestResolveArgsRejectsInlineUserDefinedScannerSecretEnvValue(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".clawscan.yml")
+	writeFile(t, config, `version: 1
+profiles:
+  review:
+    scanners:
+      - id: my-scanner
+        command: my-scanner {{target}}
+        secretEnv:
+          - SCANNER_AUTH=credential-sensitive-suffix
+`)
+
+	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
+	want := `User-defined scanner my-scanner in profile review has an invalid secretEnv entry "SCANNER_AUTH"; declare bare variable names and set values in the environment, not inline`
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	if err != nil && strings.Contains(err.Error(), "credential-sensitive-suffix") {
+		t.Fatalf("error leaked the inline secretEnv value: %v", err)
 	}
 }
 

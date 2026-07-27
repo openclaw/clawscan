@@ -990,6 +990,105 @@ func TestUserDefinedScannerMountsDockerTargetReadOnly(t *testing.T) {
 	}
 }
 
+func TestUserDefinedScannerRedactsOnlySecretEnvFromErrors(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID:        "test",
+		Command:   "test {{target}}",
+		Env:       []string{"URL_SCANNER_TOKEN"},
+		SecretEnv: []string{"SCANNER_AUTH"},
+		Targets:   []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{
+		stderr: "mode visible-value auth credential-sensitive-suffix",
+		err:    errCommandFailed,
+	}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env: map[string]string{
+			"URL_SCANNER_TOKEN": "visible-value",
+			"SCANNER_AUTH":      "credential-sensitive-suffix",
+		},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("test", filepath.Join(t.TempDir(), "file.txt"), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Error, "visible-value") {
+		t.Fatalf("plain env value was redacted: %q", result.Error)
+	}
+	if strings.Contains(result.Error, "credential-sensitive-suffix") || !strings.Contains(result.Error, "[redacted]") {
+		t.Fatalf("secretEnv value was not redacted: %q", result.Error)
+	}
+}
+
+func TestUserDefinedScannerPreservesSecretEnvInRawEvidence(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID:        "test",
+		Command:   "test {{target}}",
+		SecretEnv: []string{"SCANNER_AUTH"},
+		Targets:   []string{"skill"},
+	})
+	registry, err := NewScannerRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRunner := &recordingCommandRunner{
+		stdout: `{"evidence":"credential-sensitive-suffix"}`,
+		stderr: "auth credential-sensitive-suffix",
+		err:    errCommandFailed,
+	}
+	result, err := (ExternalScannerRunner{
+		Registry: registry, CommandRunner: commandRunner,
+		Env:         map[string]string{"SCANNER_AUTH": "credential-sensitive-suffix"},
+		SandboxMode: SandboxModeOff,
+	}).RunScanner("test", filepath.Join(t.TempDir(), "file.txt"), "2026-07-21T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Error, "credential-sensitive-suffix") {
+		t.Fatalf("secretEnv value leaked into error: %q", result.Error)
+	}
+	if !strings.Contains(string(result.Raw), "credential-sensitive-suffix") {
+		t.Fatalf("raw scanner evidence was modified: %s", result.Raw)
+	}
+}
+
+func TestCommandErrorForEnvNamesRedactsOverlappingAndTrimmedValues(t *testing.T) {
+	env := map[string]string{
+		"PLAIN_TOKEN":  "credential",
+		"SCANNER_AUTH": " credential-sensitive-suffix ",
+	}
+	result := commandErrorForEnvNames(
+		errCommandFailed,
+		"credential-sensitive-suffix rejected; credential remains visible",
+		env,
+		[]string{"SCANNER_AUTH"},
+	)
+	if result != "exit status 1: [redacted] rejected; credential remains visible" {
+		t.Fatalf("result = %q", result)
+	}
+}
+
+func TestUserDefinedScannerRequirementsIncludeEnvAndSecretEnv(t *testing.T) {
+	adapter := NewUserDefinedScanner(UserDefinedScannerConfig{
+		ID:        "test",
+		Command:   "test {{target}}",
+		Env:       []string{"MODE"},
+		SecretEnv: []string{"SCANNER_AUTH"},
+	})
+	requirements := adapter.Requirements(nil)
+	if len(requirements) != 2 || requirements[0].EnvVar != "MODE" || requirements[1].EnvVar != "SCANNER_AUTH" {
+		t.Fatalf("requirements = %#v", requirements)
+	}
+	if got := adapter.Info().RequiredEnv; !reflect.DeepEqual(got, []string{"MODE", "SCANNER_AUTH"}) {
+		t.Fatalf("required env = %#v", got)
+	}
+}
+
 func TestValidateRequirementsSkipsScannerResultCredentials(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		"./my-skill",
