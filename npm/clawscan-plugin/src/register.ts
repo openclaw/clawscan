@@ -38,8 +38,12 @@ function configuredString(
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
-function requiredScannersForShippedConfig(configPath: string, profile: string): readonly string[] {
-  if (configPath !== DEFAULT_CONFIG_PATH) {
+export function requiredScannersForShippedConfig(
+  configPath: string,
+  defaultConfigPath: string,
+  profile: string,
+): readonly string[] {
+  if (configPath !== defaultConfigPath) {
     return [];
   }
   if (profile === "clawhub") {
@@ -54,12 +58,18 @@ function requiredScannersForShippedConfig(configPath: string, profile: string): 
 export function registerInstallGate(api: GatePluginApi, resolveBinaryPath: () => string): void {
   const configPath = configuredString(api.pluginConfig, "configPath", DEFAULT_CONFIG_PATH);
   const profile = configuredString(api.pluginConfig, "profile", DEFAULT_PROFILE);
+  const resolvedConfigPath = api.resolvePath(configPath);
+  const resolvedDefaultConfigPath = api.resolvePath(DEFAULT_CONFIG_PATH);
   const handler = createBeforeInstallHandler({
     resolveBinaryPath,
-    resolveConfigPath: () => api.resolvePath(configPath),
-    resolveFallbackConfigPath: () => api.resolvePath(DEFAULT_CONFIG_PATH),
+    resolveConfigPath: () => resolvedConfigPath,
+    resolveFallbackConfigPath: () => resolvedDefaultConfigPath,
     profile,
-    requiredScanners: requiredScannersForShippedConfig(configPath, profile),
+    requiredScanners: requiredScannersForShippedConfig(
+      resolvedConfigPath,
+      resolvedDefaultConfigPath,
+      profile,
+    ),
     runCommand: async (argv, options) =>
       await api.runtime.system.runCommandWithTimeout(argv, options),
   });

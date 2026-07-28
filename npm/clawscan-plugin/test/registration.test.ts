@@ -1,12 +1,26 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BeforeInstallEvent } from "../src/gate-handler.ts";
-import { registerInstallGate, type RegisteredHandler } from "../src/register.ts";
+import {
+  registerInstallGate,
+  requiredScannersForShippedConfig,
+  type RegisteredHandler,
+} from "../src/register.ts";
 
 describe("registerInstallGate", () => {
+  it("recognizes equivalent resolved paths to the shipped profile", () => {
+    assert.deepEqual(
+      requiredScannersForShippedConfig(
+        "/plugin/profiles/clawhub.yml",
+        "/plugin/profiles/clawhub.yml",
+        "clawhub",
+      ),
+      ["skillspector", "clawscan-static"],
+    );
+  });
+
   it("registers a high-priority before_install hook with an explicit resolved config", async () => {
     let registeredHandler: RegisteredHandler | undefined;
-    let resolvedPath = "";
     const commandCalls: string[][] = [];
     registerInstallGate(
       {
@@ -14,10 +28,7 @@ describe("registerInstallGate", () => {
           configPath: "/trusted/custom.yml",
           profile: "clawhub",
         },
-        resolvePath: (input) => {
-          resolvedPath = input;
-          return input;
-        },
+        resolvePath: (input) => input,
         runtime: {
           system: {
             runCommandWithTimeout: async (argv) => {
@@ -67,7 +78,6 @@ describe("registerInstallGate", () => {
     } satisfies BeforeInstallEvent);
 
     assert.equal(result, undefined);
-    assert.equal(resolvedPath, "/trusted/custom.yml");
     assert.deepEqual(commandCalls[1], [
       "/plugin/bin/clawscan",
       "/untrusted/candidate",
