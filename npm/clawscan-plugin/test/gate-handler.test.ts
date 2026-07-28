@@ -112,7 +112,7 @@ describe("createBeforeInstallHandler", () => {
           severity: "warn",
           file: ".",
           line: 1,
-          message: "Gate degraded: Docker unavailable; clawscan-static only.",
+          message: "Gate degraded: Docker mode unavailable on this host; clawscan-static only.",
         },
       ],
     });
@@ -198,6 +198,34 @@ describe("createBeforeInstallHandler", () => {
 
     assert.equal(invocation, 2);
     assert.equal(result?.block, undefined);
+    assert.equal(result?.findings?.[0]?.ruleId, "clawscan/docker-unavailable");
+  });
+
+  it("uses the static degraded path on Windows even when Docker may be installed", async () => {
+    const calls: CommandCall[] = [];
+    const handler = createBeforeInstallHandler({
+      platform: "win32",
+      resolveBinaryPath: () => "C:\\plugin\\clawscan.exe",
+      resolveConfigPath: () => "C:\\plugin\\profiles\\clawhub.yml",
+      profile: "clawhub",
+      runCommand: async (argv, options) => {
+        calls.push({ argv, options });
+        return commandResult({
+          stdout: JSON.stringify({
+            schemaVersion: "clawscan-run-v1",
+            gate: "pass",
+            gateRules: [],
+            scanners: { "clawscan-static": { status: "completed" } },
+          }),
+        });
+      },
+    });
+
+    const result = await handler({ sourcePath: "C:\\candidate\\demo-skill" });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.argv[0], "C:\\plugin\\clawscan.exe");
+    assert.equal(calls[0]?.argv.includes("docker"), false);
     assert.equal(result?.findings?.[0]?.ruleId, "clawscan/docker-unavailable");
   });
 

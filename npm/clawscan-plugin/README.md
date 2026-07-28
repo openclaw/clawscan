@@ -20,9 +20,10 @@ sandbox. This no-LLM mode does not send source files to a model provider, but
 SkillSpector still sends dependency names to [OSV.dev](https://osv.dev/) for
 CVE lookups.
 
-If Docker is unavailable, the plugin visibly reports that the gate is degraded
-and runs only `clawscan-static` with the sandbox disabled. This fallback is a
-small static tripwire, not equivalent protection.
+If Docker mode is unavailable on the host, including on native Windows, the
+plugin visibly reports that the gate is degraded and runs only
+`clawscan-static` with the sandbox disabled. This fallback is a small static
+tripwire, not equivalent protection.
 
 The plugin accepts only an explicit `configPath` and `profile`. Relative config
 paths resolve from the plugin directory; the untrusted candidate directory is

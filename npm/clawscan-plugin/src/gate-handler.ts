@@ -1,3 +1,4 @@
+import process from "node:process";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { gateResultFromArtifact, type BeforeInstallResult } from "./artifact.ts";
 
@@ -12,6 +13,7 @@ export type CommandOptions = Exclude<Parameters<HostRunCommand>[1], number>;
 export type CommandResult = Awaited<ReturnType<HostRunCommand>>;
 
 export type GateHandlerDependencies = {
+  platform?: NodeJS.Platform;
   runCommand: (argv: string[], options: CommandOptions) => Promise<CommandResult>;
   resolveBinaryPath: () => string;
   resolveConfigPath: () => string;
@@ -89,7 +91,7 @@ const degradedFinding = {
   severity: "warn" as const,
   file: ".",
   line: 1,
-  message: "Gate degraded: Docker unavailable; clawscan-static only.",
+  message: "Gate degraded: Docker mode unavailable on this host; clawscan-static only.",
 };
 
 const scanCommandOptions: CommandOptions = {
@@ -107,13 +109,15 @@ export function createBeforeInstallHandler(dependencies: GateHandlerDependencies
   return async (event: BeforeInstallEvent): Promise<BeforeInstallResult | undefined> => {
     try {
       let dockerAvailable = false;
-      try {
-        const dockerProbe = await dependencies.runCommand(["docker", "info"], {
-          timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
-        });
-        dockerAvailable = commandSucceeded(dockerProbe);
-      } catch {
-        dockerAvailable = false;
+      if ((dependencies.platform ?? process.platform) !== "win32") {
+        try {
+          const dockerProbe = await dependencies.runCommand(["docker", "info"], {
+            timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+          });
+          dockerAvailable = commandSucceeded(dockerProbe);
+        } catch {
+          dockerAvailable = false;
+        }
       }
       const binaryPath = dependencies.resolveBinaryPath();
       if (!dockerAvailable) {
