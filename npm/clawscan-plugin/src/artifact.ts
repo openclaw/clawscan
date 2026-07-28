@@ -18,6 +18,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function scannerCompleted(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && value.status === "completed" && cleanText(value.error, 1) === "";
+}
+
+function skillSpectorEvidenceUsable(raw: unknown): boolean {
+  if (!isRecord(raw) || raw.execution_successful === false || cleanText(raw.error, 1) !== "") {
+    return false;
+  }
+  const status = cleanText(raw.status, 40).toLowerCase();
+  if (["benign", "safe", "clean", "suspicious", "malicious"].includes(status)) {
+    return true;
+  }
+  const assessment = isRecord(raw.risk_assessment)
+    ? raw.risk_assessment
+    : isRecord(raw.riskAssessment)
+      ? raw.riskAssessment
+      : {};
+  if (
+    cleanText(raw.recommendation, 1) !== "" ||
+    cleanText(assessment.recommendation, 1) !== "" ||
+    typeof raw.score === "number" ||
+    typeof assessment.score === "number"
+  ) {
+    return true;
+  }
+  return ["filtered_findings", "filteredFindings", "findings", "issues", "vulnerabilities"].some(
+    (key) => Array.isArray(raw[key]),
+  );
+}
+
+function scannerEvidenceUsable(scanner: string, result: Record<string, unknown>): boolean {
+  if (scanner === "clawscan-static") {
+    return (
+      isRecord(result.raw) &&
+      result.raw.schemaVersion === "clawscan-static-v1" &&
+      Array.isArray(result.raw.findings)
+    );
+  }
+  return scanner !== "skillspector" || skillSpectorEvidenceUsable(result.raw);
+}
+
 function cleanText(value: unknown, limit: number): string {
   if (typeof value !== "string") {
     return "";
@@ -126,12 +167,15 @@ export function gateResultFromArtifact(
   }
   for (const scanner of requiredScanners) {
     const result = parsed.scanners[scanner];
-    if (!isRecord(result) || result.status !== "completed") {
+    if (!scannerCompleted(result)) {
       return blockForInvalidArtifact(`required scanner ${scanner} did not complete`);
+    }
+    if (!scannerEvidenceUsable(scanner, result)) {
+      return blockForInvalidArtifact(`required scanner ${scanner} returned unusable evidence`);
     }
   }
   for (const [scanner, result] of Object.entries(parsed.scanners)) {
-    if (!isRecord(result) || result.status !== "completed") {
+    if (!scannerCompleted(result)) {
       const scannerName = cleanRuleSegment(scanner, "unknown-scanner");
       return blockForInvalidArtifact(`scanner ${scannerName} did not complete`);
     }

@@ -63,12 +63,15 @@ describe("@openclaw/clawscan-plugin package", () => {
     assert.doesNotMatch(handler, new RegExp(forbiddenModule));
   });
 
-  it("ships a no-judge profile with both required native gate scanners", async () => {
+  it("ships a no-judge profile with both required declarative gate scanners", async () => {
     const profile = await readFile(join(packageRoot, "profiles", "clawhub.yml"), "utf8");
 
     assert.match(profile, /id: skillspector/);
     assert.match(profile, /id: clawscan-static/);
-    assert.match(profile, /native: true/);
+    assert.match(profile, /id: execution-failed/);
+    assert.match(profile, /id: critical-finding/);
+    assert.match(profile, /id: any-finding/);
+    assert.doesNotMatch(profile, /native:/);
     assert.doesNotMatch(profile, /\bjudge:/);
   });
 });

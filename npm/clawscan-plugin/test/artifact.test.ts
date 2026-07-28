@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { gateResultFromArtifact } from "../src/artifact.ts";
 
+const skillSpectorCompleted = {
+  status: "completed",
+  error: "",
+  raw: { status: "clean", findings: [] },
+};
+const staticCompleted = {
+  status: "completed",
+  error: "",
+  raw: { schemaVersion: "clawscan-static-v1", findings: [] },
+};
+
 describe("gateResultFromArtifact", () => {
   it("continues silently for a valid pass artifact", () => {
     const result = gateResultFromArtifact(
@@ -10,8 +21,8 @@ describe("gateResultFromArtifact", () => {
         gate: "pass",
         gateRules: [],
         scanners: {
-          skillspector: { status: "completed" },
-          "clawscan-static": { status: "completed" },
+          skillspector: skillSpectorCompleted,
+          "clawscan-static": staticCompleted,
         },
       }),
       ["skillspector", "clawscan-static"],
@@ -44,8 +55,8 @@ describe("gateResultFromArtifact", () => {
           },
         ],
         scanners: {
-          skillspector: { status: "completed" },
-          "clawscan-static": { status: "completed" },
+          skillspector: skillSpectorCompleted,
+          "clawscan-static": staticCompleted,
         },
       }),
       ["skillspector", "clawscan-static"],
@@ -87,8 +98,8 @@ describe("gateResultFromArtifact", () => {
           },
         ],
         scanners: {
-          skillspector: { status: "completed" },
-          "clawscan-static": { status: "completed" },
+          skillspector: skillSpectorCompleted,
+          "clawscan-static": staticCompleted,
         },
       }),
       ["skillspector", "clawscan-static"],
@@ -153,7 +164,7 @@ describe("gateResultFromArtifact", () => {
         schemaVersion: "clawscan-run-v1",
         gate: "maybe",
         gateRules: [],
-        scanners: { skillspector: { status: "completed" } },
+        scanners: { skillspector: skillSpectorCompleted },
       }),
       requiredScanners: ["skillspector"],
     },
@@ -167,7 +178,7 @@ describe("gateResultFromArtifact", () => {
       }),
       requiredScanners: ["skillspector"],
     },
-    ...["skipped", "failed"].map((status) => ({
+    ...["skipped", "completed"].map((status) => ({
       name: `a ${status} required scanner`,
       stdout: JSON.stringify({
         schemaVersion: "clawscan-run-v1",
@@ -195,8 +206,8 @@ describe("gateResultFromArtifact", () => {
         gate: "pass",
         gateRules: [],
         scanners: {
-          skillspector: { status: "completed" },
-          "clawscan-static": { status: "completed" },
+          skillspector: skillSpectorCompleted,
+          "clawscan-static": staticCompleted,
           "team-scanner": { status: "failed" },
         },
       }),
@@ -209,6 +220,34 @@ describe("gateResultFromArtifact", () => {
       "ClawScan blocked installation: scanner team-scanner did not complete",
     );
   });
+
+  for (const [name, scanner, raw] of [
+    ["completion-only SkillSpector", "skillspector", { status: "completed" }],
+    [
+      "failed SkillSpector execution",
+      "skillspector",
+      { status: "clean", execution_successful: false },
+    ],
+    ["invalid static scanner", "clawscan-static", { schemaVersion: "wrong", findings: [] }],
+  ] as const) {
+    it(`fails closed for ${name} evidence`, () => {
+      const result = gateResultFromArtifact(
+        JSON.stringify({
+          schemaVersion: "clawscan-run-v1",
+          gate: "pass",
+          gateRules: [],
+          scanners: { [scanner]: { status: "completed", error: "", raw } },
+        }),
+        [scanner],
+      );
+
+      assert.equal(result?.block, true);
+      assert.equal(
+        result?.blockReason,
+        `ClawScan blocked installation: required scanner ${scanner} returned unusable evidence`,
+      );
+    });
+  }
 
   it("fails closed when an artifact contains no scanner results", () => {
     const result = gateResultFromArtifact(
@@ -240,8 +279,8 @@ describe("gateResultFromArtifact", () => {
           },
         ],
         scanners: {
-          skillspector: { status: "completed" },
-          "clawscan-static": { status: "completed" },
+          skillspector: skillSpectorCompleted,
+          "clawscan-static": staticCompleted,
         },
       }),
       ["skillspector", "clawscan-static"],
@@ -266,7 +305,7 @@ describe("gateResultFromArtifact", () => {
           action: "warn",
         })),
         scanners: {
-          "clawscan-static": { status: "completed" },
+          "clawscan-static": staticCompleted,
         },
       }),
       ["clawscan-static"],

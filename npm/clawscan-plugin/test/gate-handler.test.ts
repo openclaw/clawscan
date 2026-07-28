@@ -13,13 +13,19 @@ type CommandCall = {
   options: CommandOptions;
 };
 
+const staticCompleted = {
+  status: "completed",
+  error: "",
+  raw: { schemaVersion: "clawscan-static-v1", findings: [] },
+};
+
 const passArtifact = JSON.stringify({
   schemaVersion: "clawscan-run-v1",
   gate: "pass",
   gateRules: [],
   scanners: {
-    skillspector: { status: "completed" },
-    "clawscan-static": { status: "completed" },
+    skillspector: { status: "completed", error: "", raw: { status: "clean", findings: [] } },
+    "clawscan-static": staticCompleted,
   },
 });
 
@@ -98,7 +104,7 @@ describe("createBeforeInstallHandler", () => {
       gate: "pass",
       gateRules: [],
       scanners: {
-        "clawscan-static": { status: "completed" },
+        "clawscan-static": staticCompleted,
       },
     });
     const outputs = [
@@ -163,7 +169,7 @@ describe("createBeforeInstallHandler", () => {
           gate: "pass",
           gateRules: [],
           scanners: {
-            "clawscan-static": { status: "completed" },
+            "clawscan-static": staticCompleted,
           },
         }),
       }),
@@ -201,7 +207,7 @@ describe("createBeforeInstallHandler", () => {
             schemaVersion: "clawscan-run-v1",
             gate: "pass",
             gateRules: [],
-            scanners: { "clawscan-static": { status: "completed" } },
+            scanners: { "clawscan-static": staticCompleted },
           }),
         });
       },
@@ -228,7 +234,7 @@ describe("createBeforeInstallHandler", () => {
             schemaVersion: "clawscan-run-v1",
             gate: "pass",
             gateRules: [],
-            scanners: { "clawscan-static": { status: "completed" } },
+            scanners: { "clawscan-static": staticCompleted },
           }),
         });
       },
