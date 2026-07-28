@@ -70,7 +70,7 @@ describe("registerInstallGate", () => {
     assert.equal(resolvedPath, "/trusted/custom.yml");
     assert.deepEqual(commandCalls[1], [
       "/plugin/bin/clawscan",
-      "/untrusted/candidate/SKILL.md",
+      "/untrusted/candidate",
       "--config",
       "/trusted/custom.yml",
       "--profile",

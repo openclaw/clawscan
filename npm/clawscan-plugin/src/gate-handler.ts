@@ -1,4 +1,5 @@
 import process from "node:process";
+import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { gateResultFromArtifact, type BeforeInstallResult } from "./artifact.ts";
@@ -29,12 +30,27 @@ export type BeforeInstallEvent = {
   targetType: "skill" | "plugin";
 };
 
-export function scanTargetForEvent(event: BeforeInstallEvent): string {
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function scanTargetForEvent(
+  event: BeforeInstallEvent,
+  pluginManifestExists: (path: string) => boolean = isRegularFile,
+): string {
   if (event.sourcePathKind === "file") {
     return event.sourcePath;
   }
-  const manifestName = event.targetType === "plugin" ? "openclaw.plugin.json" : "SKILL.md";
-  return join(event.sourcePath, manifestName);
+  if (event.targetType === "plugin") {
+    return join(event.sourcePath, "openclaw.plugin.json");
+  }
+  return pluginManifestExists(join(event.sourcePath, "openclaw.plugin.json"))
+    ? join(event.sourcePath, "SKILL.md")
+    : event.sourcePath;
 }
 
 function commandSucceeded(result: CommandResult): boolean {

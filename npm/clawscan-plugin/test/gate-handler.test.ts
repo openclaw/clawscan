@@ -70,7 +70,7 @@ describe("createBeforeInstallHandler", () => {
       {
         argv: [
           "/plugin/node_modules/@openclaw/clawscan/binaries/clawscan",
-          "/candidate/demo-skill/SKILL.md",
+          "/candidate/demo-skill",
           "--config",
           "/plugin/profiles/clawhub.yml",
           "--profile",
@@ -131,7 +131,7 @@ describe("createBeforeInstallHandler", () => {
     assert.deepEqual(calls[1], {
       argv: [
         "/plugin/bin/clawscan",
-        "/candidate/demo-skill/SKILL.md",
+        "/candidate/demo-skill",
         "--config",
         "/plugin/profiles/clawhub.yml",
         "--profile",
@@ -375,8 +375,12 @@ describe("createBeforeInstallHandler", () => {
 });
 
 describe("scanTargetForEvent", () => {
-  it("disambiguates dual-layout candidate directories with the host target type", () => {
-    assert.equal(scanTargetForEvent(beforeInstallEvent()), "/candidate/demo-skill/SKILL.md");
+  it("scans full skill directories and disambiguates dual-layout candidates", () => {
+    assert.equal(scanTargetForEvent(beforeInstallEvent()), "/candidate/demo-skill");
+    assert.equal(
+      scanTargetForEvent(beforeInstallEvent(), () => true),
+      "/candidate/demo-skill/SKILL.md",
+    );
     assert.equal(
       scanTargetForEvent(
         beforeInstallEvent({
