@@ -97,6 +97,7 @@ const degradedFinding = {
 const scanCommandOptions: CommandOptions = {
   timeoutMs: SCAN_TIMEOUT_MS,
   env: { CLAWSCAN_SKILLSPECTOR_LLM: "0" },
+  killProcessTree: true,
   maxOutputBytes: {
     stdout: MAX_STDOUT_BYTES,
     stderr: MAX_STDERR_BYTES,

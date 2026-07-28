@@ -71,6 +71,7 @@ describe("createBeforeInstallHandler", () => {
         options: {
           timeoutMs: 600_000,
           env: { CLAWSCAN_SKILLSPECTOR_LLM: "0" },
+          killProcessTree: true,
           maxOutputBytes: { stdout: 8_388_608, stderr: 65_536 },
           outputCapture: "head",
           terminateOnOutputLimit: true,
@@ -133,6 +134,7 @@ describe("createBeforeInstallHandler", () => {
       options: {
         timeoutMs: 600_000,
         env: { CLAWSCAN_SKILLSPECTOR_LLM: "0" },
+        killProcessTree: true,
         maxOutputBytes: { stdout: 8_388_608, stderr: 65_536 },
         outputCapture: "head",
         terminateOnOutputLimit: true,
