@@ -28,6 +28,14 @@ export function normalizePackageVersion(version) {
   return match[1];
 }
 
+export function normalizeBuildDate(value) {
+  const parsed = new Date(String(value ?? "").trim());
+  if (Number.isNaN(parsed.valueOf())) {
+    throw new Error("Expected a valid commit timestamp for the package build date.");
+  }
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 export function binaryVersionFor(version) {
   const trimmed = String(version ?? "").trim();
   const packageVersion = normalizePackageVersion(trimmed);
@@ -108,10 +116,12 @@ async function stagePackages(options) {
   const binaryVersion = binaryVersionFor(options.version);
   const releaseSha = run("git", ["rev-parse", "HEAD"]).stdout.trim();
   const releaseCommit = run("git", ["rev-parse", "--short", "HEAD"]).stdout.trim();
-  const buildDate = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const buildDate = normalizeBuildDate(
+    run("git", ["show", "-s", "--format=%cI", "HEAD"]).stdout.trim(),
+  );
   const packageSource = join(repoRoot, "npm", "clawscan");
   const pluginPackageSource = join(repoRoot, "npm", "clawscan-plugin");
-  const packageOut = join(options.outDir, "clawscan-package");
+  const packageOut = join(options.outDir, "package");
   const pluginPackageOut = join(options.outDir, "clawscan-plugin-package");
 
   await rm(options.outDir, { recursive: true, force: true });

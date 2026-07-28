@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   binaryNameForTarget,
   normalizePackageVersion,
+  normalizeBuildDate,
   packageTargets,
   platformKeyForTarget,
   preparePluginPackageJson,
@@ -23,6 +24,16 @@ describe("normalizePackageVersion", () => {
       () => normalizePackageVersion("manual-42"),
       /Expected a semver npm package version or v-prefixed semver tag/,
     );
+  });
+});
+
+describe("normalizeBuildDate", () => {
+  it("derives a stable UTC build date from commit metadata", () => {
+    assert.equal(normalizeBuildDate("2026-07-28T12:34:56+10:00"), "2026-07-28T02:34:56Z");
+  });
+
+  it("rejects invalid commit timestamps", () => {
+    assert.throws(() => normalizeBuildDate("not-a-date"), /valid commit timestamp/);
   });
 });
 
