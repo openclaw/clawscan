@@ -62,13 +62,15 @@ describe("registerInstallGate", () => {
     assert.ok(registeredHandler);
     const result = await registeredHandler({
       sourcePath: "/untrusted/candidate",
+      sourcePathKind: "directory",
+      targetType: "skill",
     } satisfies BeforeInstallEvent);
 
     assert.equal(result, undefined);
     assert.equal(resolvedPath, "/trusted/custom.yml");
     assert.deepEqual(commandCalls[1], [
       "/plugin/bin/clawscan",
-      "/untrusted/candidate",
+      "/untrusted/candidate/SKILL.md",
       "--config",
       "/trusted/custom.yml",
       "--profile",

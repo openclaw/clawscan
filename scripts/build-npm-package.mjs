@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -42,6 +43,10 @@ export function binaryVersionFor(version) {
   return trimmed.startsWith("v") ? trimmed : `v${packageVersion}`;
 }
 
+export function npmDistTagForVersion(version) {
+  return normalizePackageVersion(version).includes("-") ? "next" : "latest";
+}
+
 export function platformKeyForTarget(target) {
   const arch = target.goarch === "amd64" ? "x64" : target.goarch;
   const platform = target.goos === "windows" ? "win32" : target.goos;
@@ -56,11 +61,39 @@ export function preparePluginPackageJson(packageJson, packageVersion) {
   return {
     ...packageJson,
     version: packageVersion,
+    files: [...new Set([...(packageJson.files ?? []), "dist/"])],
     dependencies: {
       ...packageJson.dependencies,
       "@openclaw/clawscan": packageVersion,
     },
+    openclaw: {
+      ...packageJson.openclaw,
+      runtimeExtensions: ["./dist/index.js"],
+    },
   };
+}
+
+const pluginRuntimeSources = [
+  "index.ts",
+  join("src", "artifact.ts"),
+  join("src", "gate-handler.ts"),
+  join("src", "register.ts"),
+];
+
+export function compilePluginTypeScript(source) {
+  return stripTypeScriptTypes(source, { mode: "transform" }).replace(
+    /((?:from\s+|import\s*)["'](?:\.\.?\/)[^"']+)\.ts(["'])/gu,
+    "$1.js$2",
+  );
+}
+
+async function stagePluginRuntime(pluginPackageSource, pluginPackageOut) {
+  for (const relativeSource of pluginRuntimeSources) {
+    const destination = join(pluginPackageOut, "dist", relativeSource.replace(/\.ts$/u, ".js"));
+    await mkdir(dirname(destination), { recursive: true });
+    const source = await readFile(join(pluginPackageSource, relativeSource), "utf8");
+    await writeFile(destination, compilePluginTypeScript(source));
+  }
 }
 
 function run(command, args, options = {}) {
@@ -142,6 +175,7 @@ async function stagePackages(options) {
   });
   await rm(join(pluginPackageOut, "test"), { recursive: true, force: true });
   await cp(join(repoRoot, "LICENSE"), join(pluginPackageOut, "LICENSE"));
+  await stagePluginRuntime(pluginPackageSource, pluginPackageOut);
 
   const packageJsonPath = join(packageOut, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
@@ -240,6 +274,7 @@ async function smokePackages(
     }
     await readFile(join(installedPluginRoot, "openclaw.plugin.json"), "utf8");
     await readFile(join(installedPluginRoot, "profiles", "clawhub.yml"), "utf8");
+    await readFile(join(installedPluginRoot, "dist", "index.js"), "utf8");
 
     const hostPackageRoot = join(pluginPrefix, "node_modules", "openclaw");
     await mkdir(join(hostPackageRoot, "plugin-sdk"), { recursive: true });
@@ -264,7 +299,11 @@ async function smokePackages(
     );
     const entrypointSmokeRoot = join(pluginPrefix, "packed-entrypoint-smoke");
     await cp(installedPluginRoot, entrypointSmokeRoot, { recursive: true });
-    const entrypointUrl = pathToFileURL(join(entrypointSmokeRoot, "index.ts")).href;
+    const runtimeEntry = installedPackageJson.openclaw?.runtimeExtensions?.[0];
+    if (runtimeEntry !== "./dist/index.js") {
+      throw new Error("Installed ClawScan plugin did not declare its built runtime entrypoint.");
+    }
+    const entrypointUrl = pathToFileURL(join(entrypointSmokeRoot, runtimeEntry)).href;
     run(
       "node",
       [

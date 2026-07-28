@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { join } from "node:path";
 import {
   binaryFileName,
   platformKey,
@@ -34,22 +35,23 @@ describe("binaryFileName", () => {
 
 describe("resolveBinaryPath", () => {
   it("resolves the bundled binary path relative to the package root", () => {
-    assert.match(
+    assert.equal(
       resolveBinaryPath({
         packageRoot: "/tmp/package",
         platform: "darwin",
         arch: "arm64",
       }),
-      /\/tmp\/package\/binaries\/darwin-arm64\/clawscan$/,
+      join("/tmp/package", "binaries", "darwin-arm64", "clawscan"),
     );
   });
 });
 
 describe("resolveBundledBinaryPath", () => {
   it("resolves the binary from the installed @openclaw/clawscan package", () => {
-    assert.match(
-      resolveBundledBinaryPath({ platform: "linux", arch: "x64" }),
-      /\/npm\/clawscan\/binaries\/linux-x64\/clawscan$/,
+    const resolved = resolveBundledBinaryPath({ platform: "linux", arch: "x64" });
+    assert.equal(
+      resolved.endsWith(join("npm", "clawscan", "binaries", "linux-x64", "clawscan")),
+      true,
     );
   });
 });

@@ -161,6 +161,11 @@ jobs:
           process.stdout.write(normalizePackageVersion(process.env.RELEASE_TAG));
           EOF
           )"
+          EXPECTED_DIST_TAG="$(node --input-type=module <<'EOF'
+          import { npmDistTagForVersion } from "./scripts/build-npm-package.mjs";
+          process.stdout.write(npmDistTagForVersion(process.env.RELEASE_TAG));
+          EOF
+          )"
           TAG_FILE="dist/npm/release-tag.txt"
           SHA_FILE="dist/npm/release-sha.txt"
           VERSION_FILE="dist/npm/package-version.txt"
@@ -185,37 +190,34 @@ jobs:
             exit 1
           fi
           echo "PACKAGE_VERSION=$EXPECTED_PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "NPM_DIST_TAG=$EXPECTED_DIST_TAG" >> "$GITHUB_ENV"
 
-      - name: Resolve publish tarballs
-        id: publish_tarballs
+      - name: Resolve ClawScan publish tarball
+        id: publish_tarball
         run: |
           set -euo pipefail
           CLAWSCAN_TARBALL="dist/npm/openclaw-clawscan-${PACKAGE_VERSION}.tgz"
-          PLUGIN_TARBALL="dist/npm/openclaw-clawscan-plugin-${PACKAGE_VERSION}.tgz"
-          if [[ ! -f "$CLAWSCAN_TARBALL" || ! -f "$PLUGIN_TARBALL" ]]; then
-            echo "Prepared preflight tarballs were not both present." >&2
+          if [[ ! -f "$CLAWSCAN_TARBALL" ]]; then
+            echo "Prepared ClawScan preflight tarball was not present." >&2
             ls -la dist/npm >&2 || true
             exit 1
           fi
-          echo "clawscan_path=$CLAWSCAN_TARBALL" >> "$GITHUB_OUTPUT"
-          echo "plugin_path=$PLUGIN_TARBALL" >> "$GITHUB_OUTPUT"
+          echo "path=$CLAWSCAN_TARBALL" >> "$GITHUB_OUTPUT"
 
-      - name: Inspect npm publish state
+      - name: Inspect ClawScan npm publish state
         id: publish_state
         run: |
           set -euo pipefail
-          inspect_package() {
-            local package_name="$1"
-            local tarball_path="$2"
-            local output_name="$3"
-            local published_version=""
-            if published_version="$(npm view "${package_name}@${PACKAGE_VERSION}" version 2>/dev/null)" && [[ -n "$published_version" ]]; then
+          package_name="@openclaw/clawscan"
+          tarball_path="${{ steps.publish_tarball.outputs.path }}"
+          published_version=""
+          if published_version="$(npm view "${package_name}@${PACKAGE_VERSION}" version 2>/dev/null)" && [[ -n "$published_version" ]]; then
               if [[ "$published_version" != "$PACKAGE_VERSION" ]]; then
                 echo "${package_name}@${PACKAGE_VERSION} reported unexpected version ${published_version}." >&2
                 exit 1
               fi
-              local remote_integrity=""
-              local local_integrity=""
+              remote_integrity=""
+              local_integrity=""
               remote_integrity="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.integrity)"
               # shellcheck disable=SC2016
               local_integrity="$(node --input-type=module -e '
@@ -228,46 +230,29 @@ jobs:
                 echo "${package_name}@${PACKAGE_VERSION} does not match the prepared release tarball." >&2
                 exit 1
               fi
-              if [[ "$package_name" == "@openclaw/clawscan-plugin" ]]; then
-                local binary_dependency=""
-                binary_dependency="$(npm view "${package_name}@${PACKAGE_VERSION}" 'dependencies.@openclaw/clawscan')"
-                if [[ "$binary_dependency" != "$PACKAGE_VERSION" ]]; then
-                  echo "${package_name}@${PACKAGE_VERSION} does not depend on the matching ClawScan version." >&2
-                  exit 1
-                fi
-              fi
               echo "${package_name}@${PACKAGE_VERSION} is already published with valid release metadata; skipping publish."
-              echo "${output_name}=false" >> "$GITHUB_OUTPUT"
-              return
-            fi
-            echo "${package_name}@${PACKAGE_VERSION} is not published yet."
-            echo "${output_name}=true" >> "$GITHUB_OUTPUT"
-          }
-          inspect_package "@openclaw/clawscan" "${{ steps.publish_tarballs.outputs.clawscan_path }}" "clawscan_needed"
-          inspect_package "@openclaw/clawscan-plugin" "${{ steps.publish_tarballs.outputs.plugin_path }}" "plugin_needed"
+              echo "clawscan_needed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          echo "${package_name}@${PACKAGE_VERSION} is not published yet."
+          echo "clawscan_needed=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish ClawScan binary package
         if: steps.publish_state.outputs.clawscan_needed == 'true'
-        run: npm publish "${{ steps.publish_tarballs.outputs.clawscan_path }}" --access public --provenance
+        run: npm publish "${{ steps.publish_tarball.outputs.path }}" --access public --provenance --tag "$NPM_DIST_TAG"
 
-      - name: Publish ClawScan OpenClaw plugin
-        if: steps.publish_state.outputs.plugin_needed == 'true'
-        run: npm publish "${{ steps.publish_tarballs.outputs.plugin_path }}" --access public --provenance
-
-      - name: Verify npm release metadata
+      - name: Verify ClawScan npm release metadata
         run: |
           set -euo pipefail
-          for package_name in "@openclaw/clawscan" "@openclaw/clawscan-plugin"; do
-            NPM_DIST_JSON=""
-            for attempt in {1..12}; do
-              if NPM_DIST_JSON="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$NPM_DIST_JSON" ]]; then
-                break
-              fi
-              if [[ "$attempt" == "12" ]]; then
-                cat /tmp/npm-view-error >&2 || true
-                exit 1
-              fi
-              sleep 5
-            done
-            printf '%s\n' "$NPM_DIST_JSON"
+          NPM_DIST_JSON=""
+          for attempt in {1..12}; do
+            if NPM_DIST_JSON="$(npm view "@openclaw/clawscan@${PACKAGE_VERSION}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$NPM_DIST_JSON" ]]; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              cat /tmp/npm-view-error >&2 || true
+              exit 1
+            fi
+            sleep 5
           done
+          printf '%s\n' "$NPM_DIST_JSON"

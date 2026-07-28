@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createBeforeInstallHandler,
+  scanTargetForEvent,
+  type BeforeInstallEvent,
   type CommandOptions,
   type CommandResult,
 } from "../src/gate-handler.ts";
@@ -33,6 +35,15 @@ function commandResult(overrides: Partial<CommandResult> = {}): CommandResult {
   };
 }
 
+function beforeInstallEvent(overrides: Partial<BeforeInstallEvent> = {}): BeforeInstallEvent {
+  return {
+    sourcePath: "/candidate/demo-skill",
+    sourcePathKind: "directory",
+    targetType: "skill",
+    ...overrides,
+  };
+}
+
 describe("createBeforeInstallHandler", () => {
   it("runs the full shipped profile and continues silently for a pass artifact", async () => {
     const calls: CommandCall[] = [];
@@ -48,7 +59,7 @@ describe("createBeforeInstallHandler", () => {
       },
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.equal(result, undefined);
     assert.deepEqual(calls, [
@@ -59,7 +70,7 @@ describe("createBeforeInstallHandler", () => {
       {
         argv: [
           "/plugin/node_modules/@openclaw/clawscan/binaries/clawscan",
-          "/candidate/demo-skill",
+          "/candidate/demo-skill/SKILL.md",
           "--config",
           "/plugin/profiles/clawhub.yml",
           "--profile",
@@ -104,7 +115,7 @@ describe("createBeforeInstallHandler", () => {
       },
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.deepEqual(result, {
       findings: [
@@ -120,7 +131,7 @@ describe("createBeforeInstallHandler", () => {
     assert.deepEqual(calls[1], {
       argv: [
         "/plugin/bin/clawscan",
-        "/candidate/demo-skill",
+        "/candidate/demo-skill/SKILL.md",
         "--config",
         "/plugin/profiles/clawhub.yml",
         "--profile",
@@ -168,7 +179,7 @@ describe("createBeforeInstallHandler", () => {
       },
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.equal(result, undefined);
     assert.ok(calls[1]?.argv.includes("clawhub-static"));
@@ -196,7 +207,7 @@ describe("createBeforeInstallHandler", () => {
       },
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.equal(invocation, 2);
     assert.equal(result?.block, undefined);
@@ -223,7 +234,7 @@ describe("createBeforeInstallHandler", () => {
       },
     });
 
-    const result = await handler({ sourcePath: "C:\\candidate\\demo-skill" });
+    const result = await handler(beforeInstallEvent({ sourcePath: "C:\\candidate\\demo-skill" }));
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.argv[0], "C:\\plugin\\clawscan.exe");
@@ -246,7 +257,7 @@ describe("createBeforeInstallHandler", () => {
       runCommand: async () => outputs.shift() ?? commandResult(),
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.equal(result?.block, true);
     assert.match(
@@ -274,7 +285,7 @@ describe("createBeforeInstallHandler", () => {
       },
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.equal(result?.block, true);
     assert.equal(
@@ -305,7 +316,7 @@ describe("createBeforeInstallHandler", () => {
         runCommand: async () => outputs.shift() ?? commandResult(),
       });
 
-      const result = await handler({ sourcePath: "/candidate/demo-skill" });
+      const result = await handler(beforeInstallEvent());
 
       assert.equal(result?.block, true);
       assert.equal(result?.blockReason, fixture.reason);
@@ -324,7 +335,7 @@ describe("createBeforeInstallHandler", () => {
       runCommand: async () => outputs.shift() ?? commandResult(),
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.equal(result?.block, true);
     assert.equal(
@@ -354,11 +365,39 @@ describe("createBeforeInstallHandler", () => {
       runCommand: async () => outputs.shift() ?? commandResult(),
     });
 
-    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+    const result = await handler(beforeInstallEvent());
 
     assert.equal(
       result?.blockReason,
       "ClawScan blocked installation: ClawScan process exceeded its output limit",
+    );
+  });
+});
+
+describe("scanTargetForEvent", () => {
+  it("disambiguates dual-layout candidate directories with the host target type", () => {
+    assert.equal(scanTargetForEvent(beforeInstallEvent()), "/candidate/demo-skill/SKILL.md");
+    assert.equal(
+      scanTargetForEvent(
+        beforeInstallEvent({
+          sourcePath: "/candidate/demo-plugin",
+          targetType: "plugin",
+        }),
+      ),
+      "/candidate/demo-plugin/openclaw.plugin.json",
+    );
+  });
+
+  it("preserves file candidates selected by the host", () => {
+    assert.equal(
+      scanTargetForEvent(
+        beforeInstallEvent({
+          sourcePath: "/candidate/plugin.tgz",
+          sourcePathKind: "file",
+          targetType: "plugin",
+        }),
+      ),
+      "/candidate/plugin.tgz",
     );
   });
 });

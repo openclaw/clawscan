@@ -255,7 +255,18 @@ jobs:
         run: |
           set -euo pipefail
           for package_name in "@openclaw/clawscan" "@openclaw/clawscan-plugin"; do
-            npm view "${package_name}@${{ steps.publish_state.outputs.package_version }}" dist.tarball dist.integrity --json
+            npm_dist_json=""
+            for attempt in {1..12}; do
+              if npm_dist_json="$(npm view "${package_name}@${{ steps.publish_state.outputs.package_version }}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$npm_dist_json" ]]; then
+                break
+              fi
+              if [[ "$attempt" == "12" ]]; then
+                cat /tmp/npm-view-error >&2 || true
+                exit 1
+              fi
+              sleep 5
+            done
+            printf '%s\n' "$npm_dist_json"
           done
 
   update-homebrew-tap:

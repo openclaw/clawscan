@@ -1,4 +1,5 @@
 import process from "node:process";
+import { join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { gateResultFromArtifact, type BeforeInstallResult } from "./artifact.ts";
 
@@ -24,7 +25,17 @@ export type GateHandlerDependencies = {
 
 export type BeforeInstallEvent = {
   sourcePath: string;
+  sourcePathKind: "file" | "directory";
+  targetType: "skill" | "plugin";
 };
+
+export function scanTargetForEvent(event: BeforeInstallEvent): string {
+  if (event.sourcePathKind === "file") {
+    return event.sourcePath;
+  }
+  const manifestName = event.targetType === "plugin" ? "openclaw.plugin.json" : "SKILL.md";
+  return join(event.sourcePath, manifestName);
+}
 
 function commandSucceeded(result: CommandResult): boolean {
   return (
@@ -109,6 +120,7 @@ const scanCommandOptions: CommandOptions = {
 export function createBeforeInstallHandler(dependencies: GateHandlerDependencies) {
   return async (event: BeforeInstallEvent): Promise<BeforeInstallResult | undefined> => {
     try {
+      const scanTarget = scanTargetForEvent(event);
       let dockerAvailable = false;
       if ((dependencies.platform ?? process.platform) !== "win32") {
         try {
@@ -127,7 +139,7 @@ export function createBeforeInstallHandler(dependencies: GateHandlerDependencies
         const scan = await dependencies.runCommand(
           [
             binaryPath,
-            event.sourcePath,
+            scanTarget,
             "--config",
             fallbackConfigPath,
             "--profile",
@@ -158,7 +170,7 @@ export function createBeforeInstallHandler(dependencies: GateHandlerDependencies
       const scan = await dependencies.runCommand(
         [
           binaryPath,
-          event.sourcePath,
+          scanTarget,
           "--config",
           configPath,
           "--profile",

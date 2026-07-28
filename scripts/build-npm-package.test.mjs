@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   binaryNameForTarget,
+  compilePluginTypeScript,
   normalizePackageVersion,
   normalizeBuildDate,
+  npmDistTagForVersion,
   packageTargets,
   platformKeyForTarget,
   preparePluginPackageJson,
@@ -24,6 +26,13 @@ describe("normalizePackageVersion", () => {
       () => normalizePackageVersion("manual-42"),
       /Expected a semver npm package version or v-prefixed semver tag/,
     );
+  });
+});
+
+describe("npmDistTagForVersion", () => {
+  it("keeps stable releases on latest and prereleases on next", () => {
+    assert.equal(npmDistTagForVersion("v1.2.3"), "latest");
+    assert.equal(npmDistTagForVersion("1.2.3-beta.1"), "next");
   });
 });
 
@@ -71,8 +80,26 @@ describe("preparePluginPackageJson", () => {
       {
         name: "@openclaw/clawscan-plugin",
         version: "1.2.3",
+        files: ["dist/"],
         dependencies: { "@openclaw/clawscan": "1.2.3" },
+        openclaw: {
+          runtimeExtensions: ["./dist/index.js"],
+        },
       },
     );
+  });
+});
+
+describe("compilePluginTypeScript", () => {
+  it("removes types and rewrites local TypeScript imports for the installed runtime", () => {
+    const compiled = compilePluginTypeScript(
+      'import type { Host } from "openclaw/plugin-sdk/plugin-entry";\n' +
+        'import { register } from "./src/register.ts";\n' +
+        "const api: Host = register;\n",
+    );
+
+    assert.doesNotMatch(compiled, /import type/);
+    assert.match(compiled, /from "\.\/src\/register\.js"/);
+    assert.doesNotMatch(compiled, /: Host/);
   });
 });
