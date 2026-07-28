@@ -38,6 +38,19 @@ function configuredString(
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function requiredScannersForShippedConfig(configPath: string, profile: string): readonly string[] {
+  if (configPath !== DEFAULT_CONFIG_PATH) {
+    return [];
+  }
+  if (profile === "clawhub") {
+    return ["skillspector", "clawscan-static"];
+  }
+  if (profile === "clawhub-static") {
+    return ["clawscan-static"];
+  }
+  return [];
+}
+
 export function registerInstallGate(api: GatePluginApi, resolveBinaryPath: () => string): void {
   const configPath = configuredString(api.pluginConfig, "configPath", DEFAULT_CONFIG_PATH);
   const profile = configuredString(api.pluginConfig, "profile", DEFAULT_PROFILE);
@@ -46,6 +59,7 @@ export function registerInstallGate(api: GatePluginApi, resolveBinaryPath: () =>
     resolveConfigPath: () => api.resolvePath(configPath),
     resolveFallbackConfigPath: () => api.resolvePath(DEFAULT_CONFIG_PATH),
     profile,
+    requiredScanners: requiredScannersForShippedConfig(configPath, profile),
     runCommand: async (argv, options) =>
       await api.runtime.system.runCommandWithTimeout(argv, options),
   });

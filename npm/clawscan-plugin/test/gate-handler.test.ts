@@ -27,6 +27,7 @@ function commandResult(overrides: Partial<CommandResult> = {}): CommandResult {
     stdout: "",
     stderr: "",
     signal: null,
+    killed: false,
     termination: "exit",
     ...overrides,
   };
@@ -40,6 +41,7 @@ describe("createBeforeInstallHandler", () => {
       resolveBinaryPath: () => "/plugin/node_modules/@openclaw/clawscan/binaries/clawscan",
       resolveConfigPath: () => "/plugin/profiles/clawhub.yml",
       profile: "clawhub",
+      requiredScanners: ["skillspector", "clawscan-static"],
       runCommand: async (argv, options) => {
         calls.push({ argv, options });
         return outputs.shift() ?? commandResult();
@@ -157,6 +159,7 @@ describe("createBeforeInstallHandler", () => {
       resolveBinaryPath: () => "/plugin/bin/clawscan",
       resolveConfigPath: () => "/plugin/profiles/clawhub.yml",
       profile: "clawhub-static",
+      requiredScanners: ["clawscan-static"],
       runCommand: async (argv, options) => {
         calls.push({ argv, options });
         return outputs.shift() ?? commandResult();

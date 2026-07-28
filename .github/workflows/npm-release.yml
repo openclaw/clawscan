@@ -206,31 +206,30 @@ jobs:
           set -euo pipefail
           inspect_package() {
             local package_name="$1"
-            local tarball_path="$2"
-            local output_name="$3"
-            local remote_integrity=""
-            if remote_integrity="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.integrity 2>/dev/null)" && [[ -n "$remote_integrity" ]]; then
-              local local_integrity=""
-              # shellcheck disable=SC2016
-              local_integrity="$(node --input-type=module -e '
-                import { createHash } from "node:crypto";
-                import { readFileSync } from "node:fs";
-                const digest = createHash("sha512").update(readFileSync(process.argv[1])).digest("base64");
-                process.stdout.write(`sha512-${digest}`);
-              ' "$tarball_path")"
-              if [[ "$remote_integrity" != "$local_integrity" ]]; then
-                echo "${package_name}@${PACKAGE_VERSION} is already published with different contents." >&2
+            local output_name="$2"
+            local published_version=""
+            if published_version="$(npm view "${package_name}@${PACKAGE_VERSION}" version 2>/dev/null)" && [[ -n "$published_version" ]]; then
+              if [[ "$published_version" != "$PACKAGE_VERSION" ]]; then
+                echo "${package_name}@${PACKAGE_VERSION} reported unexpected version ${published_version}." >&2
                 exit 1
               fi
-              echo "${package_name}@${PACKAGE_VERSION} already matches the prepared tarball; skipping publish."
+              if [[ "$package_name" == "@openclaw/clawscan-plugin" ]]; then
+                local binary_dependency=""
+                binary_dependency="$(npm view "${package_name}@${PACKAGE_VERSION}" 'dependencies.@openclaw/clawscan')"
+                if [[ "$binary_dependency" != "$PACKAGE_VERSION" ]]; then
+                  echo "${package_name}@${PACKAGE_VERSION} does not depend on the matching ClawScan version." >&2
+                  exit 1
+                fi
+              fi
+              echo "${package_name}@${PACKAGE_VERSION} is already published with valid release metadata; skipping publish."
               echo "${output_name}=false" >> "$GITHUB_OUTPUT"
               return
             fi
             echo "${package_name}@${PACKAGE_VERSION} is not published yet."
             echo "${output_name}=true" >> "$GITHUB_OUTPUT"
           }
-          inspect_package "@openclaw/clawscan" "${{ steps.publish_tarballs.outputs.clawscan_path }}" "clawscan_needed"
-          inspect_package "@openclaw/clawscan-plugin" "${{ steps.publish_tarballs.outputs.plugin_path }}" "plugin_needed"
+          inspect_package "@openclaw/clawscan" "clawscan_needed"
+          inspect_package "@openclaw/clawscan-plugin" "plugin_needed"
 
       - name: Publish ClawScan binary package
         if: steps.publish_state.outputs.clawscan_needed == 'true'

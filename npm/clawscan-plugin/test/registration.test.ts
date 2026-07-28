@@ -12,7 +12,7 @@ describe("registerInstallGate", () => {
       {
         pluginConfig: {
           configPath: "/trusted/custom.yml",
-          profile: "team-policy",
+          profile: "clawhub",
         },
         resolvePath: (input) => {
           resolvedPath = input;
@@ -28,6 +28,7 @@ describe("registerInstallGate", () => {
                   stdout: "",
                   stderr: "",
                   signal: null,
+                  killed: false,
                   termination: "exit",
                 };
               }
@@ -38,12 +39,12 @@ describe("registerInstallGate", () => {
                   gate: "pass",
                   gateRules: [],
                   scanners: {
-                    skillspector: { status: "completed" },
-                    "clawscan-static": { status: "completed" },
+                    "team-scanner": { status: "completed" },
                   },
                 }),
                 stderr: "",
                 signal: null,
+                killed: false,
                 termination: "exit",
               };
             },
@@ -71,7 +72,7 @@ describe("registerInstallGate", () => {
       "--config",
       "/trusted/custom.yml",
       "--profile",
-      "team-policy",
+      "clawhub",
       "--sandbox",
       "docker",
       "--json",

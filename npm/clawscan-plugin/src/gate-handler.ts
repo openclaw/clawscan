@@ -1,3 +1,4 @@
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { gateResultFromArtifact, type BeforeInstallResult } from "./artifact.ts";
 
 const DOCKER_PROBE_TIMEOUT_MS = 5_000;
@@ -5,25 +6,10 @@ const SCAN_TIMEOUT_MS = 600_000;
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
 
-export type CommandOptions = {
-  timeoutMs: number;
-  env?: Record<string, string>;
-  maxOutputBytes?: {
-    stdout: number;
-    stderr: number;
-  };
-  outputCapture?: "head";
-  terminateOnOutputLimit?: boolean;
-};
+type HostRunCommand = OpenClawPluginApi["runtime"]["system"]["runCommandWithTimeout"];
 
-export type CommandResult = {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  signal: string | null;
-  termination: "exit" | "timeout" | "no-output-timeout" | "signal";
-  outputLimitExceeded?: boolean;
-};
+export type CommandOptions = Exclude<Parameters<HostRunCommand>[1], number>;
+export type CommandResult = Awaited<ReturnType<HostRunCommand>>;
 
 export type GateHandlerDependencies = {
   runCommand: (argv: string[], options: CommandOptions) => Promise<CommandResult>;
@@ -31,6 +17,7 @@ export type GateHandlerDependencies = {
   resolveConfigPath: () => string;
   resolveFallbackConfigPath?: () => string;
   profile: string;
+  requiredScanners?: readonly string[];
 };
 
 export type BeforeInstallEvent = {
@@ -116,16 +103,6 @@ const scanCommandOptions: CommandOptions = {
   terminateOnOutputLimit: true,
 };
 
-function requiredScannersForProfile(profile: string): readonly string[] {
-  if (profile === "clawhub") {
-    return ["skillspector", "clawscan-static"];
-  }
-  if (profile === "clawhub-static") {
-    return ["clawscan-static"];
-  }
-  return [];
-}
-
 export function createBeforeInstallHandler(dependencies: GateHandlerDependencies) {
   return async (event: BeforeInstallEvent): Promise<BeforeInstallResult | undefined> => {
     try {
@@ -190,7 +167,7 @@ export function createBeforeInstallHandler(dependencies: GateHandlerDependencies
       if (!commandSucceeded(scan)) {
         return commandFailure("ClawScan process", scan);
       }
-      return gateResultFromArtifact(scan.stdout, requiredScannersForProfile(dependencies.profile));
+      return gateResultFromArtifact(scan.stdout, dependencies.requiredScanners ?? []);
     } catch (error) {
       if (errorCode(error) === "ENOENT") {
         return failClosed("ClawScan binary was not found");
