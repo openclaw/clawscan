@@ -1,20 +1,6 @@
 name: ClawScan Plugin Self-Scan
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/clawscan-plugin-self-scan.yml"
-      - "cmd/clawscan/**"
-      - "internal/**"
-      - "npm/clawscan-plugin/**"
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/clawscan-plugin-self-scan.yml"
-      - "cmd/clawscan/**"
-      - "internal/**"
-      - "npm/clawscan-plugin/**"
   workflow_dispatch:
 
 permissions:

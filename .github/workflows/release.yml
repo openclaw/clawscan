@@ -100,7 +100,7 @@ jobs:
             --generate-notes
 
   publish-npm:
-    name: Publish @openclaw/clawscan
+    name: Publish ClawScan npm packages
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push' || inputs.publish
@@ -133,7 +133,9 @@ jobs:
           const { readFileSync } = require("node:fs");
 
           const pkg = JSON.parse(readFileSync("npm/clawscan/package.json", "utf8"));
+          const pluginPkg = JSON.parse(readFileSync("npm/clawscan-plugin/package.json", "utf8"));
           const expectedName = "@openclaw/clawscan";
+          const expectedPluginName = "@openclaw/clawscan-plugin";
           const expectedRepo = "https://github.com/openclaw/clawscan";
           const repository = typeof pkg.repository === "string"
             ? pkg.repository
@@ -154,6 +156,15 @@ jobs:
           }
           if (pkg.private === true) {
             errors.push("package must not be private");
+          }
+          if (pluginPkg.name !== expectedPluginName) {
+            errors.push(`plugin package name must be ${expectedPluginName}; found ${pluginPkg.name ?? "<missing>"}`);
+          }
+          if (pluginPkg.dependencies?.[expectedName] !== pluginPkg.version) {
+            errors.push(`plugin must depend on the exact matching ${expectedName} version`);
+          }
+          if (pluginPkg.private === true) {
+            errors.push("plugin package must not be private");
           }
           if (errors.length > 0) {
             for (const error of errors) console.error(error);
@@ -182,37 +193,70 @@ jobs:
           execFileSync("git", ["merge-base", "--is-ancestor", releaseSha, "origin/main"]);
           NODE
 
-      - name: Ensure version is unpublished
+      - name: Check npm packages
+        run: |
+          node --test npm/clawscan/test/*.test.mjs
+          node --test npm/clawscan-plugin/test/*.test.mjs npm/clawscan-plugin/test/*.test.ts
+          node --test scripts/build-npm-package.test.mjs
+          node scripts/build-npm-package.mjs --version "${{ needs.build.outputs.version }}" --pack --smoke
+
+      - name: Inspect npm publish state
+        id: publish_state
         env:
           RELEASE_TAG: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
-          package_name="$(node -p "require('./npm/clawscan/package.json').name")"
           package_version="$(node --input-type=module -e 'import { normalizePackageVersion } from "./scripts/build-npm-package.mjs"; process.stdout.write(normalizePackageVersion(process.env.RELEASE_TAG));')"
-          set +e
-          output="$(npm view "${package_name}@${package_version}" version 2>&1)"
-          status=$?
-          set -e
-          if [ "${status}" -eq 0 ]; then
-            echo "${package_name}@${package_version} is already published."
-            exit 1
-          fi
-          if ! printf '%s\n' "${output}" | grep -q "E404"; then
-            printf '%s\n' "${output}" >&2
-            exit "${status}"
-          fi
+          inspect_package() {
+            local package_name="$1"
+            local tarball_path="$2"
+            local output_name="$3"
+            local published_version=""
+            if published_version="$(npm view "${package_name}@${package_version}" version 2>/dev/null)" && [[ -n "$published_version" ]]; then
+              local remote_integrity=""
+              local local_integrity=""
+              remote_integrity="$(npm view "${package_name}@${package_version}" dist.integrity)"
+              # shellcheck disable=SC2016
+              local_integrity="$(node --input-type=module -e '
+                import { createHash } from "node:crypto";
+                import { readFileSync } from "node:fs";
+                const digest = createHash("sha512").update(readFileSync(process.argv[1])).digest("base64");
+                process.stdout.write(`sha512-${digest}`);
+              ' "$tarball_path")"
+              if [[ "$published_version" != "$package_version" || "$remote_integrity" != "$local_integrity" ]]; then
+                echo "${package_name}@${package_version} does not match the prepared release tarball." >&2
+                exit 1
+              fi
+              echo "${package_name}@${package_version} already matches the prepared release tarball; skipping publish."
+              echo "${output_name}=false" >> "$GITHUB_OUTPUT"
+              return
+            fi
+            echo "${output_name}=true" >> "$GITHUB_OUTPUT"
+          }
+          inspect_package \
+            "@openclaw/clawscan" \
+            "dist/npm/openclaw-clawscan-${package_version}.tgz" \
+            "clawscan_needed"
+          inspect_package \
+            "@openclaw/clawscan-plugin" \
+            "dist/npm/openclaw-clawscan-plugin-${package_version}.tgz" \
+            "plugin_needed"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
 
-      - name: Check npm package
+      - name: Publish ClawScan binary package
+        if: steps.publish_state.outputs.clawscan_needed == 'true'
+        run: npm publish "dist/npm/openclaw-clawscan-${{ steps.publish_state.outputs.package_version }}.tgz" --access public --provenance
+
+      - name: Publish ClawScan OpenClaw plugin
+        if: steps.publish_state.outputs.plugin_needed == 'true'
+        run: npm publish "dist/npm/openclaw-clawscan-plugin-${{ steps.publish_state.outputs.package_version }}.tgz" --access public --provenance
+
+      - name: Verify npm release metadata
         run: |
-          node --test npm/clawscan/test/*.test.mjs
-          node --test scripts/build-npm-package.test.mjs
-          node scripts/build-npm-package.mjs --version "${{ needs.build.outputs.version }}" --pack --smoke
-
-      - name: Stage npm package
-        run: node scripts/build-npm-package.mjs --version "${{ needs.build.outputs.version }}"
-
-      - name: Publish with npm trusted publishing
-        run: npm publish dist/npm/package --access public --provenance
+          set -euo pipefail
+          for package_name in "@openclaw/clawscan" "@openclaw/clawscan-plugin"; do
+            npm view "${package_name}@${{ steps.publish_state.outputs.package_version }}" dist.tarball dist.integrity --json
+          done
 
   update-homebrew-tap:
     name: Update Homebrew tap
