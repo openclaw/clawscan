@@ -46,7 +46,8 @@ export function scanTargetForEvent(
     return event.sourcePath;
   }
   if (event.targetType === "plugin") {
-    return join(event.sourcePath, "openclaw.plugin.json");
+    const manifestPath = join(event.sourcePath, "openclaw.plugin.json");
+    return pluginManifestExists(manifestPath) ? manifestPath : event.sourcePath;
   }
   return pluginManifestExists(join(event.sourcePath, "openclaw.plugin.json"))
     ? join(event.sourcePath, "SKILL.md")

@@ -393,8 +393,19 @@ describe("scanTargetForEvent", () => {
           sourcePath: "/candidate/demo-plugin",
           targetType: "plugin",
         }),
+        () => true,
       ),
       "/candidate/demo-plugin/openclaw.plugin.json",
+    );
+    assert.equal(
+      scanTargetForEvent(
+        beforeInstallEvent({
+          sourcePath: "/candidate/codex-bundle",
+          targetType: "plugin",
+        }),
+        () => false,
+      ),
+      "/candidate/codex-bundle",
     );
   });
 
