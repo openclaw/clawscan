@@ -1,0 +1,265 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { gateResultFromArtifact } from "../src/artifact.ts";
+
+describe("gateResultFromArtifact", () => {
+  it("continues silently for a valid pass artifact", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "pass",
+        gateRules: [],
+        scanners: {
+          skillspector: { status: "completed" },
+          "clawscan-static": { status: "completed" },
+        },
+      }),
+      ["skillspector", "clawscan-static"],
+    );
+
+    assert.equal(result, undefined);
+  });
+
+  it("maps every fired warning to a structured non-blocking finding", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "warn",
+        gateRules: [
+          {
+            scanner: "skillspector",
+            rule: "nativeFindingSeverity",
+            findingCode: "SS-101",
+            findingTitle: "Suspicious package script",
+            findingSeverity: "HIGH",
+            action: "warn",
+          },
+          {
+            scanner: "clawscan-static",
+            rule: "nativeFinding",
+            findingCode: "prompt-injection",
+            findingTitle: "Prompt injection language",
+            findingSeverity: "high",
+            action: "warn",
+          },
+        ],
+        scanners: {
+          skillspector: { status: "completed" },
+          "clawscan-static": { status: "completed" },
+        },
+      }),
+      ["skillspector", "clawscan-static"],
+    );
+
+    assert.deepEqual(result, {
+      findings: [
+        {
+          ruleId: "clawscan/skillspector/SS-101",
+          severity: "warn",
+          file: ".",
+          line: 1,
+          message: "HIGH: Suspicious package script",
+        },
+        {
+          ruleId: "clawscan/clawscan-static/prompt-injection",
+          severity: "warn",
+          file: ".",
+          line: 1,
+          message: "high: Prompt injection language",
+        },
+      ],
+    });
+  });
+
+  it("maps a block artifact to an explicit block with its fired findings", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "block",
+        gateRules: [
+          {
+            scanner: "skillspector",
+            rule: "nativeFindingSeverity",
+            findingCode: "SS-900",
+            findingTitle: "Credential theft behavior",
+            findingSeverity: "CRITICAL",
+            action: "block",
+          },
+        ],
+        scanners: {
+          skillspector: { status: "completed" },
+          "clawscan-static": { status: "completed" },
+        },
+      }),
+      ["skillspector", "clawscan-static"],
+    );
+
+    assert.deepEqual(result, {
+      block: true,
+      blockReason: "ClawScan gate blocked installation: CRITICAL: Credential theft behavior",
+      findings: [
+        {
+          ruleId: "clawscan/skillspector/SS-900",
+          severity: "critical",
+          file: ".",
+          line: 1,
+          message: "CRITICAL: Credential theft behavior",
+        },
+      ],
+    });
+  });
+
+  it("bounds and sanitizes untrusted fired-rule text, file paths, and line numbers", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "warn",
+        gateRules: [
+          {
+            scanner: "demo scanner\u0000",
+            rule: "nativeFinding",
+            findingCode: "odd rule/id",
+            findingTitle: `unsafe\u0000 title ${"x".repeat(400)}`,
+            findingSeverity: "HIGH",
+            file: "/../../private/\u0000token.ts",
+            line: 9_999_999,
+            action: "warn",
+          },
+        ],
+        scanners: {
+          "demo scanner\u0000": { status: "completed" },
+        },
+      }),
+      ["demo scanner\u0000"],
+    );
+
+    assert.ok(result?.findings);
+    assert.equal(result.findings[0]?.ruleId, "clawscan/demo-scanner/odd-rule-id");
+    assert.equal(result.findings[0]?.file, "private/token.ts");
+    assert.equal(result.findings[0]?.line, 1_000_000);
+    assert.ok((result.findings[0]?.message.length ?? 0) <= 282);
+    assert.doesNotMatch(result.findings[0]?.message ?? "", /[\u0000-\u001f\u007f]/);
+  });
+
+  for (const fixture of [
+    {
+      name: "malformed JSON",
+      stdout: "{",
+      requiredScanners: ["skillspector"],
+    },
+    {
+      name: "an unknown gate verdict",
+      stdout: JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "maybe",
+        gateRules: [],
+        scanners: { skillspector: { status: "completed" } },
+      }),
+      requiredScanners: ["skillspector"],
+    },
+    {
+      name: "a missing required scanner",
+      stdout: JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "pass",
+        gateRules: [],
+        scanners: {},
+      }),
+      requiredScanners: ["skillspector"],
+    },
+    ...["skipped", "failed"].map((status) => ({
+      name: `a ${status} required scanner`,
+      stdout: JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "pass",
+        gateRules: [],
+        scanners: { skillspector: { status, error: "untrusted scanner error" } },
+      }),
+      requiredScanners: ["skillspector"],
+    })),
+  ]) {
+    it(`fails closed for ${fixture.name}`, () => {
+      const result = gateResultFromArtifact(fixture.stdout, fixture.requiredScanners);
+
+      assert.equal(result?.block, true);
+      assert.match(result?.blockReason ?? "", /^ClawScan blocked installation:/);
+      assert.equal(result?.findings?.[0]?.severity, "critical");
+      assert.doesNotMatch(result?.blockReason ?? "", /untrusted scanner error/);
+    });
+  }
+
+  it("fails closed when any additional profile scanner does not complete", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "pass",
+        gateRules: [],
+        scanners: {
+          skillspector: { status: "completed" },
+          "clawscan-static": { status: "completed" },
+          "team-scanner": { status: "failed" },
+        },
+      }),
+      ["skillspector", "clawscan-static"],
+    );
+
+    assert.equal(result?.block, true);
+    assert.equal(
+      result?.blockReason,
+      "ClawScan blocked installation: scanner team-scanner did not complete",
+    );
+  });
+
+  it("fails closed when a fired rule names a scanner outside the artifact", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "warn",
+        gateRules: [
+          {
+            scanner: "invented-scanner",
+            rule: "nativeFinding",
+            action: "warn",
+          },
+        ],
+        scanners: {
+          skillspector: { status: "completed" },
+          "clawscan-static": { status: "completed" },
+        },
+      }),
+      ["skillspector", "clawscan-static"],
+    );
+
+    assert.equal(result?.block, true);
+    assert.equal(
+      result?.blockReason,
+      "ClawScan blocked installation: fired gate rule referenced an unavailable scanner",
+    );
+  });
+
+  it("fails closed instead of returning an unbounded finding list", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "warn",
+        gateRules: Array.from({ length: 101 }, (_, index) => ({
+          scanner: "clawscan-static",
+          rule: "nativeFinding",
+          findingCode: `finding-${index}`,
+          action: "warn",
+        })),
+        scanners: {
+          "clawscan-static": { status: "completed" },
+        },
+      }),
+      ["clawscan-static"],
+    );
+
+    assert.equal(result?.block, true);
+    assert.equal(
+      result?.blockReason,
+      "ClawScan blocked installation: scanner artifact contained too many fired gate rules",
+    );
+    assert.equal(result?.findings?.length, 1);
+  });
+});

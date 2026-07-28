@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { binaryFileName, platformKey, resolveBinaryPath } from "../lib/resolve-binary.mjs";
+import {
+  binaryFileName,
+  platformKey,
+  resolveBinaryPath,
+  resolveBundledBinaryPath,
+} from "../lib/resolve-binary.mjs";
 
 describe("platformKey", () => {
   it("maps supported Node platform and arch pairs to package binary directories", () => {
@@ -36,6 +41,15 @@ describe("resolveBinaryPath", () => {
         arch: "arm64",
       }),
       /\/tmp\/package\/binaries\/darwin-arm64\/clawscan$/,
+    );
+  });
+});
+
+describe("resolveBundledBinaryPath", () => {
+  it("resolves the binary from the installed @openclaw/clawscan package", () => {
+    assert.match(
+      resolveBundledBinaryPath({ platform: "linux", arch: "x64" }),
+      /\/npm\/clawscan\/binaries\/linux-x64\/clawscan$/,
     );
   });
 });

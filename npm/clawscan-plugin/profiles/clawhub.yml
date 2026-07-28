@@ -1,0 +1,16 @@
+version: 1
+
+profiles:
+  clawhub:
+    scanners:
+      - id: skillspector
+        gate:
+          native: true
+      - id: clawscan-static
+        gate:
+          native: true
+  clawhub-static:
+    scanners:
+      - id: clawscan-static
+        gate:
+          native: true

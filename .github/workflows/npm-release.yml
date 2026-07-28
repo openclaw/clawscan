@@ -60,9 +60,10 @@ jobs:
       - name: Test npm packaging helpers
         run: |
           node --test npm/clawscan/test/*.test.mjs
+          node --test npm/clawscan-plugin/test/*.test.mjs npm/clawscan-plugin/test/*.test.ts
           node --test scripts/build-npm-package.test.mjs
 
-      - name: Build and smoke packed npm package
+      - name: Build and smoke packed npm packages
         run: node scripts/build-npm-package.mjs --version "${{ inputs.tag }}" --pack --smoke
 
       - name: Upload prepared npm publish bundle
@@ -185,42 +186,51 @@ jobs:
           fi
           echo "PACKAGE_VERSION=$EXPECTED_PACKAGE_VERSION" >> "$GITHUB_ENV"
 
-      - name: Resolve publish tarball
-        id: publish_tarball
+      - name: Resolve publish tarballs
+        id: publish_tarballs
         run: |
           set -euo pipefail
-          TARBALL_PATH="$(find dist/npm -type f -name 'openclaw-clawscan-*.tgz' -print | sort | tail -n 1)"
-          if [[ -z "$TARBALL_PATH" ]]; then
-            echo "Prepared preflight tarball not found." >&2
+          CLAWSCAN_TARBALL="dist/npm/openclaw-clawscan-${PACKAGE_VERSION}.tgz"
+          PLUGIN_TARBALL="dist/npm/openclaw-clawscan-plugin-${PACKAGE_VERSION}.tgz"
+          if [[ ! -f "$CLAWSCAN_TARBALL" || ! -f "$PLUGIN_TARBALL" ]]; then
+            echo "Prepared preflight tarballs were not both present." >&2
             ls -la dist/npm >&2 || true
             exit 1
           fi
-          echo "path=$TARBALL_PATH" >> "$GITHUB_OUTPUT"
+          echo "clawscan_path=$CLAWSCAN_TARBALL" >> "$GITHUB_OUTPUT"
+          echo "plugin_path=$PLUGIN_TARBALL" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure version is not already published
+      - name: Ensure versions are not already published
         run: |
           set -euo pipefail
-          if npm view "@openclaw/clawscan@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
-            echo "@openclaw/clawscan@${PACKAGE_VERSION} is already published on npm."
-            exit 1
-          fi
-          echo "Publishing @openclaw/clawscan@${PACKAGE_VERSION}"
+          for package_name in "@openclaw/clawscan" "@openclaw/clawscan-plugin"; do
+            if npm view "${package_name}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+              echo "${package_name}@${PACKAGE_VERSION} is already published on npm."
+              exit 1
+            fi
+            echo "Publishing ${package_name}@${PACKAGE_VERSION}"
+          done
 
-      - name: Publish
-        run: npm publish "${{ steps.publish_tarball.outputs.path }}" --access public --provenance
+      - name: Publish ClawScan binary package
+        run: npm publish "${{ steps.publish_tarballs.outputs.clawscan_path }}" --access public --provenance
+
+      - name: Publish ClawScan OpenClaw plugin
+        run: npm publish "${{ steps.publish_tarballs.outputs.plugin_path }}" --access public --provenance
 
       - name: Verify npm release metadata
         run: |
           set -euo pipefail
-          NPM_DIST_JSON=""
-          for attempt in {1..12}; do
-            if NPM_DIST_JSON="$(npm view "@openclaw/clawscan@${PACKAGE_VERSION}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$NPM_DIST_JSON" ]]; then
-              break
-            fi
-            if [[ "$attempt" == "12" ]]; then
-              cat /tmp/npm-view-error >&2 || true
-              exit 1
-            fi
-            sleep 5
+          for package_name in "@openclaw/clawscan" "@openclaw/clawscan-plugin"; do
+            NPM_DIST_JSON=""
+            for attempt in {1..12}; do
+              if NPM_DIST_JSON="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$NPM_DIST_JSON" ]]; then
+                break
+              fi
+              if [[ "$attempt" == "12" ]]; then
+                cat /tmp/npm-view-error >&2 || true
+                exit 1
+              fi
+              sleep 5
+            done
+            printf '%s\n' "$NPM_DIST_JSON"
           done
-          printf '%s\n' "$NPM_DIST_JSON"

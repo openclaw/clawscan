@@ -1,0 +1,25 @@
+{
+  "id": "clawscan",
+  "activation": {
+    "onStartup": false,
+    "onCapabilities": ["hook"]
+  },
+  "name": "ClawScan Install Gate",
+  "description": "Scans candidate skills and plugins before OpenClaw installs or updates them.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "configPath": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Explicit ClawScan config path. Relative paths resolve inside this plugin."
+      },
+      "profile": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Profile selected from the explicit config path."
+      }
+    }
+  }
+}

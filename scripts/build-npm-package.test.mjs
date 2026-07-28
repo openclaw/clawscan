@@ -5,6 +5,7 @@ import {
   normalizePackageVersion,
   packageTargets,
   platformKeyForTarget,
+  preparePluginPackageJson,
 } from "./build-npm-package.mjs";
 
 describe("normalizePackageVersion", () => {
@@ -42,5 +43,25 @@ describe("package target mapping", () => {
   it("uses clawscan.exe only for the Windows target", () => {
     assert.equal(binaryNameForTarget({ goos: "linux", goarch: "amd64" }), "clawscan");
     assert.equal(binaryNameForTarget({ goos: "windows", goarch: "amd64" }), "clawscan.exe");
+  });
+});
+
+describe("preparePluginPackageJson", () => {
+  it("pins the plugin and its binary dependency to the exact release version", () => {
+    assert.deepEqual(
+      preparePluginPackageJson(
+        {
+          name: "@openclaw/clawscan-plugin",
+          version: "0.0.0-dev",
+          dependencies: { "@openclaw/clawscan": "0.0.0-dev" },
+        },
+        "1.2.3",
+      ),
+      {
+        name: "@openclaw/clawscan-plugin",
+        version: "1.2.3",
+        dependencies: { "@openclaw/clawscan": "1.2.3" },
+      },
+    );
   });
 });

@@ -1,4 +1,7 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const supportedPlatforms = new Set([
   "darwin-arm64",
@@ -26,4 +29,11 @@ export function resolveBinaryPath({
   arch = process.arch,
 }) {
   return join(packageRoot, "binaries", platformKey(platform, arch), binaryFileName(platform));
+}
+
+export function resolveBundledBinaryPath({
+  platform = process.platform,
+  arch = process.arch,
+} = {}) {
+  return resolveBinaryPath({ packageRoot, platform, arch });
 }
