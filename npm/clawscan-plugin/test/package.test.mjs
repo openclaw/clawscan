@@ -19,6 +19,8 @@ describe("@openclaw/clawscan-plugin package", () => {
     assert.equal(packageJson.name, "@openclaw/clawscan-plugin");
     assert.equal(packageJson.version, "0.0.0-dev");
     assert.equal(packageJson.dependencies["@openclaw/clawscan"], packageJson.version);
+    assert.equal(packageJson.peerDependencies.openclaw, ">=2026.7.2");
+    assert.equal(packageJson.peerDependenciesMeta.openclaw.optional, true);
     assert.deepEqual(packageJson.openclaw.extensions, ["./index.ts"]);
     assert.equal(packageJson.openclaw.install.npmSpec, "@openclaw/clawscan-plugin");
     assert.equal(manifest.id, "clawscan");

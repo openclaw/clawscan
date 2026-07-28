@@ -121,6 +121,9 @@ export function gateResultFromArtifact(
   if (!isRecord(parsed.scanners)) {
     return blockForInvalidArtifact("scanner artifact did not contain scanner results");
   }
+  if (Object.keys(parsed.scanners).length === 0) {
+    return blockForInvalidArtifact("scanner artifact did not contain any scanner results");
+  }
   for (const scanner of requiredScanners) {
     const result = parsed.scanners[scanner];
     if (!isRecord(result) || result.status !== "completed") {

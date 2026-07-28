@@ -210,6 +210,23 @@ describe("gateResultFromArtifact", () => {
     );
   });
 
+  it("fails closed when an artifact contains no scanner results", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "pass",
+        gateRules: [],
+        scanners: {},
+      }),
+      [],
+    );
+
+    assert.equal(
+      result?.blockReason,
+      "ClawScan blocked installation: scanner artifact did not contain any scanner results",
+    );
+  });
+
   it("fails closed when a fired rule names a scanner outside the artifact", () => {
     const result = gateResultFromArtifact(
       JSON.stringify({

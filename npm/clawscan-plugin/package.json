@@ -30,6 +30,14 @@
   "dependencies": {
     "@openclaw/clawscan": "0.0.0-dev"
   },
+  "peerDependencies": {
+    "openclaw": ">=2026.7.2"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
   "engines": {
     "node": ">=22.22.3"
   },

@@ -12,6 +12,8 @@ export type CommandOptions = {
     stdout: number;
     stderr: number;
   };
+  outputCapture?: "head";
+  terminateOnOutputLimit?: boolean;
 };
 
 export type CommandResult = {
@@ -20,6 +22,7 @@ export type CommandResult = {
   stderr: string;
   signal: string | null;
   termination: "exit" | "timeout" | "no-output-timeout" | "signal";
+  outputLimitExceeded?: boolean;
 };
 
 export type GateHandlerDependencies = {
@@ -35,7 +38,12 @@ export type BeforeInstallEvent = {
 };
 
 function commandSucceeded(result: CommandResult): boolean {
-  return result.code === 0 && result.signal === null && result.termination === "exit";
+  return (
+    result.code === 0 &&
+    result.signal === null &&
+    result.termination === "exit" &&
+    result.outputLimitExceeded !== true
+  );
 }
 
 function cleanDiagnostic(message: string, limit = 600): string {
@@ -65,6 +73,9 @@ function failClosed(message: string): BeforeInstallResult {
 }
 
 function commandFailure(label: string, result: CommandResult): BeforeInstallResult {
+  if (result.outputLimitExceeded === true) {
+    return failClosed(`${label} exceeded its output limit`);
+  }
   if (result.termination === "timeout" || result.termination === "no-output-timeout") {
     return failClosed(`${label} timed out`);
   }
@@ -101,7 +112,19 @@ const scanCommandOptions: CommandOptions = {
     stdout: MAX_STDOUT_BYTES,
     stderr: MAX_STDERR_BYTES,
   },
+  outputCapture: "head",
+  terminateOnOutputLimit: true,
 };
+
+function requiredScannersForProfile(profile: string): readonly string[] {
+  if (profile === "clawhub") {
+    return ["skillspector", "clawscan-static"];
+  }
+  if (profile === "clawhub-static") {
+    return ["clawscan-static"];
+  }
+  return [];
+}
 
 export function createBeforeInstallHandler(dependencies: GateHandlerDependencies) {
   return async (event: BeforeInstallEvent): Promise<BeforeInstallResult | undefined> => {
@@ -167,7 +190,7 @@ export function createBeforeInstallHandler(dependencies: GateHandlerDependencies
       if (!commandSucceeded(scan)) {
         return commandFailure("ClawScan process", scan);
       }
-      return gateResultFromArtifact(scan.stdout, ["skillspector", "clawscan-static"]);
+      return gateResultFromArtifact(scan.stdout, requiredScannersForProfile(dependencies.profile));
     } catch (error) {
       if (errorCode(error) === "ENOENT") {
         return failClosed("ClawScan binary was not found");

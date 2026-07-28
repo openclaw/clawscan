@@ -223,12 +223,47 @@ async function smokePackages(
     );
     if (
       installedPackageJson.version !== packageVersion ||
-      installedPackageJson.dependencies?.["@openclaw/clawscan"] !== packageVersion
+      installedPackageJson.dependencies?.["@openclaw/clawscan"] !== packageVersion ||
+      installedPackageJson.peerDependencies?.openclaw !== ">=2026.7.2"
     ) {
-      throw new Error("Installed ClawScan plugin did not preserve its exact binary dependency.");
+      throw new Error("Installed ClawScan plugin did not preserve its host and binary contracts.");
     }
     await readFile(join(installedPluginRoot, "openclaw.plugin.json"), "utf8");
     await readFile(join(installedPluginRoot, "profiles", "clawhub.yml"), "utf8");
+
+    const hostPackageRoot = join(pluginPrefix, "node_modules", "openclaw");
+    await mkdir(join(hostPackageRoot, "plugin-sdk"), { recursive: true });
+    await writeFile(
+      join(hostPackageRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "openclaw",
+          version: "2026.7.2",
+          type: "module",
+          exports: {
+            "./plugin-sdk/plugin-entry": "./plugin-sdk/plugin-entry.mjs",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(hostPackageRoot, "plugin-sdk", "plugin-entry.mjs"),
+      "export const definePluginEntry = (definition) => definition;\n",
+    );
+    const entrypointSmokeRoot = join(pluginPrefix, "packed-entrypoint-smoke");
+    await cp(installedPluginRoot, entrypointSmokeRoot, { recursive: true });
+    const entrypointUrl = pathToFileURL(join(entrypointSmokeRoot, "index.ts")).href;
+    run(
+      "node",
+      [
+        "--input-type=module",
+        "--eval",
+        `const plugin = (await import(${JSON.stringify(entrypointUrl)})).default; if (plugin?.id !== "clawscan" || typeof plugin?.register !== "function") throw new Error("packed plugin entrypoint did not load");`,
+      ],
+      { cwd: pluginPrefix },
+    );
   } finally {
     await rm(prefix, { recursive: true, force: true });
     await rm(pluginPrefix, { recursive: true, force: true });

@@ -200,21 +200,44 @@ jobs:
           echo "clawscan_path=$CLAWSCAN_TARBALL" >> "$GITHUB_OUTPUT"
           echo "plugin_path=$PLUGIN_TARBALL" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure versions are not already published
+      - name: Inspect npm publish state
+        id: publish_state
         run: |
           set -euo pipefail
-          for package_name in "@openclaw/clawscan" "@openclaw/clawscan-plugin"; do
-            if npm view "${package_name}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
-              echo "${package_name}@${PACKAGE_VERSION} is already published on npm."
-              exit 1
+          inspect_package() {
+            local package_name="$1"
+            local tarball_path="$2"
+            local output_name="$3"
+            local remote_integrity=""
+            if remote_integrity="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.integrity 2>/dev/null)" && [[ -n "$remote_integrity" ]]; then
+              local local_integrity=""
+              # shellcheck disable=SC2016
+              local_integrity="$(node --input-type=module -e '
+                import { createHash } from "node:crypto";
+                import { readFileSync } from "node:fs";
+                const digest = createHash("sha512").update(readFileSync(process.argv[1])).digest("base64");
+                process.stdout.write(`sha512-${digest}`);
+              ' "$tarball_path")"
+              if [[ "$remote_integrity" != "$local_integrity" ]]; then
+                echo "${package_name}@${PACKAGE_VERSION} is already published with different contents." >&2
+                exit 1
+              fi
+              echo "${package_name}@${PACKAGE_VERSION} already matches the prepared tarball; skipping publish."
+              echo "${output_name}=false" >> "$GITHUB_OUTPUT"
+              return
             fi
-            echo "Publishing ${package_name}@${PACKAGE_VERSION}"
-          done
+            echo "${package_name}@${PACKAGE_VERSION} is not published yet."
+            echo "${output_name}=true" >> "$GITHUB_OUTPUT"
+          }
+          inspect_package "@openclaw/clawscan" "${{ steps.publish_tarballs.outputs.clawscan_path }}" "clawscan_needed"
+          inspect_package "@openclaw/clawscan-plugin" "${{ steps.publish_tarballs.outputs.plugin_path }}" "plugin_needed"
 
       - name: Publish ClawScan binary package
+        if: steps.publish_state.outputs.clawscan_needed == 'true'
         run: npm publish "${{ steps.publish_tarballs.outputs.clawscan_path }}" --access public --provenance
 
       - name: Publish ClawScan OpenClaw plugin
+        if: steps.publish_state.outputs.plugin_needed == 'true'
         run: npm publish "${{ steps.publish_tarballs.outputs.plugin_path }}" --access public --provenance
 
       - name: Verify npm release metadata

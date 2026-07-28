@@ -70,6 +70,8 @@ describe("createBeforeInstallHandler", () => {
           timeoutMs: 600_000,
           env: { CLAWSCAN_SKILLSPECTOR_LLM: "0" },
           maxOutputBytes: { stdout: 8_388_608, stderr: 65_536 },
+          outputCapture: "head",
+          terminateOnOutputLimit: true,
         },
       },
     ]);
@@ -130,8 +132,41 @@ describe("createBeforeInstallHandler", () => {
         timeoutMs: 600_000,
         env: { CLAWSCAN_SKILLSPECTOR_LLM: "0" },
         maxOutputBytes: { stdout: 8_388_608, stderr: 65_536 },
+        outputCapture: "head",
+        terminateOnOutputLimit: true,
       },
     });
+  });
+
+  it("validates the scanners selected by a shipped non-default profile", async () => {
+    const calls: CommandCall[] = [];
+    const outputs = [
+      commandResult(),
+      commandResult({
+        stdout: JSON.stringify({
+          schemaVersion: "clawscan-run-v1",
+          gate: "pass",
+          gateRules: [],
+          scanners: {
+            "clawscan-static": { status: "completed" },
+          },
+        }),
+      }),
+    ];
+    const handler = createBeforeInstallHandler({
+      resolveBinaryPath: () => "/plugin/bin/clawscan",
+      resolveConfigPath: () => "/plugin/profiles/clawhub.yml",
+      profile: "clawhub-static",
+      runCommand: async (argv, options) => {
+        calls.push({ argv, options });
+        return outputs.shift() ?? commandResult();
+      },
+    });
+
+    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+
+    assert.equal(result, undefined);
+    assert.ok(calls[1]?.argv.includes("clawhub-static"));
   });
 
   it("treats a missing Docker command as degraded mode instead of skipping the scan", async () => {
@@ -266,6 +301,31 @@ describe("createBeforeInstallHandler", () => {
     assert.deepEqual(
       result?.findings?.map((finding) => finding.ruleId),
       ["clawscan/docker-unavailable", "clawscan/gate-failure"],
+    );
+  });
+
+  it("blocks explicitly when scanner output exceeds the host capture limit", async () => {
+    const outputs = [
+      commandResult(),
+      commandResult({
+        code: null,
+        signal: "SIGTERM",
+        termination: "signal",
+        outputLimitExceeded: true,
+      }),
+    ];
+    const handler = createBeforeInstallHandler({
+      resolveBinaryPath: () => "/plugin/bin/clawscan",
+      resolveConfigPath: () => "/plugin/profiles/clawhub.yml",
+      profile: "clawhub",
+      runCommand: async () => outputs.shift() ?? commandResult(),
+    });
+
+    const result = await handler({ sourcePath: "/candidate/demo-skill" });
+
+    assert.equal(
+      result?.blockReason,
+      "ClawScan blocked installation: ClawScan process exceeded its output limit",
     );
   });
 });
