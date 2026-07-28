@@ -17,6 +17,7 @@ export const packageTargets = [
   { goos: "linux", goarch: "amd64" },
   { goos: "linux", goarch: "arm64" },
   { goos: "windows", goarch: "amd64" },
+  { goos: "windows", goarch: "arm64" },
 ];
 
 export function normalizePackageVersion(version) {

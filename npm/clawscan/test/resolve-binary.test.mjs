@@ -15,6 +15,7 @@ describe("platformKey", () => {
     assert.equal(platformKey("darwin", "x64"), "darwin-x64");
     assert.equal(platformKey("darwin", "arm64"), "darwin-arm64");
     assert.equal(platformKey("win32", "x64"), "win32-x64");
+    assert.equal(platformKey("win32", "arm64"), "win32-arm64");
   });
 
   it("rejects unsupported platform and arch pairs with a useful message", () => {
