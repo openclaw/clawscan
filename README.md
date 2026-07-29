@@ -195,6 +195,8 @@ Custom profiles can be created in `.clawscan.yml`.
 This is useful for version controlling iterations on your profile, creating multiple profiles to run over the same skills, etc
 
 ```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/openclaw/clawscan/main/schemas/clawscan.schema.json
+
 version: 1
 profiles:
   review:
@@ -212,6 +214,9 @@ profiles:
         --output-last-message {{ output }}
         - < {{ prompt:./prompt.md }}
 ```
+
+The published schema provides editor completion and catches invalid profile
+fields before a scan starts. ClawScan also validates every config at runtime.
 
 ## Judge Harness
 
