@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,8 +7,6 @@ const docsDir = path.join(root, 'docs');
 const assetsDir = path.join(docsDir, 'assets');
 const outDir = path.join(root, 'dist', 'docs-site');
 const outAssetsDir = path.join(outDir, 'assets');
-const assets = ['clawscan-logo.svg', 'clawscan-logo.png', 'clawscan-banner.svg', 'clawscan-banner.png'];
-
 const pages = [
   ['index.md', 'Introduction'],
   ['scanners.md', 'Scanners'],
@@ -20,665 +18,14 @@ const pages = [
 
 const navSections = [
   ['Start', ['index.md']],
-  ['Run', ['scanners.md', 'profiles.md', 'judge.md', 'sandbox.md', 'benchmarks.md']],
+  ['Workflow', ['scanners.md', 'profiles.md', 'judge.md', 'sandbox.md']],
+  ['Evaluate', ['benchmarks.md']],
 ];
-
-let css = `
-:root {
-  color-scheme: light dark;
-  --bg: #f8fafc;
-  --fg: #152033;
-  --muted: #5d6a7e;
-  --line: #d9e1ec;
-  --panel: #ffffff;
-  --accent: #0969da;
-  --code: #eef3f8;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1117;
-    --fg: #e6edf3;
-    --muted: #98a6b8;
-    --line: #2d3746;
-    --panel: #151b23;
-    --accent: #58a6ff;
-    --code: #1f2937;
-  }
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-.layout {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  min-height: 100vh;
-}
-nav {
-  border-right: 1px solid var(--line);
-  padding: 28px 22px;
-  background: var(--panel);
-}
-.brand {
-  display: block;
-  color: var(--fg);
-  font-weight: 760;
-  font-size: 20px;
-  margin-bottom: 20px;
-}
-nav ul { list-style: none; margin: 0; padding: 0; }
-nav li { margin: 4px 0; }
-nav a {
-  display: block;
-  border-radius: 7px;
-  color: var(--muted);
-  padding: 8px 10px;
-}
-nav a.current {
-  background: var(--code);
-  color: var(--fg);
-  font-weight: 650;
-}
-main {
-  width: min(920px, 100%);
-  padding: 44px 32px 80px;
-}
-h1, h2, h3 { line-height: 1.2; margin: 1.8em 0 0.55em; }
-h1 { font-size: 38px; margin-top: 0; }
-h2 { font-size: 26px; border-top: 1px solid var(--line); padding-top: 1.1em; }
-h3 { font-size: 20px; }
-p, ul, ol, table, pre { margin: 0 0 1.15em; }
-ul, ol { padding-left: 1.45em; }
-code {
-  background: var(--code);
-  border-radius: 5px;
-  padding: 0.12em 0.32em;
-  font-size: 0.92em;
-}
-pre {
-  overflow-x: auto;
-  background: var(--code);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 15px 16px;
-}
-pre code {
-  background: transparent;
-  border-radius: 0;
-  padding: 0;
-}
-table {
-  border-collapse: collapse;
-  display: block;
-  overflow-x: auto;
-}
-th, td {
-  border: 1px solid var(--line);
-  padding: 8px 10px;
-  vertical-align: top;
-}
-th {
-  background: var(--code);
-  text-align: left;
-}
-blockquote {
-  border-left: 4px solid var(--line);
-  color: var(--muted);
-  margin: 0 0 1.15em;
-  padding-left: 14px;
-}
-@media (max-width: 760px) {
-  .layout { display: block; }
-  nav {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding: 18px;
-  }
-  nav ul {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  main { padding: 30px 20px 64px; }
-  h1 { font-size: 32px; }
-}
-`;
-
-css = `
-:root {
-  color-scheme: light;
-  --bg: #f9f9f9;
-  --surface: #ffffff;
-  --surface-muted: #fafafa;
-  --ink: #0a0a0a;
-  --ink-soft: #525252;
-  --line: rgba(0, 0, 0, 0.08);
-  --accent: #dc2626;
-  --accent-deep: #b91c1c;
-  --accent-subtle: rgba(220, 38, 38, 0.08);
-  --code-bg: #101012;
-  --code-fg: #f5f5f5;
-  --code-inline-bg: rgba(10, 10, 10, 0.05);
-  --shadow: 0 18px 46px rgba(10, 10, 10, 0.08);
-  --font-display: "Bricolage Grotesque", "Manrope", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-body: "Manrope", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #060608;
-  --surface: #0e0e10;
-  --surface-muted: #131315;
-  --ink: #fafafa;
-  --ink-soft: #a1a1a1;
-  --line: rgba(255, 255, 255, 0.08);
-  --accent: #dc2626;
-  --accent-deep: #ef4444;
-  --accent-subtle: rgba(220, 38, 38, 0.13);
-  --code-bg: #050507;
-  --code-fg: #f5f5f5;
-  --code-inline-bg: rgba(255, 255, 255, 0.07);
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-}
-* { box-sizing: border-box; }
-html {
-  scroll-behavior: smooth;
-  scroll-padding-top: 24px;
-}
-body {
-  margin: 0;
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at 52% -10%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 32rem),
-    radial-gradient(circle at 92% 14%, color-mix(in srgb, var(--ink) 8%, transparent), transparent 30rem),
-    var(--bg);
-  color: var(--ink);
-  font: 15px/1.65 var(--font-body);
-  letter-spacing: 0;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-}
-::selection { background: var(--accent); color: #fff; }
-a {
-  color: var(--accent);
-  text-decoration: none;
-  transition: color .12s, border-color .12s, background-color .12s;
-}
-a:hover {
-  color: var(--accent-deep);
-  text-decoration: underline;
-  text-underline-offset: 0.18em;
-}
-.layout {
-  display: grid;
-  grid-template-columns: 268px minmax(0, 1fr);
-  min-height: 100vh;
-}
-.sidebar {
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow: auto;
-  padding: 24px 22px;
-  border-right: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  backdrop-filter: blur(18px);
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-}
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 24px;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-width: 0;
-  flex: 1;
-  color: var(--ink);
-  text-decoration: none;
-}
-.brand:hover { text-decoration: none; color: var(--ink); }
-.brand-mark {
-  display: block;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  border-radius: 7px;
-  object-fit: contain;
-}
-.brand strong {
-  display: block;
-  color: var(--ink);
-  font: 700 1.04rem/1.1 var(--font-display);
-  letter-spacing: 0;
-}
-.brand small {
-  display: block;
-  margin-top: 3px;
-  color: var(--ink-soft);
-  font-size: .74rem;
-  line-height: 1.2;
-}
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-muted);
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-.theme-toggle:hover {
-  border-color: color-mix(in srgb, var(--ink) 24%, var(--line));
-  color: var(--ink);
-}
-.theme-toggle svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
-.theme-icon-sun { display: none; }
-:root[data-theme="dark"] .theme-icon-moon { display: none; }
-:root[data-theme="dark"] .theme-icon-sun { display: block; }
-.search {
-  display: block;
-  margin-bottom: 22px;
-}
-.search span {
-  display: block;
-  margin-bottom: 7px;
-  color: var(--ink-soft);
-  font-size: .7rem;
-  font-weight: 700;
-  letter-spacing: .02em;
-  text-transform: uppercase;
-}
-.search input {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-muted);
-  color: var(--ink);
-  outline: none;
-  padding: 9px 12px;
-  font: inherit;
-  font-size: .9rem;
-}
-.search input:focus {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
-  box-shadow: 0 0 0 3px var(--accent-subtle);
-}
-nav section { margin-bottom: 18px; }
-nav h2 {
-  margin: 0 0 6px;
-  color: var(--ink-soft);
-  font-size: .68rem;
-  font-weight: 700;
-  letter-spacing: .02em;
-  text-transform: uppercase;
-}
-.nav-link {
-  display: block;
-  margin: 1px 0;
-  border-radius: 6px;
-  color: var(--ink-soft);
-  padding: 5px 10px;
-  font-size: .9rem;
-  line-height: 1.42;
-}
-.nav-link:hover {
-  background: color-mix(in srgb, var(--ink) 5%, transparent);
-  color: var(--ink);
-  text-decoration: none;
-}
-.nav-link.current {
-  background: var(--accent-subtle);
-  color: var(--accent-deep);
-  font-weight: 700;
-}
-.nav-toggle {
-  display: none;
-  position: fixed;
-  top: calc(14px + env(safe-area-inset-top, 0px));
-  right: calc(14px + env(safe-area-inset-right, 0px));
-  z-index: 20;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--ink);
-  cursor: pointer;
-  padding: 10px 9px;
-  box-shadow: var(--shadow);
-  flex-direction: column;
-  justify-content: space-between;
-}
-.nav-toggle span {
-  display: block;
-  width: 100%;
-  height: 2px;
-  border-radius: 2px;
-  background: currentColor;
-  transition: transform .18s, opacity .18s;
-}
-.nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(8px) rotate(45deg); }
-.nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
-.nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-8px) rotate(-45deg); }
-main {
-  min-width: 0;
-  width: 100%;
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 32px clamp(20px, 4.5vw, 56px) 80px;
-}
-.hero {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 22px;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--line);
-  padding: 8px 0 22px;
-  margin-bottom: 24px;
-}
-.eyebrow {
-  margin: 0 0 8px;
-  color: var(--ink-soft);
-  font-size: .7rem;
-  font-weight: 800;
-  letter-spacing: .03em;
-  text-transform: uppercase;
-}
-.hero h1 {
-  margin: 0;
-  color: var(--ink);
-  font: 800 2.3rem/1.06 var(--font-display);
-  letter-spacing: 0;
-}
-.hero-meta {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--ink-soft);
-  padding: 6px 11px;
-  font-size: .83rem;
-  font-weight: 700;
-}
-.btn-ghost:hover {
-  border-color: color-mix(in srgb, var(--ink) 24%, var(--line));
-  color: var(--ink);
-  text-decoration: none;
-}
-.doc-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 72ch) 200px;
-  gap: 48px;
-  align-items: start;
-}
-.doc {
-  min-width: 0;
-  max-width: 72ch;
-  overflow-wrap: break-word;
-}
-.doc h1 {
-  margin: 0 0 .45em;
-  color: var(--ink);
-  font: 800 2.5rem/1.08 var(--font-display);
-  letter-spacing: 0;
-}
-.doc > h1:first-child { display: none; }
-.doc h2 {
-  position: relative;
-  margin: 2em 0 .5em;
-  color: var(--ink);
-  font: 750 1.45rem/1.18 var(--font-display);
-  letter-spacing: 0;
-}
-.doc h3 {
-  position: relative;
-  margin: 1.65em 0 .35em;
-  color: var(--ink);
-  font: 750 1.08rem/1.25 var(--font-display);
-}
-.doc h1:first-child,
-.doc h2:first-child,
-.doc h3:first-child { margin-top: 0; }
-.doc p,
-.doc ul,
-.doc ol,
-.doc table,
-.doc pre { margin: 0 0 1.12em; }
-.doc ul,
-.doc ol { padding-left: 1.35rem; }
-.doc li { margin: .25em 0; }
-.doc strong { color: var(--ink); font-weight: 800; }
-code { font-family: var(--font-mono); }
-.doc code {
-  background: var(--code-inline-bg);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  color: var(--ink);
-  padding: .08em .35em;
-  font-size: .86em;
-}
-.doc pre {
-  position: relative;
-  overflow-x: auto;
-  background: var(--code-bg);
-  border: 1px solid color-mix(in srgb, var(--line) 75%, #000);
-  border-radius: 8px;
-  color: var(--code-fg);
-  padding: 14px 18px;
-  font-size: .86em;
-  line-height: 1.62;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .14);
-}
-.doc pre code {
-  display: block;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  color: inherit;
-  font-size: 1em;
-  padding: 0;
-  white-space: pre;
-}
-.copy {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  border: 1px solid rgba(255, 255, 255, .16);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, .08);
-  color: var(--code-fg);
-  cursor: pointer;
-  opacity: 0;
-  padding: 4px 9px;
-  font: 700 .7rem/1 var(--font-body);
-  transition: opacity .12s, background-color .12s;
-}
-.doc pre:hover .copy,
-.copy:focus { opacity: 1; }
-.copy:hover { background: rgba(255, 255, 255, .14); }
-.copy.copied {
-  opacity: 1;
-  background: var(--accent);
-  border-color: var(--accent);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  display: block;
-  overflow-x: auto;
-  font-size: .92em;
-}
-th, td {
-  border-bottom: 1px solid var(--line);
-  padding: 9px 10px;
-  vertical-align: top;
-  text-align: left;
-}
-th {
-  background: color-mix(in srgb, var(--ink) 5%, transparent);
-  color: var(--ink);
-  font-weight: 800;
-}
-blockquote {
-  margin: 1.35em 0;
-  border-left: 3px solid var(--accent);
-  border-radius: 0 8px 8px 0;
-  background: var(--accent-subtle);
-  color: var(--ink);
-  padding: 10px 16px;
-}
-blockquote p:last-child { margin-bottom: 0; }
-.toc {
-  position: sticky;
-  top: 24px;
-  max-height: calc(100vh - 48px);
-  overflow: auto;
-  border-left: 1px solid var(--line);
-  padding-left: 14px;
-  font-size: .84rem;
-}
-.toc h2 {
-  margin: 0 0 10px;
-  color: var(--ink-soft);
-  font-size: .66rem;
-  font-weight: 800;
-  letter-spacing: .03em;
-  text-transform: uppercase;
-}
-.toc a {
-  display: block;
-  border-left: 2px solid transparent;
-  margin-left: -12px;
-  padding: 4px 0 4px 10px;
-  color: var(--ink-soft);
-  line-height: 1.35;
-}
-.toc a:hover {
-  color: var(--ink);
-  text-decoration: none;
-}
-.toc a.active {
-  border-left-color: var(--accent);
-  color: var(--accent-deep);
-  font-weight: 700;
-}
-.toc-l3 {
-  padding-left: 22px !important;
-  font-size: .94em;
-}
-.page-nav {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-top: 48px;
-  border-top: 1px solid var(--line);
-  padding-top: 20px;
-}
-.page-nav a {
-  display: block;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--ink-soft);
-  padding: 13px 16px;
-}
-.page-nav a:hover {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
-  color: var(--ink);
-  text-decoration: none;
-}
-.page-nav small {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--ink-soft);
-  font-size: .7rem;
-  font-weight: 800;
-  letter-spacing: .03em;
-  text-transform: uppercase;
-}
-.page-nav span {
-  display: block;
-  color: var(--ink);
-  font-weight: 800;
-  line-height: 1.3;
-}
-.page-nav-next { text-align: right; grid-column: 2; }
-.page-nav-prev:only-child { grid-column: 1; }
-@media (max-width: 1179px) {
-  .doc-grid { grid-template-columns: minmax(0, 72ch); }
-  .toc { display: none; }
-}
-@media (max-width: 900px) {
-  .layout { display: block; }
-  .sidebar {
-    position: fixed;
-    inset: 0 30% 0 0;
-    z-index: 15;
-    max-width: 320px;
-    transform: translateX(-100%);
-    background: var(--surface);
-    box-shadow: var(--shadow);
-    transition: transform .22s ease;
-    pointer-events: none;
-  }
-  .sidebar.open {
-    transform: translateX(0);
-    pointer-events: auto;
-  }
-  .nav-toggle { display: flex; }
-  main { padding: 64px 18px 56px; }
-  .hero h1 { font-size: 1.85rem; }
-  .doc h1 { font-size: 2.1rem; }
-}
-@media (max-width: 520px) {
-  main { padding: 60px 14px 48px; }
-  .doc pre {
-    margin-left: -14px;
-    margin-right: -14px;
-    border-radius: 0;
-    border-left: 0;
-    border-right: 0;
-  }
-  .page-nav { grid-template-columns: 1fr; }
-  .page-nav-next { grid-column: 1; text-align: left; }
-}
-`;
 
 await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
-await mkdir(outAssetsDir, { recursive: true });
-await writeFile(path.join(outDir, 'style.css'), css.trimStart());
+await cp(assetsDir, outAssetsDir, { recursive: true });
 await writeFile(path.join(outDir, '.nojekyll'), '');
-
-for (const asset of assets) {
-  await copyFile(path.join(assetsDir, asset), path.join(outAssetsDir, asset));
-}
 
 for (const [file, title] of pages) {
   const markdown = await readFile(path.join(docsDir, file), 'utf8');
@@ -698,7 +45,8 @@ function pageShell(currentFile, title, body) {
           const label = pageMap.get(file);
           const href = file.replace(/\.md$/, '.html');
           const current = file === currentFile ? ' current' : '';
-          return `<a class="nav-link${current}" href="${href}">${escapeHtml(label)}</a>`;
+          const currentPage = file === currentFile ? ' aria-current="page"' : '';
+          return `<a class="nav-link${current}" href="${href}"${currentPage}>${escapeHtml(label)}</a>`;
         })
         .join('');
       return `<section><h2>${escapeHtml(section)}</h2>${links}</section>`;
@@ -707,55 +55,85 @@ function pageShell(currentFile, title, body) {
   const currentIndex = pages.findIndex(([file]) => file === currentFile);
   const pageNav = renderPageNav(pages[currentIndex - 1], pages[currentIndex + 1]);
   const toc = renderToc(body);
-  const homeClass = currentFile === 'index.md' ? ' class="home"' : '';
-  const heroTitle = title;
+  const isHome = currentFile === 'index.md';
+  const sectionName =
+    navSections.find(([, files]) => files.includes(currentFile))?.[0] ?? 'Documentation';
+  const pageIntro = isHome ? renderHomeIntro() : renderPageHeading(title, sectionName);
+  const bodyClass = isHome ? 'oc-app-surface home' : 'oc-app-surface docs-page';
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)} - ClawScan</title>
+  <title>${escapeHtml(title)} · ClawScan Docs</title>
   <meta name="description" content="ClawScan is an open, benchmarkable security scanning harness for agent skills.">
+  <meta name="theme-color" content="#f6f5f3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101012" media="(prefers-color-scheme: dark)">
   <meta property="og:image" content="assets/clawscan-banner.png">
   <link rel="icon" href="assets/clawscan-logo.png" type="image/png">
   <link rel="apple-touch-icon" href="assets/clawscan-logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <script>(function(){var s;try{s=localStorage.getItem('theme')}catch(e){}var d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=s||(d?'dark':'light')})();</script>
-  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>(function(){var s;try{s=localStorage.getItem('clawscan-theme')}catch(e){}var d=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=s||(d?'dark':'light')})();</script>
+  <link rel="stylesheet" href="assets/carapace/tokens.css">
+  <link rel="stylesheet" href="assets/carapace/themes.css">
+  <link rel="stylesheet" href="assets/carapace/typography.css">
+  <link rel="stylesheet" href="assets/carapace/components.css">
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/site.js" defer></script>
 </head>
-<body${homeClass}>
-  <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">
-    <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
-  </button>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="sidebar-head">
-        <a class="brand" href="index.html" aria-label="ClawScan docs home">
-          <img class="brand-mark" src="assets/clawscan-logo.png" alt="" width="30" height="30" aria-hidden="true">
-          <span><strong>ClawScan</strong><small>Composable security scanning harness for agent skills</small></span>
-        </a>
-        <button class="theme-toggle" type="button" aria-label="Toggle dark mode" aria-pressed="false" data-theme-toggle>
-          <svg class="theme-icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
-          <svg class="theme-icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
-        </button>
-      </div>
-      <label class="search"><span>Search</span><input id="doc-search" type="search" placeholder="scanners, judge, benchmarks"></label>
-      <nav aria-label="Documentation">
+<body class="${bodyClass}">
+  <a class="skip-link oc-action oc-action-primary" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="ClawScan documentation home">
+      <img class="brand-mark" src="assets/clawscan-logo.png" alt="" width="29" height="29" aria-hidden="true">
+      <span class="brand-product">ClawScan</span>
+      <span class="brand-divider" aria-hidden="true">/</span>
+      <span class="brand-section">docs</span>
+    </a>
+    <div class="topbar-center">
+      <button class="install-command" type="button" data-copy-install aria-label="Copy npm install command">
+        <span class="install-prompt" aria-hidden="true">$</span>
+        <code>npm install -g @openclaw/clawscan</code>
+        <span class="install-copy" aria-hidden="true">Copy</span>
+      </button>
+    </div>
+    <div class="topbar-actions">
+      <a class="source-link oc-action oc-action-ghost" href="https://github.com/openclaw/clawscan" rel="noopener">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.9c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.79a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86V21c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        <span>Source</span>
+      </a>
+      <button class="icon-button" type="button" data-theme-toggle aria-label="Switch color theme" aria-pressed="false">
+        <svg class="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.1 15.5A8.5 8.5 0 0 1 8.5 3.9 8.5 8.5 0 1 0 20.1 15.5Z"/></svg>
+        <svg class="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-6 1 3h-2l1-3Zm0 20-1-3h2l-1 3ZM2 12l3-1v2l-3-1Zm20 0-3 1v-2l3 1ZM4.9 4.9l2.8 1.4-1.4 1.4-1.4-2.8Zm14.2 14.2-2.8-1.4 1.4-1.4 1.4 2.8Zm0-14.2-1.4 2.8-1.4-1.4 2.8-1.4ZM4.9 19.1l1.4-2.8 1.4 1.4-2.8 1.4Z"/></svg>
+      </button>
+      <button class="nav-toggle" type="button" aria-label="Toggle documentation navigation" aria-expanded="false" aria-controls="docs-sidebar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z"/></svg>
+      </button>
+    </div>
+  </header>
+  <aside class="sidebar" id="docs-sidebar">
+    <div class="sidebar-inner">
+      <p class="sidebar-kicker">Documentation</p>
+      <label class="search" for="doc-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m20.7 19.3-4.1-4.1a7.5 7.5 0 1 0-1.4 1.4l4.1 4.1 1.4-1.4ZM5 11a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
+        <input id="doc-search" type="search" placeholder="Filter docs…" autocomplete="off">
+      </label>
+      <nav class="docs-nav" aria-label="Documentation">
 ${nav}
       </nav>
-    </aside>
-    <main>
-      <header class="hero">
-        <div>
-          <h1>${escapeHtml(heroTitle)}</h1>
-        </div>
-        <div class="hero-meta">
-          <a class="btn-ghost" href="https://github.com/openclaw/clawscan" rel="noopener">GitHub</a>
-          <a class="btn-ghost" href="index.html#quick-start">Quickstart</a>
-        </div>
-      </header>
+      <div class="sidebar-footer">
+        <span>Carapace v0.6.1</span>
+        <a href="https://carapace.design/" rel="noopener">Design system ↗</a>
+      </div>
+    </div>
+  </aside>
+  <button class="sidebar-overlay" type="button" aria-label="Close documentation navigation" hidden></button>
+  <main class="site-main" id="main-content">
+    <div class="page-frame">
+${pageIntro}
       <div class="doc-grid">
         <article class="doc">
 ${body}
@@ -763,126 +141,78 @@ ${pageNav}
         </article>
 ${toc}
       </div>
-    </main>
-  </div>
-  <script>
-const themeRoot = document.documentElement;
-function applyTheme(mode) {
-  themeRoot.dataset.theme = mode;
-  document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
-    button.setAttribute('aria-pressed', mode === 'dark' ? 'true' : 'false');
-  });
-}
-function storedTheme() {
-  try { return localStorage.getItem('theme'); } catch { return null; }
-}
-function persistTheme(mode) {
-  try { localStorage.setItem('theme', mode); } catch {}
-}
-applyTheme(themeRoot.dataset.theme === 'dark' ? 'dark' : 'light');
-document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const next = themeRoot.dataset.theme === 'dark' ? 'light' : 'dark';
-    applyTheme(next);
-    persistTheme(next);
-  });
-});
-const systemDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)');
-function onSystemChange(event) {
-  if (storedTheme()) return;
-  applyTheme(event.matches ? 'dark' : 'light');
-}
-if (systemDark) {
-  if (systemDark.addEventListener) systemDark.addEventListener('change', onSystemChange);
-  else if (systemDark.addListener) systemDark.addListener(onSystemChange);
-}
-const sidebar = document.querySelector('.sidebar');
-const toggle = document.querySelector('.nav-toggle');
-const mobileNav = window.matchMedia('(max-width: 900px)');
-function setSidebarOpen(open) {
-  if (!sidebar || !toggle) return;
-  sidebar.classList.toggle('open', open);
-  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-  if (mobileNav.matches) {
-    if (open) sidebar.removeAttribute('aria-hidden');
-    else sidebar.setAttribute('aria-hidden', 'true');
-  } else {
-    sidebar.removeAttribute('aria-hidden');
-  }
-}
-setSidebarOpen(false);
-toggle?.addEventListener('click', () => setSidebarOpen(!sidebar?.classList.contains('open')));
-document.addEventListener('click', (event) => {
-  if (!sidebar?.classList.contains('open')) return;
-  if (sidebar.contains(event.target) || toggle?.contains(event.target)) return;
-  setSidebarOpen(false);
-});
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') setSidebarOpen(false);
-});
-if (mobileNav.addEventListener) mobileNav.addEventListener('change', () => setSidebarOpen(false));
-else mobileNav.addListener?.(() => setSidebarOpen(false));
-const input = document.getElementById('doc-search');
-input?.addEventListener('input', () => {
-  const query = input.value.trim().toLowerCase();
-  document.querySelectorAll('nav section').forEach((section) => {
-    let any = false;
-    section.querySelectorAll('.nav-link').forEach((link) => {
-      const match = !query || link.textContent.toLowerCase().includes(query);
-      link.style.display = match ? 'block' : 'none';
-      if (match) any = true;
-    });
-    section.style.display = any ? 'block' : 'none';
-  });
-});
-document.querySelectorAll('.doc pre').forEach((pre) => {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'copy';
-  button.textContent = 'Copy';
-  button.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(pre.querySelector('code')?.textContent ?? '');
-      button.textContent = 'Copied';
-      button.classList.add('copied');
-      setTimeout(() => {
-        button.textContent = 'Copy';
-        button.classList.remove('copied');
-      }, 1400);
-    } catch {
-      button.textContent = 'Failed';
-      setTimeout(() => {
-        button.textContent = 'Copy';
-      }, 1400);
-    }
-  });
-  pre.appendChild(button);
-});
-const tocLinks = document.querySelectorAll('.toc a');
-if (tocLinks.length) {
-  const byElement = new Map();
-  tocLinks.forEach((link) => {
-    const id = link.getAttribute('href').slice(1);
-    const element = document.getElementById(id);
-    if (element) byElement.set(element, link);
-  });
-  const setActive = (link) => {
-    tocLinks.forEach((item) => item.classList.remove('active'));
-    link.classList.add('active');
-  };
-  const observer = new IntersectionObserver((entries) => {
-    const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-    if (visible.length) {
-      const link = byElement.get(visible[0].target);
-      if (link) setActive(link);
-    }
-  }, { rootMargin: '-15% 0px -65% 0px', threshold: 0 });
-  byElement.forEach((_link, element) => observer.observe(element));
-}
-  </script>
+    </div>
+  </main>
 </body>
 </html>
 `;
+}
+
+function renderPageHeading(title, section) {
+  return `<header class="page-heading">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="index.html">Docs</a>
+    <span aria-hidden="true">/</span>
+    <span>${escapeHtml(section)}</span>
+  </nav>
+  <h1>${escapeHtml(title)}</h1>
+</header>`;
+}
+
+function renderHomeIntro() {
+  return `<section class="home-hero" aria-labelledby="home-title">
+  <div class="home-hero-copy">
+    <p class="oc-eyebrow">OpenClaw security / ClawScan</p>
+    <h1 id="home-title">Scan the skill.<br><span>Keep the evidence.</span></h1>
+    <p class="home-lede">Run multiple agent-skill scanners, preserve their raw findings, and add an optional judge—without hiding what each tool actually reported.</p>
+    <div class="home-actions">
+      <a class="oc-action oc-action-primary" href="#quick-start">Install ClawScan</a>
+      <a class="oc-action oc-action-secondary" href="scanners.html">Explore scanners</a>
+    </div>
+    <div class="home-proof" aria-label="ClawScan capabilities">
+      <span><i aria-hidden="true"></i>Composable scanners</span>
+      <span><i aria-hidden="true"></i>Raw JSON evidence</span>
+      <span><i aria-hidden="true"></i>Benchmarkable profiles</span>
+    </div>
+  </div>
+  <div class="scan-console" aria-label="Example ClawScan run">
+    <div class="scan-console-head">
+      <span>Example run</span>
+      <span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    </div>
+    <div class="scan-console-command"><b>$</b> clawscan ./my-skill<br>&nbsp;&nbsp;--scanner skillspector --scanner cisco</div>
+    <div class="scan-console-row"><span>skillspector</span><strong>completed</strong></div>
+    <div class="scan-console-row"><span>cisco</span><strong>completed</strong></div>
+    <div class="scan-console-result">
+      <div><small>targets</small><strong>1</strong></div>
+      <div><small>scanners</small><strong>2</strong></div>
+      <div><small>artifact</small><strong>JSON</strong></div>
+    </div>
+  </div>
+</section>
+<section class="pipeline" aria-label="ClawScan pipeline">
+  <div class="pipeline-step"><small>01 / Input</small><strong>Agent skill</strong></div>
+  <div class="pipeline-step"><small>02 / Inspect</small><strong>Scanner suite</strong></div>
+  <div class="pipeline-step"><small>03 / Preserve</small><strong>Raw evidence</strong></div>
+  <div class="pipeline-step"><small>04 / Decide</small><strong>Optional judge</strong></div>
+</section>
+<nav class="home-cards" aria-label="Start with ClawScan">
+  <a class="home-card oc-card oc-card-interactive" href="scanners.html">
+    <small>Scanner catalog</small>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m8 5 7 7-7 7 1.4 1.4 8.4-8.4-8.4-8.4L8 5Z"/></svg>
+    <strong>Choose what inspects your skill.</strong>
+  </a>
+  <a class="home-card oc-card oc-card-interactive" href="profiles.html">
+    <small>Profiles</small>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m8 5 7 7-7 7 1.4 1.4 8.4-8.4-8.4-8.4L8 5Z"/></svg>
+    <strong>Save a repeatable scan setup.</strong>
+  </a>
+  <a class="home-card oc-card oc-card-interactive" href="benchmarks.html">
+    <small>Benchmarks</small>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m8 5 7 7-7 7 1.4 1.4 8.4-8.4-8.4-8.4L8 5Z"/></svg>
+    <strong>Measure the setup against known data.</strong>
+  </a>
+</nav>`;
 }
 
 function renderPageNav(previousPage, nextPage) {
@@ -890,10 +220,10 @@ function renderPageNav(previousPage, nextPage) {
     return '';
   }
   const previous = previousPage
-    ? `<a class="page-nav-prev" href="${previousPage[0].replace(/\.md$/, '.html')}"><small>Previous</small><span>${escapeHtml(previousPage[1])}</span></a>`
+    ? `<a class="page-nav-prev oc-card oc-card-interactive" href="${previousPage[0].replace(/\.md$/, '.html')}"><small>Previous</small><span>${escapeHtml(previousPage[1])}</span></a>`
     : '';
   const next = nextPage
-    ? `<a class="page-nav-next" href="${nextPage[0].replace(/\.md$/, '.html')}"><small>Next</small><span>${escapeHtml(nextPage[1])}</span></a>`
+    ? `<a class="page-nav-next oc-card oc-card-interactive" href="${nextPage[0].replace(/\.md$/, '.html')}"><small>Next</small><span>${escapeHtml(nextPage[1])}</span></a>`
     : '';
   return `<nav class="page-nav" aria-label="Page navigation">${previous}${next}</nav>`;
 }
@@ -1096,7 +426,7 @@ function renderTable(rows) {
   const rowsHtml = body
     .map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`)
     .join('');
-  return `<table>${head}<tbody>${rowsHtml}</tbody></table>`;
+  return `<div class="table-scroll" tabindex="0" role="region" aria-label="Scrollable data table"><table>${head}<tbody>${rowsHtml}</tbody></table></div>`;
 }
 
 function parseTableRow(line) {
