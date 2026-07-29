@@ -212,28 +212,43 @@ jobs:
           package_name="@openclaw/clawscan"
           tarball_path="${{ steps.publish_tarball.outputs.path }}"
           published_version=""
-          if published_version="$(npm view "${package_name}@${PACKAGE_VERSION}" version 2>/dev/null)" && [[ -n "$published_version" ]]; then
-              if [[ "$published_version" != "$PACKAGE_VERSION" ]]; then
-                echo "${package_name}@${PACKAGE_VERSION} reported unexpected version ${published_version}." >&2
-                exit 1
-              fi
-              remote_integrity=""
-              local_integrity=""
-              remote_integrity="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.integrity)"
-              # shellcheck disable=SC2016
-              local_integrity="$(node --input-type=module -e '
-                import { createHash } from "node:crypto";
-                import { readFileSync } from "node:fs";
-                const digest = createHash("sha512").update(readFileSync(process.argv[1])).digest("base64");
-                process.stdout.write(`sha512-${digest}`);
-              ' "$tarball_path")"
-              if [[ "$remote_integrity" != "$local_integrity" ]]; then
-                echo "${package_name}@${PACKAGE_VERSION} does not match the prepared release tarball." >&2
-                exit 1
-              fi
-              echo "${package_name}@${PACKAGE_VERSION} is already published with valid release metadata; skipping publish."
-              echo "clawscan_needed=false" >> "$GITHUB_OUTPUT"
-              exit 0
+          view_output=""
+          view_status=0
+          set +e
+          view_output="$(npm view "${package_name}@${PACKAGE_VERSION}" version 2>&1)"
+          view_status=$?
+          set -e
+          if [[ "$view_status" -eq 0 && -n "$view_output" ]]; then
+            published_version="$view_output"
+            if [[ "$published_version" != "$PACKAGE_VERSION" ]]; then
+              echo "${package_name}@${PACKAGE_VERSION} reported unexpected version ${published_version}." >&2
+              exit 1
+            fi
+            remote_integrity=""
+            local_integrity=""
+            remote_integrity="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.integrity)"
+            # shellcheck disable=SC2016
+            local_integrity="$(node --input-type=module -e '
+              import { createHash } from "node:crypto";
+              import { readFileSync } from "node:fs";
+              const digest = createHash("sha512").update(readFileSync(process.argv[1])).digest("base64");
+              process.stdout.write(`sha512-${digest}`);
+            ' "$tarball_path")"
+            if [[ "$remote_integrity" != "$local_integrity" ]]; then
+              echo "${package_name}@${PACKAGE_VERSION} does not match the prepared release tarball." >&2
+              exit 1
+            fi
+            echo "${package_name}@${PACKAGE_VERSION} is already published with valid release metadata; skipping publish."
+            echo "clawscan_needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$view_status" -eq 0 ]]; then
+            echo "${package_name}@${PACKAGE_VERSION} returned an empty publish-state response." >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$view_output" | grep -q "E404"; then
+            printf '%s\n' "$view_output" >&2
+            exit "$view_status"
           fi
           echo "${package_name}@${PACKAGE_VERSION} is not published yet."
           echo "clawscan_needed=true" >> "$GITHUB_OUTPUT"

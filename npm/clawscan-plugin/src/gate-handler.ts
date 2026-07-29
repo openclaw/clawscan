@@ -122,9 +122,25 @@ const degradedFinding = {
   message: "Gate degraded: Docker mode unavailable on this host; clawscan-static only.",
 };
 
+// The host command runner merges overrides with its ambient environment. Empty
+// values prevent ClawScan from forwarding provider credentials into Docker.
+const noLlmEnvironment = {
+  CLAWSCAN_SKILLSPECTOR_LLM: "0",
+  SKILLSPECTOR_PROVIDER: "",
+  SKILLSPECTOR_MODEL: "",
+  SKILLSPECTOR_MODEL_REGISTRY: "",
+  NVIDIA_INFERENCE_KEY: "",
+  OPENAI_API_KEY: "",
+  OPENAI_BASE_URL: "",
+  ANTHROPIC_API_KEY: "",
+  ANTHROPIC_PROXY_ENDPOINT_URL: "",
+  ANTHROPIC_PROXY_API_KEY: "",
+  ANTHROPIC_PROXY_API_VERSION: "",
+};
+
 const scanCommandOptions: CommandOptions = {
   timeoutMs: SCAN_TIMEOUT_MS,
-  env: { CLAWSCAN_SKILLSPECTOR_LLM: "0" },
+  env: noLlmEnvironment,
   killProcessTree: true,
   maxOutputBytes: {
     stdout: MAX_STDOUT_BYTES,

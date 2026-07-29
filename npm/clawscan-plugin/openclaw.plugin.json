@@ -2,6 +2,7 @@
   "id": "clawscan",
   "activation": {
     "onStartup": false,
+    "onHooks": ["before_install"],
     "onCapabilities": ["hook"]
   },
   "name": "ClawScan Install Gate",

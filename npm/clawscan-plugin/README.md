@@ -3,16 +3,23 @@
 `@openclaw/clawscan-plugin` registers OpenClaw's `before_install` hook and
 fails closed when ClawScan cannot produce a trustworthy gate artifact.
 
-Install the plugin, then explicitly trust and enable it:
+This package requires OpenClaw's
+[cold install-provider contract](https://github.com/openclaw/openclaw/pull/115197),
+which discovers explicitly trusted `before_install` providers before both CLI
+and Gateway install/update operations. Earlier prerelease builds that only run
+hooks already loaded in the current process are not supported.
+
+Install the plugin through OpenClaw:
 
 ```sh
 openclaw plugins install @openclaw/clawscan-plugin
-openclaw plugins enable clawscan
 ```
 
-This writes `plugins.entries.clawscan.enabled=true`. If your OpenClaw
-configuration uses `plugins.allow`, add `clawscan` to that list as well.
-Installation alone does not activate this install hook.
+That operator action explicitly trusts and enables this config-free plugin by
+writing `plugins.entries.clawscan.enabled=true` and adding `clawscan` to
+`plugins.allow` when the allowlist is configured. If the package is placed by
+another mechanism, run `openclaw plugins enable clawscan` and ensure the
+allowlist includes `clawscan` before relying on the install hook.
 
 By default, every candidate skill or plugin is scanned with SkillSpector
 (`CLAWSCAN_SKILLSPECTOR_LLM=0`) and `clawscan-static` inside ClawScan's Docker

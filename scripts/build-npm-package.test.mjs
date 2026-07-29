@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   binaryNameForTarget,
@@ -67,6 +68,26 @@ describe("package target mapping", () => {
   });
 });
 
+describe("GitHub release target mapping", () => {
+  it("builds the complete supported archive matrix", () => {
+    const releaseScript = readFileSync(new URL("./build-release.sh", import.meta.url), "utf8");
+    const matrix = releaseScript.match(/platforms=\(\n(?<entries>(?:\s+"[^"]+"\n)+)\)/u);
+
+    assert.ok(matrix?.groups?.entries, "release platform matrix was not found");
+    assert.deepEqual(
+      [...matrix.groups.entries.matchAll(/"([^"]+)"/gu)].map((match) => match[1]),
+      [
+        "darwin/amd64",
+        "darwin/arm64",
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
+        "windows/arm64",
+      ],
+    );
+  });
+});
+
 describe("preparePluginPackageJson", () => {
   it("pins the plugin and its binary dependency to the exact release version", () => {
     assert.deepEqual(
@@ -75,6 +96,10 @@ describe("preparePluginPackageJson", () => {
           name: "@openclaw/clawscan-plugin",
           version: "0.0.0-dev",
           dependencies: { "@openclaw/clawscan": "0.0.0-dev" },
+          openclaw: {
+            install: { minHostVersion: ">=2026.7.2" },
+            compat: { pluginApi: ">=2026.7.2" },
+          },
         },
         "1.2.3",
       ),
@@ -84,6 +109,8 @@ describe("preparePluginPackageJson", () => {
         files: ["dist/"],
         dependencies: { "@openclaw/clawscan": "1.2.3" },
         openclaw: {
+          install: { minHostVersion: ">=2026.7.2" },
+          compat: { pluginApi: ">=2026.7.2" },
           runtimeExtensions: ["./dist/index.js"],
         },
       },

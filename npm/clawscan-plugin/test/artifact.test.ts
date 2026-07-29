@@ -39,24 +39,50 @@ describe("gateResultFromArtifact", () => {
         gateRules: [
           {
             scanner: "skillspector",
-            rule: "nativeFindingSeverity",
-            findingCode: "SS-101",
-            findingTitle: "Suspicious package script",
-            findingSeverity: "HIGH",
+            rule: "high-finding",
+            path: "filtered_findings[].severity",
+            value: "HIGH",
             action: "warn",
           },
           {
             scanner: "clawscan-static",
-            rule: "nativeFinding",
-            findingCode: "prompt-injection",
-            findingTitle: "Prompt injection language",
-            findingSeverity: "high",
+            rule: "any-finding",
+            path: "findings[]",
             action: "warn",
           },
         ],
         scanners: {
-          skillspector: skillSpectorCompleted,
-          "clawscan-static": staticCompleted,
+          skillspector: {
+            status: "completed",
+            error: "",
+            raw: {
+              filtered_findings: [
+                {
+                  rule_id: "SS-101",
+                  severity: "HIGH",
+                  file_path: "package.json",
+                  start_line: 12,
+                  description: "Suspicious package script",
+                },
+              ],
+            },
+          },
+          "clawscan-static": {
+            status: "completed",
+            error: "",
+            raw: {
+              schemaVersion: "clawscan-static-v1",
+              findings: [
+                {
+                  id: "prompt-injection",
+                  severity: "high",
+                  path: "SKILL.md",
+                  line: 4,
+                  title: "Prompt injection language",
+                },
+              ],
+            },
+          },
         },
       }),
       ["skillspector", "clawscan-static"],
@@ -67,16 +93,66 @@ describe("gateResultFromArtifact", () => {
         {
           ruleId: "clawscan/skillspector/SS-101",
           severity: "warn",
-          file: ".",
-          line: 1,
+          file: "package.json",
+          line: 12,
           message: "HIGH: Suspicious package script",
         },
         {
           ruleId: "clawscan/clawscan-static/prompt-injection",
           severity: "warn",
-          file: ".",
-          line: 1,
+          file: "SKILL.md",
+          line: 4,
           message: "high: Prompt injection language",
+        },
+      ],
+    });
+  });
+
+  it("evaluates valid evidence from a completed scanner with a nonzero-exit error", () => {
+    const result = gateResultFromArtifact(
+      JSON.stringify({
+        schemaVersion: "clawscan-run-v1",
+        gate: "warn",
+        gateRules: [
+          {
+            scanner: "skillspector",
+            rule: "high-finding",
+            path: "issues[].severity",
+            value: "HIGH",
+            action: "warn",
+          },
+        ],
+        scanners: {
+          skillspector: {
+            status: "completed",
+            error: "scanner exited with code 1",
+            exitCode: 1,
+            raw: {
+              risk_assessment: { severity: "HIGH" },
+              issues: [
+                {
+                  id: "SS-101",
+                  severity: "HIGH",
+                  path: "package.json",
+                  line: 12,
+                  description: "Suspicious package script",
+                },
+              ],
+            },
+          },
+        },
+      }),
+      ["skillspector"],
+    );
+
+    assert.deepEqual(result, {
+      findings: [
+        {
+          ruleId: "clawscan/skillspector/SS-101",
+          severity: "warn",
+          file: "package.json",
+          line: 12,
+          message: "HIGH: Suspicious package script",
         },
       ],
     });
@@ -90,15 +166,28 @@ describe("gateResultFromArtifact", () => {
         gateRules: [
           {
             scanner: "skillspector",
-            rule: "nativeFindingSeverity",
-            findingCode: "SS-900",
-            findingTitle: "Credential theft behavior",
-            findingSeverity: "CRITICAL",
+            rule: "critical-finding",
+            path: "filtered_findings[].severity",
+            value: "CRITICAL",
             action: "block",
           },
         ],
         scanners: {
-          skillspector: skillSpectorCompleted,
+          skillspector: {
+            status: "completed",
+            error: "",
+            raw: {
+              filtered_findings: [
+                {
+                  rule_id: "SS-900",
+                  severity: "CRITICAL",
+                  file_path: "SKILL.md",
+                  start_line: 9,
+                  description: "Credential theft behavior",
+                },
+              ],
+            },
+          },
           "clawscan-static": staticCompleted,
         },
       }),
@@ -112,8 +201,8 @@ describe("gateResultFromArtifact", () => {
         {
           ruleId: "clawscan/skillspector/SS-900",
           severity: "critical",
-          file: ".",
-          line: 1,
+          file: "SKILL.md",
+          line: 9,
           message: "CRITICAL: Credential theft behavior",
         },
       ],
@@ -128,17 +217,26 @@ describe("gateResultFromArtifact", () => {
         gateRules: [
           {
             scanner: "demo scanner\u0000",
-            rule: "nativeFinding",
-            findingCode: "odd rule/id",
-            findingTitle: `unsafe\u0000 title ${"x".repeat(400)}`,
-            findingSeverity: "HIGH",
-            file: "/../../private/\u0000token.ts",
-            line: 9_999_999,
+            rule: "any-finding",
+            path: "findings[]",
             action: "warn",
           },
         ],
         scanners: {
-          "demo scanner\u0000": { status: "completed" },
+          "demo scanner\u0000": {
+            status: "completed",
+            raw: {
+              findings: [
+                {
+                  id: "odd rule/id",
+                  title: `unsafe\u0000 title ${"x".repeat(400)}`,
+                  severity: "HIGH",
+                  path: "/../../private/\u0000token.ts",
+                  line: 9_999_999,
+                },
+              ],
+            },
+          },
         },
       }),
       ["demo scanner\u0000"],

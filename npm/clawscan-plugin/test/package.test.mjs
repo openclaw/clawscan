@@ -23,8 +23,11 @@ describe("@openclaw/clawscan-plugin package", () => {
     assert.equal(packageJson.peerDependenciesMeta.openclaw.optional, true);
     assert.deepEqual(packageJson.openclaw.extensions, ["./index.ts"]);
     assert.equal(packageJson.openclaw.install.npmSpec, "@openclaw/clawscan-plugin");
+    assert.equal(packageJson.openclaw.install.minHostVersion, ">=2026.7.2");
+    assert.equal(packageJson.openclaw.compat.pluginApi, ">=2026.7.2");
     assert.equal(manifest.id, "clawscan");
     assert.equal(manifest.activation.onStartup, false);
+    assert.deepEqual(manifest.activation.onHooks, ["before_install"]);
     assert.deepEqual(manifest.activation.onCapabilities, ["hook"]);
     assert.equal(manifest.enabledByDefault, undefined);
   });

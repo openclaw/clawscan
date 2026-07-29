@@ -212,7 +212,14 @@ jobs:
             local tarball_path="$2"
             local output_name="$3"
             local published_version=""
-            if published_version="$(npm view "${package_name}@${package_version}" version 2>/dev/null)" && [[ -n "$published_version" ]]; then
+            local view_output=""
+            local view_status=0
+            set +e
+            view_output="$(npm view "${package_name}@${package_version}" version 2>&1)"
+            view_status=$?
+            set -e
+            if [[ "$view_status" -eq 0 && -n "$view_output" ]]; then
+              published_version="$view_output"
               local remote_integrity=""
               local local_integrity=""
               remote_integrity="$(npm view "${package_name}@${package_version}" dist.integrity)"
@@ -230,6 +237,14 @@ jobs:
               echo "${package_name}@${package_version} already matches the prepared release tarball; skipping publish."
               echo "${output_name}=false" >> "$GITHUB_OUTPUT"
               return
+            fi
+            if [[ "$view_status" -eq 0 ]]; then
+              echo "${package_name}@${package_version} returned an empty publish-state response." >&2
+              exit 1
+            fi
+            if ! printf '%s\n' "$view_output" | grep -q "E404"; then
+              printf '%s\n' "$view_output" >&2
+              return "$view_status"
             fi
             echo "${output_name}=true" >> "$GITHUB_OUTPUT"
           }

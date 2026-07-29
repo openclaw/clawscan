@@ -269,7 +269,9 @@ async function smokePackages(
     if (
       installedPackageJson.version !== packageVersion ||
       installedPackageJson.dependencies?.["@openclaw/clawscan"] !== packageVersion ||
-      installedPackageJson.peerDependencies?.openclaw !== ">=2026.7.2"
+      installedPackageJson.peerDependencies?.openclaw !== ">=2026.7.2" ||
+      installedPackageJson.openclaw?.install?.minHostVersion !== ">=2026.7.2" ||
+      installedPackageJson.openclaw?.compat?.pluginApi !== ">=2026.7.2"
     ) {
       throw new Error("Installed ClawScan plugin did not preserve its host and binary contracts.");
     }

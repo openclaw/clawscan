@@ -19,7 +19,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function scannerCompleted(value: unknown): value is Record<string, unknown> {
-  return isRecord(value) && value.status === "completed" && cleanText(value.error, 1) === "";
+  return isRecord(value) && value.status === "completed";
 }
 
 function skillSpectorEvidenceUsable(raw: unknown): boolean {
@@ -99,7 +99,98 @@ function cleanFindingLine(value: unknown): number {
   return Math.min(1_000_000, Math.max(1, Math.trunc(value)));
 }
 
-function findingFromRule(rule: Record<string, unknown>): InstallFinding | undefined {
+function firstText(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+  limit: number,
+): string {
+  for (const key of keys) {
+    const value = cleanText(record[key], limit);
+    if (value !== "") {
+      return value;
+    }
+  }
+  return "";
+}
+
+function firstNumber(record: Record<string, unknown>, keys: readonly string[]): number {
+  for (const key of keys) {
+    if (typeof record[key] === "number") {
+      return cleanFindingLine(record[key]);
+    }
+  }
+  return 1;
+}
+
+function normalizeIdentifier(value: string): string {
+  return value.trim().toUpperCase().replaceAll(" ", "_").replaceAll("-", "_");
+}
+
+function evidenceRecordsForRule(
+  scanner: string,
+  raw: unknown,
+  rule: Record<string, unknown>,
+): Record<string, unknown>[] {
+  if (!isRecord(raw)) {
+    return [];
+  }
+  const path = cleanText(rule.path, 240);
+  const pathRoot = path.includes("[]") ? path.slice(0, path.indexOf("[]")) : "";
+  const keys =
+    scanner === "clawscan-static"
+      ? ["findings"]
+      : ["filtered_findings", "filteredFindings", "findings", "issues", "vulnerabilities"];
+  const orderedKeys = pathRoot === "" ? keys : [pathRoot, ...keys.filter((key) => key !== pathRoot)];
+  for (const key of orderedKeys) {
+    const value = raw[key];
+    if (Array.isArray(value)) {
+      return value.filter(isRecord);
+    }
+  }
+  return [];
+}
+
+function findingFromEvidence(
+  rule: Record<string, unknown>,
+  evidence: Record<string, unknown>,
+): InstallFinding {
+  const scanner = cleanRuleSegment(rule.scanner, "unknown-scanner");
+  const evidenceId = firstText(evidence, ["id", "rule_id", "ruleId", "issueId", "code"], 64);
+  const ruleName = cleanRuleSegment(evidenceId || rule.rule, "gate-rule");
+  const title =
+    firstText(evidence, ["title", "description", "explanation", "message"], 240) ||
+    `${cleanText(rule.scanner, 80)} finding ${evidenceId || cleanText(rule.rule, 80)}`;
+  const severity = firstText(evidence, ["severity", "risk_severity", "riskSeverity", "level"], 40);
+  return {
+    ruleId: `clawscan/${scanner}/${ruleName}`,
+    severity: rule.action === "block" ? "critical" : "warn",
+    file: cleanFindingFile(firstText(evidence, ["path", "file_path", "filePath", "file"], 1_000)),
+    line: firstNumber(evidence, ["line", "start_line", "startLine"]),
+    message: severity ? `${severity}: ${title}` : title,
+  };
+}
+
+function findingFromRule(rule: Record<string, unknown>): InstallFinding {
+  const scanner = cleanRuleSegment(rule.scanner, "unknown-scanner");
+  const ruleName = cleanRuleSegment(rule.rule, "gate-rule");
+  const path = cleanText(rule.path, 240);
+  const value =
+    rule.value === undefined ? "" : cleanText(JSON.stringify(rule.value), 120);
+  const matched = path === "" ? "" : ` matched ${path}${value === "" ? "" : `=${value}`}`;
+  const title = `${cleanText(rule.scanner, 80)} fired ${cleanText(rule.rule, 80)}${matched}`;
+  return {
+    ruleId: `clawscan/${scanner}/${ruleName}`,
+    severity: rule.action === "block" ? "critical" : "warn",
+    file: ".",
+    line: 1,
+    message: title,
+  };
+}
+
+function findingsFromRule(
+  rule: Record<string, unknown>,
+  scanners: Record<string, unknown>,
+): InstallFinding[] | undefined {
   if (
     typeof rule.scanner !== "string" ||
     typeof rule.rule !== "string" ||
@@ -107,19 +198,24 @@ function findingFromRule(rule: Record<string, unknown>): InstallFinding | undefi
   ) {
     return undefined;
   }
-  const scanner = cleanRuleSegment(rule.scanner, "unknown-scanner");
-  const ruleName = cleanRuleSegment(rule.findingCode ?? rule.rule, "gate-rule");
-  const title =
-    cleanText(rule.findingTitle, 240) ||
-    `${cleanText(rule.scanner, 80)} fired ${cleanText(rule.rule, 80)}`;
-  const severity = cleanText(rule.findingSeverity, 40);
-  return {
-    ruleId: `clawscan/${scanner}/${ruleName}`,
-    severity: rule.action === "block" ? "critical" : "warn",
-    file: cleanFindingFile(rule.file),
-    line: cleanFindingLine(rule.line),
-    message: severity ? `${severity}: ${title}` : title,
-  };
+  const scannerResult = scanners[rule.scanner];
+  const raw = isRecord(scannerResult) ? scannerResult.raw : undefined;
+  const expectedSeverity = typeof rule.value === "string" ? normalizeIdentifier(rule.value) : "";
+  const evidence = evidenceRecordsForRule(rule.scanner, raw, rule).filter((entry) => {
+    if (expectedSeverity === "") {
+      return true;
+    }
+    const severity = firstText(
+      entry,
+      ["severity", "risk_severity", "riskSeverity", "level"],
+      40,
+    );
+    return severity !== "" && normalizeIdentifier(severity) === expectedSeverity;
+  });
+  if (evidence.length === 0) {
+    return [findingFromRule(rule)];
+  }
+  return evidence.map((entry) => findingFromEvidence(rule, entry));
 }
 
 function ruleReferencesAvailableScanner(
@@ -202,11 +298,12 @@ export function gateResultFromArtifact(
       if (!ruleReferencesAvailableScanner(rule, parsed.scanners)) {
         return blockForInvalidArtifact("fired gate rule referenced an unavailable scanner");
       }
-      const finding = findingFromRule(rule);
-      if (!finding) {
+      const ruleFindings = findingsFromRule(rule, parsed.scanners);
+      if (!ruleFindings) {
         return blockForInvalidArtifact("warn artifact contained an invalid fired gate rule");
       }
-      findings.push(finding);
+      findings.push(...ruleFindings);
+      findings.length = Math.min(findings.length, MAX_GATE_RULES);
     }
     if (findings.length === 0) {
       return blockForInvalidArtifact("warn artifact did not contain a fired warning rule");
@@ -222,11 +319,12 @@ export function gateResultFromArtifact(
       if (!ruleReferencesAvailableScanner(rule, parsed.scanners)) {
         return blockForInvalidArtifact("fired gate rule referenced an unavailable scanner");
       }
-      const finding = findingFromRule(rule);
-      if (!finding) {
+      const ruleFindings = findingsFromRule(rule, parsed.scanners);
+      if (!ruleFindings) {
         return blockForInvalidArtifact("block artifact contained an invalid fired gate rule");
       }
-      findings.push(finding);
+      findings.push(...ruleFindings);
+      findings.length = Math.min(findings.length, MAX_GATE_RULES);
     }
     const blockingMessages = findings
       .filter((finding) => finding.severity === "critical")
