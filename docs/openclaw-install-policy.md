@@ -66,6 +66,81 @@ The default `openclaw-install-policy` profile composes SkillSpector and
 command-backed scanners in Docker by default. `PATH` lets it locate Docker;
 `DOCKER_HOST` is only needed when the local Docker setup uses it.
 
+## Understand the sandbox boundary
+
+There are two separate execution boundaries:
+
+1. OpenClaw runs `security.installPolicy.exec` as a trusted local child of the
+   Gateway/install process. The normal OpenClaw agent tool sandbox does not run
+   or isolate this command.
+2. ClawScan runs command-backed scanners such as SkillSpector in its own Docker
+   sandbox. The built-in `clawscan-static` scanner runs inside the trusted
+   ClawScan policy process.
+
+OpenClaw downloads, clones, uploads, or extracts a candidate into a temporary
+staging location before install commit. It sends the absolute staged
+`sourcePath`, its `file` or `directory` kind, and the host-declared `skill` or
+`plugin` target type to ClawScan over stdin. ClawScan uses that target type
+directly instead of trying to rediscover it from a manifest.
+
+For a command-backed scanner, ClawScan automatically bind-mounts every existing
+absolute path passed to the scanner. The staged target is mounted read-only at
+the same absolute path inside the container; the scanner's temporary result
+directory is mounted writable. An invocation is conceptually equivalent to:
+
+```sh
+docker run --rm \
+  --mount type=bind,source=/tmp/openclaw-install/package,target=/tmp/openclaw-install/package,readonly \
+  --mount type=bind,source=/tmp/clawscan-results,target=/tmp/clawscan-results \
+  ghcr.io/openclaw/clawscan-runtime:latest \
+  skillspector scan /tmp/openclaw-install/package \
+  --format json \
+  --output /tmp/clawscan-results/report.json
+```
+
+Operators do not need to add a `--sandbox-mount` for `sourcePath`. That option
+is only for extra operator-owned paths required by a custom scanner or judge.
+
+### Containerized OpenClaw Gateway
+
+When the OpenClaw Gateway itself runs in a container, the policy executable
+must exist inside that container at the configured absolute `command` path.
+The default nested scanner sandbox additionally requires the Docker CLI and
+access to a Docker daemon.
+
+If the Gateway container uses the host Docker socket, a staged path that exists
+only in the Gateway container cannot be bind-mounted into the scanner
+container. Docker resolves bind-mount sources in the daemon host's filesystem,
+not the calling container's filesystem. The same rule applies to ClawScan's
+writable temporary result directories.
+
+Use one temporary root that is bind-mounted from the Docker host into the
+Gateway at the same absolute path, set the Gateway's `TMPDIR` to that root, and
+include `TMPDIR` in the policy command's `passEnv`. OpenClaw staging paths and
+ClawScan result paths will then both be visible to the host Docker daemon:
+
+```json5
+passEnv: ["PATH", "DOCKER_HOST", "TMPDIR"]
+```
+
+For example, mount `/var/lib/openclaw-install-tmp` into the Gateway at
+`/var/lib/openclaw-install-tmp` and start the Gateway with
+`TMPDIR=/var/lib/openclaw-install-tmp`. Do not use a container-only `/tmp` for
+either staging or ClawScan results in this nested-Docker topology.
+
+Alternatively, treat the outer Gateway container as the isolation boundary,
+install every selected command-backed scanner inside it, and explicitly disable
+ClawScan's nested Docker sandbox:
+
+```json5
+args: ["openclaw-install-policy", "--sandbox", "off"]
+```
+
+This alternative runs scanner commands directly inside the Gateway container.
+Use it only when that outer environment is intentionally isolated and
+disposable. Do not disable the sandbox merely to work around a missing Docker
+daemon or mismatched staging paths.
+
 For npm plugin installs, OpenClaw calls the policy before mutation with an
 `npm-package-metadata.json` file, then calls it again for the resolved package
 and installed dependency tree. ClawScan narrowly recognizes the metadata call
