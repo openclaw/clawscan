@@ -124,10 +124,6 @@ function pageShell(currentFile, title, body) {
       <nav class="docs-nav" aria-label="Documentation">
 ${nav}
       </nav>
-      <div class="sidebar-footer">
-        <span>Carapace v0.6.1</span>
-        <a href="https://carapace.design/" rel="noopener">Design system ↗</a>
-      </div>
     </div>
   </aside>
   <button class="sidebar-overlay" type="button" aria-label="Close documentation navigation" hidden></button>
