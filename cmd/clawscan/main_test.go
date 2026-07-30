@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openclaw/clawscan/internal/installpolicy"
 	"github.com/openclaw/clawscan/internal/runner"
 )
 
@@ -248,7 +249,9 @@ func TestRunOpenClawInstallPolicyHandlesNPMInstallStagesSeparately(t *testing.T)
 		"plugin":{"pluginId":"demo","contentType":"dependency-tree"}
 	}`, dependencyRoot)
 	dependencyResponse := runInstallPolicyTestRequest(t, staticArgs, dependencyRequest)
-	if dependencyResponse.Decision != "allow" || len(dependencyResponse.Findings) == 0 {
+	if dependencyResponse.Decision != "warn" ||
+		strings.TrimSpace(dependencyResponse.Reason) == "" ||
+		len(dependencyResponse.Findings) == 0 {
 		t.Fatalf("dependency response did not expose transitive code to the static gate: %#v", dependencyResponse)
 	}
 
@@ -307,6 +310,24 @@ func TestApplyInstallPolicyPlatformDefaultsUsesVisibleWindowsStaticFallback(t *t
 	}
 	if applyInstallPolicyPlatformDefaults(&shadowed, nil, "windows") {
 		t.Fatal("operator-owned profile shadow must not be overridden")
+	}
+}
+
+func TestApplyWindowsDegradedResponseRequiresConfirmation(t *testing.T) {
+	response := installpolicy.Response{ProtocolVersion: 1, Decision: "allow"}
+	applyWindowsDegradedResponse(&response)
+	if response.Decision != "warn" || strings.TrimSpace(response.Reason) == "" {
+		t.Fatalf("response = %#v", response)
+	}
+	foundFallback := false
+	for _, finding := range response.Findings {
+		if finding.RuleID == "clawscan.windows-static-fallback" {
+			foundFallback = true
+			break
+		}
+	}
+	if !foundFallback {
+		t.Fatalf("missing degraded finding: %#v", response.Findings)
 	}
 }
 

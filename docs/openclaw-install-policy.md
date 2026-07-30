@@ -4,10 +4,17 @@ ClawScan can run as OpenClaw's external `security.installPolicy.exec` command.
 This is an operator-owned boundary. It does not require a ClawScan plugin,
 plugin activation, or a new install hook.
 
+> [!IMPORTANT]
+> Deploy this adapter only with an OpenClaw release whose protocol-v1 install
+> policy parser supports `decision: "warn"` and pauses for explicit user
+> confirmation. Older allow/block-only hosts intentionally reject `warn` and
+> fail closed. No compatible release floor exists until the coordinated
+> OpenClaw host change lands.
+
 OpenClaw writes a protocol v1 request to the command's stdin before a supported
 third-party skill or plugin install/update stage is committed. One install can
 produce more than one policy call. ClawScan evaluates each staged
-`sourcePath` and writes one protocol v1 allow/block response to stdout.
+`sourcePath` and writes one protocol v1 allow/warn/block response to stdout.
 
 ## Resolve the trusted executable
 
@@ -78,8 +85,9 @@ staged root fail closed.
 
 On native Windows, the default profile visibly degrades to
 `clawscan-static` with the sandbox disabled because the Linux Docker runtime
-cannot consume native Windows staging paths. The allow/block response includes
-a warning finding for this reduced coverage. Explicit `--scanner` or
+cannot consume native Windows staging paths. The response is `warn`, requiring
+OpenClaw to obtain explicit confirmation, and includes a finding for this
+reduced coverage. Explicit `--scanner` or
 `--sandbox` arguments remain operator-owned and disable this automatic fallback.
 
 To use an operator-owned profile, add explicit arguments:
@@ -120,12 +128,19 @@ Successful scans return:
 {"protocolVersion":1,"decision":"allow"}
 ```
 
-Warning gate rules return `decision: "allow"` with bounded findings. Blocking
-gate rules return `decision: "block"` with critical findings. Invalid requests,
-scanner errors, skipped required scanners, empty results, and unknown gate
-verdicts return a valid block response with a fail-closed reason. OpenClaw also
-fails closed if the executable cannot start, times out, exits nonzero, or emits
-malformed output.
+Warning gate rules return `decision: "warn"` with a required reason and
+optional bounded findings. OpenClaw owns the confirmation prompt and resumes
+the install only after explicit user confirmation. Blocking gate rules return
+`decision: "block"` with a required reason and optional critical findings;
+blocks are not overridable. Invalid requests, scanner errors, skipped required
+scanners, empty results, and unknown gate verdicts return a valid block response
+with a fail-closed reason. OpenClaw also fails closed if the executable cannot
+start, times out, exits nonzero, emits malformed output, or does not support a
+returned protocol decision.
+
+The policy process never prompts. It does not issue approval tokens, negotiate
+capabilities, or maintain install phase IDs. Its only approval signal is the
+top-level protocol-v1 decision; OpenClaw owns all acknowledgement state and UI.
 
 ## Scope
 

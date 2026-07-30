@@ -65,7 +65,6 @@ type Finding struct {
 type Response struct {
 	ProtocolVersion int       `json:"protocolVersion"`
 	Decision        string    `json:"decision"`
-	Code            string    `json:"code,omitempty"`
 	Reason          string    `json:"reason,omitempty"`
 	Findings        []Finding `json:"findings,omitempty"`
 }
@@ -75,7 +74,7 @@ func AddFinding(response *Response, finding Finding) {
 		response.Findings = append(response.Findings, finding)
 		return
 	}
-	if response.Decision == "allow" && finding.Severity == "warn" {
+	if response.Decision != "block" && finding.Severity == "warn" {
 		response.Findings[len(response.Findings)-1] = finding
 	}
 }
@@ -258,7 +257,15 @@ func ResponseFromArtifact(artifact runner.Artifact) Response {
 				return FailureResponse("warn verdict contained a blocking gate rule")
 			}
 		}
-		return Response{ProtocolVersion: 1, Decision: "allow", Findings: findings}
+		// Protocol v1 intentionally includes warn in the matching OpenClaw host
+		// contract. Older allow/block-only hosts reject it and fail closed; the
+		// policy process does not add capability negotiation or approval state.
+		return Response{
+			ProtocolVersion: 1,
+			Decision:        "warn",
+			Reason:          "ClawScan gate reported warnings for the staged installation",
+			Findings:        findings,
+		}
 	case "block":
 		hasBlockingFinding := false
 		for _, finding := range findings {
@@ -273,7 +280,6 @@ func ResponseFromArtifact(artifact runner.Artifact) Response {
 		return Response{
 			ProtocolVersion: 1,
 			Decision:        "block",
-			Code:            "clawscan_gate_blocked",
 			Reason:          "ClawScan gate blocked the staged installation",
 			Findings:        findings,
 		}
@@ -389,7 +395,6 @@ func FailureResponse(reason string) Response {
 	return Response{
 		ProtocolVersion: 1,
 		Decision:        "block",
-		Code:            "clawscan_scan_failed",
 		Reason:          truncateText("ClawScan install policy failed closed: " + reason),
 	}
 }
@@ -409,14 +414,48 @@ func truncateText(value string) string {
 }
 
 func WriteResponse(output io.Writer, response Response) error {
-	response.Code = truncateText(response.Code)
 	response.Reason = truncateText(response.Reason)
 	for index := range response.Findings {
 		response.Findings[index].RuleID = truncateText(response.Findings[index].RuleID)
 		response.Findings[index].Message = truncateText(response.Findings[index].Message)
 		response.Findings[index].Evidence = truncateText(response.Findings[index].Evidence)
 	}
+	if err := validateResponse(response); err != nil {
+		return err
+	}
 	encoder := json.NewEncoder(output)
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(response)
+}
+
+func validateResponse(response Response) error {
+	if response.ProtocolVersion != 1 {
+		return errors.New("policy response protocolVersion must be 1")
+	}
+	switch response.Decision {
+	case "allow":
+	case "warn", "block":
+		if strings.TrimSpace(response.Reason) == "" {
+			return fmt.Errorf(
+				`policy response decision %q requires a non-empty reason`,
+				response.Decision,
+			)
+		}
+	default:
+		return errors.New(`policy response decision must be "allow", "warn", or "block"`)
+	}
+	if len(response.Findings) > maxFindings {
+		return fmt.Errorf("policy response exceeds %d findings", maxFindings)
+	}
+	for _, finding := range response.Findings {
+		if strings.TrimSpace(finding.RuleID) == "" || strings.TrimSpace(finding.Message) == "" {
+			return errors.New("policy response findings require non-empty ruleId and message")
+		}
+		switch finding.Severity {
+		case "info", "warn", "critical":
+		default:
+			return errors.New("policy response finding severity is not supported")
+		}
+	}
+	return nil
 }

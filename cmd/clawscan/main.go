@@ -188,13 +188,21 @@ func runOpenClawInstallPolicy(
 		})
 	}
 	if windowsDegraded {
-		installpolicy.AddFinding(&response, installpolicy.Finding{
-			RuleID:   "clawscan.windows-static-fallback",
-			Severity: "warn",
-			Message:  "Docker scanning is unavailable in the native Windows policy path; ClawScan used static analysis only.",
-		})
+		applyWindowsDegradedResponse(&response)
 	}
 	return installpolicy.WriteResponse(output, response)
+}
+
+func applyWindowsDegradedResponse(response *installpolicy.Response) {
+	if response.Decision != "block" {
+		response.Decision = "warn"
+		response.Reason = "ClawScan used static-only scanning on native Windows; full Docker scanner coverage was unavailable"
+	}
+	installpolicy.AddFinding(response, installpolicy.Finding{
+		RuleID:   "clawscan.windows-static-fallback",
+		Severity: "warn",
+		Message:  "Docker scanning is unavailable in the native Windows policy path; ClawScan used static analysis only.",
+	})
 }
 
 func hasProfileSelection(args []string) bool {
@@ -776,7 +784,7 @@ Core flags:
 
 OpenClaw install policy:
   openclaw-install-policy     Read an OpenClaw security.installPolicy request from stdin and
-                             return its protocol v1 allow/block response on stdout.
+                             return its protocol v1 allow/warn/block response on stdout.
                              Defaults to the composable openclaw-install-policy profile.
 
 Benchmark command flags:

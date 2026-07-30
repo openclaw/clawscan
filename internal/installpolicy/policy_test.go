@@ -119,7 +119,7 @@ func TestResponseFromArtifactMapsGateAndScannerState(t *testing.T) {
 		name     string
 		artifact runner.Artifact
 		decision string
-		code     string
+		reason   bool
 		findings int
 	}{
 		{
@@ -148,7 +148,8 @@ func TestResponseFromArtifactMapsGateAndScannerState(t *testing.T) {
 					Action:  "warn",
 				}},
 			},
-			decision: "allow",
+			decision: "warn",
+			reason:   true,
 			findings: 1,
 		},
 		{
@@ -167,7 +168,7 @@ func TestResponseFromArtifactMapsGateAndScannerState(t *testing.T) {
 				}},
 			},
 			decision: "block",
-			code:     "clawscan_gate_blocked",
+			reason:   true,
 			findings: 1,
 		},
 		{
@@ -179,7 +180,7 @@ func TestResponseFromArtifactMapsGateAndScannerState(t *testing.T) {
 				},
 			},
 			decision: "block",
-			code:     "clawscan_scan_failed",
+			reason:   true,
 		},
 		{
 			name: "scanner failure",
@@ -188,7 +189,7 @@ func TestResponseFromArtifactMapsGateAndScannerState(t *testing.T) {
 				Scanners: map[string]runner.ScannerResult{"static": {Status: "failed", Error: "boom"}},
 			},
 			decision: "block",
-			code:     "clawscan_scan_failed",
+			reason:   true,
 		},
 		{
 			name: "scanner skipped",
@@ -197,14 +198,15 @@ func TestResponseFromArtifactMapsGateAndScannerState(t *testing.T) {
 				Scanners: map[string]runner.ScannerResult{"static": {Status: "skipped"}},
 			},
 			decision: "block",
-			code:     "clawscan_scan_failed",
+			reason:   true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			response := ResponseFromArtifact(test.artifact)
-			if response.Decision != test.decision || response.Code != test.code {
+			if response.Decision != test.decision ||
+				(strings.TrimSpace(response.Reason) != "") != test.reason {
 				t.Fatalf("response = %#v", response)
 			}
 			if len(response.Findings) != test.findings {
@@ -227,8 +229,11 @@ func TestFailureResponseAndWriteResponseUsePolicyProtocol(t *testing.T) {
 	}
 	if decoded["protocolVersion"] != float64(1) ||
 		decoded["decision"] != "block" ||
-		decoded["code"] != "clawscan_scan_failed" {
+		strings.TrimSpace(decoded["reason"].(string)) == "" {
 		t.Fatalf("response = %#v", decoded)
+	}
+	if _, exists := decoded["code"]; exists {
+		t.Fatalf("response contains non-contract code field: %#v", decoded)
 	}
 }
 
@@ -236,7 +241,6 @@ func TestWriteResponseSanitizesControlCharactersInAllDiagnosticText(t *testing.T
 	response := Response{
 		ProtocolVersion: 1,
 		Decision:        "block",
-		Code:            "scan\x1b[31m_failed",
 		Reason:          "first line\nforged line\tend",
 		Findings: []Finding{{
 			RuleID:   "scanner.\x00rule",
@@ -254,7 +258,6 @@ func TestWriteResponseSanitizesControlCharactersInAllDiagnosticText(t *testing.T
 		t.Fatal(err)
 	}
 	for name, value := range map[string]string{
-		"code":     decoded.Code,
 		"reason":   decoded.Reason,
 		"ruleId":   decoded.Findings[0].RuleID,
 		"message":  decoded.Findings[0].Message,
@@ -268,6 +271,33 @@ func TestWriteResponseSanitizesControlCharactersInAllDiagnosticText(t *testing.T
 	}
 	if decoded.Reason != "first line forged line end" {
 		t.Fatalf("reason = %q", decoded.Reason)
+	}
+}
+
+func TestWriteResponseRequiresReasonsForWarnAndBlock(t *testing.T) {
+	for _, decision := range []string{"warn", "block"} {
+		t.Run(decision, func(t *testing.T) {
+			var output bytes.Buffer
+			err := WriteResponse(&output, Response{
+				ProtocolVersion: 1,
+				Decision:        decision,
+				Reason:          "\n\t",
+			})
+			if err == nil || !strings.Contains(err.Error(), "requires a non-empty reason") {
+				t.Fatalf("error = %v", err)
+			}
+			if output.Len() != 0 {
+				t.Fatalf("invalid response reached stdout: %q", output.String())
+			}
+		})
+	}
+}
+
+func TestWriteResponseRejectsUnsupportedDecision(t *testing.T) {
+	var output bytes.Buffer
+	err := WriteResponse(&output, Response{ProtocolVersion: 1, Decision: "confirm"})
+	if err == nil || !strings.Contains(err.Error(), `"allow", "warn", or "block"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
