@@ -3,13 +3,11 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   binaryNameForTarget,
-  compilePluginTypeScript,
-  normalizePackageVersion,
   normalizeBuildDate,
+  normalizePackageVersion,
   npmDistTagForVersion,
   packageTargets,
   platformKeyForTarget,
-  preparePluginPackageJson,
 } from "./build-npm-package.mjs";
 
 describe("normalizePackageVersion", () => {
@@ -85,49 +83,5 @@ describe("GitHub release target mapping", () => {
         "windows/arm64",
       ],
     );
-  });
-});
-
-describe("preparePluginPackageJson", () => {
-  it("pins the plugin and its binary dependency to the exact release version", () => {
-    assert.deepEqual(
-      preparePluginPackageJson(
-        {
-          name: "@openclaw/clawscan-plugin",
-          version: "0.0.0-dev",
-          private: true,
-          dependencies: { "@openclaw/clawscan": "0.0.0-dev" },
-          openclaw: {
-            release: { publishToClawHub: false, publishToNpm: false },
-          },
-        },
-        "1.2.3",
-      ),
-      {
-        name: "@openclaw/clawscan-plugin",
-        version: "1.2.3",
-        private: true,
-        files: ["dist/"],
-        dependencies: { "@openclaw/clawscan": "1.2.3" },
-        openclaw: {
-          release: { publishToClawHub: false, publishToNpm: false },
-          runtimeExtensions: ["./dist/index.js"],
-        },
-      },
-    );
-  });
-});
-
-describe("compilePluginTypeScript", () => {
-  it("removes types and rewrites local TypeScript imports for the installed runtime", () => {
-    const compiled = compilePluginTypeScript(
-      'import type { Host } from "openclaw/plugin-sdk/plugin-entry";\n' +
-        'import { register } from "./src/register.ts";\n' +
-        "const api: Host = register;\n",
-    );
-
-    assert.doesNotMatch(compiled, /import type/);
-    assert.match(compiled, /from "\.\/src\/register\.js"/);
-    assert.doesNotMatch(compiled, /: Host/);
   });
 });

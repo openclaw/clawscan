@@ -17,11 +17,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/output.schema.json
+//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/output.schema.json openclaw-install-policy/clawscan.yml
 var builtinFiles embed.FS
 
 var builtinProfileConfigPaths = []string{
 	"clawhub/clawscan.yml",
+	"openclaw-install-policy/clawscan.yml",
 }
 
 var jsonIntegerPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)

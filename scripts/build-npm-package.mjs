@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -58,45 +57,6 @@ export function binaryNameForTarget(target) {
   return target.goos === "windows" ? "clawscan.exe" : "clawscan";
 }
 
-export function preparePluginPackageJson(packageJson, packageVersion) {
-  return {
-    ...packageJson,
-    version: packageVersion,
-    files: [...new Set([...(packageJson.files ?? []), "dist/"])],
-    dependencies: {
-      ...packageJson.dependencies,
-      "@openclaw/clawscan": packageVersion,
-    },
-    openclaw: {
-      ...packageJson.openclaw,
-      runtimeExtensions: ["./dist/index.js"],
-    },
-  };
-}
-
-const pluginRuntimeSources = [
-  "index.ts",
-  join("src", "artifact.ts"),
-  join("src", "gate-handler.ts"),
-  join("src", "register.ts"),
-];
-
-export function compilePluginTypeScript(source) {
-  return stripTypeScriptTypes(source, { mode: "transform" }).replace(
-    /((?:from\s+|import\s*)["'](?:\.\.?\/)[^"']+)\.ts(["'])/gu,
-    "$1.js$2",
-  );
-}
-
-async function stagePluginRuntime(pluginPackageSource, pluginPackageOut) {
-  for (const relativeSource of pluginRuntimeSources) {
-    const destination = join(pluginPackageOut, "dist", relativeSource.replace(/\.ts$/u, ".js"));
-    await mkdir(dirname(destination), { recursive: true });
-    const source = await readFile(join(pluginPackageSource, relativeSource), "utf8");
-    await writeFile(destination, compilePluginTypeScript(source));
-  }
-}
-
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repoRoot,
@@ -145,7 +105,7 @@ function parseArgs(argv) {
   return options;
 }
 
-async function stagePackages(options) {
+async function stagePackage(options) {
   const packageVersion = normalizePackageVersion(options.version);
   const binaryVersion = binaryVersionFor(options.version);
   const releaseSha = run("git", ["rev-parse", "HEAD"]).stdout.trim();
@@ -154,13 +114,10 @@ async function stagePackages(options) {
     run("git", ["show", "-s", "--format=%cI", "HEAD"]).stdout.trim(),
   );
   const packageSource = join(repoRoot, "npm", "clawscan");
-  const pluginPackageSource = join(repoRoot, "npm", "clawscan-plugin");
   const packageOut = join(options.outDir, "package");
-  const pluginPackageOut = join(options.outDir, "clawscan-plugin-package");
 
   await rm(options.outDir, { recursive: true, force: true });
   await mkdir(packageOut, { recursive: true });
-  await mkdir(pluginPackageOut, { recursive: true });
   await cp(packageSource, packageOut, {
     recursive: true,
     filter: (source) => !source.includes(`${join("npm", "clawscan", "test")}`),
@@ -170,24 +127,11 @@ async function stagePackages(options) {
   await cp(join(repoRoot, "README.md"), join(packageOut, "README.md"));
   await cp(join(repoRoot, "LICENSE"), join(packageOut, "LICENSE"));
   await chmod(join(packageOut, "bin", "clawscan.js"), 0o755);
-  await cp(pluginPackageSource, pluginPackageOut, {
-    recursive: true,
-    filter: (source) => !source.includes(`${join("npm", "clawscan-plugin", "test")}`),
-  });
-  await rm(join(pluginPackageOut, "test"), { recursive: true, force: true });
-  await cp(join(repoRoot, "LICENSE"), join(pluginPackageOut, "LICENSE"));
-  await stagePluginRuntime(pluginPackageSource, pluginPackageOut);
 
   const packageJsonPath = join(packageOut, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
   packageJson.version = packageVersion;
   await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
-  const pluginPackageJsonPath = join(pluginPackageOut, "package.json");
-  const pluginPackageJson = preparePluginPackageJson(
-    JSON.parse(await readFile(pluginPackageJsonPath, "utf8")),
-    packageVersion,
-  );
-  await writeFile(pluginPackageJsonPath, `${JSON.stringify(pluginPackageJson, null, 2)}\n`);
 
   const ldflags = `-s -w -X main.version=${binaryVersion} -X main.commit=${releaseCommit} -X main.date=${buildDate}`;
   for (const target of packageTargets) {
@@ -219,7 +163,7 @@ async function stagePackages(options) {
   await writeFile(join(options.outDir, "release-sha.txt"), `${releaseSha}\n`);
   await writeFile(join(options.outDir, "package-version.txt"), `${packageVersion}\n`);
 
-  return { binaryVersion, packageOut, packageVersion, pluginPackageOut, releaseSha };
+  return { binaryVersion, packageOut, packageVersion, releaseSha };
 }
 
 async function packPackage(options, packageOut) {
@@ -236,16 +180,10 @@ async function packPackage(options, packageOut) {
   return resolve(options.outDir, first.filename);
 }
 
-async function smokePackages(
-  clawscanTarballPath,
-  pluginTarballPath,
-  binaryVersion,
-  packageVersion,
-) {
+async function smokePackage(tarballPath, binaryVersion) {
   const prefix = await mkdtemp(join(tmpdir(), "clawscan-npm-smoke-"));
-  const pluginPrefix = await mkdtemp(join(tmpdir(), "clawscan-plugin-npm-smoke-"));
   try {
-    run("npm", ["install", "-g", "--prefix", prefix, clawscanTarballPath]);
+    run("npm", ["install", "-g", "--prefix", prefix, tarballPath]);
     const binPath =
       process.platform === "win32" ? join(prefix, "clawscan.cmd") : join(prefix, "bin", "clawscan");
     const version = run(binPath, ["--version"]).stdout.trim();
@@ -259,97 +197,25 @@ async function smokePackages(
       "--json",
     ]);
     JSON.parse(smoke.stdout);
-
-    run("npm", ["install", "--prefix", pluginPrefix, clawscanTarballPath]);
-    run("npm", ["install", "--prefix", pluginPrefix, pluginTarballPath]);
-    const installedPluginRoot = join(pluginPrefix, "node_modules", "@openclaw", "clawscan-plugin");
-    const installedPackageJson = JSON.parse(
-      await readFile(join(installedPluginRoot, "package.json"), "utf8"),
-    );
-    if (
-      installedPackageJson.version !== packageVersion ||
-      installedPackageJson.dependencies?.["@openclaw/clawscan"] !== packageVersion ||
-      installedPackageJson.private !== true ||
-      installedPackageJson.peerDependencies !== undefined ||
-      installedPackageJson.openclaw?.install !== undefined ||
-      installedPackageJson.openclaw?.compat !== undefined ||
-      installedPackageJson.openclaw?.release?.publishToNpm !== false ||
-      installedPackageJson.openclaw?.release?.publishToClawHub !== false
-    ) {
-      throw new Error(
-        "Installed ClawScan plugin did not preserve its private preview and binary contracts.",
-      );
-    }
-    await readFile(join(installedPluginRoot, "openclaw.plugin.json"), "utf8");
-    await readFile(join(installedPluginRoot, "profiles", "clawhub.yml"), "utf8");
-    await readFile(join(installedPluginRoot, "dist", "index.js"), "utf8");
-
-    const hostPackageRoot = join(pluginPrefix, "node_modules", "openclaw");
-    await mkdir(join(hostPackageRoot, "plugin-sdk"), { recursive: true });
-    await writeFile(
-      join(hostPackageRoot, "package.json"),
-      `${JSON.stringify(
-        {
-          name: "openclaw",
-          version: "2026.7.2",
-          type: "module",
-          exports: {
-            "./plugin-sdk/plugin-entry": "./plugin-sdk/plugin-entry.mjs",
-          },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    await writeFile(
-      join(hostPackageRoot, "plugin-sdk", "plugin-entry.mjs"),
-      "export const definePluginEntry = (definition) => definition;\n",
-    );
-    const entrypointSmokeRoot = join(pluginPrefix, "packed-entrypoint-smoke");
-    await cp(installedPluginRoot, entrypointSmokeRoot, { recursive: true });
-    const runtimeEntry = installedPackageJson.openclaw?.runtimeExtensions?.[0];
-    if (runtimeEntry !== "./dist/index.js") {
-      throw new Error("Installed ClawScan plugin did not declare its built runtime entrypoint.");
-    }
-    const entrypointUrl = pathToFileURL(join(entrypointSmokeRoot, runtimeEntry)).href;
-    run(
-      "node",
-      [
-        "--input-type=module",
-        "--eval",
-        `const plugin = (await import(${JSON.stringify(entrypointUrl)})).default; if (plugin?.id !== "clawscan" || typeof plugin?.register !== "function") throw new Error("packed plugin entrypoint did not load");`,
-      ],
-      { cwd: pluginPrefix },
-    );
   } finally {
     await rm(prefix, { recursive: true, force: true });
-    await rm(pluginPrefix, { recursive: true, force: true });
   }
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
-  const staged = await stagePackages(options);
-  let clawscanTarballPath = "";
-  let pluginTarballPath = "";
+  const staged = await stagePackage(options);
+  let tarballPath = "";
   if (options.pack) {
-    clawscanTarballPath = await packPackage(options, staged.packageOut);
-    pluginTarballPath = await packPackage(options, staged.pluginPackageOut);
+    tarballPath = await packPackage(options, staged.packageOut);
   }
   if (options.smoke) {
-    await smokePackages(
-      clawscanTarballPath,
-      pluginTarballPath,
-      staged.binaryVersion,
-      staged.packageVersion,
-    );
+    await smokePackage(tarballPath, staged.binaryVersion);
   }
-  console.log(`clawscan npm package staged: ${staged.packageOut}`);
-  console.log(`clawscan plugin npm package staged: ${staged.pluginPackageOut}`);
+  console.log(`npm package staged: ${staged.packageOut}`);
   console.log(`package version: ${staged.packageVersion}`);
   console.log(`binary version: ${staged.binaryVersion}`);
-  if (clawscanTarballPath) console.log(`clawscan npm tarball: ${clawscanTarballPath}`);
-  if (pluginTarballPath) console.log(`clawscan plugin npm tarball: ${pluginTarballPath}`);
+  if (tarballPath) console.log(`npm tarball: ${tarballPath}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

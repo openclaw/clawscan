@@ -449,6 +449,28 @@ func TestRunStaticScannerCompletesForPluginTarget(t *testing.T) {
 	}
 }
 
+func TestResolveTargetUsesTrustedTargetKindOverride(t *testing.T) {
+	dir := t.TempDir()
+	pluginFile := filepath.Join(dir, "plugin.js")
+	if err := os.WriteFile(pluginFile, []byte("export default {};\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	target, err := resolveTargetForOptions(Options{
+		Target:     pluginFile,
+		TargetKind: "plugin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.kind != targetKindPlugin {
+		t.Fatalf("kind = %q, want plugin", target.kind)
+	}
+	if target.resolvedPath != pluginFile {
+		t.Fatalf("resolvedPath = %q, want %q", target.resolvedPath, pluginFile)
+	}
+}
+
 func TestRunFailsForInvalidPluginManifest(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bad-plugin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

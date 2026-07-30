@@ -133,9 +133,7 @@ jobs:
           const { readFileSync } = require("node:fs");
 
           const pkg = JSON.parse(readFileSync("npm/clawscan/package.json", "utf8"));
-          const pluginPkg = JSON.parse(readFileSync("npm/clawscan-plugin/package.json", "utf8"));
           const expectedName = "@openclaw/clawscan";
-          const expectedPluginName = "@openclaw/clawscan-plugin";
           const expectedRepo = "https://github.com/openclaw/clawscan";
           const repository = typeof pkg.repository === "string"
             ? pkg.repository
@@ -156,21 +154,6 @@ jobs:
           }
           if (pkg.private === true) {
             errors.push("package must not be private");
-          }
-          if (pluginPkg.name !== expectedPluginName) {
-            errors.push(`plugin package name must be ${expectedPluginName}; found ${pluginPkg.name ?? "<missing>"}`);
-          }
-          if (pluginPkg.dependencies?.[expectedName] !== pluginPkg.version) {
-            errors.push(`plugin must depend on the exact matching ${expectedName} version`);
-          }
-          if (pluginPkg.private !== true) {
-            errors.push("plugin package must remain private until its host contract is released");
-          }
-          if (
-            pluginPkg.openclaw?.release?.publishToNpm !== false ||
-            pluginPkg.openclaw?.release?.publishToClawHub !== false
-          ) {
-            errors.push("plugin publication must remain disabled until its host contract is released");
           }
           if (errors.length > 0) {
             for (const error of errors) console.error(error);
@@ -199,10 +182,9 @@ jobs:
           execFileSync("git", ["merge-base", "--is-ancestor", releaseSha, "origin/main"]);
           NODE
 
-      - name: Check npm packages
+      - name: Check npm package
         run: |
           node --test npm/clawscan/test/*.test.mjs
-          node --test npm/clawscan-plugin/test/*.test.mjs npm/clawscan-plugin/test/*.test.ts
           node --test scripts/build-npm-package.test.mjs
           node scripts/build-npm-package.mjs --version "${{ needs.build.outputs.version }}" --pack --smoke
 

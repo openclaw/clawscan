@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -76,6 +77,32 @@ type resolvedTarget struct {
 	// id is a stable, host-path-free identity. It is populated for plugin
 	// targets from their manifest and empty for skills and URLs.
 	id string
+}
+
+func resolveTargetForOptions(opts Options) (resolvedTarget, error) {
+	if opts.TargetKind == "" {
+		return resolveTarget(opts.Target)
+	}
+	if opts.TargetKind != targetKindSkill && opts.TargetKind != targetKindPlugin {
+		return resolvedTarget{}, fmt.Errorf("unsupported target kind override: %s", opts.TargetKind)
+	}
+	if isURLTarget(opts.Target) {
+		return resolvedTarget{}, errors.New("target kind override requires a local path")
+	}
+	resolved, err := filepath.Abs(opts.Target)
+	if err != nil {
+		return resolvedTarget{}, err
+	}
+	if info, err := os.Lstat(resolved); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if evaluated, evalErr := filepath.EvalSymlinks(resolved); evalErr == nil {
+			resolved = evaluated
+		}
+	}
+	return resolvedTarget{
+		kind:         opts.TargetKind,
+		input:        opts.Target,
+		resolvedPath: resolved,
+	}, nil
 }
 
 func resolveTarget(input string) (resolvedTarget, error) {
