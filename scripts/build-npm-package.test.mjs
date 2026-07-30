@@ -95,10 +95,10 @@ describe("preparePluginPackageJson", () => {
         {
           name: "@openclaw/clawscan-plugin",
           version: "0.0.0-dev",
+          private: true,
           dependencies: { "@openclaw/clawscan": "0.0.0-dev" },
           openclaw: {
-            install: { minHostVersion: ">=2026.7.2" },
-            compat: { pluginApi: ">=2026.7.2" },
+            release: { publishToClawHub: false, publishToNpm: false },
           },
         },
         "1.2.3",
@@ -106,11 +106,11 @@ describe("preparePluginPackageJson", () => {
       {
         name: "@openclaw/clawscan-plugin",
         version: "1.2.3",
+        private: true,
         files: ["dist/"],
         dependencies: { "@openclaw/clawscan": "1.2.3" },
         openclaw: {
-          install: { minHostVersion: ">=2026.7.2" },
-          compat: { pluginApi: ">=2026.7.2" },
+          release: { publishToClawHub: false, publishToNpm: false },
           runtimeExtensions: ["./dist/index.js"],
         },
       },

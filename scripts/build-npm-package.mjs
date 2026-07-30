@@ -269,11 +269,16 @@ async function smokePackages(
     if (
       installedPackageJson.version !== packageVersion ||
       installedPackageJson.dependencies?.["@openclaw/clawscan"] !== packageVersion ||
-      installedPackageJson.peerDependencies?.openclaw !== ">=2026.7.2" ||
-      installedPackageJson.openclaw?.install?.minHostVersion !== ">=2026.7.2" ||
-      installedPackageJson.openclaw?.compat?.pluginApi !== ">=2026.7.2"
+      installedPackageJson.private !== true ||
+      installedPackageJson.peerDependencies !== undefined ||
+      installedPackageJson.openclaw?.install !== undefined ||
+      installedPackageJson.openclaw?.compat !== undefined ||
+      installedPackageJson.openclaw?.release?.publishToNpm !== false ||
+      installedPackageJson.openclaw?.release?.publishToClawHub !== false
     ) {
-      throw new Error("Installed ClawScan plugin did not preserve its host and binary contracts.");
+      throw new Error(
+        "Installed ClawScan plugin did not preserve its private preview and binary contracts.",
+      );
     }
     await readFile(join(installedPluginRoot, "openclaw.plugin.json"), "utf8");
     await readFile(join(installedPluginRoot, "profiles", "clawhub.yml"), "utf8");

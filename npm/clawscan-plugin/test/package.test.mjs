@@ -18,13 +18,14 @@ describe("@openclaw/clawscan-plugin package", () => {
 
     assert.equal(packageJson.name, "@openclaw/clawscan-plugin");
     assert.equal(packageJson.version, "0.0.0-dev");
+    assert.equal(packageJson.private, true);
     assert.equal(packageJson.dependencies["@openclaw/clawscan"], packageJson.version);
-    assert.equal(packageJson.peerDependencies.openclaw, ">=2026.7.2");
-    assert.equal(packageJson.peerDependenciesMeta.openclaw.optional, true);
+    assert.equal(packageJson.peerDependencies, undefined);
     assert.deepEqual(packageJson.openclaw.extensions, ["./index.ts"]);
-    assert.equal(packageJson.openclaw.install.npmSpec, "@openclaw/clawscan-plugin");
-    assert.equal(packageJson.openclaw.install.minHostVersion, ">=2026.7.2");
-    assert.equal(packageJson.openclaw.compat.pluginApi, ">=2026.7.2");
+    assert.equal(packageJson.openclaw.install, undefined);
+    assert.equal(packageJson.openclaw.compat, undefined);
+    assert.equal(packageJson.openclaw.release.publishToClawHub, false);
+    assert.equal(packageJson.openclaw.release.publishToNpm, false);
     assert.equal(manifest.id, "clawscan");
     assert.equal(manifest.activation.onStartup, false);
     assert.deepEqual(manifest.activation.onHooks, ["before_install"]);

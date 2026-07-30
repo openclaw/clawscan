@@ -9,13 +9,20 @@ which discovers explicitly trusted `before_install` providers before both CLI
 and Gateway install/update operations. Earlier prerelease builds that only run
 hooks already loaded in the current process are not supported.
 
-Install the plugin through OpenClaw:
+The host contract has not shipped in an OpenClaw release. This package is
+therefore a private preview and is intentionally excluded from npm and ClawHub
+publication. Once a supporting host release exists, the package metadata must
+be updated to name that release as the minimum supported version before
+publication is enabled.
+
+After that release boundary is defined and this package is published, install
+the plugin through OpenClaw:
 
 ```sh
 openclaw plugins install @openclaw/clawscan-plugin
 ```
 
-That operator action explicitly trusts and enables this config-free plugin by
+That future operator action explicitly trusts and enables this config-free plugin by
 writing `plugins.entries.clawscan.enabled=true` and adding `clawscan` to
 `plugins.allow` when the allowlist is configured. If the package is placed by
 another mechanism, run `openclaw plugins enable clawscan` and ensure the

@@ -100,7 +100,7 @@ jobs:
             --generate-notes
 
   publish-npm:
-    name: Publish ClawScan npm packages
+    name: Publish ClawScan npm package
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push' || inputs.publish
@@ -163,8 +163,14 @@ jobs:
           if (pluginPkg.dependencies?.[expectedName] !== pluginPkg.version) {
             errors.push(`plugin must depend on the exact matching ${expectedName} version`);
           }
-          if (pluginPkg.private === true) {
-            errors.push("plugin package must not be private");
+          if (pluginPkg.private !== true) {
+            errors.push("plugin package must remain private until its host contract is released");
+          }
+          if (
+            pluginPkg.openclaw?.release?.publishToNpm !== false ||
+            pluginPkg.openclaw?.release?.publishToClawHub !== false
+          ) {
+            errors.push("plugin publication must remain disabled until its host contract is released");
           }
           if (errors.length > 0) {
             for (const error of errors) console.error(error);
@@ -252,24 +258,16 @@ jobs:
             "@openclaw/clawscan" \
             "dist/npm/openclaw-clawscan-${package_version}.tgz" \
             "clawscan_needed"
-          inspect_package \
-            "@openclaw/clawscan-plugin" \
-            "dist/npm/openclaw-clawscan-plugin-${package_version}.tgz" \
-            "plugin_needed"
           echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
 
       - name: Publish ClawScan binary package
         if: steps.publish_state.outputs.clawscan_needed == 'true'
         run: npm publish "dist/npm/openclaw-clawscan-${{ steps.publish_state.outputs.package_version }}.tgz" --access public --provenance
 
-      - name: Publish ClawScan OpenClaw plugin
-        if: steps.publish_state.outputs.plugin_needed == 'true'
-        run: npm publish "dist/npm/openclaw-clawscan-plugin-${{ steps.publish_state.outputs.package_version }}.tgz" --access public --provenance
-
       - name: Verify npm release metadata
         run: |
           set -euo pipefail
-          for package_name in "@openclaw/clawscan" "@openclaw/clawscan-plugin"; do
+          for package_name in "@openclaw/clawscan"; do
             npm_dist_json=""
             for attempt in {1..12}; do
               if npm_dist_json="$(npm view "${package_name}@${{ steps.publish_state.outputs.package_version }}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$npm_dist_json" ]]; then
