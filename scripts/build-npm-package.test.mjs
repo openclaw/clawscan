@@ -87,3 +87,15 @@ describe("GitHub release target mapping", () => {
     );
   });
 });
+
+describe("npm promotion verification", () => {
+  it("checks the expected dist-tag even when publication is skipped", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/npm-release.yml", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(workflow, /@openclaw\/clawscan@\$\{NPM_DIST_TAG\}/u);
+    assert.match(workflow, /Prerelease \$\{PACKAGE_VERSION\} must not be assigned to the latest/u);
+  });
+});
