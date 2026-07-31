@@ -184,7 +184,9 @@ The configured command is the composition point for multiple checks. ClawScan
 does not claim an active-scanner singleton and does not replace other policy
 engines. Operators can select several scanner adapters in one profile or wrap
 several policy checks behind their configured executable and combine their
-responses deterministically.
+responses deterministically. Install-policy profiles must express decisions
+through scanner gate rules; judge-backed profiles fail closed because ClawScan
+does not define a canonical judge-verdict-to-policy mapping.
 
 ## Request and response contract
 

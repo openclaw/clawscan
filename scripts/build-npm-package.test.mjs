@@ -31,7 +31,9 @@ describe("normalizePackageVersion", () => {
 describe("npmDistTagForVersion", () => {
   it("keeps stable releases on latest and prereleases on next", () => {
     assert.equal(npmDistTagForVersion("v1.2.3"), "latest");
+    assert.equal(npmDistTagForVersion("v1.2.3+build-7"), "latest");
     assert.equal(npmDistTagForVersion("1.2.3-beta.1"), "next");
+    assert.equal(npmDistTagForVersion("1.2.3-beta.1+build-7"), "next");
   });
 });
 

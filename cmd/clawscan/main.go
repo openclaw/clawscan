@@ -141,6 +141,11 @@ func runOpenClawInstallPolicy(
 	opts.TargetKind = request.TargetType
 	opts.JSON = false
 	opts.OutputPath = ""
+	if opts.Judge != nil {
+		return failClosed(errors.New(
+			"OpenClaw install policy does not support judge-backed profiles; use scanner gate rules",
+		))
+	}
 	metadataPreflight := request.IsNPMMetadataStage()
 	if metadataPreflight {
 		if err := installpolicy.ValidateNPMMetadataPreflight(request); err != nil {

@@ -187,6 +187,30 @@ func TestRunOpenClawInstallPolicyFailsClosedWithValidResponse(t *testing.T) {
 	}
 }
 
+func TestRunOpenClawInstallPolicyRejectsJudgeBackedProfiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "# Safe skill\n")
+	request := fmt.Sprintf(`{
+		"protocolVersion":1,
+		"targetType":"skill",
+		"targetName":"demo",
+		"sourcePath":%q,
+		"sourcePathKind":"directory",
+		"source":{"kind":"local-path","authority":"third-party","mutable":true,"network":false},
+		"origin":{"type":"skill-directory"},
+		"request":{"kind":"skill-install","mode":"install"}
+	}`, dir)
+	response := runInstallPolicyTestRequest(
+		t,
+		[]string{"--profile", "clawhub", "--sandbox", "off"},
+		request,
+	)
+	if response.Decision != "block" ||
+		!strings.Contains(response.Reason, "does not support judge-backed profiles") {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
 func TestRunOpenClawInstallPolicyHandlesNPMInstallStagesSeparately(t *testing.T) {
 	dir := t.TempDir()
 	metadataPath := filepath.Join(dir, "npm-package-metadata.json")

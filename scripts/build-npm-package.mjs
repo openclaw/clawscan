@@ -44,7 +44,8 @@ export function binaryVersionFor(version) {
 }
 
 export function npmDistTagForVersion(version) {
-  return normalizePackageVersion(version).includes("-") ? "next" : "latest";
+  const [release] = normalizePackageVersion(version).split("+", 1);
+  return release.includes("-") ? "next" : "latest";
 }
 
 export function platformKeyForTarget(target) {
