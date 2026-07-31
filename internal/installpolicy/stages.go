@@ -132,7 +132,7 @@ func PrepareDependencyTreeScanTarget(
 	budget := dependencyCopyBudget{}
 	for index, packageDir := range packageDirs {
 		destination := filepath.Join(scanRoot, fmt.Sprintf("%05d", index+1))
-		if err := copyDependencyPackage(packageDir, destination, &budget); err != nil {
+		if err := copyDependencyPackage(root, packageDir, destination, &budget); err != nil {
 			cleanup()
 			return "", nil, false, err
 		}
@@ -274,21 +274,34 @@ func addDependencyPackage(
 }
 
 func copyDependencyPackage(
+	dependencyRoot string,
 	source string,
 	destination string,
 	budget *dependencyCopyBudget,
 ) error {
-	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return fmt.Errorf("read installed dependency %s: %w", path, walkErr)
-		}
-		relative, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if relative == "." {
-			return os.MkdirAll(destination, 0o755)
-		}
+	return copyDependencyEntry(
+		dependencyRoot,
+		source,
+		destination,
+		budget,
+		map[string]bool{},
+		false,
+	)
+}
+
+func copyDependencyEntry(
+	dependencyRoot string,
+	source string,
+	destination string,
+	budget *dependencyCopyBudget,
+	directoryAncestors map[string]bool,
+	countEntry bool,
+) error {
+	info, err := os.Lstat(source)
+	if err != nil {
+		return fmt.Errorf("inspect installed dependency entry %s: %w", source, err)
+	}
+	if countEntry {
 		budget.entries++
 		if budget.entries > maxDependencyEntries {
 			return fmt.Errorf(
@@ -296,38 +309,89 @@ func copyDependencyPackage(
 				maxDependencyEntries,
 			)
 		}
-		if entry.IsDir() {
-			if entry.Name() == "node_modules" || entry.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return os.MkdirAll(filepath.Join(destination, relative), 0o755)
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := entry.Info()
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(source)
 		if err != nil {
+			return fmt.Errorf("resolve installed dependency symlink %s: %w", source, err)
+		}
+		if !pathWithin(dependencyRoot, resolved) {
+			return fmt.Errorf("installed dependency symlink escapes dependency-tree root: %s", source)
+		}
+		return copyDependencyEntry(
+			dependencyRoot,
+			resolved,
+			destination,
+			budget,
+			directoryAncestors,
+			false,
+		)
+	}
+
+	if info.IsDir() {
+		resolved, err := filepath.EvalSymlinks(source)
+		if err != nil {
+			return fmt.Errorf("resolve installed dependency directory %s: %w", source, err)
+		}
+		if !pathWithin(dependencyRoot, resolved) {
+			return fmt.Errorf("installed dependency directory escapes dependency-tree root: %s", source)
+		}
+		if directoryAncestors[resolved] {
+			return fmt.Errorf("installed dependency contains a symlink cycle: %s", source)
+		}
+		directoryAncestors[resolved] = true
+		defer delete(directoryAncestors, resolved)
+		if err := os.MkdirAll(destination, 0o755); err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("installed dependency contains a special file: %s", path)
+		entries, err := os.ReadDir(resolved)
+		if err != nil {
+			return fmt.Errorf("read installed dependency %s: %w", resolved, err)
 		}
-		if info.Size() > maxDependencyFileBytes {
-			return fmt.Errorf(
-				"dependency file exceeds %d bytes: %s",
-				maxDependencyFileBytes,
-				path,
-			)
+		for _, entry := range entries {
+			if entry.Name() == "node_modules" || entry.Name() == ".git" {
+				budget.entries++
+				if budget.entries > maxDependencyEntries {
+					return fmt.Errorf(
+						"dependency-tree scan view exceeds %d filesystem entries",
+						maxDependencyEntries,
+					)
+				}
+				continue
+			}
+			if err := copyDependencyEntry(
+				dependencyRoot,
+				filepath.Join(resolved, entry.Name()),
+				filepath.Join(destination, entry.Name()),
+				budget,
+				directoryAncestors,
+				true,
+			); err != nil {
+				return err
+			}
 		}
-		if budget.totalBytes > maxDependencyTotalBytes-info.Size() {
-			return fmt.Errorf(
-				"dependency-tree scan view exceeds %d total bytes",
-				maxDependencyTotalBytes,
-			)
-		}
-		budget.totalBytes += info.Size()
-		return copyRegularFile(path, filepath.Join(destination, relative), info.Size())
-	})
+		return nil
+	}
+
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("installed dependency contains a special file: %s", source)
+	}
+	if info.Size() > maxDependencyFileBytes {
+		return fmt.Errorf(
+			"dependency file exceeds %d bytes: %s",
+			maxDependencyFileBytes,
+			source,
+		)
+	}
+	if budget.totalBytes > maxDependencyTotalBytes-info.Size() {
+		return fmt.Errorf(
+			"dependency-tree scan view exceeds %d total bytes",
+			maxDependencyTotalBytes,
+		)
+	}
+	budget.totalBytes += info.Size()
+	return copyRegularFile(source, destination, info.Size())
 }
 
 func copyRegularFile(source string, destination string, expectedBytes int64) error {

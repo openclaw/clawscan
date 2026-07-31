@@ -156,7 +156,8 @@ phase with no installed runtime dependencies returns an explicit allow/info
 response because the package itself was already scanned in the package phase.
 For managed npm roots, the dependency view omits only OpenClaw's exact
 host-validated `node_modules/openclaw` peer symlink; other links escaping the
-staged root fail closed.
+staged root fail closed. Safe links within the staged root are dereferenced
+into stable copies so scanners inspect the code the installed package will use.
 
 On native Windows, the default profile visibly degrades to
 `clawscan-static` with the sandbox disabled because the Linux Docker runtime

@@ -197,18 +197,71 @@ func TestPrepareDependencyTreeScanTargetSkipsOnlyTrustedOpenClawPeerEscape(t *te
 	}
 }
 
+func TestPrepareDependencyTreeScanTargetRejectsEscapingPackageSymlink(t *testing.T) {
+	root := t.TempDir()
+	packageDir := filepath.Join(root, "node_modules", "demo")
+	writeStageTestFile(t, filepath.Join(packageDir, "package.json"), `{"name":"demo"}`)
+
+	outside := filepath.Join(t.TempDir(), "payload.js")
+	writeStageTestFile(t, outside, "hidden runtime code")
+	link := filepath.Join(packageDir, "index.js")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("file symlinks unavailable: %v", err)
+	}
+
+	if _, _, _, err := PrepareDependencyTreeScanTarget(root, false); err == nil ||
+		!strings.Contains(err.Error(), "symlink escapes dependency-tree root") {
+		t.Fatalf("escaping package symlink error = %v", err)
+	}
+}
+
+func TestPrepareDependencyTreeScanTargetCopiesSafePackageSymlinkTargets(t *testing.T) {
+	root := t.TempDir()
+	packageDir := filepath.Join(root, "node_modules", "demo")
+	writeStageTestFile(t, filepath.Join(packageDir, "package.json"), `{"name":"demo"}`)
+	target := filepath.Join(root, "shared", "runtime.js")
+	writeStageTestFile(t, target, "visible runtime code")
+	link := filepath.Join(packageDir, "index.js")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("file symlinks unavailable: %v", err)
+	}
+
+	scanRoot, cleanup, empty, err := PrepareDependencyTreeScanTarget(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if empty {
+		t.Fatal("dependency scan view unexpectedly reported no packages")
+	}
+	data, err := os.ReadFile(filepath.Join(scanRoot, "00001", "index.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "visible runtime code" {
+		t.Fatalf("copied symlink target = %q", data)
+	}
+	info, err := os.Lstat(filepath.Join(scanRoot, "00001", "index.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("scan view retained a symlink instead of a stable file copy")
+	}
+}
+
 func TestCopyDependencyPackageEnforcesEntryAndByteBudgets(t *testing.T) {
 	source := t.TempDir()
 	writeStageTestFile(t, filepath.Join(source, "package.json"), `{"name":"demo"}`)
 
 	entryBudget := dependencyCopyBudget{entries: maxDependencyEntries}
-	err := copyDependencyPackage(source, filepath.Join(t.TempDir(), "entries"), &entryBudget)
+	err := copyDependencyPackage(source, source, filepath.Join(t.TempDir(), "entries"), &entryBudget)
 	if err == nil || !strings.Contains(err.Error(), "filesystem entries") {
 		t.Fatalf("entry budget error = %v", err)
 	}
 
 	byteBudget := dependencyCopyBudget{totalBytes: maxDependencyTotalBytes}
-	err = copyDependencyPackage(source, filepath.Join(t.TempDir(), "bytes"), &byteBudget)
+	err = copyDependencyPackage(source, source, filepath.Join(t.TempDir(), "bytes"), &byteBudget)
 	if err == nil || !strings.Contains(err.Error(), "total bytes") {
 		t.Fatalf("byte budget error = %v", err)
 	}
@@ -227,6 +280,7 @@ func TestCopyDependencyPackageEnforcesEntryAndByteBudgets(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = copyDependencyPackage(
+		largeSource,
 		largeSource,
 		filepath.Join(t.TempDir(), "large"),
 		&dependencyCopyBudget{},
