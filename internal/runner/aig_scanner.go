@@ -69,6 +69,7 @@ func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (Sca
 	}
 
 	output, runErr := runner.CommandRunner.Run(command, args, resultDir, timeout)
+	exitCode := gateEligibleExitCode(output.ExitCode)
 	raw, readErr := os.ReadFile(resultPath)
 	finishedAt := completedAt()
 	if readErr != nil {
@@ -106,10 +107,12 @@ func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (Sca
 		CompletedAt: finishedAt,
 		Command:     fullCommand,
 		Error:       "",
+		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
 	}
 	if runErr != nil {
 		result.Error = scannerCommandError(runErr, output.Stderr, runner.Env)
+		result.Status = commandScannerResultStatus(output, runErr)
 	}
 	return result, nil
 }

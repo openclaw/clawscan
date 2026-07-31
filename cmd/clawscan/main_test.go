@@ -222,6 +222,7 @@ profiles:
 		"clawhub:",
 		"clawhub-aig:",
 		"- skillspector",
+		"- clawscan-static",
 		"- aig",
 	} {
 		if !strings.Contains(stdout, want) {
@@ -233,6 +234,9 @@ profiles:
 	}
 	if strings.Contains(stdout, "local-review:") {
 		t.Fatalf("verbose profiles output should not include project profile:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "gate:") {
+		t.Fatalf("embedded profiles should preserve their existing gate-free contract:\n%s", stdout)
 	}
 }
 
@@ -515,10 +519,11 @@ func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
 }
 
 func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
+	exitCode := 3
 	artifact := runner.Artifact{
 		Gate: "block",
 		GateRules: []runner.FiredGateRule{
-			{Scanner: "my-scanner", Rule: "blockOnExitCode", ExitCode: 3, Action: "block"},
+			{Scanner: "my-scanner", Rule: "blockOnExitCode", ExitCode: &exitCode, Action: "block"},
 		},
 		Scanners: map[string]runner.ScannerResult{},
 	}
@@ -526,6 +531,27 @@ func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
 	printRunSummary(&output, runner.RunTargetsResult{Single: &artifact}, "")
 	if !strings.Contains(output.String(), "gate: block (my-scanner exit 3 -> block)") {
 		t.Fatalf("summary missing gate rule:\n%s", output.String())
+	}
+}
+
+func TestPrintRunSummaryIncludesDeclarativeJSONGateRule(t *testing.T) {
+	artifact := runner.Artifact{
+		Gate: "warn",
+		GateRules: []runner.FiredGateRule{
+			{
+				Scanner: "skillspector",
+				Rule:    "high-finding",
+				Path:    "filtered_findings[].severity",
+				Value:   json.RawMessage(`"HIGH"`),
+				Action:  "warn",
+			},
+		},
+		Scanners: map[string]runner.ScannerResult{},
+	}
+	var output strings.Builder
+	printRunSummary(&output, runner.RunTargetsResult{Single: &artifact}, "")
+	if !strings.Contains(output.String(), `gate: warn (skillspector high-finding filtered_findings[].severity="HIGH" -> warn)`) {
+		t.Fatalf("summary missing declarative JSON gate rule:\n%s", output.String())
 	}
 }
 

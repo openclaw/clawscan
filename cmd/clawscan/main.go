@@ -341,7 +341,7 @@ func printRunSummary(w io.Writer, result runner.RunTargetsResult, outputPath str
 	if len(summary.GateRules) > 0 {
 		details := make([]string, 0, len(summary.GateRules))
 		for _, rule := range summary.GateRules {
-			details = append(details, fmt.Sprintf("%s exit %d -> %s", rule.Scanner, rule.ExitCode, rule.Action))
+			details = append(details, gateRuleSummary(rule))
 		}
 		fmt.Fprintf(w, " (%s)", strings.Join(details, ", "))
 	}
@@ -360,6 +360,19 @@ func printRunSummary(w io.Writer, result runner.RunTargetsResult, outputPath str
 	if outputPath != "" {
 		fmt.Fprintf(w, "full_results: %s\n", displayOutputPath(outputPath))
 	}
+}
+
+func gateRuleSummary(rule runner.FiredGateRule) string {
+	if rule.ExitCode != nil {
+		return fmt.Sprintf("%s exit %d -> %s", rule.Scanner, *rule.ExitCode, rule.Action)
+	}
+	if rule.Path != "" && len(rule.Value) > 0 {
+		return fmt.Sprintf("%s %s %s=%s -> %s", rule.Scanner, rule.Rule, rule.Path, rule.Value, rule.Action)
+	}
+	if rule.Path != "" {
+		return fmt.Sprintf("%s %s %s -> %s", rule.Scanner, rule.Rule, rule.Path, rule.Action)
+	}
+	return fmt.Sprintf("%s %s -> %s", rule.Scanner, rule.Rule, rule.Action)
 }
 
 func printBenchmarkSummary(w io.Writer, artifact runner.BenchmarkArtifact, outputPath string) {

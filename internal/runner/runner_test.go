@@ -1557,7 +1557,7 @@ func TestRunBlocksWhenNonzeroExitCodeRuleFires(t *testing.T) {
 	if artifact.Gate != "block" {
 		t.Fatalf("gate = %q", artifact.Gate)
 	}
-	want := []FiredGateRule{{Scanner: "clawscan-static", Rule: "blockOnExitCode", ExitCode: 2, Action: "block"}}
+	want := []FiredGateRule{{Scanner: "clawscan-static", Rule: "blockOnExitCode", ExitCode: intPointer(2), Action: "block"}}
 	if !reflect.DeepEqual(artifact.GateRules, want) {
 		t.Fatalf("gate rules = %#v", artifact.GateRules)
 	}
@@ -1615,6 +1615,508 @@ func TestRunExitCodeGateActionsAndPrecedence(t *testing.T) {
 				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
 			}
 		})
+	}
+}
+
+func TestRunAppliesDeclarativeSkillSpectorGatePolicy(t *testing.T) {
+	manyFindings := make([]map[string]string, maxClawHubSkillSpectorIssues+1)
+	for index := range manyFindings {
+		manyFindings[index] = map[string]string{"rule_id": fmt.Sprintf("LOW-%d", index+1), "severity": "LOW"}
+	}
+	manyFindings[len(manyFindings)-1] = map[string]string{"rule_id": "LATE-CRITICAL", "severity": "CRITICAL"}
+	lateCriticalRaw, err := json.Marshal(map[string]any{"filtered_findings": manyFindings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		raw   json.RawMessage
+		want  string
+		rule  string
+		path  string
+		value json.RawMessage
+	}{
+		{
+			name: "safe passes",
+			raw:  json.RawMessage(`{"risk_assessment":{"recommendation":"SAFE"},"filtered_findings":[]}`),
+			want: "pass",
+		},
+		{
+			name: "caution passes without high findings",
+			raw:  json.RawMessage(`{"risk_assessment":{"recommendation":"CAUTION"},"filtered_findings":[{"rule_id":"MED-1","severity":"MEDIUM"}]}`),
+			want: "pass",
+		},
+		{
+			name:  "do not install blocks",
+			raw:   json.RawMessage(`{"risk_assessment":{"recommendation":"DO_NOT_INSTALL"},"filtered_findings":[]}`),
+			want:  "block",
+			rule:  "do-not-install",
+			path:  "risk_assessment.recommendation",
+			value: json.RawMessage(`"DO_NOT_INSTALL"`),
+		},
+		{
+			name:  "critical finding blocks",
+			raw:   json.RawMessage(`{"risk_assessment":{"recommendation":"CAUTION"},"filtered_findings":[{"rule_id":"CRIT-1","severity":"CRITICAL"}]}`),
+			want:  "block",
+			rule:  "critical-finding",
+			path:  "filtered_findings[].severity",
+			value: json.RawMessage(`"CRITICAL"`),
+		},
+		{
+			name:  "high finding warns",
+			raw:   json.RawMessage(`{"risk_assessment":{"recommendation":"CAUTION"},"filtered_findings":[{"rule_id":"HIGH-1","severity":"HIGH"},{"rule_id":"HIGH-2","severity":"HIGH"}]}`),
+			want:  "warn",
+			rule:  "high-finding",
+			path:  "filtered_findings[].severity",
+			value: json.RawMessage(`"HIGH"`),
+		},
+		{
+			name:  "critical finding after prompt display cap blocks",
+			raw:   lateCriticalRaw,
+			want:  "block",
+			rule:  "critical-finding",
+			path:  "filtered_findings[].severity",
+			value: json.RawMessage(`"CRITICAL"`),
+		},
+	}
+	rules := []JSONGateRule{
+		{ID: "do-not-install", Paths: []string{"risk_assessment.recommendation"}, Equals: json.RawMessage(`"DO_NOT_INSTALL"`), Action: "block"},
+		{ID: "critical-finding", Paths: []string{"filtered_findings[].severity"}, Equals: json.RawMessage(`"CRITICAL"`), Action: "block"},
+		{ID: "high-finding", Paths: []string{"filtered_findings[].severity"}, Equals: json.RawMessage(`"HIGH"`), Action: "warn"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			original := append(json.RawMessage(nil), test.raw...)
+			artifact, err := Run(Options{
+				Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+				GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: rules}},
+			}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+				"skillspector": {Status: "completed", Raw: test.raw},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Gate != test.want {
+				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+			}
+			if artifact.Judge != nil {
+				t.Fatalf("declarative gate unexpectedly invoked judge: %#v", artifact.Judge)
+			}
+			if test.rule == "" {
+				if len(artifact.GateRules) != 0 {
+					t.Fatalf("gate rules = %#v", artifact.GateRules)
+				}
+			} else {
+				if len(artifact.GateRules) != 1 {
+					t.Fatalf("gate rules = %#v", artifact.GateRules)
+				}
+				rule := artifact.GateRules[0]
+				if rule.Rule != test.rule || rule.Path != test.path || !bytes.Equal(rule.Value, test.value) {
+					t.Fatalf("gate rule = %#v", rule)
+				}
+			}
+			if !bytes.Equal(artifact.Scanners["skillspector"].Raw, original) {
+				t.Fatalf("raw evidence changed\nwant %s\ngot  %s", original, artifact.Scanners["skillspector"].Raw)
+			}
+		})
+	}
+}
+
+func TestRunAppliesExistsRuleToStaticFindings(t *testing.T) {
+	tests := []struct {
+		name  string
+		raw   json.RawMessage
+		want  string
+		fired int
+	}{
+		{
+			name: "clean report passes",
+			raw:  json.RawMessage(`{"schemaVersion":"clawscan-static-v1","findings":[]}`),
+			want: "pass",
+		},
+		{
+			name:  "medium finding warns",
+			raw:   json.RawMessage(`{"schemaVersion":"clawscan-static-v1","findings":[{"id":"static.prompt_injection","title":"Prompt injection","severity":"medium"}]}`),
+			want:  "warn",
+			fired: 1,
+		},
+		{
+			name:  "high finding still only warns",
+			raw:   json.RawMessage(`{"schemaVersion":"clawscan-static-v1","findings":[{"id":"static.destructive_shell","title":"Destructive shell","severity":"high"}]}`),
+			want:  "warn",
+			fired: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			artifact, err := Run(Options{
+				Target: t.TempDir(), Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+				GateRules: map[string]ScannerGatePolicy{"clawscan-static": {JSONRules: []JSONGateRule{
+					{ID: "any-finding", Paths: []string{"findings[]"}, Exists: true, Action: "warn"},
+				}}},
+			}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+				"clawscan-static": {Status: "completed", Raw: test.raw},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Gate != test.want || len(artifact.GateRules) != test.fired {
+				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+			}
+			for _, rule := range artifact.GateRules {
+				if rule.Rule != "any-finding" || rule.Path != "findings[]" || rule.Value != nil || rule.Action != "warn" {
+					t.Fatalf("static gate rule = %#v", rule)
+				}
+			}
+		})
+	}
+}
+
+func TestRunDeclarativeJSONRulesMatchNumberAndBooleanValues(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{
+			{ID: "score-threshold", Paths: []string{"result.score"}, Equals: json.RawMessage(`7`), Action: "warn"},
+			{ID: "not-approved", Paths: []string{"result.approved"}, Equals: json.RawMessage(`false`), Action: "block"},
+		}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"skillspector": {Status: "completed", Raw: json.RawMessage(`{"result":{"score":7.0,"approved":false}}`)},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 2 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+	if !bytes.Equal(artifact.GateRules[0].Value, []byte(`7.0`)) || !bytes.Equal(artifact.GateRules[1].Value, []byte(`false`)) {
+		t.Fatalf("matched values = %#v", artifact.GateRules)
+	}
+}
+
+func TestRunDeclarativeJSONRuleUsesFirstPresentPath(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+		want string
+	}{
+		{
+			name: "preferred value does not match",
+			raw:  json.RawMessage(`{"preferred":[{"severity":"low"}],"legacy":[{"severity":"critical"}]}`),
+			want: "pass",
+		},
+		{
+			name: "preferred array is empty",
+			raw:  json.RawMessage(`{"preferred":[],"legacy":[{"severity":"critical"}]}`),
+			want: "pass",
+		},
+		{
+			name: "preferred path is absent",
+			raw:  json.RawMessage(`{"legacy":[{"severity":"critical"}]}`),
+			want: "block",
+		},
+		{
+			name: "preferred nested field is absent",
+			raw:  json.RawMessage(`{"preferred":[{}],"legacy":[{"severity":"critical"}]}`),
+			want: "block",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			artifact, err := Run(Options{
+				Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+				GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{{
+					ID: "critical-finding", Paths: []string{"preferred[].severity", "legacy[].severity"},
+					Equals: json.RawMessage(`"critical"`), Action: "block",
+				}}}},
+			}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+				"skillspector": {Status: "completed", Raw: test.raw},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Gate != test.want {
+				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+			}
+		})
+	}
+}
+
+func TestRunDeclarativeJSONRuleCanPreferAnExistingRoot(t *testing.T) {
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"preferred":[{}],"legacy":[{"severity":"critical"}]}`),
+		json.RawMessage(`{"preferred":{},"legacy":[{"severity":"critical"}]}`),
+		json.RawMessage(`{"preferred":null,"legacy":[{"severity":"critical"}]}`),
+	} {
+		artifact, err := Run(Options{
+			Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+			GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{{
+				ID: "critical-finding", Paths: []string{"preferred[].severity", "legacy[].severity"},
+				Equals: json.RawMessage(`"critical"`), Fallback: "root", Action: "block",
+			}}}},
+		}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: raw},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+			t.Fatalf("raw = %s, gate = %q, rules = %#v", raw, artifact.Gate, artifact.GateRules)
+		}
+	}
+}
+
+func TestRunDeclarativeJSONRulePreservesExplicitNullFieldAlias(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{{
+			ID: "critical-finding", Paths: []string{"preferred.severity|level", "legacy.severity"},
+			Equals: json.RawMessage(`"critical"`), Action: "block",
+		}}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"skillspector": {
+			Status: "completed",
+			Raw:    json.RawMessage(`{"preferred":{"severity":null,"level":"low"},"legacy":{"severity":"critical"}}`),
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 1 || artifact.GateRules[0].Path != "legacy.severity" {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+}
+
+func TestRunDeclarativeJSONRuleFallsBackFromEmptyScalarValues(t *testing.T) {
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"preferred":"","legacy":"critical"}`),
+		json.RawMessage(`{"preferred":"  ","legacy":"critical"}`),
+		json.RawMessage(`{"preferred":null,"legacy":"critical"}`),
+	} {
+		artifact, err := Run(Options{
+			Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+			GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{{
+				ID: "critical-risk", Paths: []string{"preferred", "legacy"},
+				Equals: json.RawMessage(`"critical"`), Action: "block",
+			}}}},
+		}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: raw},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if artifact.Gate != "block" || len(artifact.GateRules) != 1 || artifact.GateRules[0].Path != "legacy" {
+			t.Fatalf("raw = %s, gate = %q, rules = %#v", raw, artifact.Gate, artifact.GateRules)
+		}
+	}
+}
+
+func TestRunDeclarativeExistsRuleFallsBackFromEmptyValues(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{{
+			ID: "evidence", Paths: []string{"preferred", "legacy"}, Exists: true, Action: "block",
+		}}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"skillspector": {Status: "completed", Raw: json.RawMessage(`{"preferred":null,"legacy":"evidence"}`)},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 1 || artifact.GateRules[0].Path != "legacy" {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+}
+
+func TestRunDeclarativeJSONRuleResolvesFieldAliasesPerArrayItem(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{{
+			ID: "critical-finding", Paths: []string{"findings[].severity|risk_severity|level"},
+			Equals: json.RawMessage(`"critical"`), Action: "block",
+		}}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"skillspector": {
+			Status: "completed",
+			Raw:    json.RawMessage(`{"findings":[{"severity":"low"},{"risk_severity":"critical"}]}`),
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 1 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+}
+
+func TestRunDeclarativeJSONRulesDoNotMatchEmptyValues(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{
+			{ID: "blank-exists", Paths: []string{"blank"}, Exists: true, Action: "block"},
+			{ID: "null-exists", Paths: []string{"nothing"}, Exists: true, Action: "block"},
+			{ID: "empty-array-exists", Paths: []string{"items[]"}, Exists: true, Action: "block"},
+			{ID: "empty-array-value-exists", Paths: []string{"items"}, Exists: true, Action: "block"},
+			{ID: "empty-object-exists", Paths: []string{"metadata"}, Exists: true, Action: "block"},
+			{ID: "blank-equals", Paths: []string{"blank"}, Equals: json.RawMessage(`""`), Action: "block"},
+		}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"skillspector": {Status: "completed", Raw: json.RawMessage(`{"blank":"  ","nothing":null,"items":[],"metadata":{}}`)},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+}
+
+func TestRunDeclarativeJSONRuleComparesLargeNumbersExactly(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{
+			{ID: "different-large-number", Paths: []string{"result.sequence"}, Equals: json.RawMessage(`9007199254740992`), Action: "block"},
+		}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"skillspector": {Status: "completed", Raw: json.RawMessage(`{"result":{"sequence":9007199254740993}}`)},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+}
+
+func TestRunDeclarativeAndExitCodeGateRulesComposeOnOneScanner(t *testing.T) {
+	exitCode := 1
+	commandRunner := &recordingCommandRunner{
+		writeOutput: `{"filtered_findings":[{"rule_id":"HIGH-1","severity":"HIGH"}]}`,
+		err:         errCommandFailed,
+		exitCode:    &exitCode,
+	}
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {
+			JSONRules:       []JSONGateRule{{ID: "high-finding", Paths: []string{"filtered_findings[].severity"}, Equals: json.RawMessage(`"HIGH"`), Action: "warn"}},
+			BlockOnExitCode: &ExitCodeRule{Codes: []int{1}},
+		}},
+	}, RunContext{
+		Env:                 map[string]string{},
+		CommandRunner:       commandRunner,
+		SkillSpectorCommand: []string{"skillspector"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["skillspector"]
+	if result.Status != "completed" || result.ExitCode == nil || *result.ExitCode != exitCode {
+		t.Fatalf("scanner result = %#v", result)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 2 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+	if artifact.GateRules[0].Action != "warn" || artifact.GateRules[1].Action != "block" {
+		t.Fatalf("gate rule order/actions = %#v", artifact.GateRules)
+	}
+}
+
+func TestRunDeclarativeGatePolicyPreservesRawEvidenceIdentity(t *testing.T) {
+	raw := json.RawMessage("{\n  \"risk_assessment\": {\"recommendation\": \"DO_NOT_INSTALL\"},\n  \"filtered_findings\": []\n}\n")
+	run := func(enabled bool) Artifact {
+		t.Helper()
+		var rules []JSONGateRule
+		if enabled {
+			rules = []JSONGateRule{{ID: "do-not-install", Paths: []string{"risk_assessment.recommendation"}, Equals: json.RawMessage(`"DO_NOT_INSTALL"`), Action: "block"}}
+		}
+		artifact, err := Run(Options{
+			Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+			GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: rules}},
+		}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+			"skillspector": {Status: "completed", Raw: append(json.RawMessage(nil), raw...)},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return artifact
+	}
+
+	withoutPolicy := run(false)
+	withPolicy := run(true)
+	if !bytes.Equal(withoutPolicy.Scanners["skillspector"].Raw, raw) {
+		t.Fatalf("raw evidence without policy changed: %q", withoutPolicy.Scanners["skillspector"].Raw)
+	}
+	if !bytes.Equal(withPolicy.Scanners["skillspector"].Raw, raw) {
+		t.Fatalf("raw evidence with policy changed: %q", withPolicy.Scanners["skillspector"].Raw)
+	}
+	if !bytes.Equal(withPolicy.Scanners["skillspector"].Raw, withoutPolicy.Scanners["skillspector"].Raw) {
+		t.Fatal("raw evidence differs with declarative policy enabled")
+	}
+}
+
+func TestRunDeclarativeGatePolicySkipsInfrastructureFailureEvidence(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"demo"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"demo": {
+			JSONRules: []JSONGateRule{{
+				ID: "critical-risk", Paths: []string{"result.risk"}, Equals: json.RawMessage(`"critical"`), Action: "block",
+			}},
+		}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"demo": {
+			Status: "failed",
+			Error:  "command timed out after 20m",
+			Raw:    json.RawMessage(`{"result":{"risk":"critical"}}`),
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+	if string(artifact.Scanners["demo"].Raw) != `{"result":{"risk":"critical"}}` {
+		t.Fatalf("raw evidence changed: %s", artifact.Scanners["demo"].Raw)
+	}
+}
+
+func TestRunDeclarativeGatePolicyEvaluatesCompletedNonzeroEvidenceWithoutExitCode(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"snyk"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"snyk": {
+			JSONRules: []JSONGateRule{{
+				ID: "policy-violation", Paths: []string{"ok"}, Equals: json.RawMessage(`false`), Action: "block",
+			}},
+		}},
+	}, RunContext{Env: map[string]string{"SNYK_TOKEN": "present"}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"snyk": {
+			Status: "completed",
+			Error:  "exit status 1: policy violation",
+			Raw:    json.RawMessage(`{"ok":false}`),
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 1 {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
+	}
+}
+
+func TestJSONGateNumericComparisonDoesNotExpandExponents(t *testing.T) {
+	if jsonGateValuesEqual(json.Number("1e1000000000"), json.Number("1"), "") {
+		t.Fatal("different numeric values compared equal")
+	}
+	if !jsonGateValuesEqual(json.Number("10e999999999"), json.Number("1e1000000000"), "") {
+		t.Fatal("equivalent numeric values compared unequal")
+	}
+}
+
+func TestJSONGateNumericComparisonTreatsNegativeZeroAsZero(t *testing.T) {
+	if !jsonGateValuesEqual(json.Number("-0"), json.Number("0"), "") {
+		t.Fatal("negative zero compared unequal to zero")
+	}
+	if !jsonGateValuesEqual(json.Number("0.0"), json.Number("-0e1000000000"), "") {
+		t.Fatal("equivalent zero spellings compared unequal")
 	}
 }
 
@@ -2755,9 +3257,10 @@ func TestAgentVerusReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	exitCode := 1
 	runner := &recordingCommandRunner{
 		stdout: `{"overall":42,"badge":"warning","findings":[{"id":"ASST-09"}]}`,
-		err:    errCommandFailed,
+		err:    errCommandFailed, exitCode: &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "agentverus"})
 	if err != nil {
@@ -2773,6 +3276,9 @@ func TestAgentVerusReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 	result := artifact.Scanners["agentverus"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
+	}
+	if result.ExitCode == nil || *result.ExitCode != exitCode {
+		t.Fatalf("exit code = %#v", result.ExitCode)
 	}
 	if !bytes.Contains(result.Raw, []byte(`"ASST-09"`)) {
 		t.Fatalf("raw = %s", result.Raw)
@@ -2840,9 +3346,10 @@ func TestSkillSpectorReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	exitCode := 1
 	runner := &recordingCommandRunner{
 		writeOutput: `{"risk_assessment":{"severity":"HIGH"},"issues":[{"id":"x"}]}`,
-		err:         errCommandFailed,
+		err:         errCommandFailed, exitCode: &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
 	if err != nil {

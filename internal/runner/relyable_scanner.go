@@ -33,6 +33,7 @@ func (runner ExternalScannerRunner) runRelyable(target string, startedAt string)
 		timeout = 20 * time.Minute
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	exitCode := gateEligibleExitCode(output.ExitCode)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	raw := strings.TrimSpace(output.Stdout)
 	if runErr != nil {
@@ -42,11 +43,12 @@ func (runner ExternalScannerRunner) runRelyable(target string, startedAt string)
 		}
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
-				Status:      "completed",
+				Status:      commandScannerResultStatus(output, runErr),
 				StartedAt:   startedAt,
 				CompletedAt: completedAt,
 				Command:     fullCommand,
 				Error:       message,
+				ExitCode:    exitCode,
 				Raw:         json.RawMessage(raw),
 			}, nil
 		}
@@ -85,6 +87,7 @@ func (runner ExternalScannerRunner) runRelyable(target string, startedAt string)
 		CompletedAt: completedAt,
 		Command:     fullCommand,
 		Error:       "",
+		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
 	}, nil
 }

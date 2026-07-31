@@ -11,15 +11,16 @@ import (
 )
 
 type relyableRecordingCommandRunner struct {
-	calls  []commandCall
-	stdout string
-	stderr string
-	err    error
+	calls    []commandCall
+	stdout   string
+	stderr   string
+	err      error
+	exitCode *int
 }
 
 func (r *relyableRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	r.calls = append(r.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
-	return CommandOutput{Stdout: r.stdout, Stderr: r.stderr}, r.err
+	return CommandOutput{Stdout: r.stdout, Stderr: r.stderr, ExitCode: r.exitCode}, r.err
 }
 
 func TestRunExecutesRelyableScannerWithoutHostExecOutsideSandbox(t *testing.T) {
@@ -83,11 +84,13 @@ func TestRelyableScannerPassesHostExecAckInDockerSandbox(t *testing.T) {
 
 func TestRelyableScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 	const relyableJSON = `{"schemaVersion":"relyable-scan-v1","error":"no SKILL.md found in target or its immediate children"}`
+	exitCode := 2
 	runner := ExternalScannerRunner{
 		CommandRunner: &relyableRecordingCommandRunner{
-			stdout: relyableJSON,
-			stderr: "",
-			err:    errors.New("exit status 2"),
+			stdout:   relyableJSON,
+			stderr:   "",
+			err:      errors.New("exit status 2"),
+			exitCode: &exitCode,
 		},
 	}
 	result, err := runner.runRelyable("/tmp/missing", "2026-01-01T00:00:00Z")
@@ -96,6 +99,9 @@ func TestRelyableScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 	}
 	if result.Status != "completed" {
 		t.Fatalf("status = %q", result.Status)
+	}
+	if result.ExitCode == nil || *result.ExitCode != exitCode {
+		t.Fatalf("exit code = %#v", result.ExitCode)
 	}
 	if result.Error == "" {
 		t.Fatal("expected the command error to be recorded")

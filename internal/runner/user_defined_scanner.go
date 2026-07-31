@@ -116,7 +116,7 @@ func (adapter userDefinedScannerAdapter) Run(runner ExternalScannerRunner, targe
 		message := commandErrorForEnvNames(runErr, output.Stderr, runner.Env, adapter.config.SecretEnv)
 		if json.Valid([]byte(raw)) {
 			return ScannerResult{
-				Status: "completed", StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
+				Status: commandScannerResultStatus(output, runErr), StartedAt: startedAt, CompletedAt: completedAt, Command: fullCommand,
 				Error: message, ExitCode: exitCode, Raw: json.RawMessage(raw),
 			}, nil
 		}

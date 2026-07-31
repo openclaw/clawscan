@@ -33,6 +33,7 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 		cwd = resultDir
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, cwd, timeout)
+	exitCode := gateEligibleExitCode(output.ExitCode)
 	raw, readErr := os.ReadFile(resultPath)
 	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if readErr != nil {
@@ -69,10 +70,12 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 		CompletedAt: completedAt,
 		Command:     fullCommand,
 		Error:       "",
+		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
 	}
 	if runErr != nil {
 		result.Error = scannerCommandError(runErr, output.Stderr, runner.Env)
+		result.Status = commandScannerResultStatus(output, runErr)
 	}
 	return result, nil
 }

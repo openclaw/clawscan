@@ -3,6 +3,7 @@ package profiles
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,157 +51,7 @@ type ProfileScanner struct {
 	Targets   []string
 	Gate      *ProfileScannerGate
 	custom    bool
-}
-
-type ProfileScannerGate struct {
-	BlockOnExitCode *profileExitCodeRule `yaml:"blockOnExitCode,omitempty"`
-	WarnOnExitCode  *profileExitCodeRule `yaml:"warnOnExitCode,omitempty"`
-}
-
-type profileExitCodeRule struct {
-	Codes   []int
-	Nonzero bool
-}
-
-func (rule *profileExitCodeRule) UnmarshalYAML(node *yaml.Node) error {
-	node = resolvedYAMLNode(node)
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if node.Tag == "!!str" && node.Value == "nonzero" {
-			rule.Nonzero = true
-			return nil
-		}
-		if node.Tag == "!!int" {
-			var code int
-			if err := node.Decode(&code); err == nil && code >= 0 && code <= runner.MaxGateExitCode {
-				rule.Codes = []int{code}
-				return nil
-			}
-			return fmt.Errorf("exit-code gate rule must contain only integers from 0 through %d", runner.MaxGateExitCode)
-		}
-	case yaml.SequenceNode:
-		if len(node.Content) == 0 {
-			return errors.New("exit-code gate rule must not be an empty list")
-		}
-		codes := make([]int, 0, len(node.Content))
-		for _, item := range node.Content {
-			item = resolvedYAMLNode(item)
-			if item.Kind != yaml.ScalarNode || item.Tag != "!!int" {
-				return fmt.Errorf("exit-code gate rule must contain only integers from 0 through %d", runner.MaxGateExitCode)
-			}
-			var code int
-			if err := item.Decode(&code); err != nil || code < 0 || code > runner.MaxGateExitCode {
-				return fmt.Errorf("exit-code gate rule must contain only integers from 0 through %d", runner.MaxGateExitCode)
-			}
-			codes = append(codes, code)
-		}
-		rule.Codes = codes
-		return nil
-	}
-	return fmt.Errorf(`exit-code gate rule must be an integer from 0 through %d, a list of those integers, or "nonzero"`, runner.MaxGateExitCode)
-}
-
-func (rule profileExitCodeRule) MarshalYAML() (interface{}, error) {
-	if rule.Nonzero {
-		return "nonzero", nil
-	}
-	switch len(rule.Codes) {
-	case 0:
-		return nil, errors.New("exit-code gate rule must include at least one exit code")
-	case 1:
-		return rule.Codes[0], nil
-	default:
-		return append([]int(nil), rule.Codes...), nil
-	}
-}
-
-func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
-	node = resolvedYAMLNode(node)
-	if node.Kind != yaml.MappingNode {
-		return errors.New("scanner gate must be an object")
-	}
-	if len(node.Content) == 0 {
-		return errors.New("scanner gate must include blockOnExitCode or warnOnExitCode")
-	}
-	for index := 0; index < len(node.Content); index += 2 {
-		switch node.Content[index].Value {
-		case "blockOnExitCode", "warnOnExitCode":
-			value := resolvedYAMLNode(node.Content[index+1])
-			if value.Tag == "!!null" {
-				return fmt.Errorf("scanner gate %s must not be null", node.Content[index].Value)
-			}
-		default:
-			return fmt.Errorf("field %s not found in type profiles.ProfileScannerGate", node.Content[index].Value)
-		}
-	}
-	type plainGate ProfileScannerGate
-	return node.Decode((*plainGate)(gate))
-}
-
-func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if err := node.Decode(&scanner.ID); err != nil {
-			return err
-		}
-		return nil
-	case yaml.MappingNode:
-		for index := 0; index < len(node.Content); index += 2 {
-			switch node.Content[index].Value {
-			case "id", "command", "env", "secretEnv", "targets", "gate":
-				if node.Content[index].Value == "gate" {
-					gateNode := resolvedYAMLNode(node.Content[index+1])
-					if gateNode.Kind != yaml.MappingNode {
-						return errors.New("scanner gate must be an object")
-					}
-				}
-			default:
-				return fmt.Errorf("field %s not found in type profiles.ProfileScanner", node.Content[index].Value)
-			}
-		}
-		var value struct {
-			ID        string              `yaml:"id"`
-			Command   string              `yaml:"command"`
-			Env       []string            `yaml:"env,omitempty"`
-			SecretEnv []string            `yaml:"secretEnv,omitempty"`
-			Targets   []string            `yaml:"targets,omitempty"`
-			Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
-		}
-		if err := node.Decode(&value); err != nil {
-			return err
-		}
-		scanner.ID = value.ID
-		scanner.Command = value.Command
-		scanner.Env = value.Env
-		scanner.SecretEnv = value.SecretEnv
-		scanner.Targets = value.Targets
-		scanner.Gate = value.Gate
-		scanner.custom = true
-		return nil
-	default:
-		return fmt.Errorf("scanner entry must be a string or object")
-	}
-}
-
-func resolvedYAMLNode(node *yaml.Node) *yaml.Node {
-	for node != nil && node.Kind == yaml.AliasNode {
-		node = node.Alias
-	}
-	return node
-}
-
-func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
-	if !scanner.custom {
-		return scanner.ID, nil
-	}
-	return struct {
-		ID        string              `yaml:"id"`
-		Command   string              `yaml:"command"`
-		Env       []string            `yaml:"env,omitempty"`
-		SecretEnv []string            `yaml:"secretEnv,omitempty"`
-		Targets   []string            `yaml:"targets,omitempty"`
-		Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
-	}{scanner.ID, scanner.Command, scanner.Env, scanner.SecretEnv, scanner.Targets, scanner.Gate}, nil
+	mapping   bool
 }
 
 func profileScannerIDs(scanners []ProfileScanner) []string {
@@ -254,7 +105,13 @@ func profileGateRules(scanners []ProfileScanner, selectedScannerIDs []string) ma
 				Codes: append([]int(nil), scanner.Gate.WarnOnExitCode.Codes...), Nonzero: scanner.Gate.WarnOnExitCode.Nonzero,
 			}
 		}
-		if policy.BlockOnExitCode == nil && policy.WarnOnExitCode == nil {
+		for _, rule := range scanner.Gate.Rules {
+			policy.JSONRules = append(policy.JSONRules, runner.JSONGateRule{
+				ID: rule.ID, Paths: append([]string(nil), rule.Paths...), Equals: append(json.RawMessage(nil), rule.equalsJSON...), Exists: rule.Exists, Normalize: rule.Normalize,
+				Fallback: rule.Fallback, Action: rule.Action,
+			})
+		}
+		if policy.BlockOnExitCode == nil && policy.WarnOnExitCode == nil && len(policy.JSONRules) == 0 {
 			continue
 		}
 		rules[scanner.ID] = policy
@@ -272,42 +129,6 @@ type Sandbox struct {
 type SandboxMount struct {
 	Path  string
 	Write bool
-}
-
-func (m *SandboxMount) UnmarshalYAML(node *yaml.Node) error {
-	switch node.Kind {
-	case yaml.ScalarNode:
-		return node.Decode(&m.Path)
-	case yaml.MappingNode:
-		for i := 0; i < len(node.Content); i += 2 {
-			switch node.Content[i].Value {
-			case "path", "write":
-			default:
-				return fmt.Errorf("field %s not found in type profiles.SandboxMount", node.Content[i].Value)
-			}
-		}
-		var v struct {
-			Path  string `yaml:"path"`
-			Write bool   `yaml:"write"`
-		}
-		if err := node.Decode(&v); err != nil {
-			return err
-		}
-		m.Path, m.Write = v.Path, v.Write
-		return nil
-	default:
-		return fmt.Errorf("sandbox mount must be a string or object")
-	}
-}
-
-func (m SandboxMount) MarshalYAML() (interface{}, error) {
-	if !m.Write {
-		return m.Path, nil
-	}
-	return struct {
-		Path  string `yaml:"path"`
-		Write bool   `yaml:"write"`
-	}{Path: m.Path, Write: m.Write}, nil
 }
 
 type Judge struct {
@@ -1087,6 +908,20 @@ func invalidDeclaredEnvName(env []string) string {
 func validateProfile(name string, profile Profile) error {
 	seen := map[string]bool{}
 	for _, scanner := range profile.Scanners {
+		if scanner.mapping && strings.TrimSpace(scanner.ID) == "" {
+			if scanner.custom {
+				return fmt.Errorf("User-defined scanner in profile %s must include a non-empty id", name)
+			}
+			return fmt.Errorf("Scanner object in profile %s must include a non-empty id", name)
+		}
+		if scanner.mapping && !scanner.custom {
+			if !runner.DefaultScannerRegistry().Contains(scanner.ID) {
+				return fmt.Errorf("User-defined scanner %s in profile %s must include a non-empty command", scanner.ID, name)
+			}
+			if len(scanner.Env) > 0 || len(scanner.SecretEnv) > 0 || len(scanner.Targets) > 0 {
+				return fmt.Errorf("Built-in scanner reference %s in profile %s accepts only id and gate", scanner.ID, name)
+			}
+		}
 		if scanner.custom && strings.TrimSpace(scanner.ID) == "" {
 			return fmt.Errorf("User-defined scanner in profile %s must include a non-empty id", name)
 		}

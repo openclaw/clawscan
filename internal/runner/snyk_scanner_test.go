@@ -67,10 +67,12 @@ func TestSnykScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	const snykJSON = `{"ok":false,"issues":[{"id":"prompt-injection"}]}`
+	exitCode := 1
 	runner := &snykRecordingCommandRunner{
-		stdout: snykJSON,
-		stderr: "policy violation",
-		err:    errors.New("exit status 1"),
+		stdout:   snykJSON,
+		stderr:   "policy violation",
+		err:      errors.New("exit status 1"),
+		exitCode: &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "snyk"})
 	if err != nil {
@@ -87,11 +89,17 @@ func TestSnykScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
 	}
+	if result.ExitCode == nil || *result.ExitCode != exitCode {
+		t.Fatalf("exit code = %#v", result.ExitCode)
+	}
 	if !strings.Contains(result.Error, "exit status 1") || !strings.Contains(result.Error, "policy violation") {
 		t.Fatalf("error = %q", result.Error)
 	}
 	if !bytes.Equal(result.Raw, []byte(snykJSON)) {
 		t.Fatalf("raw = %s", result.Raw)
+	}
+	if result.Status != "completed" {
+		t.Fatal("policy-violation exit was classified as an infrastructure failure")
 	}
 }
 
@@ -226,13 +234,14 @@ func TestSnykScannerResultFixtureSkipsTokenRequirement(t *testing.T) {
 }
 
 type snykRecordingCommandRunner struct {
-	calls  []commandCall
-	stdout string
-	stderr string
-	err    error
+	calls    []commandCall
+	stdout   string
+	stderr   string
+	err      error
+	exitCode *int
 }
 
 func (r *snykRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	r.calls = append(r.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
-	return CommandOutput{Stdout: r.stdout, Stderr: r.stderr}, r.err
+	return CommandOutput{Stdout: r.stdout, Stderr: r.stderr, ExitCode: r.exitCode}, r.err
 }
