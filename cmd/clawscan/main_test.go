@@ -587,6 +587,9 @@ profiles:
 	if strings.Contains(stdout, "local-review:") {
 		t.Fatalf("verbose profiles output should not include project profile:\n%s", stdout)
 	}
+	if strings.Contains(stdout, "gate:") {
+		t.Fatalf("embedded profiles should preserve their existing gate-free contract:\n%s", stdout)
+	}
 }
 
 func TestRunCommandBenchmarkListPrintsCatalogTable(t *testing.T) {
