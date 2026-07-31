@@ -540,9 +540,11 @@ profiles:
 		"profiles:",
 		"clawhub:",
 		"clawhub-aig:",
+		"openclaw-install-policy:",
 		"- skillspector",
 		"- clawscan-static",
 		"- aig",
+		"gate:",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("verbose profiles output missing %q:\n%s", want, stdout)
@@ -553,9 +555,6 @@ profiles:
 	}
 	if strings.Contains(stdout, "local-review:") {
 		t.Fatalf("verbose profiles output should not include project profile:\n%s", stdout)
-	}
-	if strings.Contains(stdout, "gate:") {
-		t.Fatalf("embedded profiles should preserve their existing gate-free contract:\n%s", stdout)
 	}
 }
 
