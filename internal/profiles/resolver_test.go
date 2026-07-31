@@ -32,11 +32,8 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static" {
 		t.Fatalf("scanners = %q", got)
 	}
-	if got := len(opts.GateRules["skillspector"].JSONRules); got != 3 {
-		t.Fatalf("skillspector JSON gate rules = %#v", opts.GateRules["skillspector"].JSONRules)
-	}
-	if got := len(opts.GateRules["clawscan-static"].JSONRules); got != 1 {
-		t.Fatalf("static JSON gate rules = %#v", opts.GateRules["clawscan-static"].JSONRules)
+	if len(opts.GateRules) != 0 {
+		t.Fatalf("embedded clawhub profile changed its existing gate contract: %#v", opts.GateRules)
 	}
 	if opts.Judge == nil {
 		t.Fatal("expected embedded clawhub judge")
@@ -85,8 +82,8 @@ func TestResolveArgsUsesEmbeddedClawHubAIGCandidateProfile(t *testing.T) {
 	if got := strings.Join(candidate.Scanners, ","); got != "skillspector,aig" {
 		t.Fatalf("scanners = %q", got)
 	}
-	if got := len(candidate.GateRules["skillspector"].JSONRules); got != 3 {
-		t.Fatalf("skillspector JSON gate rules = %#v", candidate.GateRules["skillspector"].JSONRules)
+	if len(candidate.GateRules) != 0 {
+		t.Fatalf("embedded clawhub-aig profile changed its existing gate contract: %#v", candidate.GateRules)
 	}
 	if candidate.Judge == nil || clawhub.Judge == nil {
 		t.Fatal("missing embedded ClawHub judge")
@@ -980,108 +977,6 @@ profiles:
 	rules := opts.GateRules["skillspector"].JSONRules
 	if len(rules) != 1 || !bytes.Equal(rules[0].Equals, []byte(`9007199254740993.0`)) {
 		t.Fatalf("JSON gate rules = %#v", rules)
-	}
-}
-
-func TestEmbeddedClawHubGateCoversSupportedSkillSpectorShapes(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  json.RawMessage
-		want string
-		path string
-	}{
-		{
-			name: "top-level recommendation",
-			raw:  json.RawMessage(`{"recommendation":"do-not-install","issues":[]}`),
-			want: "block",
-			path: "risk_recommendation|riskRecommendation|recommendation",
-		},
-		{
-			name: "null recommendation alias falls through",
-			raw:  json.RawMessage(`{"risk_recommendation":null,"recommendation":"DO_NOT_INSTALL","issues":[]}`),
-			want: "block",
-			path: "risk_recommendation|riskRecommendation|recommendation",
-		},
-		{
-			name: "nested recommendation behind empty top-level alias",
-			raw:  json.RawMessage(`{"recommendation":"","risk_assessment":{"recommendation":"DO_NOT_INSTALL"},"issues":[]}`),
-			want: "block",
-			path: "risk_assessment.recommendation|risk_recommendation|riskRecommendation",
-		},
-		{
-			name: "risk recommendation has precedence",
-			raw:  json.RawMessage(`{"recommendation":"SAFE","risk_recommendation":"DO_NOT_INSTALL","issues":[]}`),
-			want: "block",
-			path: "risk_recommendation|riskRecommendation|recommendation",
-		},
-		{
-			name: "empty preferred recommendation group falls back to nested",
-			raw:  json.RawMessage(`{"risk_recommendation":"","recommendation":"SAFE","risk_assessment":{"recommendation":"DO_NOT_INSTALL"},"issues":[]}`),
-			want: "block",
-			path: "risk_assessment.recommendation|risk_recommendation|riskRecommendation",
-		},
-		{
-			name: "camel-case report",
-			raw:  json.RawMessage(`{"riskAssessment":{"recommendation":"CAUTION"},"filteredFindings":[{"severity":"CRITICAL"}]}`),
-			want: "block",
-			path: "filteredFindings[].severity|risk_severity|level",
-		},
-		{
-			name: "alternate issue fields",
-			raw:  json.RawMessage(`{"findings":[{"level":"high"}]}`),
-			want: "warn",
-			path: "findings[].severity|risk_severity|level",
-		},
-		{
-			name: "empty filtered findings override raw findings",
-			raw:  json.RawMessage(`{"filtered_findings":[],"findings":[{"severity":"CRITICAL"}]}`),
-			want: "pass",
-		},
-		{
-			name: "null filtered findings fall through to raw findings",
-			raw:  json.RawMessage(`{"filtered_findings":null,"findings":[{"severity":"CRITICAL"}]}`),
-			want: "block",
-			path: "findings[].severity|risk_severity|level",
-		},
-		{
-			name: "nonmatching filtered findings override raw findings",
-			raw:  json.RawMessage(`{"filtered_findings":[{"severity":"LOW"}],"findings":[{"severity":"CRITICAL"}]}`),
-			want: "pass",
-		},
-		{
-			name: "finding field aliases resolve per item",
-			raw:  json.RawMessage(`{"filtered_findings":[{"severity":"LOW"},{"risk_severity":"CRITICAL"}]}`),
-			want: "block",
-			path: "filtered_findings[].severity|risk_severity|level",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--sandbox", "off"}, t.TempDir())
-			if err != nil {
-				t.Fatal(err)
-			}
-			opts.Judge = nil
-			artifact, err := runner.Run(opts, runner.RunContext{
-				Env: map[string]string{},
-				ScannerRunner: profileScannerResultRunner{results: map[string]runner.ScannerResult{
-					"skillspector":    {Status: "completed", Raw: test.raw},
-					"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{"findings":[]}`)},
-				}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if artifact.Gate != test.want {
-				t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
-			}
-			if test.path == "" && len(artifact.GateRules) != 0 {
-				t.Fatalf("gate rules = %#v", artifact.GateRules)
-			}
-			if test.path != "" && (len(artifact.GateRules) != 1 || artifact.GateRules[0].Path != test.path) {
-				t.Fatalf("gate rules = %#v", artifact.GateRules)
-			}
-		})
 	}
 }
 
