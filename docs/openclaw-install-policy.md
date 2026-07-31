@@ -143,17 +143,19 @@ daemon or mismatched staging paths.
 
 For npm plugin installs, OpenClaw calls the policy before mutation with an
 `npm-package-metadata.json` file, then calls it again for the resolved package
-and installed dependency tree. ClawScan narrowly recognizes the metadata call
-from its complete host tuple: plugin/npm request and origin, immutable network
-npm source, package content role, file path kind, matching package names, and
-the exact metadata filename. It validates that provenance and uses the built-in
-static scanner without Docker for this lightweight phase. It does not present
-that result as a scan of plugin code. The later package and dependency-tree
-calls keep the full profile. Dependency packages are exposed in a dedicated
-scan view so normal `node_modules` exclusions cannot hide their code. Local
-`plugin-file` requests never match the metadata shortcut. A dependency-tree
-phase with no installed runtime dependencies returns an explicit allow/info
-response because the package itself was already scanned in the package phase.
+and installed dependency tree. ClawScan identifies the metadata stage from its
+plugin/npm file-stage shape, then validates the complete host tuple before
+allowing the lightweight path: npm origin, immutable network npm source,
+package content role, matching package names, and the exact metadata filename.
+A malformed metadata-stage tuple fails closed instead of falling through to an
+ordinary file scan. Valid metadata uses the built-in static scanner without
+Docker and is not presented as a scan of plugin code. The later package and
+dependency-tree calls keep the full profile. Dependency packages are exposed
+in a dedicated scan view so normal `node_modules` exclusions cannot hide their
+code. Local `plugin-file` requests never match the metadata shortcut. A
+dependency-tree phase with no installed runtime dependencies returns an
+explicit allow/info response because the package itself was already scanned in
+the package phase.
 For managed npm roots, the dependency view omits only OpenClaw's exact
 host-validated `node_modules/openclaw` peer symlink; other links escaping the
 staged root fail closed. Safe links within the staged root are dereferenced

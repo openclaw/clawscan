@@ -34,8 +34,28 @@ type npmPreflightMetadata struct {
 }
 
 func ValidateNPMMetadataPreflight(request Request) error {
-	if !request.IsNPMMetadataPreflight() {
-		return errors.New("request is not an OpenClaw npm metadata preflight")
+	if !request.IsNPMMetadataStage() {
+		return errors.New("request is not an OpenClaw npm metadata stage")
+	}
+	if filepath.Base(filepath.Clean(request.SourcePath)) != "npm-package-metadata.json" {
+		return errors.New("npm preflight sourcePath must name npm-package-metadata.json")
+	}
+	if request.Plugin == nil ||
+		request.Plugin.ContentType != "package" ||
+		strings.TrimSpace(request.Plugin.PackageName) == "" {
+		return errors.New("npm preflight plugin metadata is inconsistent")
+	}
+	if request.Source == nil ||
+		request.Source.Kind != "npm" ||
+		request.Source.Mutable ||
+		!request.Source.Network ||
+		(request.Source.Authority != "official" && request.Source.Authority != "third-party") {
+		return errors.New("npm preflight source provenance is inconsistent")
+	}
+	originType, _ := request.Origin["type"].(string)
+	originPackageName, _ := request.Origin["packageName"].(string)
+	if originType != "plugin-npm" || originPackageName != request.Plugin.PackageName {
+		return errors.New("npm preflight origin provenance is inconsistent")
 	}
 	info, err := os.Lstat(request.SourcePath)
 	if err != nil {

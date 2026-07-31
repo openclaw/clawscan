@@ -211,6 +211,13 @@ func TestRunOpenClawInstallPolicyHandlesNPMInstallStagesSeparately(t *testing.T)
 		!hasInstallPolicyFinding(metadataResponse.Findings, "clawscan.npm-metadata-preflight") {
 		t.Fatalf("metadata response = %#v", metadataResponse)
 	}
+	malformedMetadataRequest := strings.Replace(metadataRequest, `"mutable":false`, `"mutable":true`, 1)
+	malformedMetadataResponse := runInstallPolicyTestRequest(t, nil, malformedMetadataRequest)
+	if malformedMetadataResponse.Decision != "block" ||
+		!strings.Contains(malformedMetadataResponse.Reason, "source provenance is inconsistent") ||
+		hasInstallPolicyFinding(malformedMetadataResponse.Findings, "clawscan.npm-metadata-preflight") {
+		t.Fatalf("malformed metadata response = %#v", malformedMetadataResponse)
+	}
 
 	packageDir := filepath.Join(dir, "resolved-package")
 	writeFile(t, filepath.Join(packageDir, "package.json"), `{"name":"@acme/demo"}`)

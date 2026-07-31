@@ -141,7 +141,7 @@ func runOpenClawInstallPolicy(
 	opts.TargetKind = request.TargetType
 	opts.JSON = false
 	opts.OutputPath = ""
-	metadataPreflight := request.IsNPMMetadataPreflight()
+	metadataPreflight := request.IsNPMMetadataStage()
 	if metadataPreflight {
 		if err := installpolicy.ValidateNPMMetadataPreflight(request); err != nil {
 			return failClosed(err)

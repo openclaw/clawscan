@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNPMMetadataPreflightMatchesOnlyFullOpenClawTuple(t *testing.T) {
+func TestNPMMetadataStageDoesNotMatchRealPluginFileOrPackageRequests(t *testing.T) {
 	dir := t.TempDir()
 	metadataPath := filepath.Join(dir, "npm-package-metadata.json")
 	writeStageTestFile(t, metadataPath, `{
@@ -16,8 +16,8 @@ func TestNPMMetadataPreflightMatchesOnlyFullOpenClawTuple(t *testing.T) {
 		"resolution":{"name":"@acme/demo","version":"1.2.3"}
 	}`)
 	request := npmMetadataPreflightRequest(metadataPath)
-	if !request.IsNPMMetadataPreflight() {
-		t.Fatal("expected exact OpenClaw npm metadata preflight to match")
+	if !request.IsNPMMetadataStage() {
+		t.Fatal("expected OpenClaw npm metadata stage to match")
 	}
 	if err := ValidateNPMMetadataPreflight(request); err != nil {
 		t.Fatal(err)
@@ -42,53 +42,79 @@ func TestNPMMetadataPreflightMatchesOnlyFullOpenClawTuple(t *testing.T) {
 				request.SourcePath = dir
 			},
 		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := npmMetadataPreflightRequest(metadataPath)
+			test.mutate(&candidate)
+			if candidate.IsNPMMetadataStage() {
+				t.Fatalf("ordinary install request matched metadata stage: %#v", candidate)
+			}
+		})
+	}
+}
+
+func TestValidateNPMMetadataPreflightFailsClosedOnMalformedStageTuple(t *testing.T) {
+	dir := t.TempDir()
+	metadataPath := filepath.Join(dir, "npm-package-metadata.json")
+	writeStageTestFile(t, metadataPath, `{
+		"packageName":"@acme/demo",
+		"requestedSpecifier":"@acme/demo@1.2.3",
+		"resolution":{"name":"@acme/demo","version":"1.2.3"}
+	}`)
+	tests := []struct {
+		name   string
+		mutate func(*Request)
+		want   string
+	}{
 		{
-			name: "wrong origin",
+			name: "lookalike filename",
 			mutate: func(request *Request) {
-				request.Origin["type"] = "plugin-package"
+				request.SourcePath = filepath.Join(dir, "other.json")
 			},
+			want: "must name npm-package-metadata.json",
 		},
 		{
 			name: "wrong content role",
 			mutate: func(request *Request) {
 				request.Plugin.ContentType = "file"
 			},
+			want: "plugin metadata is inconsistent",
 		},
 		{
-			name: "wrong source provenance",
+			name: "missing source provenance",
 			mutate: func(request *Request) {
-				request.Source.Kind = "local-path"
+				request.Source = nil
 			},
+			want: "source provenance is inconsistent",
 		},
 		{
-			name: "lookalike filename",
+			name: "mutable npm source",
 			mutate: func(request *Request) {
-				request.SourcePath = filepath.Join(dir, "other.json")
+				request.Source.Mutable = true
 			},
+			want: "source provenance is inconsistent",
+		},
+		{
+			name: "mismatched origin package",
+			mutate: func(request *Request) {
+				request.Origin["packageName"] = "@acme/other"
+			},
+			want: "origin provenance is inconsistent",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			candidate := npmMetadataPreflightRequest(metadataPath)
-			test.mutate(&candidate)
-			if candidate.IsNPMMetadataPreflight() {
-				t.Fatalf("lookalike request matched metadata preflight: %#v", candidate)
+			request := npmMetadataPreflightRequest(metadataPath)
+			test.mutate(&request)
+			if !request.IsNPMMetadataStage() {
+				t.Fatal("malformed npm metadata tuple escaped stage classification")
+			}
+			err := ValidateNPMMetadataPreflight(request)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
 			}
 		})
-	}
-}
-
-func TestValidateNPMMetadataPreflightFailsClosedOnMismatchedProvenance(t *testing.T) {
-	dir := t.TempDir()
-	metadataPath := filepath.Join(dir, "npm-package-metadata.json")
-	writeStageTestFile(t, metadataPath, `{
-		"packageName":"@acme/other",
-		"requestedSpecifier":"@acme/demo@1.2.3",
-		"resolution":{"name":"@acme/other","version":"1.2.3"}
-	}`)
-	err := ValidateNPMMetadataPreflight(npmMetadataPreflightRequest(metadataPath))
-	if err == nil || !strings.Contains(err.Error(), "packageName does not match") {
-		t.Fatalf("error = %v", err)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -163,24 +162,10 @@ func validPluginRequestKind(kind string) bool {
 	}
 }
 
-func (request Request) IsNPMMetadataPreflight() bool {
-	if request.TargetType != "plugin" ||
-		request.Request.Kind != "plugin-npm" ||
-		request.SourcePathKind != "file" ||
-		filepath.Base(filepath.Clean(request.SourcePath)) != "npm-package-metadata.json" ||
-		request.Plugin == nil ||
-		request.Plugin.ContentType != "package" ||
-		strings.TrimSpace(request.Plugin.PackageName) == "" ||
-		request.Source == nil ||
-		request.Source.Kind != "npm" ||
-		request.Source.Mutable ||
-		!request.Source.Network ||
-		(request.Source.Authority != "official" && request.Source.Authority != "third-party") {
-		return false
-	}
-	originType, _ := request.Origin["type"].(string)
-	originPackageName, _ := request.Origin["packageName"].(string)
-	return originType == "plugin-npm" && originPackageName == request.Plugin.PackageName
+func (request Request) IsNPMMetadataStage() bool {
+	return request.TargetType == "plugin" &&
+		request.Request.Kind == "plugin-npm" &&
+		request.SourcePathKind == "file"
 }
 
 func (request Request) IsDependencyTree() bool {
