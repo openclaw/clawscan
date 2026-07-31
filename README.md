@@ -117,6 +117,18 @@ ClawScan turns that approach into a repeatable CLI. It includes a built-in `claw
 | `clawscan profiles [-v]` | Inspect built-in profiles; `-v` prints the catalog as YAML. |
 | `clawscan benchmark [list\|<benchmark-id>]` | Discover or run supported benchmarks through a selected scanner/profile/judge setup. |
 | `clawscan install <scanner-id> [...]` | Install or verify local scanner dependencies where ClawScan has registry-backed install plans. |
+| `clawscan openclaw-install-policy` | Act as an external OpenClaw `security.installPolicy.exec` command. Reads the staged install request from stdin and returns allow/warn/block JSON. |
+
+## OpenClaw install policy
+
+ClawScan integrates with OpenClaw at the operator-owned
+`security.installPolicy` boundary. It does not register an install hook or
+depend on plugin activation. The policy command scans the staged `sourcePath`
+for both skills and plugins before OpenClaw commits a supported install or
+update.
+
+See [docs/openclaw-install-policy.md](docs/openclaw-install-policy.md) for the
+trusted executable setup, configuration, payload contract, and scope.
 
 ## Scanners
 
@@ -187,6 +199,7 @@ clawscan profiles -v
 | Profile | Scanners | Judge |
 | --- | --- | --- |
 | `clawhub` | `skillspector`, `clawscan-static` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
+| `openclaw-install-policy` | `skillspector`, `clawscan-static` | none |
 
 ### Build a custom profile with `.clawscan.yml`
 

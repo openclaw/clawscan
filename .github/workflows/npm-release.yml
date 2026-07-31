@@ -1,4 +1,4 @@
-name: NPM Release
+name: ClawScan Binary NPM Promotion
 
 on:
   workflow_dispatch:
@@ -138,7 +138,7 @@ jobs:
           set -euo pipefail
           RUN_JSON="$(gh run view "$PREFLIGHT_RUN_ID" --repo "$GITHUB_REPOSITORY" --json workflowName,headBranch,event,conclusion,url)"
           # shellcheck disable=SC2016
-          printf '%s' "$RUN_JSON" | node --input-type=module -e 'const chunks=[]; process.stdin.on("data", (chunk) => chunks.push(chunk)); process.stdin.on("end", () => { const run = JSON.parse(Buffer.concat(chunks).toString("utf8")); const checks = [["workflowName", "NPM Release"], ["headBranch", "main"], ["event", "workflow_dispatch"], ["conclusion", "success"]]; for (const [key, expected] of checks) { if (run[key] !== expected) { console.error(`Referenced npm preflight run ${process.env.PREFLIGHT_RUN_ID} must have ${key}=${expected}, got ${run[key] ?? "<missing>"}.`); process.exit(1); } } console.log(`Using npm preflight run ${process.env.PREFLIGHT_RUN_ID}: ${run.url}`); });'
+          printf '%s' "$RUN_JSON" | node --input-type=module -e 'const chunks=[]; process.stdin.on("data", (chunk) => chunks.push(chunk)); process.stdin.on("end", () => { const run = JSON.parse(Buffer.concat(chunks).toString("utf8")); const checks = [["workflowName", "ClawScan Binary NPM Promotion"], ["headBranch", "main"], ["event", "workflow_dispatch"], ["conclusion", "success"]]; for (const [key, expected] of checks) { if (run[key] !== expected) { console.error(`Referenced npm preflight run ${process.env.PREFLIGHT_RUN_ID} must have ${key}=${expected}, got ${run[key] ?? "<missing>"}.`); process.exit(1); } } console.log(`Using npm preflight run ${process.env.PREFLIGHT_RUN_ID}: ${run.url}`); });'
 
       - name: Download prepared npm tarball
         uses: actions/download-artifact@v4
@@ -158,6 +158,11 @@ jobs:
           EXPECTED_PACKAGE_VERSION="$(node --input-type=module <<'EOF'
           import { normalizePackageVersion } from "./scripts/build-npm-package.mjs";
           process.stdout.write(normalizePackageVersion(process.env.RELEASE_TAG));
+          EOF
+          )"
+          EXPECTED_DIST_TAG="$(node --input-type=module <<'EOF'
+          import { npmDistTagForVersion } from "./scripts/build-npm-package.mjs";
+          process.stdout.write(npmDistTagForVersion(process.env.RELEASE_TAG));
           EOF
           )"
           TAG_FILE="dist/npm/release-tag.txt"
@@ -184,32 +189,73 @@ jobs:
             exit 1
           fi
           echo "PACKAGE_VERSION=$EXPECTED_PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "NPM_DIST_TAG=$EXPECTED_DIST_TAG" >> "$GITHUB_ENV"
 
-      - name: Resolve publish tarball
+      - name: Resolve ClawScan publish tarball
         id: publish_tarball
         run: |
           set -euo pipefail
-          TARBALL_PATH="$(find dist/npm -type f -name 'openclaw-clawscan-*.tgz' -print | sort | tail -n 1)"
-          if [[ -z "$TARBALL_PATH" ]]; then
-            echo "Prepared preflight tarball not found." >&2
+          CLAWSCAN_TARBALL="dist/npm/openclaw-clawscan-${PACKAGE_VERSION}.tgz"
+          if [[ ! -f "$CLAWSCAN_TARBALL" ]]; then
+            echo "Prepared ClawScan preflight tarball was not present." >&2
             ls -la dist/npm >&2 || true
             exit 1
           fi
-          echo "path=$TARBALL_PATH" >> "$GITHUB_OUTPUT"
+          echo "path=$CLAWSCAN_TARBALL" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure version is not already published
+      - name: Inspect ClawScan npm publish state
+        id: publish_state
         run: |
           set -euo pipefail
-          if npm view "@openclaw/clawscan@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
-            echo "@openclaw/clawscan@${PACKAGE_VERSION} is already published on npm."
+          package_name="@openclaw/clawscan"
+          tarball_path="${{ steps.publish_tarball.outputs.path }}"
+          published_version=""
+          view_output=""
+          view_status=0
+          set +e
+          view_output="$(npm view "${package_name}@${PACKAGE_VERSION}" version 2>&1)"
+          view_status=$?
+          set -e
+          if [[ "$view_status" -eq 0 && -n "$view_output" ]]; then
+            published_version="$view_output"
+            if [[ "$published_version" != "$PACKAGE_VERSION" ]]; then
+              echo "${package_name}@${PACKAGE_VERSION} reported unexpected version ${published_version}." >&2
+              exit 1
+            fi
+            remote_integrity=""
+            local_integrity=""
+            remote_integrity="$(npm view "${package_name}@${PACKAGE_VERSION}" dist.integrity)"
+            # shellcheck disable=SC2016
+            local_integrity="$(node --input-type=module -e '
+              import { createHash } from "node:crypto";
+              import { readFileSync } from "node:fs";
+              const digest = createHash("sha512").update(readFileSync(process.argv[1])).digest("base64");
+              process.stdout.write(`sha512-${digest}`);
+            ' "$tarball_path")"
+            if [[ "$remote_integrity" != "$local_integrity" ]]; then
+              echo "${package_name}@${PACKAGE_VERSION} does not match the prepared release tarball." >&2
+              exit 1
+            fi
+            echo "${package_name}@${PACKAGE_VERSION} is already published with valid release metadata; skipping publish."
+            echo "clawscan_needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$view_status" -eq 0 ]]; then
+            echo "${package_name}@${PACKAGE_VERSION} returned an empty publish-state response." >&2
             exit 1
           fi
-          echo "Publishing @openclaw/clawscan@${PACKAGE_VERSION}"
+          if ! printf '%s\n' "$view_output" | grep -q "E404"; then
+            printf '%s\n' "$view_output" >&2
+            exit "$view_status"
+          fi
+          echo "${package_name}@${PACKAGE_VERSION} is not published yet."
+          echo "clawscan_needed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Publish
-        run: npm publish "${{ steps.publish_tarball.outputs.path }}" --access public --provenance
+      - name: Publish ClawScan binary package
+        if: steps.publish_state.outputs.clawscan_needed == 'true'
+        run: npm publish "${{ steps.publish_tarball.outputs.path }}" --access public --provenance --tag "$NPM_DIST_TAG"
 
-      - name: Verify npm release metadata
+      - name: Verify ClawScan npm release metadata
         run: |
           set -euo pipefail
           NPM_DIST_JSON=""
@@ -224,3 +270,34 @@ jobs:
             sleep 5
           done
           printf '%s\n' "$NPM_DIST_JSON"
+
+          TAGGED_VERSION=""
+          for attempt in {1..12}; do
+            if TAGGED_VERSION="$(npm view "@openclaw/clawscan@${NPM_DIST_TAG}" version 2>/tmp/npm-tag-view-error)" &&
+              [[ "$TAGGED_VERSION" == "$PACKAGE_VERSION" ]]; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              cat /tmp/npm-tag-view-error >&2 || true
+              echo "Expected dist-tag ${NPM_DIST_TAG} to resolve to ${PACKAGE_VERSION}, got ${TAGGED_VERSION:-<missing>}." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          if [[ "$NPM_DIST_TAG" == "next" ]]; then
+            LATEST_VERSION=""
+            LATEST_STATUS=0
+            set +e
+            LATEST_VERSION="$(npm view "@openclaw/clawscan@latest" version 2>/tmp/npm-latest-view-error)"
+            LATEST_STATUS=$?
+            set -e
+            if [[ "$LATEST_STATUS" -eq 0 && "$LATEST_VERSION" == "$PACKAGE_VERSION" ]]; then
+              echo "Prerelease ${PACKAGE_VERSION} must not be assigned to the latest dist-tag." >&2
+              exit 1
+            fi
+            if [[ "$LATEST_STATUS" -ne 0 ]] && ! grep -q "E404" /tmp/npm-latest-view-error; then
+              cat /tmp/npm-latest-view-error >&2
+              exit "$LATEST_STATUS"
+            fi
+          fi

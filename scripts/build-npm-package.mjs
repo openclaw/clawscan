@@ -16,20 +16,36 @@ export const packageTargets = [
   { goos: "linux", goarch: "amd64" },
   { goos: "linux", goarch: "arm64" },
   { goos: "windows", goarch: "amd64" },
+  { goos: "windows", goarch: "arm64" },
 ];
 
 export function normalizePackageVersion(version) {
-  const match = String(version ?? "").trim().match(semverPattern);
+  const match = String(version ?? "")
+    .trim()
+    .match(semverPattern);
   if (!match) {
     throw new Error("Expected a semver npm package version or v-prefixed semver tag.");
   }
   return match[1];
 }
 
+export function normalizeBuildDate(value) {
+  const parsed = new Date(String(value ?? "").trim());
+  if (Number.isNaN(parsed.valueOf())) {
+    throw new Error("Expected a valid commit timestamp for the package build date.");
+  }
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 export function binaryVersionFor(version) {
   const trimmed = String(version ?? "").trim();
   const packageVersion = normalizePackageVersion(trimmed);
   return trimmed.startsWith("v") ? trimmed : `v${packageVersion}`;
+}
+
+export function npmDistTagForVersion(version) {
+  const [release] = normalizePackageVersion(version).split("+", 1);
+  return release.includes("-") ? "next" : "latest";
 }
 
 export function platformKeyForTarget(target) {
@@ -52,7 +68,9 @@ function run(command, args, options = {}) {
   if (result.status !== 0) {
     const stderr = result.stderr ? `\n${result.stderr.trim()}` : "";
     const stdout = result.stdout ? `\n${result.stdout.trim()}` : "";
-    throw new Error(`${command} ${args.join(" ")} failed with exit ${result.status}${stderr}${stdout}`);
+    throw new Error(
+      `${command} ${args.join(" ")} failed with exit ${result.status}${stderr}${stdout}`,
+    );
   }
   return result;
 }
@@ -93,7 +111,9 @@ async function stagePackage(options) {
   const binaryVersion = binaryVersionFor(options.version);
   const releaseSha = run("git", ["rev-parse", "HEAD"]).stdout.trim();
   const releaseCommit = run("git", ["rev-parse", "--short", "HEAD"]).stdout.trim();
-  const buildDate = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const buildDate = normalizeBuildDate(
+    run("git", ["show", "-s", "--format=%cI", "HEAD"]).stdout.trim(),
+  );
   const packageSource = join(repoRoot, "npm", "clawscan");
   const packageOut = join(options.outDir, "package");
 
@@ -118,22 +138,26 @@ async function stagePackage(options) {
   for (const target of packageTargets) {
     const binaryDir = join(packageOut, "binaries", platformKeyForTarget(target));
     await mkdir(binaryDir, { recursive: true });
-    run("go", [
-      "build",
-      "-trimpath",
-      "-ldflags",
-      ldflags,
-      "-o",
-      join(binaryDir, binaryNameForTarget(target)),
-      "github.com/openclaw/clawscan/cmd/clawscan",
-    ], {
-      env: {
-        ...process.env,
-        GOOS: target.goos,
-        GOARCH: target.goarch,
-        CGO_ENABLED: "0",
+    run(
+      "go",
+      [
+        "build",
+        "-trimpath",
+        "-ldflags",
+        ldflags,
+        "-o",
+        join(binaryDir, binaryNameForTarget(target)),
+        "github.com/openclaw/clawscan/cmd/clawscan",
+      ],
+      {
+        env: {
+          ...process.env,
+          GOOS: target.goos,
+          GOARCH: target.goarch,
+          CGO_ENABLED: "0",
+        },
       },
-    });
+    );
   }
 
   await writeFile(join(options.outDir, "release-tag.txt"), `${binaryVersion}\n`);
@@ -144,9 +168,13 @@ async function stagePackage(options) {
 }
 
 async function packPackage(options, packageOut) {
-  const result = run("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", options.outDir], {
-    cwd: packageOut,
-  });
+  const result = run(
+    "npm",
+    ["pack", "--json", "--ignore-scripts", "--pack-destination", options.outDir],
+    {
+      cwd: packageOut,
+    },
+  );
   const parsed = JSON.parse(result.stdout);
   const first = Array.isArray(parsed) ? parsed[0] : undefined;
   if (!first?.filename) throw new Error("npm pack did not return a tarball filename.");
@@ -155,17 +183,24 @@ async function packPackage(options, packageOut) {
 
 async function smokePackage(tarballPath, binaryVersion) {
   const prefix = await mkdtemp(join(tmpdir(), "clawscan-npm-smoke-"));
-  run("npm", ["install", "-g", "--prefix", prefix, tarballPath]);
-  const binPath = process.platform === "win32"
-    ? join(prefix, "clawscan.cmd")
-    : join(prefix, "bin", "clawscan");
-  const version = run(binPath, ["--version"]).stdout.trim();
-  if (!version.includes(`clawscan ${binaryVersion} `)) {
-    throw new Error(`Unexpected clawscan --version output: ${version}`);
+  try {
+    run("npm", ["install", "-g", "--prefix", prefix, tarballPath]);
+    const binPath =
+      process.platform === "win32" ? join(prefix, "clawscan.cmd") : join(prefix, "bin", "clawscan");
+    const version = run(binPath, ["--version"]).stdout.trim();
+    if (!version.includes(`clawscan ${binaryVersion} `)) {
+      throw new Error(`Unexpected clawscan --version output: ${version}`);
+    }
+    const smoke = run(binPath, [
+      join(repoRoot, "README.md"),
+      "--scanner",
+      "clawscan-static",
+      "--json",
+    ]);
+    JSON.parse(smoke.stdout);
+  } finally {
+    await rm(prefix, { recursive: true, force: true });
   }
-  const smoke = run(binPath, [join(repoRoot, "README.md"), "--scanner", "clawscan-static", "--json"]);
-  JSON.parse(smoke.stdout);
-  await rm(prefix, { recursive: true, force: true });
 }
 
 export async function main(argv = process.argv.slice(2)) {

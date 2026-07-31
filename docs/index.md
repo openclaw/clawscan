@@ -111,3 +111,11 @@ ClawScan turns that approach into a repeatable CLI. It includes a built-in `claw
 | `clawscan profiles [-v]` | Inspect built-in profiles; `-v` prints the catalog as YAML. |
 | `clawscan benchmark [list\|<benchmark-id>]` | Discover or run supported benchmarks through a selected scanner/profile/judge setup. |
 | `clawscan install <scanner-id> [...]` | Install or verify local scanner dependencies where ClawScan has registry-backed install plans. |
+| `clawscan openclaw-install-policy` | Run as an external OpenClaw `security.installPolicy.exec` command for staged skill and plugin installs. |
+
+## OpenClaw install policy
+
+ClawScan integrates through OpenClaw's operator-owned
+`security.installPolicy` boundary, not a plugin-runtime install hook. See
+[OpenClaw install policy](openclaw-install-policy.md) for trusted executable
+setup and the fail-closed request/response contract.

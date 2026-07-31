@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/openclaw/clawscan/internal/installpolicy"
 	"github.com/openclaw/clawscan/internal/profiles"
 	"github.com/openclaw/clawscan/internal/runner"
 )
@@ -49,6 +51,9 @@ func run(args []string, environ []string) error {
 	}
 	if len(args) > 0 && args[0] == "install" {
 		return runInstall(args[1:], environ)
+	}
+	if len(args) > 0 && args[0] == "openclaw-install-policy" {
+		return runOpenClawInstallPolicy(args[1:], environ, os.Stdin, os.Stdout)
 	}
 	if len(args) > 0 && looksLikeCommand(args[0]) {
 		return fmt.Errorf("Unknown command: %s", args[0])
@@ -103,6 +108,179 @@ func run(args []string, environ []string) error {
 	}
 	printRunSummary(os.Stdout, result, "")
 	return nil
+}
+
+func runOpenClawInstallPolicy(
+	args []string,
+	environ []string,
+	input io.Reader,
+	output io.Writer,
+) error {
+	failClosed := func(err error) error {
+		return installpolicy.WriteResponse(output, installpolicy.FailureResponse(err.Error()))
+	}
+	request, err := installpolicy.DecodeRequest(input)
+	if err != nil {
+		return failClosed(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return failClosed(err)
+	}
+	if !hasProfileSelection(args) {
+		args = append(args, "--profile", "openclaw-install-policy")
+	}
+	resolved, err := profiles.ResolveRunSet(append([]string{request.SourcePath}, args...), cwd)
+	if err != nil {
+		return failClosed(err)
+	}
+	if resolved.AllProfiles || len(resolved.Options) != 1 {
+		return failClosed(errors.New("OpenClaw install policy requires exactly one ClawScan profile"))
+	}
+	opts := resolved.Options[0]
+	opts.TargetKind = request.TargetType
+	opts.JSON = false
+	opts.OutputPath = ""
+	if opts.Judge != nil {
+		return failClosed(errors.New(
+			"OpenClaw install policy does not support judge-backed profiles; use scanner gate rules",
+		))
+	}
+	metadataPreflight := request.IsNPMMetadataStage()
+	if metadataPreflight {
+		if err := installpolicy.ValidateNPMMetadataPreflight(request); err != nil {
+			return failClosed(err)
+		}
+	}
+	metadataStaticOnly := applyInstallPolicyMetadataDefaults(&opts, args, metadataPreflight)
+	windowsDegraded := false
+	if !metadataStaticOnly {
+		windowsDegraded = applyInstallPolicyPlatformDefaults(&opts, args, runtime.GOOS)
+	}
+	if request.IsDependencyTree() {
+		scanTarget, cleanup, empty, err := installpolicy.PrepareDependencyTreeScanTarget(
+			request.SourcePath,
+			request.AllowsManagedNPMRootPeerLinks(),
+		)
+		if err != nil {
+			return failClosed(err)
+		}
+		defer cleanup()
+		if empty {
+			response := installpolicy.Response{ProtocolVersion: 1, Decision: "allow"}
+			installpolicy.AddFinding(&response, installpolicy.Finding{
+				RuleID:   "clawscan.empty-dependency-tree",
+				Severity: "info",
+				Message:  "OpenClaw reported no installed runtime dependencies in this dependency-tree phase.",
+			})
+			return installpolicy.WriteResponse(output, response)
+		}
+		opts.Target = scanTarget
+	}
+	result, err := runner.RunTargets(opts, runner.RunContext{Env: runner.EnvMap(environ)}, cwd)
+	if err != nil {
+		return failClosed(err)
+	}
+	if result.Single == nil || result.Batch != nil {
+		return failClosed(errors.New("ClawScan install policy expected one scan artifact"))
+	}
+	response := installpolicy.ResponseFromArtifact(*result.Single)
+	if metadataPreflight {
+		installpolicy.AddFinding(&response, installpolicy.Finding{
+			RuleID:   "clawscan.npm-metadata-preflight",
+			Severity: "info",
+			Message:  "ClawScan validated npm registry metadata in this preflight phase; OpenClaw submits the resolved package and dependency tree for separate code scans.",
+		})
+	}
+	if windowsDegraded {
+		applyWindowsDegradedResponse(&response)
+	}
+	return installpolicy.WriteResponse(output, response)
+}
+
+func applyWindowsDegradedResponse(response *installpolicy.Response) {
+	if response.Decision != "block" {
+		response.Decision = "warn"
+		response.Reason = "ClawScan used static-only scanning on native Windows; full Docker scanner coverage was unavailable"
+	}
+	installpolicy.AddFinding(response, installpolicy.Finding{
+		RuleID:   "clawscan.windows-static-fallback",
+		Severity: "warn",
+		Message:  "Docker scanning is unavailable in the native Windows policy path; ClawScan used static analysis only.",
+	})
+}
+
+func hasProfileSelection(args []string) bool {
+	for _, arg := range args {
+		if arg == "--profile" || strings.HasPrefix(arg, "--profile=") ||
+			arg == "--config" || strings.HasPrefix(arg, "--config=") {
+			return true
+		}
+	}
+	return false
+}
+
+func applyInstallPolicyPlatformDefaults(opts *runner.Options, args []string, goos string) bool {
+	if goos != "windows" ||
+		opts.Profile != "openclaw-install-policy" ||
+		opts.ConfigSource != "built-in" ||
+		hasInstallPolicyConfigOverride(args) {
+		return false
+	}
+	for _, arg := range args {
+		if arg == "--scanner" || strings.HasPrefix(arg, "--scanner=") ||
+			arg == "--sandbox" || strings.HasPrefix(arg, "--sandbox=") {
+			return false
+		}
+	}
+	opts.Scanners = []string{"clawscan-static"}
+	keepInstallPolicyGateRules(opts, "clawscan-static")
+	opts.Sandbox.Mode = runner.SandboxModeOff
+	return true
+}
+
+func applyInstallPolicyMetadataDefaults(
+	opts *runner.Options,
+	args []string,
+	metadataPreflight bool,
+) bool {
+	if !metadataPreflight ||
+		opts.Profile != "openclaw-install-policy" ||
+		opts.ConfigSource != "built-in" ||
+		hasInstallPolicyExecutionOverride(args) || hasInstallPolicyConfigOverride(args) {
+		return false
+	}
+	opts.Scanners = []string{"clawscan-static"}
+	keepInstallPolicyGateRules(opts, "clawscan-static")
+	opts.Sandbox.Mode = runner.SandboxModeOff
+	return true
+}
+
+func keepInstallPolicyGateRules(opts *runner.Options, scannerID string) {
+	for configuredScannerID := range opts.GateRules {
+		if configuredScannerID != scannerID {
+			delete(opts.GateRules, configuredScannerID)
+		}
+	}
+}
+
+func hasInstallPolicyExecutionOverride(args []string) bool {
+	for _, arg := range args {
+		if arg == "--scanner" || strings.HasPrefix(arg, "--scanner=") ||
+			arg == "--sandbox" || strings.HasPrefix(arg, "--sandbox=") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasInstallPolicyConfigOverride(args []string) bool {
+	for _, arg := range args {
+		if arg == "--config" || strings.HasPrefix(arg, "--config=") {
+			return true
+		}
+	}
+	return false
 }
 
 func runBenchmarkCommand(args []string, environ []string) error {
@@ -585,6 +763,7 @@ Usage:
   clawscan benchmark list
   clawscan benchmark <benchmark-id> --scanner <scanner-id> [flags]
   clawscan benchmark <benchmark-id> --profile <profile-name> [flags]
+  clawscan openclaw-install-policy [--profile <profile-name>] [flags]
   clawscan <target> --scanner <scanner-id> [flags]
   clawscan --scanner <scanner-id> [flags]
   clawscan --profile clawhub [flags]
@@ -607,6 +786,11 @@ Core flags:
   --sandbox-image <image>     Docker runtime image. Defaults to %s or CLAWSCAN_SANDBOX_IMAGE.
   --sandbox-env <name>        Allow an env var through the Docker sandbox. Repeat for multiple vars.
   --sandbox-mount <path[:rw]>  Bind-mount a host path into the Docker sandbox (read-only; append :rw for writable). Repeat for multiple.
+
+OpenClaw install policy:
+  openclaw-install-policy     Read an OpenClaw security.installPolicy request from stdin and
+                             return its protocol v1 allow/warn/block response on stdout.
+                             Defaults to the composable openclaw-install-policy profile.
 
 Benchmark command flags:
   --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for clawhub-security-signals.

@@ -28,6 +28,7 @@ import (
 
 type Options struct {
 	Target             string
+	TargetKind         string
 	Profile            string
 	ConfigSource       string
 	DiscoverConfig     bool
@@ -458,7 +459,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		env = EnvMap(os.Environ())
 	}
 	applyRuntimeEnvDefaults(opts, env)
-	target, err := resolveTarget(opts.Target)
+	target, err := resolveTargetForOptions(opts)
 	if err != nil {
 		return Artifact{}, err
 	}

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { binaryFileName, platformKey, resolveBinaryPath } from "../lib/resolve-binary.mjs";
+import { join } from "node:path";
+import {
+  binaryFileName,
+  platformKey,
+  resolveBinaryPath,
+  resolveBundledBinaryPath,
+} from "../lib/resolve-binary.mjs";
 
 describe("platformKey", () => {
   it("maps supported Node platform and arch pairs to package binary directories", () => {
@@ -9,6 +15,7 @@ describe("platformKey", () => {
     assert.equal(platformKey("darwin", "x64"), "darwin-x64");
     assert.equal(platformKey("darwin", "arm64"), "darwin-arm64");
     assert.equal(platformKey("win32", "x64"), "win32-x64");
+    assert.equal(platformKey("win32", "arm64"), "win32-arm64");
   });
 
   it("rejects unsupported platform and arch pairs with a useful message", () => {
@@ -29,13 +36,23 @@ describe("binaryFileName", () => {
 
 describe("resolveBinaryPath", () => {
   it("resolves the bundled binary path relative to the package root", () => {
-    assert.match(
+    assert.equal(
       resolveBinaryPath({
         packageRoot: "/tmp/package",
         platform: "darwin",
         arch: "arm64",
       }),
-      /\/tmp\/package\/binaries\/darwin-arm64\/clawscan$/,
+      join("/tmp/package", "binaries", "darwin-arm64", "clawscan"),
+    );
+  });
+});
+
+describe("resolveBundledBinaryPath", () => {
+  it("resolves the binary from the installed @openclaw/clawscan package", () => {
+    const resolved = resolveBundledBinaryPath({ platform: "linux", arch: "x64" });
+    assert.equal(
+      resolved.endsWith(join("npm", "clawscan", "binaries", "linux-x64", "clawscan")),
+      true,
     );
   });
 });

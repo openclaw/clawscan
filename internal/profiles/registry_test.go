@@ -83,7 +83,7 @@ func TestInspectProfilesReturnsBuiltIns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,clawhub-aig" {
+	if got := strings.Join(catalog.IDs(), ","); got != "clawhub,clawhub-aig,openclaw-install-policy" {
 		t.Fatalf("profile ids = %q", got)
 	}
 
