@@ -1,0 +1,15 @@
+:root {
+  /*
+   * Font binaries are intentionally not distributed. Consumers must load
+   * licensed fonts themselves or use the documented fallback stacks.
+   */
+  --oc-font-display: "Switzer", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --oc-font-body: "Switzer", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --oc-font-serif: "Sentient", Georgia, "Times New Roman", serif;
+  --oc-font-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
+
+  --font-display: var(--oc-font-display);
+  --font-body: var(--oc-font-body);
+  --font-serif: var(--oc-font-serif);
+  --font-mono: var(--oc-font-mono);
+}

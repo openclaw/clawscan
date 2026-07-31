@@ -65,6 +65,8 @@ Custom profiles can be created in `.clawscan.yml`.
 This is useful for version controlling iterations on your profile, creating multiple profiles to run over the same skills, etc
 
 ```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/openclaw/clawscan/main/schemas/clawscan.schema.json
+
 version: 1
 profiles:
   review:
@@ -86,6 +88,11 @@ profiles:
         --output-last-message {{ output }}
         - < {{ prompt:./prompt.md }}
 ```
+
+The schema gives editors completion and catches misspelled fields, invalid
+types, unsupported values, and malformed gate rules before a scan starts.
+ClawScan still validates the file when it loads so correctness does not depend
+on editor support.
 
 Sandbox mounts must use existing absolute host paths. A string mount is
 read-only; set `write: true` only for a directory the scanner genuinely needs

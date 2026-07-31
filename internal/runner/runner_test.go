@@ -1845,6 +1845,7 @@ func TestRunDeclarativeJSONRuleCanPreferAnExistingRoot(t *testing.T) {
 	for _, raw := range []json.RawMessage{
 		json.RawMessage(`{"preferred":[{}],"legacy":[{"severity":"critical"}]}`),
 		json.RawMessage(`{"preferred":{},"legacy":[{"severity":"critical"}]}`),
+		json.RawMessage(`{"preferred":null,"legacy":[{"severity":"critical"}]}`),
 	} {
 		artifact, err := Run(Options{
 			Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
@@ -1861,6 +1862,27 @@ func TestRunDeclarativeJSONRuleCanPreferAnExistingRoot(t *testing.T) {
 		if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
 			t.Fatalf("raw = %s, gate = %q, rules = %#v", raw, artifact.Gate, artifact.GateRules)
 		}
+	}
+}
+
+func TestRunDeclarativeJSONRulePreservesExplicitNullFieldAlias(t *testing.T) {
+	artifact, err := Run(Options{
+		Target: t.TempDir(), Scanners: []string{"skillspector"}, Sandbox: SandboxOptions{Mode: SandboxModeOff},
+		GateRules: map[string]ScannerGatePolicy{"skillspector": {JSONRules: []JSONGateRule{{
+			ID: "critical-finding", Paths: []string{"preferred.severity|level", "legacy.severity"},
+			Equals: json.RawMessage(`"critical"`), Action: "block",
+		}}}},
+	}, RunContext{Env: map[string]string{}, ScannerRunner: &gateScannerRunner{results: map[string]ScannerResult{
+		"skillspector": {
+			Status: "completed",
+			Raw:    json.RawMessage(`{"preferred":{"severity":null,"level":"low"},"legacy":{"severity":"critical"}}`),
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Gate != "block" || len(artifact.GateRules) != 1 || artifact.GateRules[0].Path != "legacy.severity" {
+		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
 	}
 }
 

@@ -1,0 +1,69 @@
+:root {
+  /* Canonical source palette: openclaw.ai at b94b43b. */
+  --oc-palette-ink-950: #101012;
+  --oc-palette-ink-900: #19191c;
+  --oc-palette-ink-850: #202024;
+  --oc-palette-ink-50: #ededed;
+  --oc-palette-ink-300: #bcbcc4;
+  --oc-palette-ink-500: #9a9aa2;
+
+  --oc-palette-paper-50: #ffffff;
+  --oc-palette-paper-100: #f6f5f3;
+  --oc-palette-paper-200: #eceae6;
+  --oc-palette-paper-950: #17171a;
+  --oc-palette-paper-700: #46464e;
+  --oc-palette-paper-600: #63636c;
+
+  --oc-palette-coral-dark-bright: #f5654a;
+  --oc-palette-coral-dark-mid: #e05540;
+  --oc-palette-coral-dark-deep: #b23a28;
+  --oc-palette-coral-light-bright: #d84a31;
+  --oc-palette-coral-light-mid: #c24028;
+  --oc-palette-coral-light-deep: #9c3222;
+
+  --oc-palette-sea-dark-bright: #4fc8ae;
+  --oc-palette-sea-dark-mid: #2fa48d;
+  --oc-palette-sea-light-bright: #14806e;
+  --oc-palette-sea-light-mid: #0f6355;
+
+  --oc-space-1: 0.25rem;
+  --oc-space-2: 0.5rem;
+  --oc-space-3: 0.75rem;
+  --oc-space-4: 1rem;
+  --oc-space-5: 1.5rem;
+  --oc-space-6: 2rem;
+  --oc-space-7: 3rem;
+  --oc-space-8: 4rem;
+
+  --oc-font-size-xs: 0.75rem;
+  --oc-font-size-sm: 0.8125rem;
+  --oc-font-size-base: 0.875rem;
+  --oc-font-size-md: 0.9375rem;
+  --oc-font-size-lg: 1.0625rem;
+  --oc-font-size-xl: 1.25rem;
+  --oc-font-size-2xl: 1.5rem;
+  --oc-font-size-3xl: 2rem;
+
+  --oc-radius-sm: 0.25rem;
+  --oc-radius-md: 0.5rem;
+  --oc-radius-lg: 0.75rem;
+  --oc-radius-xl: 1rem;
+  --oc-radius-full: 999px;
+  --oc-radius-surface: var(--oc-radius-md);
+  --oc-radius-control: var(--oc-radius-md);
+  --oc-radius-inset: var(--oc-radius-sm);
+  --oc-radius-round: var(--oc-radius-full);
+
+  --oc-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.12);
+  --oc-shadow-md: 0 8px 24px -6px rgb(0 0 0 / 0.28);
+  --oc-shadow-lg: 0 24px 48px -12px rgb(0 0 0 / 0.42);
+
+  --oc-duration-fast: 160ms;
+  --oc-duration-ui: 200ms;
+  --oc-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  --oc-control-min-height: 2.75rem;
+
+  --oc-content-max: 75rem;
+  --oc-content-narrow: 48rem;
+}

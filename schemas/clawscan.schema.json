@@ -1,0 +1,363 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/openclaw/clawscan/main/schemas/clawscan.schema.json",
+  "title": "ClawScan configuration",
+  "description": "Configuration for ClawScan profiles, scanners, sandboxing, judges, and declarative gate policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "profiles"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "sandbox": {
+      "$ref": "#/$defs/sandbox"
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    }
+  },
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scanners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanner"
+          }
+        },
+        "scannerResults": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "type": "string"
+        },
+        "json": {
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/sandbox"
+        },
+        "judge": {
+          "$ref": "#/$defs/judge"
+        }
+      }
+    },
+    "scanner": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/builtinScannerID",
+          "description": "Registered built-in scanner ID."
+        },
+        {
+          "$ref": "#/$defs/builtinScanner"
+        },
+        {
+          "$ref": "#/$defs/commandScanner"
+        }
+      ]
+    },
+    "builtinScannerID": {
+      "enum": [
+        "agentverus",
+        "aig",
+        "cisco",
+        "clawscan-static",
+        "relyable",
+        "skillspector",
+        "snyk",
+        "socket",
+        "virustotal"
+      ]
+    },
+    "builtinScanner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/builtinScannerID",
+          "description": "Registered built-in scanner ID."
+        },
+        "gate": {
+          "$ref": "#/$defs/scannerGate"
+        }
+      }
+    },
+    "commandScanner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "command"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "not": {
+            "$ref": "#/$defs/builtinScannerID"
+          }
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\{\\{\\s*target\\s*\\}\\}",
+          "description": "Scanner command containing an active, unquoted {{target}} placeholder."
+        },
+        "env": {
+          "$ref": "#/$defs/environmentNames"
+        },
+        "secretEnv": {
+          "$ref": "#/$defs/environmentNames"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "skill",
+              "plugin",
+              "url"
+            ]
+          }
+        },
+        "gate": {
+          "$ref": "#/$defs/scannerGate"
+        }
+      }
+    },
+    "scannerGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "blockOnExitCode"
+          ]
+        },
+        {
+          "required": [
+            "warnOnExitCode"
+          ]
+        },
+        {
+          "required": [
+            "rules"
+          ]
+        }
+      ],
+      "properties": {
+        "blockOnExitCode": {
+          "$ref": "#/$defs/exitCodeRule"
+        },
+        "warnOnExitCode": {
+          "$ref": "#/$defs/exitCodeRule"
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/jsonGateRule"
+          }
+        }
+      }
+    },
+    "exitCodeRule": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 124
+        },
+        {
+          "const": "nonzero"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 124
+          }
+        }
+      ]
+    },
+    "jsonGateRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[^.\\[\\]|]+(?:\\|[^.\\[\\]|]+)*|[^.\\[\\]|]+\\[\\])(?:\\.(?:[^.\\[\\]|]+(?:\\|[^.\\[\\]|]+)*|[^.\\[\\]|]+\\[\\]))*$"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^(?:[^.\\[\\]|]+(?:\\|[^.\\[\\]|]+)*|[^.\\[\\]|]+\\[\\])(?:\\.(?:[^.\\[\\]|]+(?:\\|[^.\\[\\]|]+)*|[^.\\[\\]|]+\\[\\]))*$"
+              }
+            }
+          ]
+        },
+        "equals": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "exists": {
+          "const": true
+        },
+        "normalize": {
+          "const": "identifier"
+        },
+        "fallback": {
+          "const": "root"
+        },
+        "action": {
+          "enum": [
+            "warn",
+            "block"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "required": [
+                "equals"
+              ],
+              "not": {
+                "required": [
+                  "exists"
+                ]
+              }
+            },
+            {
+              "required": [
+                "exists"
+              ],
+              "not": {
+                "required": [
+                  "equals"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "if": {
+            "required": [
+              "normalize"
+            ]
+          },
+          "then": {
+            "required": [
+              "equals"
+            ],
+            "properties": {
+              "equals": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "docker",
+            "off"
+          ]
+        },
+        "image": {
+          "type": "string"
+        },
+        "env": {
+          "$ref": "#/$defs/environmentNames"
+        },
+        "mounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sandboxMount"
+          }
+        }
+      }
+    },
+    "sandboxMount": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "write": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "environmentNames": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      }
+    },
+    "judge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
