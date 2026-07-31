@@ -126,6 +126,18 @@ func TestClawScanSchemaRejectsInvalidGateRules(t *testing.T) {
             exists: true
             action: block
 `,
+		"indexed scalar path": `
+          - id: risky
+            path: "findings[0].severity"
+            equals: critical
+            action: block
+`,
+		"indexed path in list": `
+          - id: risky
+            path: [result.risk, "findings[0].severity"]
+            equals: critical
+            action: block
+`,
 	}
 
 	for name, rules := range tests {

@@ -2410,10 +2410,13 @@ func jsonGatePathValues(document any, path string) ([]any, bool, bool, bool) {
 			}
 			if array {
 				child, ok := object[keys[0]]
-				if !ok || child == nil {
+				if !ok {
 					continue
 				}
 				rootKeyPresent = true
+				if child == nil {
+					continue
+				}
 				items, ok := child.([]any)
 				if ok {
 					present = true
@@ -2424,7 +2427,7 @@ func jsonGatePathValues(document any, path string) ([]any, bool, bool, bool) {
 
 			for _, key := range keys {
 				child, ok := object[key]
-				if !ok || child == nil {
+				if !ok {
 					continue
 				}
 				rootKeyPresent = true
