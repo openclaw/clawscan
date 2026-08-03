@@ -9,6 +9,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: runtime-tool-updates
+  cancel-in-progress: false
+
 jobs:
   update-runtime-tools:
     name: Update runtime tool pins
@@ -64,7 +68,7 @@ jobs:
           git checkout -B "$BRANCH"
           git add docker/clawscan-runtime/Dockerfile
           git commit -m "chore: update clawscan runtime tool pins"
-          git push --force-with-lease origin "$BRANCH"
+          scripts/push-runtime-tool-update-branch.sh origin "$BRANCH"
 
           cat > /tmp/runtime-tool-update-pr.md <<'EOF'
             Updates pinned tool versions in `docker/clawscan-runtime/Dockerfile`.
