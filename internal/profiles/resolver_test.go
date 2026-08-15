@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -40,6 +41,9 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	}
 	if !strings.Contains(opts.Judge.Command, "codex exec") {
 		t.Fatalf("judge command = %q", opts.Judge.Command)
+	}
+	if !strings.Contains(opts.Judge.Command, `[ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY"; codex exec`) {
+		t.Fatalf("judge command does not alias OPENAI_API_KEY for codex exec: %q", opts.Judge.Command)
 	}
 	if !strings.Contains(opts.Judge.Command, "--sandbox {{ judge_sandbox }}") {
 		t.Fatalf("judge command missing runtime-aware sandbox placeholder: %q", opts.Judge.Command)
@@ -98,6 +102,47 @@ func TestResolveArgsUsesEmbeddedClawHubAIGCandidateProfile(t *testing.T) {
 	}
 	if got := strings.Join(candidate.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,LLM_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
+	}
+}
+
+func TestClawHubProfilesAliasOpenAIKeyForCodex(t *testing.T) {
+	for _, profile := range []string{"clawhub", "clawhub-aig"} {
+		t.Run(profile, func(t *testing.T) {
+			opts, err := ResolveArgs([]string{"./skill", "--profile", profile}, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix, _, ok := strings.Cut(opts.Judge.Command, "codex exec")
+			if !ok {
+				t.Fatalf("judge command missing codex exec: %q", opts.Judge.Command)
+			}
+
+			for _, test := range []struct {
+				name   string
+				openAI string
+				codex  string
+				output string
+			}{
+				{name: "openai fallback", openAI: "openai-marker", output: "openai-marker"},
+				{name: "explicit codex key wins", openAI: "openai-marker", codex: "codex-marker", output: "codex-marker"},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					cmd := exec.Command("sh", "-c", prefix+`sh -c 'printf %s "$CODEX_API_KEY"'`)
+					cmd.Env = append(
+						os.Environ(),
+						strings.Join([]string{"OPENAI_API_KEY", test.openAI}, "="),
+						strings.Join([]string{"CODEX_API_KEY", test.codex}, "="),
+					)
+					output, err := cmd.Output()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := string(output); got != test.output {
+						t.Fatalf("CODEX_API_KEY = %q, want %q", got, test.output)
+					}
+				})
+			}
+		})
 	}
 }
 

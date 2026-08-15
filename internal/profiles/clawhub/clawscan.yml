@@ -12,6 +12,7 @@ profiles:
         - SKILLSPECTOR_PROVIDER
     judge:
       command: >-
+        [ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY";
         codex exec --cd {{ workspace }}
         --model gpt-5.5
         --sandbox {{ judge_sandbox }}
@@ -39,6 +40,7 @@ profiles:
         - LLM_API_KEY
     judge:
       command: >-
+        [ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY";
         codex exec --cd {{ workspace }}
         --model gpt-5.5
         --sandbox {{ judge_sandbox }}
