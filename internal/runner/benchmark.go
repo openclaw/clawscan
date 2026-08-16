@@ -44,6 +44,14 @@ const (
 	// (5,520 cases). --ids is SkillTrustBench-only, so a valid selection
 	// cannot contain more unique IDs than that set.
 	maxSkillTrustBenchIDSelection = 5520
+	// maxBenchmarkIDBytes caps one extracted id. Documented SkillTrustBench
+	// ids are case_NNNNN. The scanner still allows 1 MiB records, so this
+	// stops a hostile source from retaining megabyte-sized unique ids.
+	maxBenchmarkIDBytes = 256
+	// maxBenchmarkIDSelectionBytes caps retained id text (not the JSONL
+	// stream). 256 KiB holds the 5,520-id set with headroom; it is not a
+	// file-size limit (the full JSONL is about 1.3 MiB).
+	maxBenchmarkIDSelectionBytes = 256 * 1024
 )
 
 var huggingFaceRowsRetryDelay = 2 * time.Second
@@ -359,6 +367,7 @@ func parseBenchmarkIDs(source string, reader io.Reader) ([]string, error) {
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	var ids []string
 	seen := map[string]bool{}
+	retained := 0
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -373,8 +382,15 @@ func parseBenchmarkIDs(source string, reader io.Reader) ([]string, error) {
 		if seen[id] {
 			return nil, fmt.Errorf("--ids source %s line %d duplicates benchmark id %s", source, lineNumber, id)
 		}
+		if len(id) > maxBenchmarkIDBytes {
+			return nil, fmt.Errorf("--ids source %s line %d exceeds the %d-byte benchmark id limit", source, lineNumber, maxBenchmarkIDBytes)
+		}
+		if retained+len(id) > maxBenchmarkIDSelectionBytes {
+			return nil, fmt.Errorf("--ids source %s exceeds the %d-byte retained-id budget", source, maxBenchmarkIDSelectionBytes)
+		}
 		seen[id] = true
 		ids = append(ids, id)
+		retained += len(id)
 		if len(ids) > maxSkillTrustBenchIDSelection {
 			return nil, fmt.Errorf("--ids source %s exceeds the %d-id SkillTrustBench selection limit", source, maxSkillTrustBenchIDSelection)
 		}

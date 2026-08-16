@@ -833,6 +833,34 @@ func TestLoadBenchmarkIDSelectionAcceptsJSONLLargerThan256KiB(t *testing.T) {
 	}
 }
 
+func TestLoadBenchmarkIDSelectionRejectsOversizedRetainedIDs(t *testing.T) {
+	huge := strings.Repeat("a", maxBenchmarkIDBytes+1)
+	path := filepath.Join(t.TempDir(), "huge-id.txt")
+	if err := os.WriteFile(path, []byte(huge+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBenchmarkIDSelection(path)
+	if err == nil || !strings.Contains(err.Error(), "256-byte benchmark id limit") {
+		t.Fatalf("err = %v, want 256-byte benchmark id limit", err)
+	}
+
+	var body strings.Builder
+	// 2000 IDs * 200 bytes is under the 5,520 count cap but over the
+	// retained-id budget (256 KiB).
+	chunk := strings.Repeat("b", 200)
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&body, "%s-%04d\n", chunk, i)
+	}
+	aggPath := filepath.Join(t.TempDir(), "agg-ids.txt")
+	if err := os.WriteFile(aggPath, []byte(body.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadBenchmarkIDSelection(aggPath)
+	if err == nil || !strings.Contains(err.Error(), "262144-byte retained-id budget") {
+		t.Fatalf("err = %v, want 262144-byte retained-id budget", err)
+	}
+}
+
 func TestLoadBenchmarkIDSelectionRejectsMoreIDsThanPinnedSet(t *testing.T) {
 	var body strings.Builder
 	for i := 0; i < maxSkillTrustBenchIDSelection+1; i++ {
