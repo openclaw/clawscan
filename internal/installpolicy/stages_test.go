@@ -277,11 +277,14 @@ func TestPrepareDependencyTreeScanTargetCopiesSafePackageSymlinkTargets(t *testi
 }
 
 func TestCopyDependencyPackageEnforcesEntryAndByteBudgets(t *testing.T) {
-	source := t.TempDir()
+	source, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeStageTestFile(t, filepath.Join(source, "package.json"), `{"name":"demo"}`)
 
 	entryBudget := dependencyCopyBudget{entries: maxDependencyEntries}
-	err := copyDependencyPackage(source, source, filepath.Join(t.TempDir(), "entries"), &entryBudget)
+	err = copyDependencyPackage(source, source, filepath.Join(t.TempDir(), "entries"), &entryBudget)
 	if err == nil || !strings.Contains(err.Error(), "filesystem entries") {
 		t.Fatalf("entry budget error = %v", err)
 	}
@@ -292,7 +295,10 @@ func TestCopyDependencyPackageEnforcesEntryAndByteBudgets(t *testing.T) {
 		t.Fatalf("byte budget error = %v", err)
 	}
 
-	largeSource := t.TempDir()
+	largeSource, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	largePath := filepath.Join(largeSource, "large.bin")
 	file, err := os.Create(largePath)
 	if err != nil {

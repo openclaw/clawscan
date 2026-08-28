@@ -46,7 +46,7 @@ Usage: scripts/publish-security-signals-results.sh [--dry-run|--publish] [--root
 
 Builds the Security Signals results dataset payload from accepted submission
 directories. Dry-run mode writes the JSONL payload locally. Publish mode uploads
-that payload to the private Hugging Face dataset with huggingface-cli.
+that payload to the private Hugging Face dataset with hf.
 USAGE
       exit 0
       ;;
@@ -116,9 +116,9 @@ if [ -z "${HF_TOKEN:-}" ]; then
   echo "HF_TOKEN is required for --publish" >&2
   exit 1
 fi
-if ! command -v huggingface-cli >/dev/null 2>&1; then
-  echo "huggingface-cli is required for --publish. Install with: python -m pip install huggingface_hub" >&2
+if ! command -v hf >/dev/null 2>&1; then
+  echo "hf is required for --publish. Install with: python -m pip install huggingface_hub" >&2
   exit 1
 fi
 
-huggingface-cli upload "$results_dataset" "$output_path" results.jsonl --repo-type dataset --token "$HF_TOKEN"
+hf upload "$results_dataset" "$output_path" results.jsonl --repo-type dataset

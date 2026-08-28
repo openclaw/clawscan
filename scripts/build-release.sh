@@ -43,6 +43,6 @@ for platform in "${platforms[@]}"; do
   fi
 done
 
-(cd "$dist_dir" && shasum -a 256 *.tar.gz *.zip > checksums.txt)
+(cd "$dist_dir" && shasum -a 256 -- *.tar.gz *.zip > checksums.txt)
 
 printf 'Built release artifacts in %s/\n' "$dist_dir"

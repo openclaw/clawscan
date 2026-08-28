@@ -5384,6 +5384,7 @@ func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
+		CommandRunner: &recordingCommandRunner{writeOutput: `{"ok":true}`},
 	})
 	if err != nil {
 		t.Fatal(err)

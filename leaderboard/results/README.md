@@ -26,6 +26,9 @@ The publish path is intentionally separate from PR validation:
 - Post-merge publishing runs `scripts/publish-security-signals-results.sh`.
 - Dry-run mode writes `dist/security-signals-results/results.jsonl` locally.
 
+Publishing requires the `hf` CLI from `huggingface_hub` and reads credentials
+from `HF_TOKEN`. The deprecated `huggingface-cli` command is not supported.
+
 Each result row is JSONL with this shape:
 
 ```json

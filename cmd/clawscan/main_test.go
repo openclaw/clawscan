@@ -1340,7 +1340,10 @@ func TestRunCommandProfilePlusOverride(t *testing.T) {
 	writeSkill(t, target, "# Override\n")
 
 	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--profile", "clawhub", "--scanner", "clawscan-static", "--json"}, []string{}); err != nil {
+		if err := run([]string{
+			target, "--profile", "clawhub", "--scanner", "clawscan-static",
+			"--judge", clawHubReceiptJudgeCommand(), "--sandbox", "off", "--json",
+		}, []string{}); err != nil {
 			t.Fatal(err)
 		}
 	})

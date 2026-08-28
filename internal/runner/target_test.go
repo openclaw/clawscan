@@ -41,12 +41,8 @@ func TestResolveTargetClassifiesPluginDirectory(t *testing.T) {
 	if resolved.id != "probe-plugin" {
 		t.Fatalf("id = %q", resolved.id)
 	}
-	expected, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		expected = dir
-	}
-	if resolved.resolvedPath != expected {
-		t.Fatalf("resolvedPath = %q, want %q", resolved.resolvedPath, expected)
+	if resolved.resolvedPath != dir {
+		t.Fatalf("resolvedPath = %q, want %q", resolved.resolvedPath, dir)
 	}
 }
 
@@ -60,12 +56,8 @@ func TestResolveTargetClassifiesPluginManifestFile(t *testing.T) {
 	if resolved.kind != targetKindPlugin || resolved.id != "probe-plugin" {
 		t.Fatalf("resolved = %#v", resolved)
 	}
-	expected, evalErr := filepath.EvalSymlinks(dir)
-	if evalErr != nil {
-		expected = dir
-	}
-	if resolved.resolvedPath != expected {
-		t.Fatalf("manifest-file target must scan the plugin directory: resolvedPath = %q, want %q", resolved.resolvedPath, expected)
+	if resolved.resolvedPath != dir {
+		t.Fatalf("manifest-file target must scan the plugin directory: resolvedPath = %q, want %q", resolved.resolvedPath, dir)
 	}
 }
 
