@@ -691,27 +691,34 @@ func scannerIssueCount(raw json.RawMessage) int {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return 0
 	}
-	return countIssueArrays(decoded)
+	return countIssues(decoded)
 }
 
-func countIssueArrays(value interface{}) int {
+func countIssues(value interface{}) int {
 	switch typed := value.(type) {
 	case map[string]interface{}:
 		total := 0
 		for key, nested := range typed {
+			// Risk-based reports store named findings in a map, including empty maps for clean components.
+			if key == "risk_indexes" {
+				if risks, ok := nested.(map[string]interface{}); ok {
+					total += len(risks)
+					continue
+				}
+			}
 			if isIssueArrayKey(key) {
 				if items, ok := nested.([]interface{}); ok {
 					total += len(items)
 					continue
 				}
 			}
-			total += countIssueArrays(nested)
+			total += countIssues(nested)
 		}
 		return total
 	case []interface{}:
 		total := 0
 		for _, nested := range typed {
-			total += countIssueArrays(nested)
+			total += countIssues(nested)
 		}
 		return total
 	default:
