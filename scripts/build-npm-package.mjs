@@ -167,6 +167,16 @@ async function stagePackage(options) {
   return { binaryVersion, packageOut, packageVersion, releaseSha };
 }
 
+export function parsePackFilename(output) {
+  const parsed = JSON.parse(output);
+  // npm 12 keys results by package name; older supported npm versions use an array.
+  const packed = Array.isArray(parsed) ? parsed[0] : parsed?.["@openclaw/clawscan"];
+  if (typeof packed?.filename !== "string" || !packed.filename) {
+    throw new Error("npm pack did not return a tarball filename.");
+  }
+  return packed.filename;
+}
+
 async function packPackage(options, packageOut) {
   const result = run(
     "npm",
@@ -175,10 +185,7 @@ async function packPackage(options, packageOut) {
       cwd: packageOut,
     },
   );
-  const parsed = JSON.parse(result.stdout);
-  const first = Array.isArray(parsed) ? parsed[0] : undefined;
-  if (!first?.filename) throw new Error("npm pack did not return a tarball filename.");
-  return resolve(options.outDir, first.filename);
+  return resolve(options.outDir, parsePackFilename(result.stdout));
 }
 
 async function smokePackage(tarballPath, binaryVersion) {

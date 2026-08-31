@@ -48,6 +48,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Set up npm
+        run: npm install -g npm@^12.0.2
+
       - name: Check formatting
         run: |
           unformatted="$(git ls-files '*.go' | xargs gofmt -l)"

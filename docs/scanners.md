@@ -236,3 +236,9 @@ commas, single-quoted strings, and unquoted keys.
 | `snyk` | Snyk Agent Scan | [repo](https://github.com/snyk/agent-scan) | Local skill scanner invoked through `uvx snyk-agent-scan`. | `SNYK_TOKEN` | verifies `uvx` launcher |
 | `socket` | Socket CLI | [repo](https://github.com/SocketDev/socket-cli) | Local file or directory scanner using Socket's public CLI full-scan path. | `SOCKET_CLI_API_TOKEN` | `npm install -g socket` |
 | `virustotal` | VirusTotal API | [docs](https://docs.virustotal.com/reference/file) | API-backed local file hash lookup. Skill and OpenClaw plugin directories are scanned as deterministic ZIP archives. | `VIRUSTOTAL_API_KEY` | skipped; API-backed |
+
+Snyk Agent Scan 0.6 reports named findings in `risk_indexes` maps under
+`scan_path_responses`. ClawScan preserves that upstream JSON and includes those
+findings in `issues_found`; clean components with empty risk maps contribute
+zero. Operator-owned gate rules that inspect Snyk's older `issues` arrays need
+to use the [current Snyk JSON schema](https://github.com/snyk/agent-scan/blob/v0.6.0/docs/json-output.md#agent-scan-v06-and-later).

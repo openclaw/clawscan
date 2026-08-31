@@ -1,0 +1,26 @@
+{
+  "scan_path_responses": [
+    {
+      "path": "/synthetic/skills",
+      "server_risks": [
+        {
+          "name": "example-server",
+          "risk_indexes": {
+            "prompt_injection_tool_desc": {"score": 1000, "evidence": "Synthetic injected instruction."}
+          }
+        }
+      ],
+      "skill_risks": [
+        {
+          "name": "risky-skill",
+          "files": [{"name": "SKILL.md", "type": "instruction"}],
+          "risk_indexes": {
+            "suspicious_download_url": {"score": 600, "evidence": "Synthetic untrusted download."},
+            "unverifiable_dependencies": {"score": 500, "evidence": "Synthetic unverified dependency."}
+          }
+        },
+        {"name": "clean-skill", "risk_indexes": {}}
+      ]
+    }
+  ]
+}

@@ -7,8 +7,27 @@ import {
   normalizePackageVersion,
   npmDistTagForVersion,
   packageTargets,
+  parsePackFilename,
   platformKeyForTarget,
 } from "./build-npm-package.mjs";
+
+describe("npm pack output", () => {
+  const filename = "openclaw-clawscan-1.2.3.tgz";
+
+  it("reads npm 12 results keyed by package name", () => {
+    assert.equal(parsePackFilename(JSON.stringify({ "@openclaw/clawscan": { filename } })), filename);
+  });
+
+  it("reads the array returned by npm 11 and older", () => {
+    assert.equal(parsePackFilename(JSON.stringify([{ filename }])), filename);
+  });
+
+  it("rejects missing or invalid tarball filenames", () => {
+    for (const result of [null, {}, [], [{ filename: "" }], { "@openclaw/clawscan": { filename: 42 } }]) {
+      assert.throws(() => parsePackFilename(JSON.stringify(result)), /did not return a tarball filename/);
+    }
+  });
+});
 
 describe("normalizePackageVersion", () => {
   it("strips a release tag v-prefix for npm package metadata", () => {

@@ -877,6 +877,27 @@ func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
 	}
 }
 
+func TestRunCommandSummarizesSnykRiskIndexes(t *testing.T) {
+	fixture, err := filepath.Abs("testdata/snyk-0.6.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Summary\n")
+	output := filepath.Join(dir, "artifact.json")
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--scanner", "snyk", "--scanner-result", "snyk=" + fixture, "--output", output}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{"scanner_completed: 1", "scanner_failed: 0", "issues_found: 3", "errors: 0"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
 func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
 	exitCode := 3
 	artifact := runner.Artifact{
