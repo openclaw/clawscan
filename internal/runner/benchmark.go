@@ -40,6 +40,18 @@ const (
 	huggingFaceRowsEndpoint       = "https://datasets-server.huggingface.co/rows"
 	huggingFaceRowsPageSize       = 100
 	huggingFaceRowsMaxAttempts    = 6
+	// maxSkillTrustBenchIDSelection is the pinned SkillTrustBench full set
+	// (5,520 cases). --ids is SkillTrustBench-only, so a valid selection
+	// cannot contain more unique IDs than that set.
+	maxSkillTrustBenchIDSelection = 5520
+	// maxBenchmarkIDBytes caps one extracted id. Documented SkillTrustBench
+	// ids are case_NNNNN. The scanner still allows 1 MiB records, so this
+	// stops a hostile source from retaining megabyte-sized unique ids.
+	maxBenchmarkIDBytes = 256
+	// maxBenchmarkIDSelectionBytes caps retained id text (not the JSONL
+	// stream). 256 KiB holds the 5,520-id set with headroom; it is not a
+	// file-size limit (the full JSONL is about 1.3 MiB).
+	maxBenchmarkIDSelectionBytes = 256 * 1024
 )
 
 var huggingFaceRowsRetryDelay = 2 * time.Second
@@ -312,11 +324,12 @@ func LoadBenchmarkIDSelection(source string) (BenchmarkIDSelection, error) {
 	if source == "" {
 		return BenchmarkIDSelection{}, errors.New("--ids source is required")
 	}
-	data, err := readBenchmarkIDSource(source)
+	reader, err := openBenchmarkIDSource(source)
 	if err != nil {
 		return BenchmarkIDSelection{}, err
 	}
-	ids, err := parseBenchmarkIDs(source, data)
+	defer reader.Close()
+	ids, err := parseBenchmarkIDs(source, reader)
 	if err != nil {
 		return BenchmarkIDSelection{}, err
 	}
@@ -329,31 +342,32 @@ func LoadBenchmarkIDSelection(source string) (BenchmarkIDSelection, error) {
 	}, nil
 }
 
-func readBenchmarkIDSource(source string) ([]byte, error) {
+func openBenchmarkIDSource(source string) (io.ReadCloser, error) {
 	if parsed, err := url.Parse(source); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 		client := &http.Client{Timeout: 60 * time.Second}
 		resp, err := client.Get(source)
 		if err != nil {
 			return nil, fmt.Errorf("read --ids source %s: %w", source, err)
 		}
-		defer resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			resp.Body.Close()
 			return nil, fmt.Errorf("read --ids source %s: HTTP %d", source, resp.StatusCode)
 		}
-		return io.ReadAll(resp.Body)
+		return resp.Body, nil
 	}
-	data, err := os.ReadFile(source)
+	file, err := os.Open(source)
 	if err != nil {
 		return nil, fmt.Errorf("read --ids source %s: %w", source, err)
 	}
-	return data, nil
+	return file, nil
 }
 
-func parseBenchmarkIDs(source string, data []byte) ([]string, error) {
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+func parseBenchmarkIDs(source string, reader io.Reader) ([]string, error) {
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	var ids []string
 	seen := map[string]bool{}
+	retained := 0
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -368,8 +382,18 @@ func parseBenchmarkIDs(source string, data []byte) ([]string, error) {
 		if seen[id] {
 			return nil, fmt.Errorf("--ids source %s line %d duplicates benchmark id %s", source, lineNumber, id)
 		}
+		if len(id) > maxBenchmarkIDBytes {
+			return nil, fmt.Errorf("--ids source %s line %d exceeds the %d-byte benchmark id limit", source, lineNumber, maxBenchmarkIDBytes)
+		}
+		if retained+len(id) > maxBenchmarkIDSelectionBytes {
+			return nil, fmt.Errorf("--ids source %s exceeds the %d-byte retained-id budget", source, maxBenchmarkIDSelectionBytes)
+		}
 		seen[id] = true
 		ids = append(ids, id)
+		retained += len(id)
+		if len(ids) > maxSkillTrustBenchIDSelection {
+			return nil, fmt.Errorf("--ids source %s exceeds the %d-id SkillTrustBench selection limit", source, maxSkillTrustBenchIDSelection)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read --ids source %s: %w", source, err)

@@ -12,7 +12,9 @@ clawscan benchmark SkillTrustBench \
 ```
 
 Use `--ids <path-or-url>` with SkillTrustBench to run a fixed subset from a
-plain text ID list or JSONL rows with an `id` field.
+plain text ID list or JSONL rows with an `id` field. The loader streams the
+source (file or HTTP) and accepts at most 5,520 unique IDs, the size of the
+pinned SkillTrustBench full set.
 
 ## Available benchmarks
 
