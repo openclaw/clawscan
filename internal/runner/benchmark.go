@@ -929,11 +929,11 @@ func isRetriableHuggingFaceRowsStatus(statusCode int) bool {
 func huggingFaceRowsBackoff(attempt int, headers http.Header) time.Duration {
 	if retryAfter := headers.Get("Retry-After"); retryAfter != "" {
 		if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds >= 0 {
-			return time.Duration(seconds) * time.Second
+			return min(time.Duration(seconds)*time.Second, 30*time.Second)
 		}
 		if retryAt, err := http.ParseTime(retryAfter); err == nil {
 			if delay := time.Until(retryAt); delay > 0 {
-				return delay
+				return min(delay, 30*time.Second)
 			}
 		}
 	}
