@@ -648,7 +648,7 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 	if artifact.Gate == "block" || (artifact.Gate == "warn" && summary.Gate == "pass") {
 		summary.Gate = artifact.Gate
 	}
-	for _, result := range artifact.Scanners {
+	for scannerID, result := range artifact.Scanners {
 		switch result.Status {
 		case "completed":
 			summary.ScannerCompleted++
@@ -659,7 +659,7 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 		default:
 			summary.ScannerOther++
 		}
-		summary.IssuesFound += scannerIssueCount(result.Raw)
+		summary.IssuesFound += scannerIssueCount(scannerID, result.Raw)
 	}
 	if artifact.Judge == nil {
 		return
@@ -683,9 +683,18 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 	}
 }
 
-func scannerIssueCount(raw json.RawMessage) int {
+func scannerIssueCount(scannerID string, raw json.RawMessage) int {
 	if len(raw) == 0 {
 		return 0
+	}
+	if scannerID == "endor" {
+		var report struct {
+			AllFindings []json.RawMessage `json:"all_findings"`
+		}
+		if err := json.Unmarshal(raw, &report); err != nil {
+			return 0
+		}
+		return len(report.AllFindings)
 	}
 	var decoded interface{}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -839,6 +848,7 @@ Built-in profiles:
 
 Required environment variables:
   aig: LLM_API_KEY or OPENAI_API_KEY. Use "clawscan scanners aig" for local scanner details and optional model configuration.
+  endor: ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET.
   socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY

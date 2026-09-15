@@ -299,6 +299,28 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runStatic,
 		},
 		scannerAdapter{
+			id:              "endor",
+			requirements:    endorRequirements,
+			commandBacked:   true,
+			supportsPlugins: true,
+			info: ScannerInfo{
+				DisplayName:   "Endor Labs",
+				RepositoryURL: "https://docs.endorlabs.com/developers-api/cli/commands/scan",
+				Description:   "Local JavaScript and TypeScript dependency scanner invoked through endorctl in the Docker sandbox.",
+				OptionalEnv: []string{
+					"ENDOR_API",
+					"ENDOR_API_CREDENTIALS_KEY",
+					"ENDOR_API_CREDENTIALS_SECRET",
+				},
+			},
+			installPlan: InstallPlan{
+				ScannerID:       "endor",
+				Name:            "Endor Labs",
+				NoInstallReason: "build docker/clawscan-endor/Dockerfile and select it with --sandbox-image; host execution is unsupported",
+			},
+			run: ExternalScannerRunner.runEndor,
+		},
+		scannerAdapter{
 			id:            "relyable",
 			commandBacked: true,
 			info: ScannerInfo{

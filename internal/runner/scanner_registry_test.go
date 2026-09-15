@@ -85,7 +85,7 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,aig,cisco,clawscan-static,relyable,skillspector,snyk,socket,virustotal"
+	want := "agentverus,aig,cisco,clawscan-static,endor,relyable,skillspector,snyk,socket,virustotal"
 	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
 	}
@@ -104,7 +104,7 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 		if !adapter.SupportsTargetKind(targetKindURL) {
 			t.Fatalf("%s should support url targets", id)
 		}
-		wantPlugin := id == "clawscan-static" || id == "skillspector" || id == "socket" || id == "virustotal"
+		wantPlugin := id == "clawscan-static" || id == "endor" || id == "skillspector" || id == "socket" || id == "virustotal"
 		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {
 			t.Fatalf("%s plugin support = %v, want %v", id, got, wantPlugin)
 		}
