@@ -21,6 +21,41 @@ const endorFindingsJSON = `{
 }
 `
 
+const endorLinuxMixedOwnerSetup = `set -eu
+mkdir -p /tmp/source /tmp/plugin /tmp/unrelated /tmp/bin
+printf '%s\n' '{"name":"demo"}' > /tmp/source/package.json
+printf '%s\n' 'export const demo = true' > /tmp/source/index.ts
+cp -R /tmp/source/. /tmp/plugin/
+git -C /tmp/unrelated init -q -b main
+chown -R 1000:1000 /tmp/source /tmp/plugin /tmp/unrelated
+cat > /tmp/bin/endorctl <<'EOF'
+#!/bin/sh
+set -eu
+test "$(id -u)" = 0
+test "$(stat -c %u "$9")" = 1000
+git -C "$9" status --short >/dev/null
+if unrelated_error=$(git -C "$ENDOR_UNRELATED_REPO" status --short 2>&1); then
+	echo "unrelated repository was unexpectedly trusted" >&2
+	exit 1
+fi
+case "$unrelated_error" in
+	*"dubious ownership"*) ;;
+	*)
+		echo "unrelated repository failed for the wrong reason: $unrelated_error" >&2
+		exit 1
+		;;
+esac
+test ! -e "$ENDOR_SOURCE_REPO/.git"
+test "$(cat "$ENDOR_SOURCE_REPO/package.json")" = '{"name":"demo"}'
+printf '%s\n' '{"all_findings":[],"blocking_findings":[],"warning_findings":[]}'
+EOF
+chmod 755 /tmp/bin/endorctl
+export PATH="/tmp/bin:$PATH"
+export ENDOR_SOURCE_REPO=/tmp/source
+export ENDOR_UNRELATED_REPO=/tmp/unrelated
+exec /bin/sh -c "$1" clawscan-endor /tmp/plugin
+`
+
 func TestEndorRequirementsAcceptTokenOrAPICredentials(t *testing.T) {
 	opts, err := ParseArgs([]string{"./plugin", "--scanner", "endor"})
 	if err != nil {
@@ -181,6 +216,31 @@ printf '%s\n' '{"all_findings":[],"blocking_findings":[],"warning_findings":[]}'
 	}
 	if _, err := os.Stat(filepath.Join(target, ".git")); !os.IsNotExist(err) {
 		t.Fatalf("source target gained git metadata: %v", err)
+	}
+}
+
+func TestEndorShellBootstrapTrustsOnlyMixedOwnerScratchOnLinux(t *testing.T) {
+	image := strings.TrimSpace(os.Getenv("CLAWSCAN_TEST_ENDOR_DOCKER_IMAGE"))
+	if image == "" {
+		t.Skip("set CLAWSCAN_TEST_ENDOR_DOCKER_IMAGE to a Linux Endor image")
+	}
+	if err := dockerAvailable(); err != nil {
+		t.Fatal(err)
+	}
+
+	env := EnvMap(os.Environ())
+	output, err := (defaultCommandRunner{Env: env}).Run("docker", []string{
+		"run", "--rm",
+		"--platform", "linux/amd64",
+		"--network", "none",
+		image,
+		"/bin/sh", "-c", endorLinuxMixedOwnerSetup, "clawscan-endor-linux-test", endorScanScript,
+	}, "", 2*time.Minute)
+	if err != nil {
+		t.Fatalf("Linux mixed-owner bootstrap failed: %v\nstderr:\n%s", err, output.Stderr)
+	}
+	if got := strings.TrimSpace(output.Stdout); got != `{"all_findings":[],"blocking_findings":[],"warning_findings":[]}` {
+		t.Fatalf("stdout = %q, stderr = %q", output.Stdout, output.Stderr)
 	}
 }
 

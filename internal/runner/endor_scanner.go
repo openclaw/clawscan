@@ -18,6 +18,10 @@ var (
 
 const endorScanScript = `set -eu
 export NPM_CONFIG_IGNORE_SCRIPTS=true
+scan_root=$(cd "$1" && pwd -P)
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="$scan_root"
 git -c core.hooksPath=/dev/null -c user.name=ClawScan -c user.email=clawscan@example.invalid -C "$1" init -q -b main
 git -C "$1" config core.hooksPath /dev/null
 git -C "$1" config user.name ClawScan
