@@ -101,8 +101,9 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 		if !adapter.SupportsTargetKind(targetKindSkill) {
 			t.Fatalf("%s should support skill targets", id)
 		}
-		if !adapter.SupportsTargetKind(targetKindURL) {
-			t.Fatalf("%s should support url targets", id)
+		wantURL := id != "endor"
+		if got := adapter.SupportsTargetKind(targetKindURL); got != wantURL {
+			t.Fatalf("%s url support = %v, want %v", id, got, wantURL)
 		}
 		wantPlugin := id == "clawscan-static" || id == "endor" || id == "skillspector" || id == "socket" || id == "virustotal"
 		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {

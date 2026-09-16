@@ -123,8 +123,11 @@ type scannerAdapter struct {
 	info          ScannerInfo
 	installPlan   InstallPlan
 	commandBacked bool
-	// supportsPlugins marks adapters that can analyze OpenClaw plugin
-	// targets. Skill and URL kinds are always supported.
+	// targetKinds overrides the historical built-in defaults when a scanner has
+	// a narrower capability set.
+	targetKinds map[string]bool
+	// supportsPlugins extends those defaults when targetKinds is nil. Skill and
+	// URL kinds are supported by default.
 	supportsPlugins bool
 	run             func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
@@ -175,6 +178,9 @@ func (adapter scannerAdapter) InstallPlan() InstallPlan {
 }
 
 func (adapter scannerAdapter) SupportsTargetKind(kind string) bool {
+	if adapter.targetKinds != nil {
+		return adapter.targetKinds[kind]
+	}
 	if kind == targetKindPlugin {
 		return adapter.supportsPlugins
 	}
@@ -300,10 +306,13 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runStatic,
 		},
 		scannerAdapter{
-			id:              "endor",
-			requirements:    endorRequirements,
-			commandBacked:   true,
-			supportsPlugins: true,
+			id:            "endor",
+			requirements:  endorRequirements,
+			commandBacked: true,
+			targetKinds: map[string]bool{
+				targetKindSkill:  true,
+				targetKindPlugin: true,
+			},
 			info: ScannerInfo{
 				DisplayName:            "Endor Labs",
 				RepositoryURL:          "https://docs.endorlabs.com/developers-api/cli/commands/scan",
