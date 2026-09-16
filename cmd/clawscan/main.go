@@ -389,7 +389,7 @@ func printScannerCatalog(w io.Writer, registry runner.ScannerRegistry) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tName\tRequired env\tInstall")
 	for _, info := range registry.Infos() {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, info.DisplayName, formatEnvList(info.RequiredEnv), info.InstallHint)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, info.DisplayName, requiredEnvDescription(info), info.InstallHint)
 	}
 	_ = tw.Flush()
 }
@@ -399,11 +399,18 @@ func printScannerDetail(w io.Writer, info runner.ScannerInfo) {
 	fmt.Fprintf(w, "ID: %s\n", info.ID)
 	fmt.Fprintf(w, "Repository: %s\n", info.RepositoryURL)
 	fmt.Fprintf(w, "Description: %s\n", info.Description)
-	fmt.Fprintf(w, "Required env vars: %s\n", formatEnvList(info.RequiredEnv))
+	fmt.Fprintf(w, "Required env vars: %s\n", requiredEnvDescription(info))
 	if len(info.OptionalEnv) > 0 {
 		fmt.Fprintf(w, "Optional env vars: %s\n", strings.Join(info.OptionalEnv, ", "))
 	}
 	fmt.Fprintf(w, "Install: %s\n", info.InstallHint)
+}
+
+func requiredEnvDescription(info runner.ScannerInfo) string {
+	if info.RequiredEnvDescription != "" {
+		return info.RequiredEnvDescription
+	}
+	return formatEnvList(info.RequiredEnv)
 }
 
 func runProfiles(args []string) error {
@@ -648,7 +655,7 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 	if artifact.Gate == "block" || (artifact.Gate == "warn" && summary.Gate == "pass") {
 		summary.Gate = artifact.Gate
 	}
-	for _, result := range artifact.Scanners {
+	for scannerID, result := range artifact.Scanners {
 		switch result.Status {
 		case "completed":
 			summary.ScannerCompleted++
@@ -659,7 +666,7 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 		default:
 			summary.ScannerOther++
 		}
-		summary.IssuesFound += scannerIssueCount(result.Raw)
+		summary.IssuesFound += scannerIssueCount(scannerID, result.Raw)
 	}
 	if artifact.Judge == nil {
 		return
@@ -683,9 +690,18 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 	}
 }
 
-func scannerIssueCount(raw json.RawMessage) int {
+func scannerIssueCount(scannerID string, raw json.RawMessage) int {
 	if len(raw) == 0 {
 		return 0
+	}
+	if scannerID == "endor" {
+		var report struct {
+			AllFindings []json.RawMessage `json:"all_findings"`
+		}
+		if err := json.Unmarshal(raw, &report); err != nil {
+			return 0
+		}
+		return len(report.AllFindings)
 	}
 	var decoded interface{}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -840,6 +856,7 @@ Built-in profiles:
 
 Required environment variables:
   aig: LLM_API_KEY or OPENAI_API_KEY. Use "clawscan scanners aig" for local scanner details and optional model configuration.
+  endor: ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET.
   socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
   virustotal: VIRUSTOTAL_API_KEY

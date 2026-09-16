@@ -19,14 +19,15 @@ type ScannerAdapter interface {
 }
 
 type ScannerInfo struct {
-	ID            string
-	DisplayName   string
-	RepositoryURL string
-	Description   string
-	RequiredEnv   []string
-	OptionalEnv   []string
-	InstallHint   string
-	Installable   bool
+	ID                     string
+	DisplayName            string
+	RepositoryURL          string
+	Description            string
+	RequiredEnv            []string
+	RequiredEnvDescription string
+	OptionalEnv            []string
+	InstallHint            string
+	Installable            bool
 }
 
 type ScannerRegistry struct {
@@ -122,8 +123,11 @@ type scannerAdapter struct {
 	info          ScannerInfo
 	installPlan   InstallPlan
 	commandBacked bool
-	// supportsPlugins marks adapters that can analyze OpenClaw plugin
-	// targets. Skill and URL kinds are always supported.
+	// targetKinds overrides the historical built-in defaults when a scanner has
+	// a narrower capability set.
+	targetKinds map[string]bool
+	// supportsPlugins extends those defaults when targetKinds is nil. Skill and
+	// URL kinds are supported by default.
 	supportsPlugins bool
 	run             func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
@@ -174,6 +178,9 @@ func (adapter scannerAdapter) InstallPlan() InstallPlan {
 }
 
 func (adapter scannerAdapter) SupportsTargetKind(kind string) bool {
+	if adapter.targetKinds != nil {
+		return adapter.targetKinds[kind]
+	}
 	if kind == targetKindPlugin {
 		return adapter.supportsPlugins
 	}
@@ -297,6 +304,31 @@ func defaultScannerAdapters() []ScannerAdapter {
 				NoInstallReason: "built in; no install needed",
 			},
 			run: ExternalScannerRunner.runStatic,
+		},
+		scannerAdapter{
+			id:            "endor",
+			requirements:  endorRequirements,
+			commandBacked: true,
+			targetKinds: map[string]bool{
+				targetKindSkill:  true,
+				targetKindPlugin: true,
+			},
+			info: ScannerInfo{
+				DisplayName:            "Endor Labs",
+				RepositoryURL:          "https://docs.endorlabs.com/developers-api/cli/commands/scan",
+				Description:            "Local JavaScript and TypeScript dependency scanner invoked through endorctl in the Docker sandbox.",
+				RequiredEnv:            []string{"ENDOR_NAMESPACE"},
+				RequiredEnvDescription: "ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET",
+				OptionalEnv: []string{
+					"ENDOR_API",
+				},
+			},
+			installPlan: InstallPlan{
+				ScannerID:       "endor",
+				Name:            "Endor Labs",
+				NoInstallReason: "build docker/clawscan-endor/Dockerfile and select it with --sandbox-image; host execution is unsupported",
+			},
+			run: ExternalScannerRunner.runEndor,
 		},
 		scannerAdapter{
 			id:            "relyable",

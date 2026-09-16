@@ -227,6 +227,43 @@ Plugin ids follow OpenClaw's install grammar, including `@scope/name` ids.
 Manifests accept the same JSON5 syntax as OpenClaw, including comments, trailing
 commas, single-quoted strings, and unquoted keys.
 
+## Endor Labs
+
+`endor` scans the JavaScript/TypeScript dependencies of a local skill or plugin
+with a root `package.json`. It runs Endor CLI in dry-run mode, preserves the
+upstream findings JSON, and leaves the submitted directory unchanged. Endor
+still authenticates and contacts its API; dry-run prevents storing scan results
+in the Endor tenant.
+
+The scanner requires Docker and an image containing `endorctl`, Node.js, npm,
+Git, and TypeScript. The default ClawScan runtime does not include Endor. Build
+the supplied image using a reviewed Linux Endor binary for your Docker
+architecture:
+
+```bash
+# /path/to/runtime-context contains the Linux binary named endorctl.
+docker build -f docker/clawscan-endor/Dockerfile \
+  --build-arg ENDORCTL_SHA256=<verified-binary-sha256> \
+  -t clawscan-endor:local /path/to/runtime-context
+
+# Set ENDOR_NAMESPACE and ENDOR_TOKEN in your environment first.
+clawscan ./my-plugin --scanner endor \
+  --sandbox docker --sandbox-image clawscan-endor:local \
+  --output endor-report.json
+```
+
+The adapter creates a disposable copy with synthetic Git metadata for Endor.
+It disables package lifecycle scripts and project builds. It does not repair
+manifests, replace lockfiles, or remove development dependencies: unresolved
+workspace dependencies or unsupported lockfiles remain scan failures. A target
+without a root `package.json` is skipped, and `--sandbox off` is refused.
+
+Read `scanners.endor.status` before interpreting its raw report. Dependency scan
+errors remain failures even when Endor returns exit code zero. An empty finding
+list is not proof of vulnerable-function reachability or complete dependency
+coverage. Endor's reachable-dependency and potentially-reachable-function tags
+remain unchanged; neither is converted into confirmed reachability.
+
 ## Available scanners
 
 > **Want to add your scanner to the list?** Follow the guide in [docs/scanners.md](docs/scanners.md#adding-a-built-in-scanner-adapter)
@@ -237,6 +274,7 @@ commas, single-quoted strings, and unquoted keys.
 | `aig` | Tencent AI-Infra-Guard | [repo](https://github.com/Tencent/AI-Infra-Guard/tree/main/skill-scan) | Tencent Zhuque Lab's local directory scanner invoked through `aig-skill-scan`. Produces SARIF 2.1.0 with SkillTrustBench T01-T09 evidence. | `LLM_API_KEY` or `OPENAI_API_KEY`<br><details><summary>Optional config</summary><code>DEFAULT_MODEL</code>, <code>DEFAULT_BASE_URL</code>, <code>DEFAULT_MODEL_CONTEXT_WINDOW</code>, <code>LOG_LEVEL</code>.</details> | `pip install aig-skill-scan` |
 | `cisco` | Cisco AI Defense skill-scanner | [repo](https://github.com/cisco-ai-defense/skill-scanner) | Local file or directory scanner invoked through `skill-scanner` with JSON report output. Optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers. | none<br><details><summary>Optional config</summary><code>SKILL_SCANNER_LLM_API_KEY</code>, <code>SKILL_SCANNER_LLM_PROVIDER</code>, <code>SKILL_SCANNER_LLM_MODEL</code>, <code>SKILL_SCANNER_LLM_BASE_URL</code>, <code>SKILL_SCANNER_LLM_USER</code>, <code>SKILL_SCANNER_LLM_API_VERSION</code>, <code>SKILL_SCANNER_LLM_FORCE_JSON_OBJECT</code>, <code>SKILL_SCANNER_META_LLM_API_KEY</code>, <code>SKILL_SCANNER_META_LLM_MODEL</code>, <code>SKILL_SCANNER_META_LLM_BASE_URL</code>, <code>SKILL_SCANNER_META_LLM_API_VERSION</code>, <code>AWS_PROFILE</code>, <code>AWS_REGION</code>, <code>GOOGLE_APPLICATION_CREDENTIALS</code>, <code>VIRUSTOTAL_API_KEY</code>, <code>AI_DEFENSE_API_KEY</code>, <code>AI_DEFENSE_API_URL</code>.</details> | `uv pip install cisco-ai-skill-scanner` |
 | `clawscan-static` | ClawScan Static | [repo](https://github.com/openclaw/clawscan) | Built-in deterministic scanner for high-signal risky skill and OpenClaw plugin patterns; packaged Python bytecode and NUL-obfuscated text are flagged and inspected, while opaque binary omissions remain visible as low-severity evidence. | none | skipped; built in |
+| `endor` | Endor Labs | [docs](https://docs.endorlabs.com/developers-api/cli/commands/scan) | Local JavaScript/TypeScript dependency scan with raw Endor findings; Docker required. | `ENDOR_NAMESPACE`, `ENDOR_TOKEN` (or API credentials) | See the Endor Labs runtime setup above. |
 | `relyable` | Relyable | [repo](https://github.com/veriker/relyable) | Functional re-derivation evidence: does the skill still do what its docs claim, recomputed? Emits the strongest grade that applies. `exogenous`: a declared `rederive.json` property manifest (idempotence / round-trip), with both sides of the relation computed from the skill's own code and the result mutation-tested against vacuity. `self_spec`: re-runs the author's own committed oracle (shipped tests or documented I/O examples). `cold_golden`: when an LLM key is set, a code-blind model infers goldens from SKILL.md alone and abstains unless the docs pin exact behavior; divergences are reported as unconfirmed, never as accusations. `non_rederivable`: the honest floor, never a fabricated pass. Functional axis only; complements the security scanners and does not detect malware or prompt injection. Skill code runs only inside the Docker sandbox (or with an explicit opt-in), in a scrubbed environment, and the scanner fails closed otherwise. Not preinstalled in the `clawscan-runtime` image. | none<br><details><summary>Optional config</summary><code>RELYABLE_SCAN_ALLOW_HOST_EXEC</code> — explicit ack that the host is disposable when running with <code>--sandbox off</code>.<br><br><code>RELYABLE_LLM_API_KEY</code> (+ <code>RELYABLE_LLM_PROVIDER</code> <code>anthropic|openai</code>, <code>RELYABLE_LLM_MODEL</code>, <code>RELYABLE_LLM_BASE_URL</code>) — explicit per-scanner opt-in that enables the <code>cold_golden</code> lane; key presence only is ever recorded in the payload. Generic <code>ANTHROPIC_API_KEY</code>/<code>OPENAI_API_KEY</code> are honored by standalone <code>relyable-scan</code> but are deliberately not auto-forwarded by ClawScan.</details> | `clawscan install relyable` — not preinstalled in the runtime image |
 | `skillspector` | NVIDIA SkillSpector | [repo](https://github.com/NVIDIA/skillspector) | Local skill or OpenClaw plugin file/directory scanner. Uses LLM mode when provider env vars are set; otherwise runs with `--no-llm`. | none<br><details><summary>Optional config</summary><code>SKILLSPECTOR_PROVIDER</code>, <code>SKILLSPECTOR_MODEL</code>, <code>SKILLSPECTOR_MODEL_REGISTRY</code>, <code>SKILLSPECTOR_LOG_LEVEL</code>, <code>SKILLSPECTOR_SSL_VERIFY</code>, <code>NVIDIA_INFERENCE_KEY</code>, <code>OPENAI_API_KEY</code>, <code>OPENAI_BASE_URL</code>, <code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_PROXY_ENDPOINT_URL</code>, <code>ANTHROPIC_PROXY_API_KEY</code>, <code>ANTHROPIC_PROXY_API_VERSION</code>.</details> | `uv tool install git+https://github.com/NVIDIA/skillspector.git` |
 | `snyk` | Snyk Agent Scan | [repo](https://github.com/snyk/agent-scan) | Local skill scanner invoked through `uvx snyk-agent-scan`. | `SNYK_TOKEN` | verifies `uvx` launcher |

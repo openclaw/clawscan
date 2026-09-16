@@ -1679,6 +1679,48 @@ func TestRunIncludesDurationMsForScannerResults(t *testing.T) {
 	assertScannerDurationJSON(t, artifact, "skillspector")
 }
 
+func TestRunEndorTargetCapabilitiesGatePreflight(t *testing.T) {
+	t.Run("URL skips without credentials or Docker", func(t *testing.T) {
+		opts, err := ParseArgs([]string{"https://example.com/plugin", "--scanner", "endor"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dockerChecks := 0
+		artifact, err := Run(opts, RunContext{
+			Env: map[string]string{},
+			DockerAvailability: func() error {
+				dockerChecks++
+				return errors.New("docker should not be checked")
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dockerChecks != 0 {
+			t.Fatalf("Docker checks = %d, want 0", dockerChecks)
+		}
+		result := artifact.Scanners["endor"]
+		if result.Status != "skipped" || !strings.Contains(result.Error, "does not support url targets") {
+			t.Fatalf("result = %#v", result)
+		}
+	})
+
+	t.Run("local target still requires credentials", func(t *testing.T) {
+		target := t.TempDir()
+		if err := os.WriteFile(filepath.Join(target, "package.json"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		opts, err := ParseArgs([]string{target, "--scanner", "endor"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = Run(opts, RunContext{Env: map[string]string{}})
+		if err == nil || !strings.Contains(err.Error(), "ENDOR_NAMESPACE") || !strings.Contains(err.Error(), "ENDOR_TOKEN") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
 func TestRunBlocksWhenNonzeroExitCodeRuleFires(t *testing.T) {
 	target := t.TempDir()
 	exitCode := 2

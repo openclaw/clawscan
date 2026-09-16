@@ -85,7 +85,7 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,aig,cisco,clawscan-static,relyable,skillspector,snyk,socket,virustotal"
+	want := "agentverus,aig,cisco,clawscan-static,endor,relyable,skillspector,snyk,socket,virustotal"
 	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
 	}
@@ -101,10 +101,11 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 		if !adapter.SupportsTargetKind(targetKindSkill) {
 			t.Fatalf("%s should support skill targets", id)
 		}
-		if !adapter.SupportsTargetKind(targetKindURL) {
-			t.Fatalf("%s should support url targets", id)
+		wantURL := id != "endor"
+		if got := adapter.SupportsTargetKind(targetKindURL); got != wantURL {
+			t.Fatalf("%s url support = %v, want %v", id, got, wantURL)
 		}
-		wantPlugin := id == "clawscan-static" || id == "skillspector" || id == "socket" || id == "virustotal"
+		wantPlugin := id == "clawscan-static" || id == "endor" || id == "skillspector" || id == "socket" || id == "virustotal"
 		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {
 			t.Fatalf("%s plugin support = %v, want %v", id, got, wantPlugin)
 		}
@@ -352,6 +353,17 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	socket, _ := registry.Info("socket")
 	if got := strings.Join(socket.RequiredEnv, ","); got != "SOCKET_CLI_API_TOKEN" {
 		t.Fatalf("socket required env = %q", got)
+	}
+
+	endor, _ := registry.Info("endor")
+	if got := strings.Join(endor.RequiredEnv, ","); got != "ENDOR_NAMESPACE" {
+		t.Fatalf("endor required env = %q", got)
+	}
+	if got := endor.RequiredEnvDescription; got != "ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET" {
+		t.Fatalf("endor required env description = %q", got)
+	}
+	if got := strings.Join(endor.OptionalEnv, ","); got != "ENDOR_API" {
+		t.Fatalf("endor optional env = %q", got)
 	}
 
 	aig, _ := registry.Info("aig")

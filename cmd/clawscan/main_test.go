@@ -59,9 +59,10 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"SkillTrustBench",
 		"clawhub-security-signals",
 		"Accepted scanner IDs:",
-		"agentverus, aig, cisco, clawscan-static, relyable, skillspector, snyk, socket, virustotal",
+		"agentverus, aig, cisco, clawscan-static, endor, relyable, skillspector, snyk, socket, virustotal",
 		"Required environment variables:",
 		"aig: LLM_API_KEY or OPENAI_API_KEY",
+		"endor: ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET",
 		"SOCKET_CLI_API_TOKEN",
 		"SNYK_TOKEN",
 		"VIRUSTOTAL_API_KEY",
@@ -491,6 +492,30 @@ func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
 	}
 }
 
+func TestRunCommandScannersDescribeEndorCredentialAlternatives(t *testing.T) {
+	want := "ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET"
+	catalog := captureStdout(t, func() {
+		if err := run([]string{"scanners"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	detail := captureStdout(t, func() {
+		if err := run([]string{"scanners", "endor"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(catalog, want) {
+		t.Fatalf("Endor catalog requirements missing %q:\n%s", want, catalog)
+	}
+	if !strings.Contains(detail, "Required env vars: "+want) {
+		t.Fatalf("Endor detail requirements missing %q:\n%s", want, detail)
+	}
+	if !strings.Contains(detail, "Optional env vars: ENDOR_API") {
+		t.Fatalf("Endor detail missing optional API override:\n%s", detail)
+	}
+}
+
 func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		if err := run([]string{"scanners", "aig"}, []string{}); err != nil {
@@ -895,6 +920,55 @@ func TestRunCommandSummarizesSnykRiskIndexes(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout)
 		}
+	}
+}
+
+func TestRunCommandSummarizesEndorAllFindingsWithoutSubsetDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "skill")
+	writeSkill(t, target, "# Summary\n")
+	fixture := filepath.Join(dir, "endor.json")
+	writeFile(t, fixture, `{
+  "all_findings": [
+    {"uuid":"finding-1","meta":{"name":"dependency_with_critical_severity_vulnerabilities"},"spec":{"level":"FINDING_LEVEL_CRITICAL"}},
+    {"uuid":"finding-2","meta":{"name":"dependency_with_high_severity_vulnerabilities"},"spec":{"level":"FINDING_LEVEL_HIGH"}}
+  ],
+  "blocking_findings": [
+    {"uuid":"finding-1","meta":{"name":"dependency_with_critical_severity_vulnerabilities"},"spec":{"level":"FINDING_LEVEL_CRITICAL"}}
+  ],
+  "warning_findings": [
+    {"uuid":"finding-2","meta":{"name":"dependency_with_high_severity_vulnerabilities"},"spec":{"level":"FINDING_LEVEL_HIGH"}}
+  ]
+}`)
+	output := filepath.Join(dir, "artifact.json")
+	stdout := captureStdout(t, func() {
+		if err := run([]string{target, "--scanner", "endor", "--scanner-result", "endor=" + fixture, "--output", output}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{"scanner_completed: 1", "scanner_failed: 0", "issues_found: 2", "errors: 0"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+	artifactRaw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact runner.Artifact
+	if err := json.Unmarshal(artifactRaw, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["endor"]
+	if artifact.Gate != "pass" || len(result.Raw) == 0 {
+		t.Fatalf("artifact gate = %q, Endor result = %#v", artifact.Gate, artifact.Scanners["endor"])
+	}
+	var report map[string][]json.RawMessage
+	if err := json.Unmarshal(result.Raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report["all_findings"]) != 2 || len(report["blocking_findings"]) != 1 || len(report["warning_findings"]) != 1 {
+		t.Fatalf("raw Endor report changed: %#v", report)
 	}
 }
 
