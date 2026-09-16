@@ -354,6 +354,17 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 		t.Fatalf("socket required env = %q", got)
 	}
 
+	endor, _ := registry.Info("endor")
+	if got := strings.Join(endor.RequiredEnv, ","); got != "ENDOR_NAMESPACE" {
+		t.Fatalf("endor required env = %q", got)
+	}
+	if got := endor.RequiredEnvDescription; got != "ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET" {
+		t.Fatalf("endor required env description = %q", got)
+	}
+	if got := strings.Join(endor.OptionalEnv, ","); got != "ENDOR_API" {
+		t.Fatalf("endor optional env = %q", got)
+	}
+
 	aig, _ := registry.Info("aig")
 	if got := strings.Join(aig.RequiredEnv, ","); got != "LLM_API_KEY" {
 		t.Fatalf("aig required env = %q", got)

@@ -22,17 +22,23 @@ const endorFindingsJSON = `{
 `
 
 const endorLinuxMixedOwnerSetup = `set -eu
-mkdir -p /tmp/source /tmp/plugin /tmp/unrelated /tmp/bin
+mkdir -p /tmp/source /tmp/unrelated /tmp/bin
 printf '%s\n' '{"name":"demo"}' > /tmp/source/package.json
 printf '%s\n' 'export const demo = true' > /tmp/source/index.ts
-cp -R /tmp/source/. /tmp/plugin/
 git -C /tmp/unrelated init -q -b main
-chown -R 1000:1000 /tmp/source /tmp/plugin /tmp/unrelated
+chown -R 1000:1000 /tmp/source /tmp/unrelated
 cat > /tmp/bin/endorctl <<'EOF'
 #!/bin/sh
 set -eu
 test "$(id -u)" = 0
-test "$(stat -c %u "$9")" = 1000
+test "$NPM_CONFIG_IGNORE_SCRIPTS" = true
+test "$GIT_CONFIG_COUNT" = 1
+test "$GIT_CONFIG_KEY_0" = safe.directory
+test "$GIT_CONFIG_VALUE_0" = "$9"
+test "$9" != "$ENDOR_INPUT_REPO"
+test "$(pwd -P)" = "$9"
+test "$(stat -c %u "$9")" = 0
+test "$(stat -c %u "$ENDOR_INPUT_REPO")" = 1000
 git -C "$9" status --short >/dev/null
 if unrelated_error=$(git -C "$ENDOR_UNRELATED_REPO" status --short 2>&1); then
 	echo "unrelated repository was unexpectedly trusted" >&2
@@ -47,13 +53,43 @@ case "$unrelated_error" in
 esac
 test ! -e "$ENDOR_SOURCE_REPO/.git"
 test "$(cat "$ENDOR_SOURCE_REPO/package.json")" = '{"name":"demo"}'
+test ! -e "$ENDOR_INPUT_REPO/.git"
+test "$(cat "$ENDOR_INPUT_REPO/package.json")" = '{"name":"demo"}'
+if test "$ENDOR_TEST_OUTCOME" = failed; then
+	echo "expected Endor fixture failure" >&2
+	exit 42
+fi
 printf '%s\n' '{"all_findings":[],"blocking_findings":[],"warning_findings":[]}'
 EOF
 chmod 755 /tmp/bin/endorctl
 export PATH="/tmp/bin:$PATH"
 export ENDOR_SOURCE_REPO=/tmp/source
 export ENDOR_UNRELATED_REPO=/tmp/unrelated
-exec /bin/sh -c "$1" clawscan-endor /tmp/plugin
+for outcome in completed failed; do
+	input="/tmp/input-$outcome"
+	mkdir -p "$input"
+	cp -R /tmp/source/. "$input"/
+	chown -R 1000:1000 "$input"
+	export ENDOR_INPUT_REPO="$input"
+	export ENDOR_TEST_OUTCOME="$outcome"
+	set +e
+	scan_output=$(/bin/sh -c "$1" clawscan-endor "$input" 2>"/tmp/$outcome.stderr")
+	scan_exit=$?
+	set -e
+	case "$outcome:$scan_exit:$scan_output" in
+		'completed:0:{"all_findings":[],"blocking_findings":[],"warning_findings":[]}'*) ;;
+		failed:42:*) ;;
+		*)
+			echo "unexpected $outcome result: exit=$scan_exit output=$scan_output" >&2
+			exit 1
+			;;
+	esac
+	runuser -u node -- rm -rf "$input"
+	test ! -e "$input"
+done
+test ! -e /tmp/source/.git
+test "$(cat /tmp/source/package.json)" = '{"name":"demo"}'
+printf '%s\n' cleanup-ok
 `
 
 func TestEndorRequirementsAcceptTokenOrAPICredentials(t *testing.T) {
@@ -62,19 +98,27 @@ func TestEndorRequirementsAcceptTokenOrAPICredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name string
-		env  map[string]string
+		name        string
+		env         map[string]string
+		wantSandbox string
 	}{
-		{name: "token", env: map[string]string{"ENDOR_NAMESPACE": "demo", "ENDOR_TOKEN": "token"}},
+		{
+			name:        "token",
+			env:         map[string]string{"ENDOR_NAMESPACE": "demo", "ENDOR_TOKEN": "token"},
+			wantSandbox: "ENDOR_NAMESPACE,ENDOR_TOKEN",
+		},
 		{name: "API credentials", env: map[string]string{
 			"ENDOR_NAMESPACE":              "demo",
 			"ENDOR_API_CREDENTIALS_KEY":    "key",
 			"ENDOR_API_CREDENTIALS_SECRET": "secret",
-		}},
+		}, wantSandbox: "ENDOR_API_CREDENTIALS_KEY,ENDOR_API_CREDENTIALS_SECRET,ENDOR_NAMESPACE"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := ValidateRequirements(opts, test.env); err != nil {
 				t.Fatal(err)
+			}
+			if got := strings.Join(sandboxEnvNames(opts, test.env), ","); got != test.wantSandbox {
+				t.Fatalf("sandbox env = %q, want %q", got, test.wantSandbox)
 			}
 		})
 	}
@@ -104,7 +148,7 @@ func TestEndorRequirementsRejectMissingOrIncompleteCredentials(t *testing.T) {
 	}
 }
 
-func TestEndorScansPluginFromWritableScratchAndPreservesSource(t *testing.T) {
+func TestEndorScansPluginFromSanitizedScratchAndPreservesSource(t *testing.T) {
 	target := createEndorTarget(t, true)
 	commandRunner := &endorRecordingCommandRunner{
 		stdout: endorFindingsJSON,
@@ -112,15 +156,18 @@ func TestEndorScansPluginFromWritableScratchAndPreservesSource(t *testing.T) {
 			if call.command != "/bin/sh" {
 				t.Fatalf("command = %q", call.command)
 			}
-			if call.cwd == target || !strings.HasSuffix(call.cwd, string(filepath.Separator)+"artifact") {
-				t.Fatalf("cwd = %q, target = %q", call.cwd, target)
-			}
-			if len(call.args) != 4 || call.args[0] != "-c" || call.args[2] != "clawscan-endor" || call.args[3] != "." {
+			if len(call.args) != 4 || call.args[0] != "-c" || call.args[2] != "clawscan-endor" {
 				t.Fatalf("args = %#v", call.args)
+			}
+			scanInput := call.args[3]
+			if call.cwd != "" || scanInput == target || !strings.HasSuffix(scanInput, string(filepath.Separator)+"artifact") {
+				t.Fatalf("cwd = %q, input = %q, target = %q", call.cwd, scanInput, target)
 			}
 			script := call.args[1]
 			for _, fragment := range []string{
 				"NPM_CONFIG_IGNORE_SCRIPTS=true",
+				"scan_root=$(mktemp -d)",
+				`cp -R "$1"/. "$scan_root"/`,
 				"core.hooksPath=/dev/null",
 				"user.name=ClawScan",
 				"user.email=clawscan@example.invalid",
@@ -128,19 +175,16 @@ func TestEndorScansPluginFromWritableScratchAndPreservesSource(t *testing.T) {
 				"--languages=javascript,typescript",
 				"--call-graph-languages=javascript,typescript",
 				"--build=false --output-type=json",
-				`--path "$1"`,
+				`--path "$scan_root"`,
 			} {
 				if !strings.Contains(script, fragment) {
 					t.Fatalf("script missing %q:\n%s", fragment, script)
 				}
 			}
 			for _, name := range []string{"package.json", "npm-shrinkwrap.json", pluginManifestName, "index.ts"} {
-				if _, err := os.Stat(filepath.Join(call.cwd, name)); err != nil {
+				if _, err := os.Stat(filepath.Join(scanInput, name)); err != nil {
 					t.Fatalf("scratch missing %s: %v", name, err)
 				}
-			}
-			if err := os.WriteFile(filepath.Join(call.cwd, "endor-created.lock"), []byte("scratch"), 0o644); err != nil {
-				t.Fatal(err)
 			}
 		},
 	}
@@ -195,13 +239,18 @@ test "$5" = "--call-graph-languages=javascript,typescript"
 test "$6" = "--build=false"
 test "$7" = "--output-type=json"
 test "$8" = "--path"
-test "$9" = "."
+test "$(cd "$9" && pwd -P)" = "$(pwd -P)"
 printf '%s\n' '{"all_findings":[],"blocking_findings":[],"warning_findings":[]}'
 `
 	if err := os.WriteFile(fakeEndor, []byte(fakeScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	fakeMktemp := filepath.Join(binDir, "mktemp")
+	if err := os.WriteFile(fakeMktemp, []byte("#!/bin/sh\nexec /usr/bin/mktemp -d \"$ENDOR_TEST_TMPDIR/scan.XXXXXXXX\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	env := EnvMap(os.Environ())
+	env["ENDOR_TEST_TMPDIR"] = t.TempDir()
 	env["PATH"] = binDir + string(os.PathListSeparator) + env["PATH"]
 	result, err := (ExternalScannerRunner{
 		CommandRunner: defaultCommandRunner{Env: env},
@@ -219,7 +268,7 @@ printf '%s\n' '{"all_findings":[],"blocking_findings":[],"warning_findings":[]}'
 	}
 }
 
-func TestEndorShellBootstrapTrustsOnlyMixedOwnerScratchOnLinux(t *testing.T) {
+func TestEndorShellBootstrapKeepsMixedOwnerInputsRemovableOnLinux(t *testing.T) {
 	image := strings.TrimSpace(os.Getenv("CLAWSCAN_TEST_ENDOR_DOCKER_IMAGE"))
 	if image == "" {
 		t.Skip("set CLAWSCAN_TEST_ENDOR_DOCKER_IMAGE to a Linux Endor image")
@@ -239,12 +288,12 @@ func TestEndorShellBootstrapTrustsOnlyMixedOwnerScratchOnLinux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Linux mixed-owner bootstrap failed: %v\nstderr:\n%s", err, output.Stderr)
 	}
-	if got := strings.TrimSpace(output.Stdout); got != `{"all_findings":[],"blocking_findings":[],"warning_findings":[]}` {
+	if got := strings.TrimSpace(output.Stdout); got != "cleanup-ok" {
 		t.Fatalf("stdout = %q, stderr = %q", output.Stdout, output.Stderr)
 	}
 }
 
-func TestEndorDockerRunMountsOnlyWritableScratch(t *testing.T) {
+func TestEndorDockerRunMountsSanitizedScratchReadOnly(t *testing.T) {
 	target := createEndorTarget(t, true)
 	hostRunner := &endorRecordingCommandRunner{
 		stdout: endorFindingsJSON,
@@ -266,17 +315,18 @@ func TestEndorDockerRunMountsOnlyWritableScratch(t *testing.T) {
 					}
 				}
 			}
-			if len(mounts) != 1 || strings.Contains(mounts[0], "readonly") {
+			if len(mounts) != 1 || !strings.Contains(mounts[0], "readonly") {
 				t.Fatalf("mounts = %#v", mounts)
 			}
 			if strings.Contains(mounts[0], target) {
 				t.Fatalf("source target was mounted: %s", mounts[0])
 			}
-			if cwd == "" || !strings.Contains(mounts[0], "source="+cwd+",") || !strings.Contains(mounts[0], "target="+cwd) {
+			if cwd != "" {
 				t.Fatalf("cwd = %q mounts = %#v", cwd, mounts)
 			}
-			if call.args[len(call.args)-1] != "." {
-				t.Fatalf("container target = %q", call.args[len(call.args)-1])
+			containerTarget := call.args[len(call.args)-1]
+			if !strings.Contains(mounts[0], "source="+containerTarget+",") || !strings.Contains(mounts[0], "target="+containerTarget) {
+				t.Fatalf("container target = %q mounts = %#v", containerTarget, mounts)
 			}
 		},
 	}
@@ -304,10 +354,11 @@ func TestEndorExplicitManifestScansItsDirectory(t *testing.T) {
 	commandRunner := &endorRecordingCommandRunner{
 		stdout: endorFindingsJSON,
 		inspect: func(call commandCall) {
-			if _, err := os.Stat(filepath.Join(call.cwd, skillManifestName)); err != nil {
+			scanInput := call.args[len(call.args)-1]
+			if _, err := os.Stat(filepath.Join(scanInput, skillManifestName)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(filepath.Join(call.cwd, "package.json")); err != nil {
+			if _, err := os.Stat(filepath.Join(scanInput, "package.json")); err != nil {
 				t.Fatal(err)
 			}
 		},

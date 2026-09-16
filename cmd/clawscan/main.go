@@ -389,7 +389,7 @@ func printScannerCatalog(w io.Writer, registry runner.ScannerRegistry) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tName\tRequired env\tInstall")
 	for _, info := range registry.Infos() {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, info.DisplayName, formatEnvList(info.RequiredEnv), info.InstallHint)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, info.DisplayName, requiredEnvDescription(info), info.InstallHint)
 	}
 	_ = tw.Flush()
 }
@@ -399,11 +399,18 @@ func printScannerDetail(w io.Writer, info runner.ScannerInfo) {
 	fmt.Fprintf(w, "ID: %s\n", info.ID)
 	fmt.Fprintf(w, "Repository: %s\n", info.RepositoryURL)
 	fmt.Fprintf(w, "Description: %s\n", info.Description)
-	fmt.Fprintf(w, "Required env vars: %s\n", formatEnvList(info.RequiredEnv))
+	fmt.Fprintf(w, "Required env vars: %s\n", requiredEnvDescription(info))
 	if len(info.OptionalEnv) > 0 {
 		fmt.Fprintf(w, "Optional env vars: %s\n", strings.Join(info.OptionalEnv, ", "))
 	}
 	fmt.Fprintf(w, "Install: %s\n", info.InstallHint)
+}
+
+func requiredEnvDescription(info runner.ScannerInfo) string {
+	if info.RequiredEnvDescription != "" {
+		return info.RequiredEnvDescription
+	}
+	return formatEnvList(info.RequiredEnv)
 }
 
 func runProfiles(args []string) error {

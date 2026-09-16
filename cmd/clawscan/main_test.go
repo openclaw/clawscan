@@ -492,6 +492,30 @@ func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
 	}
 }
 
+func TestRunCommandScannersDescribeEndorCredentialAlternatives(t *testing.T) {
+	want := "ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET"
+	catalog := captureStdout(t, func() {
+		if err := run([]string{"scanners"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	detail := captureStdout(t, func() {
+		if err := run([]string{"scanners", "endor"}, []string{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(catalog, want) {
+		t.Fatalf("Endor catalog requirements missing %q:\n%s", want, catalog)
+	}
+	if !strings.Contains(detail, "Required env vars: "+want) {
+		t.Fatalf("Endor detail requirements missing %q:\n%s", want, detail)
+	}
+	if !strings.Contains(detail, "Optional env vars: ENDOR_API") {
+		t.Fatalf("Endor detail missing optional API override:\n%s", detail)
+	}
+}
+
 func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		if err := run([]string{"scanners", "aig"}, []string{}); err != nil {

@@ -19,14 +19,15 @@ type ScannerAdapter interface {
 }
 
 type ScannerInfo struct {
-	ID            string
-	DisplayName   string
-	RepositoryURL string
-	Description   string
-	RequiredEnv   []string
-	OptionalEnv   []string
-	InstallHint   string
-	Installable   bool
+	ID                     string
+	DisplayName            string
+	RepositoryURL          string
+	Description            string
+	RequiredEnv            []string
+	RequiredEnvDescription string
+	OptionalEnv            []string
+	InstallHint            string
+	Installable            bool
 }
 
 type ScannerRegistry struct {
@@ -304,13 +305,13 @@ func defaultScannerAdapters() []ScannerAdapter {
 			commandBacked:   true,
 			supportsPlugins: true,
 			info: ScannerInfo{
-				DisplayName:   "Endor Labs",
-				RepositoryURL: "https://docs.endorlabs.com/developers-api/cli/commands/scan",
-				Description:   "Local JavaScript and TypeScript dependency scanner invoked through endorctl in the Docker sandbox.",
+				DisplayName:            "Endor Labs",
+				RepositoryURL:          "https://docs.endorlabs.com/developers-api/cli/commands/scan",
+				Description:            "Local JavaScript and TypeScript dependency scanner invoked through endorctl in the Docker sandbox.",
+				RequiredEnv:            []string{"ENDOR_NAMESPACE"},
+				RequiredEnvDescription: "ENDOR_NAMESPACE and either ENDOR_TOKEN or both ENDOR_API_CREDENTIALS_KEY and ENDOR_API_CREDENTIALS_SECRET",
 				OptionalEnv: []string{
 					"ENDOR_API",
-					"ENDOR_API_CREDENTIALS_KEY",
-					"ENDOR_API_CREDENTIALS_SECRET",
 				},
 			},
 			installPlan: InstallPlan{

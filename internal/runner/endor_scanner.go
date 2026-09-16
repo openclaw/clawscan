@@ -18,18 +18,20 @@ var (
 
 const endorScanScript = `set -eu
 export NPM_CONFIG_IGNORE_SCRIPTS=true
-scan_root=$(cd "$1" && pwd -P)
+scan_root=$(mktemp -d)
+cp -R "$1"/. "$scan_root"/
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0=safe.directory
 export GIT_CONFIG_VALUE_0="$scan_root"
-git -c core.hooksPath=/dev/null -c user.name=ClawScan -c user.email=clawscan@example.invalid -C "$1" init -q -b main
-git -C "$1" config core.hooksPath /dev/null
-git -C "$1" config user.name ClawScan
-git -C "$1" config user.email clawscan@example.invalid
-git -c core.hooksPath=/dev/null -c user.name=ClawScan -c user.email=clawscan@example.invalid -C "$1" add --all --force
-git -c core.hooksPath=/dev/null -c user.name=ClawScan -c user.email=clawscan@example.invalid -C "$1" commit -q --allow-empty -m "ClawScan scan snapshot"
-git -c core.hooksPath=/dev/null -C "$1" remote add origin https://example.invalid/clawscan/scan-target.git
-exec endorctl scan --dry-run --dependencies --languages=javascript,typescript --call-graph-languages=javascript,typescript --build=false --output-type=json --path "$1"`
+git -c core.hooksPath=/dev/null -c user.name=ClawScan -c user.email=clawscan@example.invalid -C "$scan_root" init -q -b main
+git -C "$scan_root" config core.hooksPath /dev/null
+git -C "$scan_root" config user.name ClawScan
+git -C "$scan_root" config user.email clawscan@example.invalid
+git -c core.hooksPath=/dev/null -c user.name=ClawScan -c user.email=clawscan@example.invalid -C "$scan_root" add --all --force
+git -c core.hooksPath=/dev/null -c user.name=ClawScan -c user.email=clawscan@example.invalid -C "$scan_root" commit -q --allow-empty -m "ClawScan scan snapshot"
+git -c core.hooksPath=/dev/null -C "$scan_root" remote add origin https://example.invalid/clawscan/scan-target.git
+cd "$scan_root"
+exec endorctl scan --dry-run --dependencies --languages=javascript,typescript --call-graph-languages=javascript,typescript --build=false --output-type=json --path "$scan_root"`
 
 type endorFindingsReport struct {
 	AllFindings      []json.RawMessage `json:"all_findings"`
@@ -86,13 +88,13 @@ func (runner ExternalScannerRunner) runEndor(target string, startedAt string) (S
 	}
 
 	command := "/bin/sh"
-	args := []string{"-c", endorScanScript, "clawscan-endor", "."}
+	args := []string{"-c", endorScanScript, "clawscan-endor", scratch}
 	fullCommand := append([]string{command}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	output, runErr := runner.CommandRunner.Run(command, args, scratch, timeout)
+	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
 	exitCode := gateEligibleExitCode(output.ExitCode)
 	raw := []byte(output.Stdout)
 	reportErr := validateEndorFindingsReport(raw)
