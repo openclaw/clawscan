@@ -270,6 +270,19 @@ func TestHuggingFaceBenchmarkClientHonorsCancelDuringRetryBackoff(t *testing.T) 
 	}
 }
 
+func TestHuggingFaceRowsBackoffCapsRetryAfter(t *testing.T) {
+	got := huggingFaceRowsBackoff(1, http.Header{"Retry-After": []string{"3600"}})
+	if got != 30*time.Second {
+		t.Fatalf("Retry-After 3600 = %s, want 30s", got)
+	}
+
+	future := time.Now().UTC().Add(2 * time.Hour).Format(http.TimeFormat)
+	got = huggingFaceRowsBackoff(1, http.Header{"Retry-After": []string{future}})
+	if got != 30*time.Second {
+		t.Fatalf("Retry-After HTTP-date %q = %s, want 30s", future, got)
+	}
+}
+
 func withHuggingFaceRowsRetryDelay(t *testing.T, delay time.Duration) {
 	t.Helper()
 	previous := huggingFaceRowsRetryDelay
