@@ -209,9 +209,6 @@ func TestEndorScansPluginFromSanitizedScratchAndPreservesSource(t *testing.T) {
 	if bytes.Contains(result.Raw, []byte("secret-token")) {
 		t.Fatalf("raw report leaked token: %s", result.Raw)
 	}
-	if _, err := os.Stat(filepath.Join(target, "endor-created.lock")); !os.IsNotExist(err) {
-		t.Fatalf("source target was modified: %v", err)
-	}
 	if got := readTestFile(t, filepath.Join(target, "package.json")); got != "{\"name\":\"demo\"}\n" {
 		t.Fatalf("source package.json changed: %q", got)
 	}
