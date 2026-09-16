@@ -17,6 +17,12 @@ clawscan scanners
 clawscan scanners skillspector
 ```
 
+When writing a results bundle with `--output`, each scanner result's
+`outputPath` points to its raw JSON evidence beside the main artifact. Target,
+profile, and scanner names are sanitized for filesystem use; colliding paths
+receive numeric suffixes so every report is preserved. Read the recorded
+`outputPath` instead of reconstructing a filename from a target or scanner ID.
+
 ## Profile scanner configuration
 
 A trusted config can mix built-in scanner IDs with user-defined command

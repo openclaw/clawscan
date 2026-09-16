@@ -738,6 +738,7 @@ func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error
 			scanners = append(scanners, scanner)
 		}
 		sort.Strings(scanners)
+		usedScannerPaths := map[string]int{}
 		for _, scanner := range scanners {
 			result := artifact.Scanners[scanner]
 			if len(result.Raw) == 0 {
@@ -745,7 +746,8 @@ func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error
 				artifact.Scanners[scanner] = result
 				continue
 			}
-			relPath := filepath.ToSlash(filepath.Join(spec.PathPrefix, runPath, safeOutputPathSegment(scanner)+".json"))
+			scannerPath := uniqueOutputPath(safeOutputPathSegment(scanner), usedScannerPaths)
+			relPath := filepath.ToSlash(filepath.Join(spec.PathPrefix, runPath, scannerPath+".json"))
 			absPath := filepath.Join(spec.RootDir, filepath.FromSlash(relPath))
 			if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 				return err
@@ -807,12 +809,20 @@ func targetOutputPath(input string) string {
 }
 
 func uniqueOutputPath(base string, used map[string]int) string {
-	used[base]++
-	if used[base] == 1 {
+	if used[base] == 0 {
+		used[base] = 1
 		return base
 	}
 	dir, file := path.Split(base)
-	return dir + file + "-" + strconv.Itoa(used[base])
+	for {
+		used[base]++
+		candidate := dir + file + "-" + strconv.Itoa(used[base])
+		if used[candidate] == 0 {
+			// Reserve generated names too: another input may already use a suffix.
+			used[candidate] = 1
+			return candidate
+		}
+	}
 }
 
 func safeOutputPathSegment(value string) string {
