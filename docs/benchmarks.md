@@ -12,7 +12,13 @@ clawscan benchmark SkillTrustBench \
 ```
 
 Use `--ids <path-or-url>` with SkillTrustBench to run a fixed subset from a
-plain text ID list or JSONL rows with an `id` field.
+plain text ID list or JSONL rows with an `id` field. The loader streams the
+source (file or HTTP) and accepts at most 5,520 unique IDs, the size of the
+pinned SkillTrustBench full set. Each extracted ID may contain at most 256
+bytes, and all retained ID text together may contain at most 256 KiB (262,144
+bytes). Whitespace around IDs is trimmed. These limits apply to the extracted
+IDs, not total source size: the full JSONL list may exceed 256 KiB. Individual
+lines must be smaller than the parser's 1 MiB buffer limit.
 
 ## Available benchmarks
 

@@ -801,6 +801,146 @@ func TestLoadBenchmarkIDSelectionRejectsBadSources(t *testing.T) {
 	}
 }
 
+func TestLoadBenchmarkIDSelectionAcceptsJSONLLargerThan256KiB(t *testing.T) {
+	payload := oversizedBenchmarkIDJSONL(t, maxSkillTrustBenchIDSelection)
+	if len(payload) <= 256*1024 {
+		t.Fatalf("fixture is %d bytes, want more than 256 KiB", len(payload))
+	}
+
+	path := filepath.Join(t.TempDir(), "ids.jsonl")
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fileSelection, err := LoadBenchmarkIDSelection(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fileSelection.IDs) != maxSkillTrustBenchIDSelection {
+		t.Fatalf("file ids = %d, want %d", len(fileSelection.IDs), maxSkillTrustBenchIDSelection)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	httpSelection, err := LoadBenchmarkIDSelection(server.URL + "/ids.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(httpSelection.IDs, fileSelection.IDs) || httpSelection.SHA256 != fileSelection.SHA256 {
+		t.Fatal("HTTP and file selections differ")
+	}
+}
+
+func TestLoadBenchmarkIDSelectionReleasesWhitespacePadding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "padded-ids.txt")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 64; i++ {
+		if _, err := fmt.Fprintf(file, "%s case_%05d\n", strings.Repeat(" ", 256*1024), i); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	selection, err := LoadBenchmarkIDSelection(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(selection)
+	// The IDs occupy hundreds of bytes; retaining their padded source lines
+	// would keep more than 16 MiB live after collection.
+	if retained := int64(after.HeapAlloc) - int64(before.HeapAlloc); retained > 2*1024*1024 {
+		t.Fatalf("retained %d bytes for %d short IDs", retained, len(selection.IDs))
+	}
+}
+
+func TestLoadBenchmarkIDSelectionClosesRejectedHTTPStream(t *testing.T) {
+	closed := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, strings.Repeat("x", maxBenchmarkIDBytes+1))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+			close(closed)
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer server.Close()
+	_, err := LoadBenchmarkIDSelection(server.URL)
+	if err == nil || !strings.Contains(err.Error(), "256-byte benchmark id limit") {
+		t.Fatalf("err = %v, want ID length rejection", err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rejected stream was not closed before reading the entire response")
+	}
+}
+
+func TestLoadBenchmarkIDSelectionRejectsOversizedRetainedIDs(t *testing.T) {
+	huge := strings.Repeat("a", maxBenchmarkIDBytes+1)
+	path := filepath.Join(t.TempDir(), "huge-id.txt")
+	if err := os.WriteFile(path, []byte(huge+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBenchmarkIDSelection(path)
+	if err == nil || !strings.Contains(err.Error(), "256-byte benchmark id limit") {
+		t.Fatalf("err = %v, want 256-byte benchmark id limit", err)
+	}
+
+	var body strings.Builder
+	// 2000 IDs * 200 bytes is under the 5,520 count cap but over the
+	// retained-id budget (256 KiB).
+	chunk := strings.Repeat("b", 200)
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&body, "%s-%04d\n", chunk, i)
+	}
+	aggPath := filepath.Join(t.TempDir(), "agg-ids.txt")
+	if err := os.WriteFile(aggPath, []byte(body.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadBenchmarkIDSelection(aggPath)
+	if err == nil || !strings.Contains(err.Error(), "262144-byte retained-id budget") {
+		t.Fatalf("err = %v, want 262144-byte retained-id budget", err)
+	}
+}
+
+func TestLoadBenchmarkIDSelectionRejectsMoreIDsThanPinnedSet(t *testing.T) {
+	var body strings.Builder
+	for i := 0; i < maxSkillTrustBenchIDSelection+1; i++ {
+		fmt.Fprintf(&body, "case_%05d\n", i)
+	}
+	path := filepath.Join(t.TempDir(), "ids.txt")
+	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBenchmarkIDSelection(path)
+	if err == nil || !strings.Contains(err.Error(), "5520-id") {
+		t.Fatalf("err = %v, want 5520-id selection limit", err)
+	}
+}
+
+func oversizedBenchmarkIDJSONL(t *testing.T, count int) []byte {
+	t.Helper()
+	var body strings.Builder
+	pad := strings.Repeat("x", 700)
+	for i := 0; i < count; i++ {
+		fmt.Fprintf(&body, `{"id":"case_%05d","judgment":"normal","pad":"%s"}`+"\n", i, pad)
+	}
+	return []byte(body.String())
+}
+
 func TestRunSkillTrustBenchBenchmarkRejectsMissingSelectedID(t *testing.T) {
 	dir := t.TempDir()
 	idsPath := filepath.Join(dir, "ids.txt")
