@@ -802,7 +802,7 @@ func TestLoadBenchmarkIDSelectionRejectsBadSources(t *testing.T) {
 }
 
 func TestLoadBenchmarkIDSelectionAcceptsJSONLLargerThan256KiB(t *testing.T) {
-	payload := oversizedBenchmarkIDJSONL(t, 400)
+	payload := oversizedBenchmarkIDJSONL(t, maxSkillTrustBenchIDSelection)
 	if len(payload) <= 256*1024 {
 		t.Fatalf("fixture is %d bytes, want more than 256 KiB", len(payload))
 	}
@@ -815,8 +815,8 @@ func TestLoadBenchmarkIDSelectionAcceptsJSONLLargerThan256KiB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fileSelection.IDs) != 400 {
-		t.Fatalf("file ids = %d, want 400", len(fileSelection.IDs))
+	if len(fileSelection.IDs) != maxSkillTrustBenchIDSelection {
+		t.Fatalf("file ids = %d, want %d", len(fileSelection.IDs), maxSkillTrustBenchIDSelection)
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -828,8 +828,63 @@ func TestLoadBenchmarkIDSelectionAcceptsJSONLLargerThan256KiB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(httpSelection.IDs) != 400 {
-		t.Fatalf("http ids = %d, want 400", len(httpSelection.IDs))
+	if !reflect.DeepEqual(httpSelection.IDs, fileSelection.IDs) || httpSelection.SHA256 != fileSelection.SHA256 {
+		t.Fatal("HTTP and file selections differ")
+	}
+}
+
+func TestLoadBenchmarkIDSelectionReleasesWhitespacePadding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "padded-ids.txt")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 64; i++ {
+		if _, err := fmt.Fprintf(file, "%s case_%05d\n", strings.Repeat(" ", 256*1024), i); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	selection, err := LoadBenchmarkIDSelection(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(selection)
+	// The IDs occupy hundreds of bytes; retaining their padded source lines
+	// would keep more than 16 MiB live after collection.
+	if retained := int64(after.HeapAlloc) - int64(before.HeapAlloc); retained > 2*1024*1024 {
+		t.Fatalf("retained %d bytes for %d short IDs", retained, len(selection.IDs))
+	}
+}
+
+func TestLoadBenchmarkIDSelectionClosesRejectedHTTPStream(t *testing.T) {
+	closed := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, strings.Repeat("x", maxBenchmarkIDBytes+1))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+			close(closed)
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer server.Close()
+	_, err := LoadBenchmarkIDSelection(server.URL)
+	if err == nil || !strings.Contains(err.Error(), "256-byte benchmark id limit") {
+		t.Fatalf("err = %v, want ID length rejection", err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rejected stream was not closed before reading the entire response")
 	}
 }
 

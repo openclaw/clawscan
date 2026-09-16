@@ -808,6 +808,7 @@ OpenClaw install policy:
 Benchmark command flags:
   --split <name>              Benchmark split. Defaults to benchmark for SkillTrustBench and eval_holdout for clawhub-security-signals.
   --ids <path-or-url>         Run selected benchmark IDs from a streamed text or JSONL source (max 5520 IDs). SkillTrustBench only.
+                             Max 256 bytes per trimmed ID and 256 KiB total ID text, not source size; lines must be under 1 MiB.
   --limit <n>                 Maximum benchmark rows to run. 0 means all rows.
   --offset <n>                Benchmark row offset. Defaults to 0.
   --predictions-output <path> Write benchmark predictions JSONL. Defaults next to --output for clawhub-security-signals.

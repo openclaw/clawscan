@@ -214,7 +214,10 @@ into temporary scan targets.
 
 Use `--ids <path-or-url>` with SkillTrustBench to run a fixed subset from a
 plain text file with one ID per line or JSONL rows with an `id` field. The
-source is streamed and may contain at most 5,520 unique IDs. `--ids`
+source is streamed and may contain at most 5,520 unique IDs, at most 256 bytes
+per trimmed ID, and at most 256 KiB (262,144 bytes) of retained ID text. These
+are selection limits, not a total source-size limit; JSONL sources may exceed
+256 KiB. Individual lines must be smaller than the parser's 1 MiB buffer limit. `--ids`
 preserves source order, records `idsSource`, `idsCount`, and `idsSha256` in the
 artifact, and is mutually exclusive with `--limit` and `--offset`.
 

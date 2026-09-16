@@ -388,6 +388,8 @@ func parseBenchmarkIDs(source string, reader io.Reader) ([]string, error) {
 		if retained+len(id) > maxBenchmarkIDSelectionBytes {
 			return nil, fmt.Errorf("--ids source %s exceeds the %d-byte retained-id budget", source, maxBenchmarkIDSelectionBytes)
 		}
+		// Trimmed text IDs must not retain their potentially large source lines.
+		id = strings.Clone(id)
 		seen[id] = true
 		ids = append(ids, id)
 		retained += len(id)
