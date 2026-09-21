@@ -58,6 +58,17 @@ export function binaryNameForTarget(target) {
   return target.goos === "windows" ? "clawscan.exe" : "clawscan";
 }
 
+export function packageTargetForPlatform(platform) {
+  const target = packageTargets.find((entry) => platformKeyForTarget(entry) === platform);
+  if (!target) {
+    const supported = packageTargets.map(platformKeyForTarget).join(", ");
+    throw new Error(
+      `Unsupported npm package platform: ${platform ?? "<missing>"}. Expected ${supported}.`,
+    );
+  }
+  return target;
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repoRoot,
@@ -89,6 +100,10 @@ function parseArgs(argv) {
     }
     if (arg === "--out") {
       options.outDir = resolve(argv[++index]);
+      continue;
+    }
+    if (arg === "--platform") {
+      options.target = packageTargetForPlatform(argv[++index]);
       continue;
     }
     if (arg === "--pack") {
@@ -132,10 +147,17 @@ async function stagePackage(options) {
   const packageJsonPath = join(packageOut, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
   packageJson.version = packageVersion;
+  if (options.target) {
+    const platformKey = platformKeyForTarget(options.target);
+    const [platform, arch] = platformKey.split("-");
+    packageJson.name = `${packageJson.name}-${platformKey}`;
+    packageJson.os = [platform];
+    packageJson.cpu = [arch];
+  }
   await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
 
   const ldflags = `-s -w -X main.version=${binaryVersion} -X main.commit=${releaseCommit} -X main.date=${buildDate}`;
-  for (const target of packageTargets) {
+  for (const target of options.target ? [options.target] : packageTargets) {
     const binaryDir = join(packageOut, "binaries", platformKeyForTarget(target));
     await mkdir(binaryDir, { recursive: true });
     run(
@@ -164,20 +186,26 @@ async function stagePackage(options) {
   await writeFile(join(options.outDir, "release-sha.txt"), `${releaseSha}\n`);
   await writeFile(join(options.outDir, "package-version.txt"), `${packageVersion}\n`);
 
-  return { binaryVersion, packageOut, packageVersion, releaseSha };
+  return {
+    binaryVersion,
+    packageName: packageJson.name,
+    packageOut,
+    packageVersion,
+    releaseSha,
+  };
 }
 
-export function parsePackFilename(output) {
+export function parsePackFilename(output, packageName = "@openclaw/clawscan") {
   const parsed = JSON.parse(output);
   // npm 12 keys results by package name; older supported npm versions use an array.
-  const packed = Array.isArray(parsed) ? parsed[0] : parsed?.["@openclaw/clawscan"];
+  const packed = Array.isArray(parsed) ? parsed[0] : parsed?.[packageName];
   if (typeof packed?.filename !== "string" || !packed.filename) {
     throw new Error("npm pack did not return a tarball filename.");
   }
   return packed.filename;
 }
 
-async function packPackage(options, packageOut) {
+async function packPackage(options, packageOut, packageName) {
   const result = run(
     "npm",
     ["pack", "--json", "--ignore-scripts", "--pack-destination", options.outDir],
@@ -185,7 +213,7 @@ async function packPackage(options, packageOut) {
       cwd: packageOut,
     },
   );
-  return resolve(options.outDir, parsePackFilename(result.stdout));
+  return resolve(options.outDir, parsePackFilename(result.stdout, packageName));
 }
 
 async function smokePackage(tarballPath, binaryVersion) {
@@ -215,7 +243,7 @@ export async function main(argv = process.argv.slice(2)) {
   const staged = await stagePackage(options);
   let tarballPath = "";
   if (options.pack) {
-    tarballPath = await packPackage(options, staged.packageOut);
+    tarballPath = await packPackage(options, staged.packageOut, staged.packageName);
   }
   if (options.smoke) {
     await smokePackage(tarballPath, staged.binaryVersion);
