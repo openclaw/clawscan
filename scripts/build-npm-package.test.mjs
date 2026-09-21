@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   binaryNameForTarget,
+  main,
   normalizeBuildDate,
   normalizePackageVersion,
   npmDistTagForVersion,
   packageTargets,
+  packageTargetForPlatform,
   parsePackFilename,
   platformKeyForTarget,
 } from "./build-npm-package.mjs";
@@ -20,6 +22,21 @@ describe("npm pack output", () => {
 
   it("reads the array returned by npm 11 and older", () => {
     assert.equal(parsePackFilename(JSON.stringify([{ filename }])), filename);
+  });
+
+  it("reads the selected platform package from npm 11 and npm 12 results", () => {
+    const name = "@openclaw/clawscan-win32-arm64";
+    const platformFilename = "openclaw-clawscan-win32-arm64-1.2.3.tgz";
+    for (const result of [
+      { [name]: { filename: platformFilename } },
+      [{ filename: platformFilename }],
+    ]) {
+      assert.equal(parsePackFilename(JSON.stringify(result), name), platformFilename);
+    }
+    assert.throws(
+      () => parsePackFilename(JSON.stringify({ "@openclaw/clawscan": { filename } }), name),
+      /did not return a tarball filename/,
+    );
   });
 
   it("rejects missing or invalid tarball filenames", () => {
@@ -67,6 +84,28 @@ describe("normalizeBuildDate", () => {
 });
 
 describe("package target mapping", () => {
+  it("selects one Go target for each supported npm platform", () => {
+    for (const [platform, target] of [
+      ["darwin-x64", { goos: "darwin", goarch: "amd64" }],
+      ["darwin-arm64", { goos: "darwin", goarch: "arm64" }],
+      ["linux-x64", { goos: "linux", goarch: "amd64" }],
+      ["linux-arm64", { goos: "linux", goarch: "arm64" }],
+      ["win32-x64", { goos: "windows", goarch: "amd64" }],
+      ["win32-arm64", { goos: "windows", goarch: "arm64" }],
+    ]) {
+      assert.deepEqual(packageTargetForPlatform(platform), target);
+    }
+  });
+
+  it("rejects missing or unsupported --platform values before staging output", async () => {
+    for (const args of [[], ["freebsd-x64"], ["linux-ia32"], ["windows-x64"]]) {
+      await assert.rejects(
+        main(["--version", "v1.2.3", "--platform", ...args]),
+        /Unsupported npm package platform/,
+      );
+    }
+  });
+
   it("maps Go release targets to npm binary directories", () => {
     assert.deepEqual(
       packageTargets.map((target) => [target.goos, target.goarch, platformKeyForTarget(target)]),
