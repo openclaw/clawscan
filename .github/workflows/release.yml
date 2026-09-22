@@ -80,9 +80,14 @@ jobs:
   publish:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, publish-npm]
     if: github.event_name == 'push' || inputs.publish
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.checkout_ref }}
+
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -94,10 +99,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.build.outputs.version }}
         run: |
+          npm view "@openclaw/clawscan@${RELEASE_TAG#v}" --json > npm-metadata.json
+          node scripts/release-notes.mjs "$RELEASE_TAG" npm-metadata.json > release-notes.md
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "$RELEASE_TAG" \
-            --generate-notes
+            --notes-file release-notes.md
 
   publish-npm:
     name: Publish ClawScan npm package
