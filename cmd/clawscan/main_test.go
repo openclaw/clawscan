@@ -69,6 +69,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"cisco: no ClawScan-required env vars",
 		"CLAWSCAN_SANDBOX=off",
 		"CLAWSCAN_SANDBOX_IMAGE",
+		"CLAWSCAN_SANDBOX_RUN_ID",
 		"No target with --scanner, --profile, or --config scans child skill directories under ./skills",
 		"--judge <cmd>",
 		"{{ workspace }}",
