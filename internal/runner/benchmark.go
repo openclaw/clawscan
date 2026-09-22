@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -954,7 +955,12 @@ func isRetriableHuggingFaceRowsStatus(statusCode int) bool {
 
 func huggingFaceRowsBackoff(attempt int, headers http.Header) time.Duration {
 	if retryAfter := headers.Get("Retry-After"); retryAfter != "" {
-		if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds >= 0 {
+		seconds, err := strconv.ParseUint(retryAfter, 10, 64)
+		if err == nil || (errors.Is(err, strconv.ErrRange) && strings.Trim(retryAfter, "0123456789") == "") {
+			// Saturate before converting seconds to nanoseconds so large cooldowns cannot wrap.
+			if seconds > uint64(math.MaxInt64/time.Second) {
+				return time.Duration(math.MaxInt64)
+			}
 			return time.Duration(seconds) * time.Second
 		}
 		if retryAt, err := http.ParseTime(retryAfter); err == nil {

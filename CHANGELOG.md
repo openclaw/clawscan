@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Prevent large Hugging Face `Retry-After` values from overflowing into immediate retries while preserving server cooldowns and cancellation.
 - Label worker-owned Docker containers with optional run and command IDs so supervisors can clean up after cancellation. Thanks @jesse-merhi (#55).
 - Add `--platform` to build smaller npm tarballs for one supported operating system and architecture while retaining the default universal package.
 - Preserve every scanner report when sanitized target, profile, or custom scanner names collide with each other or generated numeric suffixes.
