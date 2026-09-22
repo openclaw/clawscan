@@ -23,6 +23,24 @@ profile, and scanner names are sanitized for filesystem use; colliding paths
 receive numeric suffixes so every report is preserved. Read the recorded
 `outputPath` instead of reconstructing a filename from a target or scanner ID.
 
+## Adding a built-in scanner adapter
+
+First evaluate the scanner with a [custom profile](#profile-scanner-configuration)
+and discuss built-in adoption with maintainers. Adding an adapter also means
+maintaining its dependency, target support, and output contract.
+
+Implement the adapter in `internal/runner/` and register it in
+`defaultScannerAdapters` in `scanner_registry.go`. Declare required and optional
+environment variables, install and verification commands, and supported target
+kinds in the registry. Preserve upstream JSON evidence and report skipped or
+failed scans explicitly. Command-backed scanners use the Docker runner by default;
+include a pinned runtime dependency when the adapter requires it.
+
+Add fixture-backed tests for valid output, malformed output, process failures,
+and unsupported targets. Update this scanner catalog and the README catalog,
+then run the Go tests, `go vet`, and `make docs-site` from the contributing guide.
+Never put credentials in flags, fixtures, or scan artifacts.
+
 ## Profile scanner configuration
 
 A trusted config can mix built-in scanner IDs with user-defined command
