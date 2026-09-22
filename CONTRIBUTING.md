@@ -47,11 +47,9 @@ separate maintainer commands, but do not add ClawHub-specific flags to
 
 Good starting points:
 
-- [Contributing guide](docs/contributing.md)
 - [Adding scanner adapters](docs/scanners.md#adding-a-built-in-scanner-adapter)
 - [Running benchmarks](docs/benchmarks.md)
-- [Improving ClawHub scans](docs/improving-clawhub-scans.md)
-- [Development commands](docs/development.md)
+- [Improving ClawHub scans](docs/benchmarks.md#submitting-a-patch-to-the-clawhub-profile)
 - [Security policy](SECURITY.md)
 
 ## Validation
