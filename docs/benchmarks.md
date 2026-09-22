@@ -22,6 +22,12 @@ lines must be smaller than the parser's 1 MiB buffer limit.
 
 ## Available benchmarks
 
+Hugging Face row requests retry temporary errors up to six attempts and honor
+the server's `Retry-After` cooldown, including delays longer than 30 seconds.
+Numeric cooldowns beyond Go's duration range saturate at its maximum instead
+of wrapping into an immediate retry. Embedded clients can cancel the wait
+through `HuggingFaceBenchmarkClient.Context`; CLI users can interrupt the process.
+
 | Benchmark | ID | Source |
 | --- | --- | --- |
 | ClawHub Security Signals | `clawhub-security-signals` | [Hugging Face](https://huggingface.co/datasets/OpenClaw/clawhub-security-signals) |
