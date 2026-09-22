@@ -1,6 +1,6 @@
 module github.com/openclaw/clawscan
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/alchemy/json5 v0.2.0
@@ -8,4 +8,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require golang.org/x/text v0.41.0 // indirect
+require golang.org/x/text v0.42.0 // indirect
