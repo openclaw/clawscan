@@ -259,30 +259,31 @@ jobs:
         run: |
           set -euo pipefail
           NPM_DIST_JSON=""
-          for attempt in {1..12}; do
+          # npm can accept a publish before asynchronous registry processing finishes.
+          for attempt in {1..60}; do
             if NPM_DIST_JSON="$(npm view "@openclaw/clawscan@${PACKAGE_VERSION}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$NPM_DIST_JSON" ]]; then
               break
             fi
-            if [[ "$attempt" == "12" ]]; then
+            if [[ "$attempt" == "60" ]]; then
               cat /tmp/npm-view-error >&2 || true
               exit 1
             fi
-            sleep 5
+            sleep 10
           done
           printf '%s\n' "$NPM_DIST_JSON"
 
           TAGGED_VERSION=""
-          for attempt in {1..12}; do
+          for attempt in {1..60}; do
             if TAGGED_VERSION="$(npm view "@openclaw/clawscan@${NPM_DIST_TAG}" version 2>/tmp/npm-tag-view-error)" &&
               [[ "$TAGGED_VERSION" == "$PACKAGE_VERSION" ]]; then
               break
             fi
-            if [[ "$attempt" == "12" ]]; then
+            if [[ "$attempt" == "60" ]]; then
               cat /tmp/npm-tag-view-error >&2 || true
               echo "Expected dist-tag ${NPM_DIST_TAG} to resolve to ${PACKAGE_VERSION}, got ${TAGGED_VERSION:-<missing>}." >&2
               exit 1
             fi
-            sleep 5
+            sleep 10
           done
 
           if [[ "$NPM_DIST_TAG" == "next" ]]; then
