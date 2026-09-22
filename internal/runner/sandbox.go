@@ -1,10 +1,13 @@
 package runner
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -14,8 +17,14 @@ const (
 	SandboxModeDocker = "docker"
 	SandboxModeOff    = "off"
 
+	SandboxRunIDEnv       = "CLAWSCAN_SANDBOX_RUN_ID"
+	SandboxRunIDLabel     = "org.openclaw.clawscan.run-id"
+	SandboxCommandIDLabel = "org.openclaw.clawscan.command-id"
+
 	DefaultSandboxImage = "ghcr.io/openclaw/clawscan-runtime:latest"
 )
+
+var sandboxRunIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 type SandboxOptions struct {
 	Mode   string
@@ -116,23 +125,11 @@ func sandboxMetadataForOptionList(optsList []Options, env map[string]string) San
 			next.Image != first.Image ||
 			next.Network != first.Network ||
 			strings.Join(next.Env, "\x00") != strings.Join(first.Env, "\x00") ||
-			!sandboxMountsEqual(next.Mounts, first.Mounts) {
+			!slices.Equal(next.Mounts, first.Mounts) {
 			return SandboxMetadata{Mode: "mixed"}
 		}
 	}
 	return first
-}
-
-func sandboxMountsEqual(left []SandboxMount, right []SandboxMount) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func effectiveSandboxMounts(mounts []SandboxMount) []SandboxMount {
@@ -198,6 +195,15 @@ func dockerAvailable() error {
 
 func (runner dockerCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	dockerArgs := []string{"run", "--rm", "--network", "bridge"}
+	if runID := strings.TrimSpace(runner.Env[SandboxRunIDEnv]); runID != "" {
+		if !sandboxRunIDPattern.MatchString(runID) {
+			return CommandOutput{}, fmt.Errorf("%s must be 1-64 letters, digits, dots, underscores or hyphens, starting with a letter or digit", SandboxRunIDEnv)
+		}
+		dockerArgs = append(dockerArgs,
+			"--label", SandboxRunIDLabel+"="+runID,
+			"--label", SandboxCommandIDLabel+"="+rand.Text(),
+		)
+	}
 	for _, name := range runner.EnvNames {
 		if strings.TrimSpace(runner.Env[name]) != "" {
 			dockerArgs = append(dockerArgs, "-e", name)

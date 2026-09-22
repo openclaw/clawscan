@@ -847,6 +847,7 @@ Required environment variables:
   cisco: no ClawScan-required env vars; optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers.
   judge: provider credentials belong to the command passed to --judge.
   sandbox: CLAWSCAN_SANDBOX=off disables Docker by default; CLAWSCAN_SANDBOX_IMAGE overrides the runtime image.
+           Process supervisors can set CLAWSCAN_SANDBOX_RUN_ID to identify only that process's Docker containers for cleanup.
 
 Target notes:
   No target with --scanner, --profile, or --config scans child skill directories under ./skills.
