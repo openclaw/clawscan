@@ -9,7 +9,7 @@ environments.
 
 Prerequisites:
 
-- Go 1.27.0 or newer (see `go.mod`).
+- Go 1.27.1 or newer (see `go.mod`).
 - Node.js/npm for scanner adapters that shell out through `npx`.
 - `make` for docs and release helper targets.
 - Optional scanner credentials in environment variables, never CLI flags.
