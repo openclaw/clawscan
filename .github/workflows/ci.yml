@@ -70,6 +70,7 @@ jobs:
         run: |
           node --test npm/clawscan/test/*.test.mjs
           node --test scripts/build-npm-package.test.mjs
+          node --test scripts/release-notes.test.mjs
           node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke
 
       - name: Test runtime update branch push

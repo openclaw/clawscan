@@ -4,9 +4,9 @@ ClawScan is a composable security scanning harness for agent skills.
 
 Run a suite of skill security scanners, pass the results to a judge harness, and compare against multiple skill security benchmarks.
 
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen)](https://github.com/openclaw/clawscan/actions/workflows/ci.yml?query=branch%3Amain)
-[![Release](https://img.shields.io/badge/Release-passing-brightgreen)](https://github.com/openclaw/clawscan/actions/workflows/release.yml)
-[![Latest release](https://img.shields.io/badge/latest%20release-unreleased-lightgrey)](https://github.com/openclaw/clawscan/releases)
+[![CI](https://github.com/openclaw/clawscan/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/openclaw/clawscan/actions/workflows/ci.yml?query=branch%3Amain)
+[![Release](https://github.com/openclaw/clawscan/actions/workflows/release.yml/badge.svg)](https://github.com/openclaw/clawscan/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/openclaw/clawscan)](https://github.com/openclaw/clawscan/releases)
 
 
 ## Quick Start
