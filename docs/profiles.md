@@ -56,8 +56,16 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `clawscan-static`, `aig` | Codex `gpt-5.5`, high reasoning, bundled ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `clawscan-static`, `aig` | Codex `gpt-6-luna`, high reasoning, bundled ClawHub prompt/schema |
+| `clawhub-aig` | `skillspector`, `aig` | Codex `gpt-6-luna`, high reasoning, bundled ClawHub prompt/schema |
 | `openclaw-install-policy` | `skillspector`, `clawscan-static` | none |
+
+Set `SKILLSPECTOR_MODEL=gpt-6-luna` and
+`SKILLSPECTOR_REASONING_EFFORT=high` to select the same model and effort for
+SkillSpector. Both settings pass through the Docker sandbox. The A.I.G model
+uses `DEFAULT_MODEL`; its optional `REASONING_EFFORT` setting also passes
+through, but requires an upstream version that supports it. The bundled
+A.I.G 0.2.2 runtime does not yet support reasoning effort.
 
 ## Build a custom profile with `.clawscan.yml`
 

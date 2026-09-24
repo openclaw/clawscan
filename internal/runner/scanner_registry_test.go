@@ -91,6 +91,33 @@ func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
 	}
 }
 
+func TestSkillSpectorModelSettingsReachDocker(t *testing.T) {
+	env := map[string]string{
+		"SKILLSPECTOR_MODEL":            "gpt-6-luna",
+		"SKILLSPECTOR_REASONING_EFFORT": "high",
+	}
+	opts := Options{Scanners: []string{"skillspector"}}
+	host := &recordingCommandRunner{}
+	commandRunner := dockerCommandRunner{
+		Host: host, Env: env, Image: DefaultSandboxImage,
+		EnvNames: sandboxEnvNames(opts, env),
+	}
+	if _, err := commandRunner.Run("skillspector", []string{"scan", "fixture"}, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.calls) != 1 || host.calls[0].command != "docker" {
+		t.Fatalf("calls = %#v", host.calls)
+	}
+	for name := range env {
+		if !containsArgPair(host.calls[0].args, "-e", name) {
+			t.Fatalf("docker args missing env %q: %#v", name, host.calls[0].args)
+		}
+	}
+	if got := sandboxEnvNames(opts, map[string]string{}); len(got) != 0 {
+		t.Fatalf("unset optional env should not be forwarded: %#v", got)
+	}
+}
+
 func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 	registry := DefaultScannerRegistry()
 	for _, id := range registry.IDs() {
@@ -340,7 +367,7 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	}
 
 	skillspector, _ := registry.Info("skillspector")
-	if got := strings.Join(skillspector.OptionalEnv, ","); got != "SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_MODEL_REGISTRY,SKILLSPECTOR_LOG_LEVEL,SKILLSPECTOR_SSL_VERIFY,NVIDIA_INFERENCE_KEY,OPENAI_API_KEY,OPENAI_BASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_PROXY_ENDPOINT_URL,ANTHROPIC_PROXY_API_KEY,ANTHROPIC_PROXY_API_VERSION" {
+	if got := strings.Join(skillspector.OptionalEnv, ","); got != "SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,SKILLSPECTOR_MODEL_REGISTRY,SKILLSPECTOR_LOG_LEVEL,SKILLSPECTOR_SSL_VERIFY,NVIDIA_INFERENCE_KEY,OPENAI_API_KEY,OPENAI_BASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_PROXY_ENDPOINT_URL,ANTHROPIC_PROXY_API_KEY,ANTHROPIC_PROXY_API_VERSION" {
 		t.Fatalf("skillspector optional env = %q", got)
 	}
 
@@ -358,7 +385,7 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	if got := strings.Join(aig.RequiredEnv, ","); got != "LLM_API_KEY" {
 		t.Fatalf("aig required env = %q", got)
 	}
-	if got := strings.Join(aig.OptionalEnv, ","); got != "OPENAI_API_KEY,DEFAULT_MODEL,DEFAULT_BASE_URL,DEFAULT_MODEL_CONTEXT_WINDOW,LOG_LEVEL" {
+	if got := strings.Join(aig.OptionalEnv, ","); got != "OPENAI_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL,DEFAULT_MODEL_CONTEXT_WINDOW,LOG_LEVEL" {
 		t.Fatalf("aig optional env = %q", got)
 	}
 	if aig.InstallHint != "pip install aig-skill-scan" {

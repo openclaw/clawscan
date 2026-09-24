@@ -149,7 +149,11 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, err := Run(opts, RunContext{
-		Env:                map[string]string{"LLM_API_KEY": "present"},
+		Env: map[string]string{
+			"LLM_API_KEY":      "present",
+			"DEFAULT_MODEL":    "gpt-6-luna",
+			"REASONING_EFFORT": "high",
+		},
 		HostCommandRunner:  hostRunner,
 		DockerAvailability: func() error { return nil },
 	})
@@ -165,6 +169,11 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 	call := hostRunner.calls[0]
 	if call.command != "docker" {
 		t.Fatalf("command = %q", call.command)
+	}
+	for _, name := range []string{"LLM_API_KEY", "DEFAULT_MODEL", "REASONING_EFFORT"} {
+		if !containsArgPair(call.args, "-e", name) {
+			t.Fatalf("docker args missing env %q: %#v", name, call.args)
+		}
 	}
 	outputPath := argValue(call.args, "-o")
 	outputDir := filepath.Dir(outputPath)
