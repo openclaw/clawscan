@@ -229,6 +229,7 @@ func defaultScannerAdapters() []ScannerAdapter {
 				OptionalEnv: []string{
 					"OPENAI_API_KEY",
 					"DEFAULT_MODEL",
+					"REASONING_EFFORT",
 					"DEFAULT_BASE_URL",
 					"DEFAULT_MODEL_CONTEXT_WINDOW",
 					"LOG_LEVEL",
@@ -341,6 +342,7 @@ func defaultScannerAdapters() []ScannerAdapter {
 				OptionalEnv: []string{
 					"SKILLSPECTOR_PROVIDER",
 					"SKILLSPECTOR_MODEL",
+					"SKILLSPECTOR_REASONING_EFFORT",
 					"SKILLSPECTOR_MODEL_REGISTRY",
 					"SKILLSPECTOR_LOG_LEVEL",
 					"SKILLSPECTOR_SSL_VERIFY",

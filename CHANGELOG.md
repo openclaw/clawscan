@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use GPT-6 Luna with high reasoning for both bundled ClawHub judges and forward SkillSpector model/reasoning and optional A.I.G reasoning settings into scanner sandboxes.
+
 ## 0.2.0 - 2026-09-22
 
 **Highlights:** Preserve scanner evidence, bound benchmark input memory, and identify worker-owned containers for cleanup.

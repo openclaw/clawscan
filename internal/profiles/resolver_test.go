@@ -66,7 +66,7 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if string(opts.Judge.Files["clawhub/output.schema.json"]) == "" {
 		t.Fatal("expected embedded clawhub output schema file")
 	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,LLM_API_KEY,DEFAULT_MODEL,DEFAULT_BASE_URL" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,LLM_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
@@ -100,22 +100,28 @@ func TestResolveArgsUsesEmbeddedClawHubAIGCandidateProfile(t *testing.T) {
 			t.Fatalf("candidate judge file %s differs from clawhub", path)
 		}
 	}
-	if got := strings.Join(candidate.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,LLM_API_KEY,DEFAULT_MODEL,DEFAULT_BASE_URL" {
+	if got := strings.Join(candidate.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,LLM_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
 
-func TestClawHubProfilesAliasOpenAIKeyForCodex(t *testing.T) {
+func TestClawHubProfilesConfigureCodex(t *testing.T) {
 	for _, profile := range []string{"clawhub", "clawhub-aig"} {
 		t.Run(profile, func(t *testing.T) {
 			opts, err := ResolveArgs([]string{"./skill", "--profile", profile}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
-			prefix, _, ok := strings.Cut(opts.Judge.Command, "codex exec")
-			if !ok {
+			if !strings.Contains(opts.Judge.Command, "codex exec") {
 				t.Fatalf("judge command missing codex exec: %q", opts.Judge.Command)
 			}
+			command := strings.NewReplacer(
+				"{{ workspace }}", "fixture-workspace",
+				"{{ judge_sandbox }}", "read-only",
+				"{{ output_schema:clawhub/output.schema.json }}", "fixture-schema",
+				"{{ output }}", "fixture-output",
+				"{{ prompt:clawhub/prompt.md }}", "/dev/null",
+			).Replace(opts.Judge.Command)
 
 			for _, test := range []struct {
 				name   string
@@ -127,7 +133,7 @@ func TestClawHubProfilesAliasOpenAIKeyForCodex(t *testing.T) {
 				{name: "explicit codex key wins", openAI: "openai-marker", codex: "codex-marker", output: "codex-marker"},
 			} {
 				t.Run(test.name, func(t *testing.T) {
-					cmd := exec.Command("sh", "-c", prefix+`sh -c 'printf %s "$CODEX_API_KEY"'`)
+					cmd := exec.Command("sh", "-c", `codex() { printf '%s\n' "$CODEX_API_KEY" "$@"; }; `+command)
 					cmd.Env = append(
 						os.Environ(),
 						strings.Join([]string{"OPENAI_API_KEY", test.openAI}, "="),
@@ -137,8 +143,15 @@ func TestClawHubProfilesAliasOpenAIKeyForCodex(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if got := string(output); got != test.output {
-						t.Fatalf("CODEX_API_KEY = %q, want %q", got, test.output)
+					lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+					if lines[0] != test.output {
+						t.Fatalf("CODEX_API_KEY = %q, want %q", lines[0], test.output)
+					}
+					args := strings.Join(lines[1:], "\x00")
+					for _, want := range []string{"--model\x00gpt-6-luna\x00", "-c\x00model_reasoning_effort=high\x00"} {
+						if !strings.Contains(args, want) {
+							t.Fatalf("codex arguments missing %q: %#v", want, lines[1:])
+						}
 					}
 				})
 			}
@@ -693,7 +706,7 @@ func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 	if opts.Sandbox.Image != "ghcr.io/acme/runtime:v1" {
 		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
 	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,LLM_API_KEY,DEFAULT_MODEL,DEFAULT_BASE_URL,ANTHROPIC_API_KEY" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,LLM_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL,ANTHROPIC_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
