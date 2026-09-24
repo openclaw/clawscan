@@ -505,7 +505,7 @@ func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 		"Repository: https://github.com/Tencent/AI-Infra-Guard/tree/main/skill-scan",
 		"Description: Tencent Zhuque Lab's local directory scanner invoked through aig-skill-scan",
 		"Required env vars: LLM_API_KEY",
-		"Optional env vars: OPENAI_API_KEY, DEFAULT_MODEL, DEFAULT_BASE_URL, DEFAULT_MODEL_CONTEXT_WINDOW, LOG_LEVEL",
+		"Optional env vars: OPENAI_API_KEY, DEFAULT_MODEL, REASONING_EFFORT, DEFAULT_BASE_URL, DEFAULT_MODEL_CONTEXT_WINDOW, LOG_LEVEL",
 		"Install:",
 		"pip install aig-skill-scan",
 	} {
