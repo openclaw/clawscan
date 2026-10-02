@@ -26,7 +26,7 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - `scripts/` - docs, release, and leaderboard helper scripts.
 - `skills/clawscan-cli/` - Codex skill for using this CLI.
 - `npm/clawscan/` - npm package wrapper, binary resolver, and package tests.
-- `.agents/skills/autoreview/` - structured review closeout helper.
+- `.agents/skills/autoreview/SKILL.md` - shared review skill setup and entrypoint.
 - `dist/` - generated release/docs artifacts. Do not hand-edit it.
 
 ## Development Commands
@@ -107,7 +107,7 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - Use conventional commit messages.
 - Keep generated `dist/` changes out of ordinary feature commits unless the
   task is release-packaging proof.
-- For non-trivial changes, run `.agents/skills/autoreview/scripts/autoreview`
+- For non-trivial changes, run `python3 "$HOME/.agents/skills/autoreview/scripts/autoreview"`
   before final handoff.
 - Releases are tag-driven through the GitHub release workflow. Local release
   archives should match `make release VERSION=<version>`.

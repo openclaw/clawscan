@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use one shared autoreview installation from `openclaw/agent-skills`; repository entrypoints now receive upstream fixes without copied helpers or test suites.
+
 - Use GPT-6 Luna with high reasoning for both bundled ClawHub judges and forward SkillSpector model/reasoning and optional A.I.G reasoning settings into scanner sandboxes.
 
 ## 0.2.0 - 2026-09-22

@@ -93,7 +93,7 @@ scripts/validate-security-signals-submissions.sh leaderboard/submissions/<run-id
   artifacts, issues, or pull requests.
 - Prefer small, reviewable changes with fixture-backed tests for scanner
   behavior.
-- For non-trivial changes, run `.agents/skills/autoreview/scripts/autoreview`
+- For non-trivial changes, run `python3 "$HOME/.agents/skills/autoreview/scripts/autoreview"`
   before handoff.
 
 ## Security Reports
