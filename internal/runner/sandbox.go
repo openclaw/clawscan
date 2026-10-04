@@ -2,6 +2,7 @@ package runner
 
 import (
 	"crypto/rand"
+	"encoding/csv"
 	"fmt"
 	"os"
 	"os/exec"
@@ -252,13 +253,40 @@ func dockerMounts(cwd string, args []string, extra []SandboxMount) []string {
 	sort.Strings(sources)
 	out := make([]string, 0, len(sources))
 	for _, source := range sources {
-		option := "type=bind,source=" + source + ",target=" + source
-		if mounts[source] {
-			option += ",readonly"
-		}
-		out = append(out, option)
+		out = append(out, dockerMountSpec(source, mounts[source]))
 	}
 	return out
+}
+
+func dockerMountSpec(source string, readOnly bool) string {
+	fields := []string{"type=bind", "source=" + source, "target=" + source}
+	if readOnly {
+		fields = append(fields, "readonly")
+	}
+	quoted := make([]string, len(fields))
+	for i, field := range fields {
+		quoted[i] = quoteDockerCSVField(field)
+	}
+	return strings.Join(quoted, ",")
+}
+
+// Docker parses --mount with encoding/csv. Quote the whole field when a path
+// contains a comma or quote; quoting only the path value is a bare quote.
+func quoteDockerCSVField(field string) string {
+	var buf strings.Builder
+	writer := csv.NewWriter(&buf)
+	if err := writer.Write([]string{field}); err != nil {
+		return quotedDockerCSVField(field)
+	}
+	writer.Flush()
+	if writer.Error() != nil {
+		return quotedDockerCSVField(field)
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func quotedDockerCSVField(field string) string {
+	return `"` + strings.ReplaceAll(field, `"`, `""`) + `"`
 }
 
 func sandboxEnvNames(opts Options, env map[string]string) []string {
