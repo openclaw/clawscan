@@ -107,9 +107,15 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - Use conventional commit messages.
 - Keep generated `dist/` changes out of ordinary feature commits unless the
   task is release-packaging proof.
-- For non-trivial changes, run `python3 "$HOME/.agents/skills/autoreview/scripts/autoreview"`
+- For non-trivial changes, run `python3 "$HOME/.agents/skills/autoreview/scripts/autoreview" --max-priority P3`
   before final handoff.
 - Releases are tag-driven through the GitHub release workflow. Local release
   archives should match `make release VERSION=<version>`.
 - After the one-time npm registry bootstrap package, npm releases use trusted
   publishing from GitHub Actions. Do not add long-lived npm tokens.
+
+## Autoreview priority
+
+Use `--max-priority P3` with the shared autoreview helper to preserve this
+repository's existing P0–P3 review gate. Follow the
+[shared skill setup](.agents/skills/autoreview/SKILL.md) before running it.
