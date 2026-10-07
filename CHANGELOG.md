@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh bundled Cisco, Snyk, Socket, Claude Code, and Codex tools while retaining the existing Node.js and Python runtime floors and two-day dependency cooldown.
 - Preserve Docker sandbox paths containing commas or quotation marks without changing read-only or writable mount permissions. Thanks @SebTardif (#64).
 - Use one shared autoreview installation from `openclaw/agent-skills`; repository entrypoints now receive upstream fixes without copied helpers or test suites.
 
