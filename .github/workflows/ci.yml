@@ -66,6 +66,11 @@ jobs:
       - name: Build CLI
         run: go build ./cmd/clawscan
 
+      - name: Test Docker mount paths and permissions
+        run: |
+          docker pull alpine:3.23
+          node --test scripts/docker-mounts.test.mjs
+
       - name: Check npm package
         run: |
           node --test npm/clawscan/test/*.test.mjs
