@@ -76,6 +76,18 @@ node --test scripts/build-npm-package.test.mjs
 node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke
 ```
 
+For Docker sandbox changes, also run the CLI integration test with Docker running:
+
+```bash
+go build ./cmd/clawscan
+docker pull alpine:3.23
+node --test scripts/docker-mounts.test.mjs
+```
+
+This checks plain paths and paths containing commas and quotes, including
+read-only targets and mounts and explicitly writable cache mounts. CI runs the
+same check. Set `CLAWSCAN_BIN` to test an existing binary instead.
+
 For benchmark or leaderboard submission plumbing, CI validates changed
 submission directories. Maintainers can also run the repository validation
 script while debugging:

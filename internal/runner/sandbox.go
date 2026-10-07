@@ -2,6 +2,7 @@ package runner
 
 import (
 	"crypto/rand"
+	"encoding/csv"
 	"fmt"
 	"os"
 	"os/exec"
@@ -252,13 +253,23 @@ func dockerMounts(cwd string, args []string, extra []SandboxMount) []string {
 	sort.Strings(sources)
 	out := make([]string, 0, len(sources))
 	for _, source := range sources {
-		option := "type=bind,source=" + source + ",target=" + source
-		if mounts[source] {
-			option += ",readonly"
-		}
-		out = append(out, option)
+		out = append(out, dockerMountSpec(source, mounts[source]))
 	}
 	return out
+}
+
+func dockerMountSpec(source string, readOnly bool) string {
+	fields := []string{"type=bind", "source=" + source, "target=" + source}
+	if readOnly {
+		fields = append(fields, "readonly")
+	}
+	// Docker parses the entire --mount value as one CSV record. strings.Builder
+	// writes cannot fail, so encoding needs no separate escaping fallback.
+	var buf strings.Builder
+	writer := csv.NewWriter(&buf)
+	_ = writer.Write(fields)
+	writer.Flush()
+	return strings.TrimSuffix(buf.String(), "\n")
 }
 
 func sandboxEnvNames(opts Options, env map[string]string) []string {

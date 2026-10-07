@@ -3,6 +3,7 @@ package runner
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -224,6 +225,57 @@ func TestDockerMountsAddsExplicitMounts(t *testing.T) {
 	}
 	if got := dockerMounts("", nil, []SandboxMount{{Path: dir, Write: true}}); !reflect.DeepEqual(got, []string{writable}) {
 		t.Fatalf("writable mounts = %#v, want %#v", got, []string{writable})
+	}
+}
+
+func TestDockerMountsQuotesCSVFields(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain")
+	commaDir := filepath.Join(dir, "My Skill, v2")
+	quoteDir := filepath.Join(dir, `skill "v2"`)
+	newlineDir := filepath.Join(dir, "skill\nv2")
+	for _, path := range []string{plain, commaDir, quoteDir, newlineDir} {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mounts := dockerMounts("", nil, []SandboxMount{
+		{Path: plain},
+		{Path: commaDir},
+		{Path: quoteDir, Write: true},
+		{Path: newlineDir},
+	})
+	if len(mounts) != 4 {
+		t.Fatalf("mounts = %#v", mounts)
+	}
+	got := map[string]bool{}
+	for _, mount := range mounts {
+		fields, err := csv.NewReader(strings.NewReader(mount)).Read()
+		if err != nil {
+			t.Fatalf("parse %q: %v", mount, err)
+		}
+		vals := map[string]string{}
+		readOnly := false
+		for _, field := range fields {
+			if field == "readonly" {
+				readOnly = true
+				continue
+			}
+			key, val, ok := strings.Cut(field, "=")
+			if !ok {
+				t.Fatalf("field %q in %q", field, mount)
+			}
+			vals[key] = val
+		}
+		if vals["type"] != "bind" || vals["source"] == "" || vals["source"] != vals["target"] {
+			t.Fatalf("mount fields = %#v from %q", vals, mount)
+		}
+		got[vals["source"]] = readOnly
+	}
+	want := map[string]bool{plain: true, commaDir: true, quoteDir: false, newlineDir: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("readonly flags = %#v, want %#v", got, want)
 	}
 }
 

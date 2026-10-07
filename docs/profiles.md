@@ -106,4 +106,6 @@ on editor support.
 Sandbox mounts must use existing absolute host paths. A string mount is
 read-only; set `write: true` only for a directory the scanner genuinely needs
 to modify. The CLI equivalents are repeatable `--sandbox-mount /path` and
-`--sandbox-mount /path:rw`.
+`--sandbox-mount /path:rw`. Paths containing commas or quotation marks are
+supported; quote the complete argument for your shell, for example
+`--sandbox-mount '/opt/scanner rules, v2'`.
