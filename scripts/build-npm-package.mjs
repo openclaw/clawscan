@@ -102,6 +102,10 @@ function parseArgs(argv) {
       options.outDir = resolve(argv[++index]);
       continue;
     }
+    if (arg === "--binary-root") {
+      options.binaryRoot = resolve(argv[++index]);
+      continue;
+    }
     if (arg === "--platform") {
       options.target = packageTargetForPlatform(argv[++index]);
       continue;
@@ -160,6 +164,11 @@ async function stagePackage(options) {
   for (const target of options.target ? [options.target] : packageTargets) {
     const binaryDir = join(packageOut, "binaries", platformKeyForTarget(target));
     await mkdir(binaryDir, { recursive: true });
+    if (options.binaryRoot) {
+      const source = join(options.binaryRoot, `clawscan_${binaryVersion}_${target.goos}_${target.goarch}`, binaryNameForTarget(target));
+      await cp(source, join(binaryDir, binaryNameForTarget(target)));
+      await chmod(join(binaryDir, binaryNameForTarget(target)), 0o755);
+    } else {
     run(
       "go",
       [
@@ -180,6 +189,7 @@ async function stagePackage(options) {
         },
       },
     );
+    }
   }
 
   await writeFile(join(options.outDir, "release-tag.txt"), `${binaryVersion}\n`);

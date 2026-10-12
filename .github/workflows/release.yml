@@ -2,347 +2,236 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    tags: ['v*']
   workflow_dispatch:
     inputs:
-      tag:
-        description: Tag name to use when publishing a manual release.
-        required: false
-        type: string
-      publish:
-        description: Publish a GitHub Release instead of only building artifacts.
-        required: true
-        default: false
+      dry_run:
+        description: Validate and build without publishing
         type: boolean
+        default: true
+      version:
+        description: Dated changelog version to verify (blank uses the latest dated section)
+        type: string
+        required: false
 
-permissions:
-  contents: write
-
+permissions: {}
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.version || github.ref_name }}
   cancel-in-progress: false
-
-env:
-  NODE_VERSION: 24
 
 jobs:
   build:
-    name: Build release artifacts
-    runs-on: ubuntu-latest
+    runs-on: macos-15
+    permissions:
+      actions: read
+      contents: read
     outputs:
-      checkout_ref: ${{ steps.version.outputs.checkout_ref }}
-      version: ${{ steps.version.outputs.value }}
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+      tag_object: ${{ steps.release.outputs.tag_object }}
     steps:
-      - name: Resolve release version
-        id: version
-        run: |
-          version="${GITHUB_REF_NAME}"
-          checkout_ref="${GITHUB_REF}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            version="${{ inputs.tag }}"
-            if [ -n "$version" ]; then
-              checkout_ref="$version"
-            elif [ "${{ inputs.publish }}" = "true" ]; then
-              echo "Manual publishing requires the tag input."
-              exit 1
-            else
-              version="manual-${GITHUB_RUN_NUMBER}"
-            fi
-          fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.version.outputs.checkout_ref }}
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build release artifacts
-        run: make release VERSION="${{ steps.version.outputs.value }}"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: clawscan-${{ steps.version.outputs.value }}-release
-          path: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/checksums.txt
-          if-no-files-found: error
-
-  publish:
-    name: Publish GitHub Release
-    runs-on: ubuntu-latest
-    needs: [build, publish-npm]
-    if: github.event_name == 'push' || inputs.publish
-    steps:
-      - name: Checkout release notes
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.build.outputs.checkout_ref }}
-
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Publish release
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test release guard
+        run: python3 -B scripts/test_release_preflight.py
+      - name: Validate source, changelog, signature, and exact-commit push CI
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.build.outputs.version }}
+          VERSION: ${{ inputs.version || github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          CI_WORKFLOWS: ci.yml
+          PACKAGE_NAME: '@openclaw/clawscan'
         run: |
-          npm view "@openclaw/clawscan@${RELEASE_TAG#v}" --json > npm-metadata.json
-          node scripts/release-notes.mjs "$RELEASE_TAG" npm-metadata.json > release-notes.md
-          gh release create "$RELEASE_TAG" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$RELEASE_TAG" \
-            --notes-file release-notes.md
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$VERSION" = main ]; then export VERSION=; fi
+          python3 scripts/release-preflight.py
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '26.5.1'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Test and build release matrix
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          node --test npm/clawscan/test/*.test.mjs
+          node --test scripts/build-npm-package.test.mjs
+          make release VERSION="$TAG"
+      - name: Sign and notarize macOS payloads
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_P8: ${{ secrets.ASC_PRIVATE_KEY_P8 }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: bash scripts/sign-release-macos.sh
+      - name: Pack the same signed release binaries into npm
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: node scripts/build-npm-package.mjs --version "$TAG" --binary-root dist --pack --smoke
+      - name: Freeze verified channel payloads
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          mkdir release-assets
+          cp dist/*.tar.gz dist/*.zip release-assets/
+          cp "dist/npm/openclaw-clawscan-${VERSION}.tgz" "release-assets/clawscan-${VERSION}.tgz"
+          cd release-assets
+          shasum -a 1 ./*.tgz > "clawscan-${VERSION}.tgz.sha1"
+          shasum -a 256 ./*.tgz > "clawscan-${VERSION}.tgz.sha256"
+          shasum -a 256 ./*.tgz ./*.tar.gz ./*.zip > checksums.txt
+          cp checksums.txt SHA256SUMS
+          shasum -a 256 -c checksums.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            release-assets/
+            release-notes.md
+          if-no-files-found: error
 
-  publish-npm:
-    name: Publish ClawScan npm package
-    runs-on: ubuntu-latest
+  verify:
     needs: build
-    if: github.event_name == 'push' || inputs.publish
-    timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            npm_arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+            npm_arch: x64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      actions: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: payload
+      - name: Verify signatures and identical npm payload
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+          NPM_ARCH: ${{ matrix.npm_arch }}
+        run: |
+          set -euo pipefail
+          cd payload/release-assets
+          shasum -a 256 -c checksums.txt
+          mkdir native npm
+          tar -xzf "clawscan_${TAG}_darwin_${ARCH}.tar.gz" -C native
+          tar -xzf "clawscan-${TAG#v}.tgz" -C npm
+          binary="native/clawscan_${TAG}_darwin_${ARCH}/clawscan"
+          cmp "$binary" "npm/package/binaries/darwin-${NPM_ARCH}/clawscan"
+          codesign --verify --strict --check-notarization -R=notarized "$binary"
+          codesign -dv --verbose=4 "$binary" 2>&1 | grep -Fx 'TeamIdentifier=FWJYW4S8P8'
+          "$binary" --version
+          "$binary" --help
+
+  npm:
+    timeout-minutes: 45
+    if: github.event_name == 'push'
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    outputs:
+      dist_tag: ${{ steps.publish.outputs.dist_tag }}
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          ref: ${{ needs.build.outputs.checkout_ref }}
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          node-version: '26.5.1'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          registry-url: https://registry.npmjs.org
-
-      - name: Validate package metadata
-        run: |
-          node <<'NODE'
-          const { readFileSync } = require("node:fs");
-
-          const pkg = JSON.parse(readFileSync("npm/clawscan/package.json", "utf8"));
-          const expectedName = "@openclaw/clawscan";
-          const expectedRepo = "https://github.com/openclaw/clawscan";
-          const repository = typeof pkg.repository === "string"
-            ? pkg.repository
-            : pkg.repository?.url;
-          const normalize = (value) =>
-            String(value ?? "")
-              .trim()
-              .replace(/^git\+/, "")
-              .replace(/\.git$/i, "")
-              .replace(/\/+$/, "");
-
-          const errors = [];
-          if (pkg.name !== expectedName) {
-            errors.push(`package name must be ${expectedName}; found ${pkg.name ?? "<missing>"}`);
-          }
-          if (normalize(repository) !== expectedRepo) {
-            errors.push(`repository URL must be ${expectedRepo}; found ${normalize(repository) || "<missing>"}`);
-          }
-          if (pkg.private === true) {
-            errors.push("package must not be private");
-          }
-          if (errors.length > 0) {
-            for (const error of errors) console.error(error);
-            process.exit(1);
-          }
-          NODE
-
-      - name: Validate release tag
+          name: release-${{ github.sha }}
+          path: payload
+      - name: Publish immutable tarball through npm OIDC
+        id: publish
         env:
-          RELEASE_TAG: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
+          PACKAGE_NAME: '@openclaw/clawscan'
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/release.npmrc
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main
-
-          node --input-type=module <<'NODE'
-          import { execFileSync } from "node:child_process";
-          const { normalizePackageVersion } = await import("./scripts/build-npm-package.mjs");
-
-          const releaseTag = process.env.RELEASE_TAG ?? "";
-          const releaseSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-
-          if (!/^v\d+\.\d+\.\d+$/.test(releaseTag)) {
-            throw new Error(`release tag must match vX.Y.Z; received ${releaseTag || "<missing>"}`);
-          }
-          normalizePackageVersion(releaseTag);
-          execFileSync("git", ["merge-base", "--is-ancestor", releaseSha, "origin/main"]);
-          NODE
-
-      - name: Check npm package
-        run: |
-          node --test npm/clawscan/test/*.test.mjs
-          node --test scripts/build-npm-package.test.mjs
-          node scripts/build-npm-package.mjs --version "${{ needs.build.outputs.version }}" --pack --smoke
-
-      - name: Inspect npm publish state
-        id: publish_state
-        env:
-          RELEASE_TAG: ${{ needs.build.outputs.version }}
-        run: |
-          set -euo pipefail
-          package_version="$(node --input-type=module -e 'import { normalizePackageVersion } from "./scripts/build-npm-package.mjs"; process.stdout.write(normalizePackageVersion(process.env.RELEASE_TAG));')"
-          inspect_package() {
-            local package_name="$1"
-            local tarball_path="$2"
-            local output_name="$3"
-            local published_version=""
-            local view_output=""
-            local view_status=0
-            set +e
-            view_output="$(npm view "${package_name}@${package_version}" version 2>&1)"
-            view_status=$?
-            set -e
-            if [[ "$view_status" -eq 0 && -n "$view_output" ]]; then
-              published_version="$view_output"
-              local remote_integrity=""
-              local local_integrity=""
-              remote_integrity="$(npm view "${package_name}@${package_version}" dist.integrity)"
-              # shellcheck disable=SC2016
-              local_integrity="$(node --input-type=module -e '
-                import { createHash } from "node:crypto";
-                import { readFileSync } from "node:fs";
-                const digest = createHash("sha512").update(readFileSync(process.argv[1])).digest("base64");
-                process.stdout.write(`sha512-${digest}`);
-              ' "$tarball_path")"
-              if [[ "$published_version" != "$package_version" || "$remote_integrity" != "$local_integrity" ]]; then
-                echo "${package_name}@${package_version} does not match the prepared release tarball." >&2
-                exit 1
-              fi
-              echo "${package_name}@${package_version} already matches the prepared release tarball; skipping publish."
-              echo "${output_name}=false" >> "$GITHUB_OUTPUT"
-              return
+          npm install --global npm@11.20.0
+          version=${TAG#v}
+          if npm view "$PACKAGE_NAME@$version" version --json >"$RUNNER_TEMP/npm-existing.json" 2>"$RUNNER_TEMP/npm-view.err"; then
+            echo "Version already exists; refusing to publish" >&2; exit 1;
+          fi
+          grep -q E404 "$RUNNER_TEMP/npm-view.err"
+          cd payload/release-assets
+          sha256sum -c SHA256SUMS
+          latest=$(npm view "$PACKAGE_NAME@latest" version)
+          dist_tag=$(node -e '
+            const [version, latest] = process.argv.slice(1);
+            if (version.includes("-")) { console.log("next"); process.exit(); }
+            const a=version.split(".").map(Number), b=latest.split(".").map(Number);
+            const first=a.findIndex((n,i)=>n!==b[i]);
+            console.log(first>=0 && a[first]<b[first] ? "legacy" : "latest");
+          ' "$version" "$latest")
+          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
+          env -u NPM_TOKEN -u NODE_AUTH_TOKEN npm publish "clawscan-$version.tgz" --access public --provenance --tag "$dist_tag"
+          expected="sha512-$(openssl dgst -sha512 -binary "clawscan-$version.tgz" | base64 -w0)"
+          actual=
+          for _ in {1..120}; do
+            if actual=$(npm view "$PACKAGE_NAME@$version" dist.integrity 2>"$RUNNER_TEMP/npm-propagation.err"); then
+              [[ -z "$actual" ]] || break
+            else
+              grep -q E404 "$RUNNER_TEMP/npm-propagation.err" || { cat "$RUNNER_TEMP/npm-propagation.err" >&2; exit 1; }
             fi
-            if [[ "$view_status" -eq 0 ]]; then
-              echo "${package_name}@${package_version} returned an empty publish-state response." >&2
-              exit 1
-            fi
-            if ! printf '%s\n' "$view_output" | grep -q "E404"; then
-              printf '%s\n' "$view_output" >&2
-              return "$view_status"
-            fi
-            echo "${output_name}=true" >> "$GITHUB_OUTPUT"
-          }
-          inspect_package \
-            "@openclaw/clawscan" \
-            "dist/npm/openclaw-clawscan-${package_version}.tgz" \
-            "clawscan_needed"
-          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
-
-      - name: Publish ClawScan binary package
-        if: steps.publish_state.outputs.clawscan_needed == 'true'
-        run: npm publish "dist/npm/openclaw-clawscan-${{ steps.publish_state.outputs.package_version }}.tgz" --access public --provenance
-
-      - name: Verify npm release metadata
-        run: |
-          set -euo pipefail
-          for package_name in "@openclaw/clawscan"; do
-            npm_dist_json=""
-            # npm can accept a publish before asynchronous registry processing finishes.
-            for attempt in {1..60}; do
-              if npm_dist_json="$(npm view "${package_name}@${{ steps.publish_state.outputs.package_version }}" dist.tarball dist.integrity --json 2>/tmp/npm-view-error)" && [[ -n "$npm_dist_json" ]]; then
-                break
-              fi
-              if [[ "$attempt" == "60" ]]; then
-                cat /tmp/npm-view-error >&2 || true
-                exit 1
-              fi
-              sleep 10
-            done
-            printf '%s\n' "$npm_dist_json"
+            sleep 15
           done
+          test "$actual" = "$expected"
+          npm view "$PACKAGE_NAME@$version" dist.tarball dist.integrity dist.attestations --json
 
-  update-homebrew-tap:
-    name: Update Homebrew tap
+  publish:
+    if: github.event_name == 'push'
+    needs: [build, verify, npm]
     runs-on: ubuntu-latest
-    needs:
-      - build
-      - publish
-      - publish-npm
-    if: always() && needs.publish.result == 'success' && needs.publish-npm.result == 'success' && startsWith(needs.build.outputs.version, 'v')
-    env:
-      TAP_REPO: openclaw/homebrew-tap
-      FORMULA: clawscan
-      DESCRIPTION: Agent-skill security scanner harness for ClawHub
+    permissions:
+      actions: read
+      contents: write
     steps:
-      - name: Dispatch tap formula update
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.build.outputs.sha }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: payload
+      - name: Reverify immutable tag and publish exact archive
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.build.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          TARGET_SHA: ${{ needs.build.outputs.sha }}
+          TAG_OBJECT: ${{ needs.build.outputs.tag_object }}
+          DIST_TAG: ${{ needs.npm.outputs.dist_tag }}
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "refs/tags/$TAG:refs/audit/tag"
+          test "$(git rev-parse refs/audit/tag)" = "$TAG_OBJECT"
+          test "$(git rev-parse refs/audit/tag^{})" = "$TARGET_SHA"
+          git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag refs/audit/tag
+          (cd payload/release-assets && sha256sum -c SHA256SUMS)
+          flags=()
+          [[ "$TAG" != *-* ]] || flags+=(--prerelease)
+          [[ "$DIST_TAG" = latest ]] || flags+=(--latest=false)
+          gh release create "$TAG" payload/release-assets/* --verify-tag --title "$TAG" --notes-file payload/release-notes.md "${flags[@]}"
 
-          export GH_TOKEN="${HOMEBREW_TAP_TOKEN:-${HOMEBREW_TAP_GITHUB_TOKEN:-}}"
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::warning::Homebrew tap update skipped; set HOMEBREW_TAP_TOKEN with workflow access to ${TAP_REPO}."
-            exit 0
-          fi
-
-          if ! can_push="$(gh api "repos/${TAP_REPO}" --jq '.permissions.push // false')"; then
-            echo "::warning::Homebrew tap update skipped; token cannot access ${TAP_REPO}."
-            exit 0
-          fi
-          if [ "${can_push}" != "true" ]; then
-            echo "::warning::Homebrew tap update skipped; token needs push access to ${TAP_REPO}."
-            exit 0
-          fi
-
-          request_id="${FORMULA}-${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          expected_title="Update ${FORMULA} for ${RELEASE_TAG} (${request_id})"
-
-          gh workflow run update-formula.yml \
-            --repo "${TAP_REPO}" \
-            --ref main \
-            -f formula="${FORMULA}" \
-            -f tag="${RELEASE_TAG}" \
-            -f repository="${GITHUB_REPOSITORY}" \
-            -f description="${DESCRIPTION}" \
-            -f artifact_template="{formula}_{tag}_{target}.tar.gz" \
-            -f request_id="${request_id}"
-
-          run_id=""
-          for _ in {1..30}; do
-            run_id=$(gh run list \
-              --repo "${TAP_REPO}" \
-              --workflow update-formula.yml \
-              --branch main \
-              --event workflow_dispatch \
-              --limit 20 \
-              --json databaseId,displayTitle \
-              --jq ".[] | select(.displayTitle == \"${expected_title}\") | .databaseId" | head -n1)
-            if [ -n "${run_id}" ]; then
-              break
-            fi
-            sleep 5
-          done
-
-          if [ -z "${run_id}" ]; then
-            echo "::error::Could not find tap workflow run with title: ${expected_title}"
-            exit 1
-          fi
-
-          gh run watch "${run_id}" \
-            --repo "${TAP_REPO}" \
-            --exit-status \
-            --interval 10
+  homebrew:
+    if: github.event_name == 'push' && needs.npm.outputs.dist_tag == 'latest'
+    needs: [build, publish, npm]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/homebrew-release.yml
+    with:
+      tag: ${{ needs.build.outputs.tag }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
