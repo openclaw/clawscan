@@ -175,7 +175,7 @@ async function stagePackage(options) {
         "build",
         "-trimpath",
         "-ldflags",
-        ldflags,
+        target.goos === "darwin" ? `${ldflags} -macos=13.0` : ldflags,
         "-o",
         join(binaryDir, binaryNameForTarget(target)),
         "github.com/openclaw/clawscan/cmd/clawscan",
@@ -186,6 +186,7 @@ async function stagePackage(options) {
           GOOS: target.goos,
           GOARCH: target.goarch,
           CGO_ENABLED: "0",
+          MACOSX_DEPLOYMENT_TARGET: "13.0",
         },
       },
     );

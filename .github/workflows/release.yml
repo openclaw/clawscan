@@ -15,13 +15,15 @@ on:
         required: false
 
 permissions: {}
+env:
+  MACOSX_DEPLOYMENT_TARGET: '13.0'
 concurrency:
   group: release-${{ github.event.inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: xcode-27
     permissions:
       actions: read
       contents: read
@@ -99,10 +101,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: macos-15
+          - runner: xcode-27
             arch: arm64
             npm_arch: arm64
-          - runner: macos-15-intel
+          - runner: xcode-27
             arch: amd64
             npm_arch: x64
     runs-on: ${{ matrix.runner }}
@@ -129,8 +131,19 @@ jobs:
           cmp "$binary" "npm/package/binaries/darwin-${NPM_ARCH}/clawscan"
           codesign --verify --strict --check-notarization -R=notarized "$binary"
           codesign -dv --verbose=4 "$binary" 2>&1 | grep -Fx 'TeamIdentifier=FWJYW4S8P8'
-          "$binary" --version
-          "$binary" --help
+          minos=$(xcrun vtool -show-build "$binary" | awk '$1 == "minos" { print $2 }')
+          test "$minos" = 13.0
+          if [ "$ARCH" = amd64 ]; then
+            if ! arch -x86_64 /usr/bin/true; then
+              softwareupdate --install-rosetta --agree-to-license
+            fi
+            arch -x86_64 /usr/bin/true
+            arch -x86_64 "$binary" --version
+            arch -x86_64 "$binary" --help
+          else
+            "$binary" --version
+            "$binary" --help
+          fi
 
   npm:
     timeout-minutes: 45

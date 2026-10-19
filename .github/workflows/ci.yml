@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MACOSX_DEPLOYMENT_TARGET: '13.0'
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -30,9 +33,17 @@ jobs:
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: ${{ matrix.check_name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            check_name: Test
+          - os: xcode-27
+            check_name: Test (macOS 27)
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,6 +78,7 @@ jobs:
         run: go build ./cmd/clawscan
 
       - name: Test Docker mount paths and permissions
+        if: runner.os == 'Linux'
         run: |
           docker pull alpine:3.23
           node --test scripts/docker-mounts.test.mjs
@@ -77,6 +89,23 @@ jobs:
           node --test scripts/build-npm-package.test.mjs
           node --test scripts/release-notes.test.mjs
           node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke
+
+      - name: Verify macOS minimum and both architectures
+        if: runner.os == 'macOS'
+        run: |
+          if ! arch -x86_64 /usr/bin/true; then
+            softwareupdate --install-rosetta --agree-to-license
+          fi
+          arch -x86_64 /usr/bin/true
+          for npm_arch in arm64 x64; do
+            binary="dist/npm/package/binaries/darwin-${npm_arch}/clawscan"
+            minos=$(xcrun vtool -show-build "$binary" | awk '$1 == "minos" { print $2 }')
+            test "$minos" = 13.0
+          done
+          dist/npm/package/binaries/darwin-arm64/clawscan --version
+          dist/npm/package/binaries/darwin-arm64/clawscan --help
+          arch -x86_64 dist/npm/package/binaries/darwin-x64/clawscan --version
+          arch -x86_64 dist/npm/package/binaries/darwin-x64/clawscan --help
 
       - name: Test runtime update branch push
         run: node --test scripts/push-runtime-tool-update-branch.test.mjs

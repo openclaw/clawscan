@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Move macOS CI and release verification to Xcode 27 with Rosetta for x86_64, retain the existing macOS 13 minimum in both release and npm binaries, and select Go 1.27.2 to fix reachable standard-library vulnerabilities while keeping the Go 1.27.1 source minimum.
+
 - Refresh bundled Cisco, Snyk, Socket, Claude Code, and Codex tools while retaining the existing Node.js and Python runtime floors and two-day dependency cooldown.
 - Preserve Docker sandbox paths containing commas or quotation marks without changing read-only or writable mount permissions. Thanks @SebTardif (#64).
 - Use one shared autoreview installation from `openclaw/agent-skills`; repository entrypoints now receive upstream fixes without copied helpers or test suites.
