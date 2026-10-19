@@ -17,6 +17,11 @@ Install ClawScan:
 npm install -g @openclaw/clawscan
 ```
 
+The macOS binaries support macOS 13 or later on Apple Silicon and Intel. CI uses
+the Apple Silicon `xcode-27` runner and verifies x86_64 binaries under Rosetta.
+Release and npm builds pin the macOS 13 deployment target and check both binaries' minimum OS metadata.
+Source builds require Go 1.27.1 or later; the module selects the patched Go 1.27.2 build toolchain.
+
 Command-backed scanners and judges run in ClawScan's Docker runtime by default,
 so keep Docker running for local scans.
 

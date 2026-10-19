@@ -1674,13 +1674,14 @@ func TestNewArtifactAlwaysIncludesPassingGate(t *testing.T) {
 }
 
 func TestRunWritesScannerOnlyArtifact(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "run.json")
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--output", out})
+	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off", "--output", out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4737,6 +4738,7 @@ func TestValidateArtifactInspectionReceiptStillRequiresChallengedFile(t *testing
 }
 
 func TestRunLoadsExplicitContextJSON(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.MkdirAll(target, 0o755); err != nil {
@@ -4751,6 +4753,7 @@ func TestRunLoadsExplicitContextJSON(t *testing.T) {
 		Target:      target,
 		ContextPath: contextPath,
 		Scanners:    []string{"skillspector"},
+		Sandbox:     SandboxOptions{Mode: SandboxModeOff},
 	}
 	artifact, err := Run(opts, RunContext{
 		Env: map[string]string{},
@@ -4767,6 +4770,7 @@ func TestRunLoadsExplicitContextJSON(t *testing.T) {
 }
 
 func TestRunRejectsInvalidContextJSON(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
 	if err := os.MkdirAll(target, 0o755); err != nil {
@@ -4780,6 +4784,7 @@ func TestRunRejectsInvalidContextJSON(t *testing.T) {
 		Target:      target,
 		ContextPath: contextPath,
 		Scanners:    []string{"skillspector"},
+		Sandbox:     SandboxOptions{Mode: SandboxModeOff},
 	}, RunContext{
 		Env: map[string]string{},
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{

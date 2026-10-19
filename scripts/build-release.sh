@@ -33,7 +33,11 @@ for platform in "${platforms[@]}"; do
   fi
 
   mkdir -p "$workdir"
-  GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "${workdir}/${binary}" "$package"
+  target_ldflags="$ldflags"
+  if [[ "$os" == darwin ]]; then
+    target_ldflags="$target_ldflags -macos=13.0"
+  fi
+  MACOSX_DEPLOYMENT_TARGET=13.0 GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "$target_ldflags" -o "${workdir}/${binary}" "$package"
   cp README.md "${workdir}/README.md"
 
   if [[ "$os" == "windows" ]]; then
