@@ -151,8 +151,8 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 	artifact, err := Run(opts, RunContext{
 		Env: map[string]string{
 			"LLM_API_KEY":      "present",
-			"DEFAULT_MODEL":    "gpt-6-luna",
-			"REASONING_EFFORT": "high",
+			"DEFAULT_MODEL":    "gpt-6.1-sol",
+			"REASONING_EFFORT": "medium",
 		},
 		HostCommandRunner:  hostRunner,
 		DockerAvailability: func() error { return nil },

@@ -32,12 +32,13 @@ type Config struct {
 }
 
 type Profile struct {
-	Scanners       []ProfileScanner  `yaml:"scanners"`
-	ScannerResults map[string]string `yaml:"scannerResults,omitempty"`
-	Output         string            `yaml:"output,omitempty"`
-	JSON           bool              `yaml:"json,omitempty"`
-	Sandbox        *Sandbox          `yaml:"sandbox,omitempty"`
-	Judge          *Judge            `yaml:"judge,omitempty"`
+	ScannerEnvDefaults map[string]string `yaml:"scannerEnvDefaults,omitempty"`
+	Scanners           []ProfileScanner  `yaml:"scanners"`
+	ScannerResults     map[string]string `yaml:"scannerResults,omitempty"`
+	Output             string            `yaml:"output,omitempty"`
+	JSON               bool              `yaml:"json,omitempty"`
+	Sandbox            *Sandbox          `yaml:"sandbox,omitempty"`
+	Judge              *Judge            `yaml:"judge,omitempty"`
 }
 
 func (profile Profile) ScannerIDs() []string {
@@ -294,6 +295,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
+	opts.ScannerEnvDefaults = selected.profile.ScannerEnvDefaults
 	opts.Profile = profileName
 	opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 	opts.ConfigSource = configSource
@@ -396,6 +398,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
+		opts.ScannerEnvDefaults = selected.profile.ScannerEnvDefaults
 		opts.Profile = profileName
 		opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 		opts.ConfigSource = filepath.Clean(projectPath)
@@ -907,6 +910,9 @@ func invalidDeclaredEnvName(env []string) string {
 }
 
 func validateProfile(name string, profile Profile) error {
+	if err := runner.ValidateScannerEnvDefaults(profile.ScannerEnvDefaults); err != nil {
+		return fmt.Errorf("Profile %s: %w", name, err)
+	}
 	seen := map[string]bool{}
 	for _, scanner := range profile.Scanners {
 		if scanner.mapping && strings.TrimSpace(scanner.ID) == "" {

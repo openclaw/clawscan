@@ -148,7 +148,10 @@ func TestClawHubProfilesConfigureCodex(t *testing.T) {
 						t.Fatalf("CODEX_API_KEY = %q, want %q", lines[0], test.output)
 					}
 					args := strings.Join(lines[1:], "\x00")
-					for _, want := range []string{"--model\x00gpt-6-luna\x00", "-c\x00model_reasoning_effort=high\x00"} {
+					if strings.Contains(args, "service_tier") {
+						t.Fatalf("judge must use default Standard service: %s", args)
+					}
+					for _, want := range []string{"--model\x00gpt-6.1-sol\x00", "-c\x00model_reasoning_effort=high\x00"} {
 						if !strings.Contains(args, want) {
 							t.Fatalf("codex arguments missing %q: %#v", want, lines[1:])
 						}
@@ -2003,4 +2006,34 @@ func (commandRunner *profileCommandRunner) Run(command string, args []string, _ 
 		args:    append([]string(nil), args...),
 	})
 	return runner.CommandOutput{Stdout: commandRunner.stdout}, nil
+}
+
+func TestResolveScannerEnvDefaults(t *testing.T) {
+	for _, profile := range []string{"clawhub", "clawhub-aig"} {
+		opts, err := ResolveArgs([]string{"./skill", "--profile", profile}, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if opts.ScannerEnvDefaults["SKILLSPECTOR_MODEL"] != "gpt-6.1-sol" || opts.ScannerEnvDefaults["REASONING_EFFORT"] != "medium" {
+			t.Fatalf("defaults = %v", opts.ScannerEnvDefaults)
+		}
+	}
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles:\n  clawhub:\n    scanners: [clawscan-static]\n")
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.ScannerEnvDefaults) != 0 {
+		t.Fatalf("shadow profile inherited production defaults: %v", opts.ScannerEnvDefaults)
+	}
+}
+
+func TestProfileRejectsSecretEnvDefaults(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles:\n  review:\n    scanners: [skillspector]\n    scannerEnvDefaults:\n      OPENAI_API_KEY: fixture\n")
+	_, err := ResolveArgs([]string{"./skill", "--profile", "review", "--discover-config"}, dir)
+	if err == nil || !strings.Contains(err.Error(), "credentials belong in the environment") {
+		t.Fatalf("err = %v", err)
+	}
 }

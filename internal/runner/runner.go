@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net/url"
 	"os"
@@ -27,6 +28,7 @@ import (
 )
 
 type Options struct {
+	ScannerEnvDefaults map[string]string
 	Target             string
 	TargetKind         string
 	Profile            string
@@ -452,6 +454,9 @@ func ValidateRequirements(opts Options, env map[string]string) error {
 }
 
 func Run(opts Options, ctx RunContext) (Artifact, error) {
+	if err := ValidateScannerEnvDefaults(opts.ScannerEnvDefaults); err != nil {
+		return Artifact{}, err
+	}
 	if err := validateGateRuleScanners(opts); err != nil {
 		return Artifact{}, err
 	}
@@ -459,6 +464,8 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	if env == nil {
 		env = EnvMap(os.Environ())
 	}
+	// Each run owns its defaults; profile batches must not mutate their shared environment.
+	env = maps.Clone(env)
 	applyRuntimeEnvDefaults(opts, env)
 	target, err := resolveTargetForOptions(opts)
 	if err != nil {
@@ -2241,6 +2248,7 @@ func defaultAIGRuntimeEnv(env map[string]string) {
 }
 
 func applyRuntimeEnvDefaults(opts Options, env map[string]string) {
+	applyScannerModelDefaults(opts, env)
 	if scannerRequested(opts, "skillspector") {
 		defaultSkillSpectorOpenAIProvider(env)
 	}

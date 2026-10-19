@@ -14,12 +14,13 @@ const pages = [
   ['openclaw-install-policy.md', 'OpenClaw install policy'],
   ['judge.md', 'Judge'],
   ['sandbox.md', 'Sandbox'],
+  ['scanner-runtime.md', 'Scanner runtime'],
   ['benchmarks.md', 'Benchmarks'],
 ];
 
 const navSections = [
   ['Start', ['index.md']],
-  ['Workflow', ['scanners.md', 'profiles.md', 'openclaw-install-policy.md', 'judge.md', 'sandbox.md']],
+  ['Workflow', ['scanners.md', 'profiles.md', 'openclaw-install-policy.md', 'judge.md', 'sandbox.md', 'scanner-runtime.md']],
   ['Evaluate', ['benchmarks.md']],
 ];
 

@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -57,6 +58,13 @@ func TestDefaultProfileRegistryContainsEmbeddedBuiltIns(t *testing.T) {
 	}
 	if candidate.profile.Judge == nil || clawhub.profile.Judge == nil {
 		t.Fatal("missing built-in judge")
+	}
+	wantDefaults := map[string]string{
+		"SKILLSPECTOR_PROVIDER": "openai", "SKILLSPECTOR_MODEL": "gpt-6.1-sol",
+		"SKILLSPECTOR_REASONING_EFFORT": "medium", "DEFAULT_MODEL": "gpt-6.1-sol", "REASONING_EFFORT": "medium",
+	}
+	if !maps.Equal(clawhub.profile.ScannerEnvDefaults, wantDefaults) || !maps.Equal(candidate.profile.ScannerEnvDefaults, wantDefaults) {
+		t.Fatal("ClawHub profile scanner-model defaults diverged")
 	}
 	if candidate.profile.Judge.Command != clawhub.profile.Judge.Command {
 		t.Fatalf("clawhub-aig judge command differs from clawhub")

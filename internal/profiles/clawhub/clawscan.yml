@@ -6,6 +6,12 @@ profiles:
       - skillspector
       - clawscan-static
       - aig
+    scannerEnvDefaults:
+      SKILLSPECTOR_PROVIDER: openai
+      SKILLSPECTOR_MODEL: gpt-6.1-sol
+      SKILLSPECTOR_REASONING_EFFORT: medium
+      DEFAULT_MODEL: gpt-6.1-sol
+      REASONING_EFFORT: medium
     sandbox:
       env:
         - OPENAI_API_KEY
@@ -21,13 +27,12 @@ profiles:
       command: >-
         [ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY";
         codex exec --cd {{ workspace }}
-        --model gpt-6-luna
+        --model gpt-6.1-sol
         --sandbox {{ judge_sandbox }}
         --skip-git-repo-check
         --ignore-user-config
         -c approval_policy=never
         -c model_reasoning_effort=high
-        -c service_tier=fast
         -c 'shell_environment_policy.inherit="core"'
         -c shell_environment_policy.ignore_default_excludes=false
         --output-schema {{ output_schema:output.schema.json }}
@@ -39,6 +44,12 @@ profiles:
     scanners:
       - skillspector
       - aig
+    scannerEnvDefaults:
+      SKILLSPECTOR_PROVIDER: openai
+      SKILLSPECTOR_MODEL: gpt-6.1-sol
+      SKILLSPECTOR_REASONING_EFFORT: medium
+      DEFAULT_MODEL: gpt-6.1-sol
+      REASONING_EFFORT: medium
     sandbox:
       env:
         - OPENAI_API_KEY
@@ -54,13 +65,12 @@ profiles:
       command: >-
         [ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY";
         codex exec --cd {{ workspace }}
-        --model gpt-6-luna
+        --model gpt-6.1-sol
         --sandbox {{ judge_sandbox }}
         --skip-git-repo-check
         --ignore-user-config
         -c approval_policy=never
         -c model_reasoning_effort=high
-        -c service_tier=fast
         -c 'shell_environment_policy.inherit="core"'
         -c shell_environment_policy.ignore_default_excludes=false
         --output-schema {{ output_schema:output.schema.json }}

@@ -51,6 +51,33 @@
         },
         "judge": {
           "$ref": "#/$defs/judge"
+        },
+        "scannerEnvDefaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Non-secret model defaults for bundled scanners; explicit environment overrides win.",
+          "properties": {
+            "SKILLSPECTOR_PROVIDER": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:/@-]{1,200}$"
+            },
+            "SKILLSPECTOR_MODEL": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:/@-]{1,200}$"
+            },
+            "SKILLSPECTOR_REASONING_EFFORT": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:/@-]{1,200}$"
+            },
+            "DEFAULT_MODEL": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:/@-]{1,200}$"
+            },
+            "REASONING_EFFORT": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:/@-]{1,200}$"
+            }
+          }
         }
       }
     },
