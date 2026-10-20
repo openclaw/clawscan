@@ -4,4 +4,3 @@ self-hosted-runner:
     - openclaw
     - clawscan
     - xcode-27
-    - blacksmith-8vcpu-ubuntu-2404
