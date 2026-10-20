@@ -12,13 +12,11 @@ permissions:
 
 jobs:
   inspect-package:
-    name: Inspect package (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
+    name: Inspect package (Ubuntu 22.04)
+    # Ubuntu 24.04 rejects the judge's nested bubblewrap setup with RTM_NEWADDR.
+    # Keep the real read-only judge proof on a runner that supports it.
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-22.04]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,10 +35,6 @@ jobs:
           go build -o ./dist/clawscan ./cmd/clawscan
           npm install -g @openai/codex@0.160.0
           codex --version
-
-      - name: Probe sandbox before calling the model
-        continue-on-error: true
-        run: codex sandbox -c 'sandbox_mode="read-only"' -- /bin/sh -c 'printf "sandbox can execute commands\n"'
 
       - name: Verify real judge inspection with worker environment
         env:
@@ -91,7 +85,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: judge-inspection-${{ matrix.runner }}
+          name: judge-inspection-ubuntu-22.04
           path: artifacts/judge-inspection.json
           if-no-files-found: warn
           retention-days: 7
