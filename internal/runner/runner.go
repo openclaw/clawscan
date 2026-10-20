@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net/url"
 	"os"
@@ -27,6 +28,7 @@ import (
 )
 
 type Options struct {
+	ScannerEnvDefaults map[string]string
 	Target             string
 	TargetKind         string
 	Profile            string
@@ -239,6 +241,7 @@ type TargetWorkspaceOmission struct {
 type JudgeResult struct {
 	Status           string      `json:"status"`
 	Command          string      `json:"command,omitempty"`
+	ConfiguredModel  string      `json:"configuredModel,omitempty"`
 	PromptPath       string      `json:"promptPath,omitempty"`
 	OutputSchemaPath string      `json:"outputSchemaPath,omitempty"`
 	OutputPath       string      `json:"outputPath,omitempty"`
@@ -452,6 +455,9 @@ func ValidateRequirements(opts Options, env map[string]string) error {
 }
 
 func Run(opts Options, ctx RunContext) (Artifact, error) {
+	if err := ValidateScannerEnvDefaults(opts.ScannerEnvDefaults); err != nil {
+		return Artifact{}, err
+	}
 	if err := validateGateRuleScanners(opts); err != nil {
 		return Artifact{}, err
 	}
@@ -459,6 +465,8 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	if env == nil {
 		env = EnvMap(os.Environ())
 	}
+	// Each run owns its defaults; profile batches must not mutate their shared environment.
+	env = maps.Clone(env)
 	applyRuntimeEnvDefaults(opts, env)
 	target, err := resolveTargetForOptions(opts)
 	if err != nil {
@@ -1263,6 +1271,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 	}
 	result := &JudgeResult{
 		Status:           "completed",
+		ConfiguredModel:  configuredJudgeModel(command, runtime.GOOS, env),
 		PromptPath:       state.promptSource,
 		OutputSchemaPath: state.schemaSource,
 		OutputPath:       state.outputPath,
@@ -2241,6 +2250,7 @@ func defaultAIGRuntimeEnv(env map[string]string) {
 }
 
 func applyRuntimeEnvDefaults(opts Options, env map[string]string) {
+	applyScannerModelDefaults(opts, env)
 	if scannerRequested(opts, "skillspector") {
 		defaultSkillSpectorOpenAIProvider(env)
 	}

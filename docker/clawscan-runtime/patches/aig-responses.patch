@@ -1,0 +1,115 @@
+--- a/skill-scan/skill_scan/utils/llm.py
++++ b/skill-scan/skill_scan/utils/llm.py
+@@ -18,6 +18,7 @@
+
+ from __future__ import annotations
+
++import threading
+ import time
+
+ import openai
+@@ -74,6 +75,9 @@
+         return ret
+
+     def chat_stream(self, message: list[dict]) -> tuple[str, dict]:
++        if self.model == "gpt-6.1-sol":
++            return self._chat_responses(message)
++
+         started = time.monotonic()
+         request_options = {}
+         reasoning_effort = (get_env("REASONING_EFFORT") or "").strip()
+@@ -121,6 +125,94 @@
+
+         return ret, usage
+
++    def _chat_responses(self, message: list[dict]) -> tuple[str, dict]:
++        # AIG tools are XML in ordinary text, not OpenAI function/tool calls.
++        # Replay the complete local history without creating server-side state.
++        history = []
++        for item in message:
++            role, content = item.get("role"), item.get("content")
++            if role not in {"system", "developer", "user", "assistant"} or not isinstance(
++                content, str
++            ):
++                raise ValueError("GPT-6.1 Sol requires AIG text message history")
++            history.append({"role": role, "content": content})
++
++        deadline = getattr(self, "stream_timeout", 300)
++        started = time.monotonic()
++        if deadline <= 0:
++            raise TimeoutError("LLM streaming response deadline must be positive")
++        effort = (get_env("REASONING_EFFORT") or "").strip()
++        options = {"reasoning": {"effort": effort}} if effort else {}
++        tier = (get_env("AIG_SERVICE_TIER") or "default").strip() or "default"
++        if tier not in {"auto", "default", "flex", "priority"}:
++            raise ValueError("Unsupported AIG_SERVICE_TIER")
++        options["service_tier"] = tier
++        # Bound opening the stream too; automatic SDK retries can exceed the
++        # overall budget. Other models retain the original client/retry path.
++        response = self.client.with_options(
++            timeout=min(60, deadline), max_retries=0
++        ).responses.create(model=self.model, input=history, stream=True, store=False, **options)
++        expired = threading.Event()
++
++        def expire():
++            expired.set()
++            response.close()
++
++        # The SDK read timeout resets on each packet. Close even a silent or
++        # heartbeat-only stream at the complete-response deadline.
++        watchdog = threading.Timer(max(0, deadline - (time.monotonic() - started)), expire)
++        watchdog.daemon = True
++        watchdog.start()
++        ret = ""
++        try:
++            for event in response:
++                if expired.is_set() or time.monotonic() - started >= deadline:
++                    raise TimeoutError("LLM streaming response deadline exceeded")
++                if event.type == "response.output_text.delta":
++                    ret += event.delta
++                elif event.type == "response.refusal.delta":
++                    raise RuntimeError("OpenAI Responses refused the audit request")
++                elif event.type in {"response.failed", "response.incomplete"}:
++                    result = event.response
++                    detail = (
++                        getattr(getattr(result, "error", None), "code", None)
++                        or getattr(getattr(result, "incomplete_details", None), "reason", None)
++                        or "unknown"
++                    )
++                    # Do not include server messages, which may echo audit input.
++                    raise RuntimeError(f"OpenAI Responses {result.status}: {detail}")
++                elif event.type == "error":
++                    raise RuntimeError(f"OpenAI Responses stream error: {event.code}")
++                elif event.type == "response.completed":
++                    result = event.response
++                    if result.status != "completed":
++                        raise RuntimeError(f"OpenAI Responses unexpected status: {result.status}")
++                    for item in result.output:
++                        if item.type == "message" and any(
++                            part.type == "refusal" for part in item.content
++                        ):
++                            raise RuntimeError("OpenAI Responses refused the audit request")
++                    usage = result.usage
++                    return result.output_text or ret, (
++                        {
++                            "prompt_tokens": usage.input_tokens,
++                            "completion_tokens": usage.output_tokens,
++                            "total_tokens": usage.total_tokens,
++                        }
++                        if usage is not None
++                        else None
++                    )
++            raise RuntimeError("OpenAI Responses stream ended without response.completed")
++        except Exception as exc:
++            if expired.is_set() or time.monotonic() - started >= deadline:
++                raise TimeoutError(
++                    f"LLM streaming response exceeded the {deadline}-second deadline"
++                ) from exc
++            raise
++        finally:
++            watchdog.cancel()
++            response.close()
++
+     def _normalize_usage(self, usage) -> dict | None:
+         if not usage:
+             return None

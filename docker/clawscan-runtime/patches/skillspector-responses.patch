@@ -1,0 +1,59 @@
+diff --git a/src/skillspector/providers/chat_models.py b/src/skillspector/providers/chat_models.py
+index e1366ba..d95faef 100644
+--- a/src/skillspector/providers/chat_models.py
++++ b/src/skillspector/providers/chat_models.py
+@@ -212,6 +212,18 @@ def create_openai_compatible_chat_model(
+         model, include_seed=True, reasoning_effort=reasoning_effort
+     )
+     kwargs.update(sampling_parameters)
++    # Sol exposes tool calls only on Responses, not Chat Completions. Keep
++    # other models and OpenAI-compatible providers on their existing route.
++    if model == "gpt-6.1-sol":
++        if "seed" in sampling_parameters:
++            raise UnsupportedControlError(
++                "SKILLSPECTOR_SEED is not supported by the Sol Responses API; unset it"
++            )
++        kwargs["use_responses_api"] = True
++        service_tier = (os.getenv("SKILLSPECTOR_SERVICE_TIER") or "default").strip() or "default"
++        if service_tier not in {"auto", "default", "flex", "priority"}:
++            raise UnsupportedControlError("Unsupported SKILLSPECTOR_SERVICE_TIER")
++        kwargs["service_tier"] = service_tier
+     chat_model = ChatOpenAI(**kwargs)
+     register_chat_model_controls(
+         chat_model,
+diff --git a/tests/unit/test_model_capabilities.py b/tests/unit/test_model_capabilities.py
+index 5e9a044..d5e3d55 100644
+--- a/tests/unit/test_model_capabilities.py
++++ b/tests/unit/test_model_capabilities.py
+@@ -315,10 +315,11 @@ class TestOpenAIStructuredOutput:
+
+         assert chain.invoke("analyse this") == Verdict(ok=True)
+         request = requests[0]
+-        assert request["response_format"] is Verdict
++        assert llm.use_responses_api is True
++        assert request["text_format"] is Verdict
+         assert "tools" not in request and "tool_choice" not in request
+-        assert request["max_completion_tokens"] == 128_000
+-        assert "temperature" not in request and "reasoning_effort" not in request
++        assert request["max_output_tokens"] == 128_000
++        assert "temperature" not in request and "reasoning" not in request
+
+     @pytest.mark.parametrize(
+         "model", ["azure/anthropic/claude-opus-5-5", "aws/anthropic/bedrock-claude-sonnet-5-5"]
+@@ -514,13 +515,11 @@ class TestOpenAIProtocolControls:
+         assert chat_model_requested_controls(llm)["temperature"] == 0.2
+         assert llm.reasoning_effort == "minimal"
+
+-    def test_seed_is_forwarded_to_gpt_6_1_sol(self, monkeypatch: pytest.MonkeyPatch) -> None:
++    def test_seed_is_rejected_by_sol_responses(self, monkeypatch: pytest.MonkeyPatch) -> None:
+         provider = _openai_protocol_provider(monkeypatch, OpenAIProvider)
+         monkeypatch.setenv("SKILLSPECTOR_SEED", "42")
+-        llm = provider.create_chat_model("gpt-6.1-sol", max_tokens=1_000)
+-        # Sent and recorded, though OpenAI treats the seed as best-effort only.
+-        assert chat_model_requested_controls(llm)["seed"] == 42
+-        assert chat_model_controls(llm)["seed"] == 42
++        with pytest.raises(UnsupportedControlError, match="SKILLSPECTOR_SEED"):
++            provider.create_chat_model("gpt-6.1-sol", max_tokens=1_000)
+
+
+ class TestAzureOpenAIControls:

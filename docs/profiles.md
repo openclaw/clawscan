@@ -56,16 +56,31 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `clawscan-static`, `aig` | Codex `gpt-6-luna`, high reasoning, bundled ClawHub prompt/schema |
-| `clawhub-aig` | `skillspector`, `aig` | Codex `gpt-6-luna`, high reasoning, bundled ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `clawscan-static`, `aig` | Codex `gpt-6.1-sol`, high reasoning, Standard service, bundled ClawHub prompt/schema |
+| `clawhub-aig` | `skillspector`, `aig` | Codex `gpt-6.1-sol`, high reasoning, Standard service, bundled ClawHub prompt/schema |
 | `openclaw-install-policy` | `skillspector`, `clawscan-static` | none |
 
-Set `SKILLSPECTOR_MODEL=gpt-6-luna` and
-`SKILLSPECTOR_REASONING_EFFORT=high` to select the same model and effort for
-SkillSpector. Both settings pass through the Docker sandbox. The A.I.G model
-uses `DEFAULT_MODEL`; its optional `REASONING_EFFORT` setting also passes
-through, but requires an upstream version that supports it. The bundled
-A.I.G 0.2.2 runtime does not yet support reasoning effort.
+The two ClawHub profiles explicitly configure the OpenAI scanner lanes with
+`scannerEnvDefaults`: SkillSpector uses `SKILLSPECTOR_PROVIDER=openai`,
+`SKILLSPECTOR_MODEL=gpt-6.1-sol`, and `SKILLSPECTOR_REASONING_EFFORT=medium`;
+A.I.G uses `DEFAULT_MODEL=gpt-6.1-sol` and `REASONING_EFFORT=medium` with OpenAI
+credentials. The final Codex judge uses `gpt-6.1-sol`, high reasoning, and default
+Standard service (no fast/priority override). Credentials stay in the environment.
+
+Explicit model/provider/effort environment overrides win. A different
+SkillSpector provider retains its own model defaults. A.I.G with a dedicated
+`LLM_API_KEY` retains its provider defaults unless `DEFAULT_BASE_URL` explicitly
+selects `https://api.openai.com/v1`; third-party endpoints are never redirected.
+An explicit alternative model does not inherit the profile's Sol effort.
+Generic `--scanner` runs and project profiles without `scannerEnvDefaults` keep
+their existing provider choices. The supported defaults are only the five model
+control names above, not arbitrary environment variables or credentials.
+
+Use the runtime image built from the same source revision: its pinned NVIDIA
+SkillSpector and Tencent Zhuque Lab A.I.G integrations include narrow Responses
+API compatibility patches. Sol tool calls are not supported on Chat Completions;
+changing only the model environment or reusing the old 0.2.0 runtime is insufficient.
+See [scanner runtime compatibility](scanner-runtime.md).
 
 ## Build a custom profile with `.clawscan.yml`
 

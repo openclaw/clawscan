@@ -148,7 +148,8 @@ func TestClawHubProfilesConfigureCodex(t *testing.T) {
 						t.Fatalf("CODEX_API_KEY = %q, want %q", lines[0], test.output)
 					}
 					args := strings.Join(lines[1:], "\x00")
-					for _, want := range []string{"--model\x00gpt-6-luna\x00", "-c\x00model_reasoning_effort=high\x00"} {
+
+					for _, want := range []string{"--model\x00gpt-6.1-sol\x00", "-c\x00model_reasoning_effort=high\x00", "--ignore-user-config\x00", "-c\x00service_tier=\"default\"\x00"} {
 						if !strings.Contains(args, want) {
 							t.Fatalf("codex arguments missing %q: %#v", want, lines[1:])
 						}
@@ -156,6 +157,27 @@ func TestClawHubProfilesConfigureCodex(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestClawHubJudgeOverrideKeepsExplicitTier(t *testing.T) {
+	command := `codex exec --model gpt-6-luna -c model_reasoning_effort=low -c 'service_tier="priority"'`
+	for _, profile := range []string{"clawhub", "clawhub-aig"} {
+		opts, err := ResolveArgs([]string{"./skill", "--profile", profile, "--judge", command}, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if opts.Judge.Command != command {
+			t.Fatalf("explicit judge changed: %q", opts.Judge.Command)
+		}
+		cmd := exec.Command("sh", "-c", `codex() { printf '%s\n' "$@"; }; `+opts.Judge.Command)
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(output), `service_tier="priority"`+"\n") || strings.Contains(string(output), `service_tier="default"`) {
+			t.Fatalf("explicit tier was overridden: %s", output)
+		}
 	}
 }
 
@@ -2003,4 +2025,34 @@ func (commandRunner *profileCommandRunner) Run(command string, args []string, _ 
 		args:    append([]string(nil), args...),
 	})
 	return runner.CommandOutput{Stdout: commandRunner.stdout}, nil
+}
+
+func TestResolveScannerEnvDefaults(t *testing.T) {
+	for _, profile := range []string{"clawhub", "clawhub-aig"} {
+		opts, err := ResolveArgs([]string{"./skill", "--profile", profile}, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if opts.ScannerEnvDefaults["SKILLSPECTOR_MODEL"] != "gpt-6.1-sol" || opts.ScannerEnvDefaults["REASONING_EFFORT"] != "medium" {
+			t.Fatalf("defaults = %v", opts.ScannerEnvDefaults)
+		}
+	}
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles:\n  clawhub:\n    scanners: [clawscan-static]\n")
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.ScannerEnvDefaults) != 0 {
+		t.Fatalf("shadow profile inherited production defaults: %v", opts.ScannerEnvDefaults)
+	}
+}
+
+func TestProfileRejectsSecretEnvDefaults(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles:\n  review:\n    scanners: [skillspector]\n    scannerEnvDefaults:\n      OPENAI_API_KEY: fixture\n")
+	_, err := ResolveArgs([]string{"./skill", "--profile", "review", "--discover-config"}, dir)
+	if err == nil || !strings.Contains(err.Error(), "credentials belong in the environment") {
+		t.Fatalf("err = %v", err)
+	}
 }
