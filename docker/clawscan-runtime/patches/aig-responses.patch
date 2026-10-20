@@ -1,5 +1,3 @@
-diff --git a/skill-scan/skill_scan/utils/llm.py b/skill-scan/skill_scan/utils/llm.py
-index e36bb57..6626652 100644
 --- a/skill-scan/skill_scan/utils/llm.py
 +++ b/skill-scan/skill_scan/utils/llm.py
 @@ -18,6 +18,7 @@
@@ -10,7 +8,7 @@ index e36bb57..6626652 100644
  import time
 
  import openai
-@@ -74,6 +75,9 @@ class LLM:
+@@ -74,6 +75,9 @@
          return ret
 
      def chat_stream(self, message: list[dict]) -> tuple[str, dict]:
@@ -20,7 +18,7 @@ index e36bb57..6626652 100644
          started = time.monotonic()
          request_options = {}
          reasoning_effort = (get_env("REASONING_EFFORT") or "").strip()
-@@ -121,6 +125,90 @@ class LLM:
+@@ -121,6 +125,94 @@
 
          return ret, usage
 
@@ -42,6 +40,10 @@ index e36bb57..6626652 100644
 +            raise TimeoutError("LLM streaming response deadline must be positive")
 +        effort = (get_env("REASONING_EFFORT") or "").strip()
 +        options = {"reasoning": {"effort": effort}} if effort else {}
++        tier = (get_env("AIG_SERVICE_TIER") or "default").strip() or "default"
++        if tier not in {"auto", "default", "flex", "priority"}:
++            raise ValueError("Unsupported AIG_SERVICE_TIER")
++        options["service_tier"] = tier
 +        # Bound opening the stream too; automatic SDK retries can exceed the
 +        # overall budget. Other models retain the original client/retry path.
 +        response = self.client.with_options(

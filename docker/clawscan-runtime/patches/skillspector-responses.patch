@@ -1,8 +1,8 @@
 diff --git a/src/skillspector/providers/chat_models.py b/src/skillspector/providers/chat_models.py
-index e1366ba..13d2951 100644
+index e1366ba..d95faef 100644
 --- a/src/skillspector/providers/chat_models.py
 +++ b/src/skillspector/providers/chat_models.py
-@@ -212,6 +212,14 @@ def create_openai_compatible_chat_model(
+@@ -212,6 +212,18 @@ def create_openai_compatible_chat_model(
          model, include_seed=True, reasoning_effort=reasoning_effort
      )
      kwargs.update(sampling_parameters)
@@ -14,6 +14,10 @@ index e1366ba..13d2951 100644
 +                "SKILLSPECTOR_SEED is not supported by the Sol Responses API; unset it"
 +            )
 +        kwargs["use_responses_api"] = True
++        service_tier = (os.getenv("SKILLSPECTOR_SERVICE_TIER") or "default").strip() or "default"
++        if service_tier not in {"auto", "default", "flex", "priority"}:
++            raise UnsupportedControlError("Unsupported SKILLSPECTOR_SERVICE_TIER")
++        kwargs["service_tier"] = service_tier
      chat_model = ChatOpenAI(**kwargs)
      register_chat_model_controls(
          chat_model,

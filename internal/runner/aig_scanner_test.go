@@ -153,6 +153,7 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 			"LLM_API_KEY":      "present",
 			"DEFAULT_MODEL":    "gpt-6.1-sol",
 			"REASONING_EFFORT": "medium",
+			"AIG_SERVICE_TIER": "flex",
 		},
 		HostCommandRunner:  hostRunner,
 		DockerAvailability: func() error { return nil },
@@ -170,7 +171,7 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 	if call.command != "docker" {
 		t.Fatalf("command = %q", call.command)
 	}
-	for _, name := range []string{"LLM_API_KEY", "DEFAULT_MODEL", "REASONING_EFFORT"} {
+	for _, name := range []string{"LLM_API_KEY", "DEFAULT_MODEL", "REASONING_EFFORT", "AIG_SERVICE_TIER"} {
 		if !containsArgPair(call.args, "-e", name) {
 			t.Fatalf("docker args missing env %q: %#v", name, call.args)
 		}

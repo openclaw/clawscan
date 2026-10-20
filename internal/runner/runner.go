@@ -241,6 +241,7 @@ type TargetWorkspaceOmission struct {
 type JudgeResult struct {
 	Status           string      `json:"status"`
 	Command          string      `json:"command,omitempty"`
+	ConfiguredModel  string      `json:"configuredModel,omitempty"`
 	PromptPath       string      `json:"promptPath,omitempty"`
 	OutputSchemaPath string      `json:"outputSchemaPath,omitempty"`
 	OutputPath       string      `json:"outputPath,omitempty"`
@@ -1270,6 +1271,7 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 	}
 	result := &JudgeResult{
 		Status:           "completed",
+		ConfiguredModel:  configuredJudgeModel(command, runtime.GOOS, env),
 		PromptPath:       state.promptSource,
 		OutputSchemaPath: state.schemaSource,
 		OutputPath:       state.outputPath,

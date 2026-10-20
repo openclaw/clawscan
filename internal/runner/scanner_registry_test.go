@@ -95,6 +95,7 @@ func TestSkillSpectorModelSettingsReachDocker(t *testing.T) {
 	env := map[string]string{
 		"SKILLSPECTOR_MODEL":            "gpt-6.1-sol",
 		"SKILLSPECTOR_REASONING_EFFORT": "medium",
+		"SKILLSPECTOR_SERVICE_TIER":     "flex",
 	}
 	opts := Options{Scanners: []string{"skillspector"}}
 	host := &recordingCommandRunner{}
@@ -367,7 +368,7 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	}
 
 	skillspector, _ := registry.Info("skillspector")
-	if got := strings.Join(skillspector.OptionalEnv, ","); got != "SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,SKILLSPECTOR_TEMPERATURE,SKILLSPECTOR_SEED,SKILLSPECTOR_MODEL_REGISTRY,SKILLSPECTOR_LOG_LEVEL,SKILLSPECTOR_SSL_VERIFY,NVIDIA_INFERENCE_KEY,OPENAI_API_KEY,OPENAI_BASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_PROXY_ENDPOINT_URL,ANTHROPIC_PROXY_API_KEY,ANTHROPIC_PROXY_API_VERSION" {
+	if got := strings.Join(skillspector.OptionalEnv, ","); got != "SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,SKILLSPECTOR_TEMPERATURE,SKILLSPECTOR_SEED,SKILLSPECTOR_SERVICE_TIER,SKILLSPECTOR_MODEL_REGISTRY,SKILLSPECTOR_LOG_LEVEL,SKILLSPECTOR_SSL_VERIFY,NVIDIA_INFERENCE_KEY,OPENAI_API_KEY,OPENAI_BASE_URL,ANTHROPIC_API_KEY,ANTHROPIC_PROXY_ENDPOINT_URL,ANTHROPIC_PROXY_API_KEY,ANTHROPIC_PROXY_API_VERSION" {
 		t.Fatalf("skillspector optional env = %q", got)
 	}
 
@@ -385,7 +386,7 @@ func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
 	if got := strings.Join(aig.RequiredEnv, ","); got != "LLM_API_KEY" {
 		t.Fatalf("aig required env = %q", got)
 	}
-	if got := strings.Join(aig.OptionalEnv, ","); got != "OPENAI_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL,DEFAULT_MODEL_CONTEXT_WINDOW,LOG_LEVEL" {
+	if got := strings.Join(aig.OptionalEnv, ","); got != "OPENAI_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,AIG_SERVICE_TIER,DEFAULT_BASE_URL,DEFAULT_MODEL_CONTEXT_WINDOW,LOG_LEVEL" {
 		t.Fatalf("aig optional env = %q", got)
 	}
 	if aig.InstallHint != "pip install aig-skill-scan" {

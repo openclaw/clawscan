@@ -64,3 +64,39 @@ For unsandboxed execution, install the same patched scanner sources yourself.
 A stock `pip install aig-skill-scan` or unpatched SkillSpector is not equivalent.
 Live provider tests are optional and must use existing authorized credentials;
 never put keys in profiles, command-line flags, fixtures or evidence files.
+
+## Judge model provenance
+
+Run artifacts expose `judge.configuredModel` only when ClawScan can conservatively
+recognize a literal model flag on a single direct final POSIX `codex exec`
+invocation. This is the **configured request**, not a provider-observed model or
+proof that inference completed. The complete command stays omitted because it
+can contain credentials. Never infer execution provenance from model-authored
+`judge.result.model` or other response text. Dynamic/ambiguous commands,
+unsupported options, non-GPT IDs, other harnesses and Windows remain unknown
+(the field is absent), rather than guessed. Consumers should preserve unknown.
+
+## Standard tier and explicit overrides
+
+Both exact Sol adapter paths send `service_tier: "default"` explicitly, independent
+of provider project defaults. Optional `SKILLSPECTOR_SERVICE_TIER` and
+`AIG_SERVICE_TIER` override only these Sol paths; supported values are `default`,
+`flex`, `priority` and `auto`. Unset/blank means Standard; invalid values fail
+before network access without echoing their values. These controls are passed
+through the scanner sandbox allowlist. Other models retain upstream behavior.
+An explicit `auto` override deliberately opts back into provider project defaults.
+
+## Minimum CI image proof
+
+Build the runtime directory context for both production platforms (Linux amd64
+and arm64). Build logs must show exact-pin patch application and all installed
+SkillSpector/AIG SDK wire-contract tests passing. Export the resulting image or
+OCI layout successfully and retain its immutable digest; a cache-only build or
+host-side Python tests are not final-image export proof. From the exported image,
+smoke `skillspector --help`, `aig-skill-scan --help`, and `codex --version`.
+No credentials or live paid calls are needed for these CI checks.
+
+A consumer deliberately running `--sandbox off` may instead install these same
+pinned, patched scanner sources into its host environment and execute the SDK
+contract tests there. In that mode it does not depend on a runtime-image rollout;
+it must not silently fall back to stock pip/uvx scanner packages.

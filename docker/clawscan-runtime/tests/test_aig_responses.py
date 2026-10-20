@@ -135,6 +135,7 @@ def llm_factory(monkeypatch, tmp_path):
     real_client = openai.OpenAI
     clients = []
     monkeypatch.delenv("REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("AIG_SERVICE_TIER", raising=False)
 
     def make(
         events=None,
@@ -201,6 +202,7 @@ def test_sol_uses_real_responses_wire_request_history_and_usage(
         "input": HISTORY,
         "stream": True,
         "store": False,
+        "service_tier": "default",
         "reasoning": {"effort": "medium"},
     }
     assert wire.closed.is_set()
@@ -229,6 +231,7 @@ def test_sol_preserves_reasoning_effort_overrides(
 def test_other_models_keep_chat_completions_wire_contract(
     llm_factory, monkeypatch, model, effort
 ):
+    monkeypatch.setenv("AIG_SERVICE_TIER", "unsupported")
     if effort:
         monkeypatch.setenv("REASONING_EFFORT", effort)
     chunks = [
@@ -440,3 +443,30 @@ def test_silent_stream_is_closed_at_deadline(llm_factory):
     with pytest.raises(TimeoutError, match="0.05-second deadline"):
         llm.chat_stream(HISTORY)
     assert wire.closed.is_set()
+
+
+@pytest.mark.parametrize(
+    "tier,expected",
+    [
+        ("", "default"),
+        ("  ", "default"),
+        ("default", "default"),
+        (" flex ", "flex"),
+        ("priority", "priority"),
+        ("auto", "auto"),
+    ],
+)
+def test_sol_service_tier_wire_override(llm_factory, monkeypatch, tier, expected):
+    monkeypatch.setenv("AIG_SERVICE_TIER", tier)
+    llm, requests, _ = llm_factory(happy_events())
+    assert llm.chat_stream(HISTORY) == (TEXT, USAGE)
+    assert request_json(requests)["service_tier"] == expected
+
+
+@pytest.mark.parametrize("tier", ["unsupported", "secret-tier-fixture"])
+def test_sol_invalid_service_tier_fails_before_network(llm_factory, monkeypatch, tier):
+    monkeypatch.setenv("AIG_SERVICE_TIER", tier)
+    llm, requests, _ = llm_factory(happy_events())
+    with pytest.raises(ValueError, match="Unsupported AIG_SERVICE_TIER"):
+        llm.chat_stream(HISTORY)
+    assert requests == []

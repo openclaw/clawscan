@@ -15,6 +15,7 @@ def controls(monkeypatch):
     for name in (
         "SKILLSPECTOR_TEMPERATURE",
         "SKILLSPECTOR_SEED",
+        "SKILLSPECTOR_SERVICE_TIER",
         "SKILLSPECTOR_REASONING_EFFORT",
         "OPENAI_BASE_URL",
     ):
@@ -91,7 +92,7 @@ def test_sol_tool_call_uses_responses_and_medium(monkeypatch):
     assert body["model"] == "gpt-6.1-sol"
     assert body["tools"][0]["type"] == "function"
     assert "temperature" not in body and "seed" not in body
-    assert "service_tier" not in body
+    assert body["service_tier"] == "default"
     assert result.tool_calls[0]["id"] == "call_1"
     assert result.tool_calls[0]["args"] == {"path": "SKILL.md"}
     assert result.usage_metadata["total_tokens"] == 19
@@ -272,3 +273,39 @@ def test_sol_raw_report_retains_requested_and_observed_model(
         "requested_model" if observed_model == "gpt-6.1-sol" else "provider_response"
     )
     assert all(item["model"] == "gpt-6.1-sol" for item in provenance["analyzers"])
+
+
+@pytest.mark.parametrize(
+    "tier,expected",
+    [
+        ("", "default"),
+        ("  ", "default"),
+        ("default", "default"),
+        (" flex ", "flex"),
+        ("priority", "priority"),
+        ("auto", "auto"),
+    ],
+)
+def test_sol_service_tier_wire_override(monkeypatch, tier, expected):
+    monkeypatch.setenv("SKILLSPECTOR_SERVICE_TIER", tier)
+
+    def handler(request):
+        assert json.loads(request.content)["service_tier"] == expected
+        return httpx.Response(200, request=request, json=response([]))
+
+    model(monkeypatch, handler).invoke("Inspect")
+
+
+@pytest.mark.parametrize("tier", ["unsupported", "secret-tier-fixture"])
+def test_sol_invalid_service_tier_fails_before_network(monkeypatch, tier):
+    monkeypatch.setenv("SKILLSPECTOR_SERVICE_TIER", tier)
+    with pytest.raises(
+        UnsupportedControlError, match="Unsupported SKILLSPECTOR_SERVICE_TIER"
+    ):
+        OpenAIProvider().create_chat_model("gpt-6.1-sol", max_tokens=128)
+
+
+def test_other_model_ignores_sol_service_tier(monkeypatch):
+    monkeypatch.setenv("SKILLSPECTOR_SERVICE_TIER", "unsupported")
+    llm = OpenAIProvider().create_chat_model("gpt-5.5", max_tokens=128)
+    assert llm.service_tier is None
