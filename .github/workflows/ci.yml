@@ -9,6 +9,11 @@ on:
       - main
       - "pe/**"
   workflow_dispatch:
+    inputs:
+      judge-inspection:
+        description: Run the live judge inspection proof (uses OPENAI_API_KEY)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,6 +26,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  judge-inspection:
+    if: github.event_name == 'workflow_dispatch' && inputs.judge-inspection
+    uses: ./.github/workflows/judge-inspection-smoke.yml
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
   lint-workflows:
     name: Lint workflows
     runs-on: ubuntu-latest
