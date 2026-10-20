@@ -33,6 +33,8 @@ func applyScannerModelDefaults(opts Options, env map[string]string) {
 	}
 	if scannerRequested(opts, "skillspector") {
 		setDefault("SKILLSPECTOR_PROVIDER")
+		// Infer the effective provider before considering provider-specific models.
+		defaultSkillSpectorOpenAIProvider(env)
 		// Other providers keep their own model defaults, even in a production profile.
 		if strings.TrimSpace(env["SKILLSPECTOR_PROVIDER"]) == "openai" {
 			setDefault("SKILLSPECTOR_MODEL")

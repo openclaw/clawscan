@@ -33,6 +33,7 @@ profiles:
         --ignore-user-config
         -c approval_policy=never
         -c model_reasoning_effort=high
+        -c 'service_tier="default"'
         -c 'shell_environment_policy.inherit="core"'
         -c shell_environment_policy.ignore_default_excludes=false
         --output-schema {{ output_schema:output.schema.json }}
@@ -71,6 +72,7 @@ profiles:
         --ignore-user-config
         -c approval_policy=never
         -c model_reasoning_effort=high
+        -c 'service_tier="default"'
         -c 'shell_environment_policy.inherit="core"'
         -c shell_environment_policy.ignore_default_excludes=false
         --output-schema {{ output_schema:output.schema.json }}

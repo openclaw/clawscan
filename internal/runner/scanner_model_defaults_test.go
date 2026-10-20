@@ -40,6 +40,36 @@ func TestProductionScannerModelDefaults(t *testing.T) {
 	}
 }
 
+func TestSkillSpectorModelDefaultsWithInferredProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		env                     map[string]string
+		provider, model, effort string
+	}{
+		{"inferred OpenAI", map[string]string{"OPENAI_API_KEY": "fixture"}, "openai", "gpt-6.1-sol", "medium"},
+		{"explicit model", map[string]string{"OPENAI_API_KEY": "fixture", "SKILLSPECTOR_MODEL": "operator-model"}, "openai", "operator-model", ""},
+		{"explicit effort", map[string]string{"OPENAI_API_KEY": "fixture", "SKILLSPECTOR_REASONING_EFFORT": "high"}, "openai", "gpt-6.1-sol", "high"},
+		{"explicit other provider", map[string]string{"OPENAI_API_KEY": "fixture", "SKILLSPECTOR_PROVIDER": "anthropic"}, "anthropic", "", ""},
+		{"no OpenAI credential", map[string]string{"NVIDIA_INFERENCE_KEY": "fixture"}, "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := maps.Clone(tc.env)
+			applyRuntimeEnvDefaults(Options{Scanners: []string{"skillspector"}, ScannerEnvDefaults: map[string]string{"SKILLSPECTOR_MODEL": "gpt-6.1-sol", "SKILLSPECTOR_REASONING_EFFORT": "medium"}}, env)
+			if env["SKILLSPECTOR_PROVIDER"] != tc.provider || env["SKILLSPECTOR_MODEL"] != tc.model || env["SKILLSPECTOR_REASONING_EFFORT"] != tc.effort {
+				t.Fatalf("effective controls = provider %q, model %q, effort %q; want %q, %q, %q", env["SKILLSPECTOR_PROVIDER"], env["SKILLSPECTOR_MODEL"], env["SKILLSPECTOR_REASONING_EFFORT"], tc.provider, tc.model, tc.effort)
+			}
+		})
+	}
+}
+
+func TestSkillSpectorExplicitProfileProviderPrecedesInference(t *testing.T) {
+	env := map[string]string{"OPENAI_API_KEY": "fixture"}
+	applyRuntimeEnvDefaults(Options{Scanners: []string{"skillspector"}, ScannerEnvDefaults: map[string]string{"SKILLSPECTOR_PROVIDER": "anthropic", "SKILLSPECTOR_MODEL": "gpt-6.1-sol", "SKILLSPECTOR_REASONING_EFFORT": "medium"}}, env)
+	if env["SKILLSPECTOR_PROVIDER"] != "anthropic" || env["SKILLSPECTOR_MODEL"] != "" || env["SKILLSPECTOR_REASONING_EFFORT"] != "" {
+		t.Fatal("OpenAI inference overrode the explicit profile provider")
+	}
+}
+
 func TestGenericScannersKeepProviderDefaults(t *testing.T) {
 	env := map[string]string{"OPENAI_API_KEY": "fixture"}
 	applyRuntimeEnvDefaults(Options{Scanners: []string{"skillspector", "aig"}}, env)

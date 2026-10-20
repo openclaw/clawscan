@@ -86,6 +86,24 @@ before network access without echoing their values. These controls are passed
 through the scanner sandbox allowlist. Other models retain upstream behavior.
 An explicit `auto` override deliberately opts back into provider project defaults.
 
+The bundled final Codex judges also pass `-c 'service_tier="default"'`
+explicitly, alongside `--ignore-user-config` and high reasoning. A complete
+operator `--judge` command override remains authoritative, including a different
+model, effort, or service tier.
+
+## Executed upgrade proof
+
+`scripts/verify-model-policy-upgrade.py` compares an actual binary built from
+`v0.2.0` with a candidate binary. Run it with `--previous <old-binary>`,
+`--candidate <candidate-binary>` and `--output <outside-repository.json>`.
+It executes real ClawScan CLI/profile resolution and scanner/judge subprocess
+paths with synthetic probes, an isolated environment and no provider credentials
+or calls. The trace records binary SHA-256 identities and non-secret model
+controls. Assertions cover bundled model/tier changes, retained explicit
+provider/model/effort/judge overrides, whole-profile project shadows, and
+provider-inferred custom model defaults. This is upgrade-routing proof, not a
+live provider wire test, scanner verdict evaluation or runtime-image proof.
+
 ## Minimum CI image proof
 
 Build the runtime directory context for both production platforms (Linux amd64
