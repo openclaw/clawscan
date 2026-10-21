@@ -2,15 +2,19 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-20
+
+**Highlights:** Patch certificate validation in release binaries and verify signed macOS packages on Xcode 27.
+
 - Build with Go 1.27.3 to fix the reachable GO-2026-6809 crypto/x509 certificate-validation vulnerability while retaining the Go 1.27.1 source minimum.
-- Move macOS CI and release verification to Xcode 27 with Rosetta for x86_64, retain the existing macOS 13 minimum in both release and npm binaries, and select Go 1.27.2 to fix reachable standard-library vulnerabilities while keeping the Go 1.27.1 source minimum.
+- Move macOS CI and release verification to Xcode 27 with Rosetta for x86_64 and retain the existing macOS 13 minimum in both release and npm binaries.
 - Keep mocked scanner/context tests independent of an installed Docker CLI while preserving sandbox enforcement checks.
 
 - Refresh bundled Cisco, Snyk, Socket, Claude Code, and Codex tools while retaining the existing Node.js and Python runtime floors and two-day dependency cooldown.
 - Preserve Docker sandbox paths containing commas or quotation marks without changing read-only or writable mount permissions. Thanks @SebTardif (#64).
 - Use one shared autoreview installation from `openclaw/agent-skills`; repository entrypoints now receive upstream fixes without copied helpers or test suites.
 
-- Use GPT-6 Luna with high reasoning for both bundled ClawHub judges and forward SkillSpector model/reasoning and optional A.I.G reasoning settings into scanner sandboxes.
+- Use Codex with high reasoning for both bundled ClawHub judges and forward SkillSpector model/reasoning and optional A.I.G reasoning settings into scanner sandboxes.
 
 ## 0.2.0 - 2026-09-22
 
