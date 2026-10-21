@@ -1163,6 +1163,85 @@ func clawHubReceiptJudgeCommand() string {
 	return `challenge=$(sed -n 's/.*"challenge": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json); required_file=$(sed -n 's/.*"required_file": "\([^"]*\)".*/\1/p' {{ workspace }}/artifact-inspection.json); if command -v sha256sum >/dev/null 2>&1; then required_sha=$(sha256sum {{ workspace }}/"$required_file" | cut -d ' ' -f 1); else required_sha=$(shasum -a 256 {{ workspace }}/"$required_file" | cut -d ' ' -f 1); fi; printf '{"verdict":"benign","artifact_inspection":{"status":"completed","challenge":"%s","required_file_sha256":"%s","files_inspected":["%s"]}}\n' "$challenge" "$required_sha" "$required_file" > {{ output }}`
 }
 
+func TestRunCommandClawHubReceiptExampleUsesRequiredFile(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		manifest string
+		content  string
+	}{
+		{name: "package", manifest: "package.json", content: `{"name":"receipt-example","version":"1.0.0"}`},
+		{name: "skill", manifest: "SKILL.md", content: "# Receipt example\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "artifact")
+			writeFile(t, filepath.Join(target, test.manifest), test.content)
+			promptPath := filepath.Join(dir, "rendered-prompt.md")
+			command := `cat {{ prompt:clawhub/prompt.md }} > "$CLAWSCAN_TEST_PROMPT_PATH"; ` + clawHubReceiptJudgeCommand()
+			stdout := captureStdout(t, func() {
+				if err := run([]string{
+					target, "--profile", "clawhub", "--scanner", "clawscan-static",
+					"--judge", command, "--sandbox", "off", "--json",
+				}, []string{"CLAWSCAN_TEST_PROMPT_PATH=" + promptPath}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			var artifact runner.Artifact
+			if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+				t.Fatalf("judge = %#v", artifact.Judge)
+			}
+			prompt, err := os.ReadFile(promptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf(`"files_inspected": ["artifact/%s"]`, test.manifest)
+			if !bytes.Contains(prompt, []byte(want)) {
+				t.Fatalf("rendered prompt does not show the challenged file: want %s", want)
+			}
+		})
+	}
+}
+
+func TestRunCommandClawHubRejectsMalformedPackageReceipts(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		inspectedFile string
+		wrongHash     bool
+		wantError     string
+	}{
+		{name: "glob", inspectedFile: "artifact/*", wantError: "did not include required file artifact/package.json"},
+		{name: "added space", inspectedFile: "artifact/ package.json", wantError: "did not include required file artifact/package.json"},
+		{name: "wrong hash", inspectedFile: "artifact/package.json", wrongHash: true, wantError: "file hash did not match"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := filepath.Join(t.TempDir(), "package")
+			writeFile(t, filepath.Join(target, "package.json"), `{"name":"receipt-rejection","version":"1.0.0"}`)
+			command := strings.Replace(clawHubReceiptJudgeCommand(), `"$required_file" > {{ output }}`, fmt.Sprintf(`"%s" > {{ output }}`, test.inspectedFile), 1)
+			if test.wrongHash {
+				command = strings.Replace(command, `"$required_sha"`, `"`+strings.Repeat("0", 64)+`"`, 1)
+			}
+			stdout := captureStdout(t, func() {
+				if err := run([]string{
+					target, "--profile", "clawhub", "--scanner", "clawscan-static",
+					"--judge", command, "--sandbox", "off", "--json",
+				}, []string{}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			var artifact runner.Artifact
+			if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+				t.Fatal(err)
+			}
+			if artifact.Judge == nil || artifact.Judge.Status != "failed" || !strings.Contains(artifact.Judge.Error, test.wantError) {
+				t.Fatalf("judge = %#v; want failed with %q", artifact.Judge, test.wantError)
+			}
+		})
+	}
+}
+
 func TestRunCommandUsesProjectProfile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
