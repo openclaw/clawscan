@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pin CI and release setup explicitly to Go 1.27.3 so setup-go cannot select the older language minimum.
+
 ## 0.2.1 - 2026-10-20
 
 **Highlights:** Patch certificate validation in release binaries and verify signed macOS packages on Xcode 27.
