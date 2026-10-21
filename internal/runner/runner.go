@@ -1557,7 +1557,19 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 	if err != nil {
 		return "", err
 	}
-	prompt, err := renderJudgePromptSource(source, string(promptTemplate), artifact)
+	template := string(promptTemplate)
+	const requiredFilePlaceholder = "{{ artifact_inspection.required_file }}"
+	if strings.Contains(template, requiredFilePlaceholder) {
+		if state.inspection == nil {
+			return "", errors.New("prompt references artifact inspection, but no inspection challenge was prepared")
+		}
+		requiredFileJSON, err := json.Marshal(state.inspection.RequiredFile)
+		if err != nil {
+			return "", err
+		}
+		template = strings.ReplaceAll(template, requiredFilePlaceholder, string(requiredFileJSON))
+	}
+	prompt, err := renderJudgePromptSource(source, template, artifact)
 	if err != nil {
 		return "", err
 	}
