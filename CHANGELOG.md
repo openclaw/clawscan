@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Build with Go 1.27.3 to fix the reachable GO-2026-6809 crypto/x509 certificate-validation vulnerability while retaining the Go 1.27.1 source minimum.
 - Move macOS CI and release verification to Xcode 27 with Rosetta for x86_64, retain the existing macOS 13 minimum in both release and npm binaries, and select Go 1.27.2 to fix reachable standard-library vulnerabilities while keeping the Go 1.27.1 source minimum.
 - Keep mocked scanner/context tests independent of an installed Docker CLI while preserving sandbox enforcement checks.
 

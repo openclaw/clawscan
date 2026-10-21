@@ -2,7 +2,7 @@ module github.com/openclaw/clawscan
 
 go 1.27.1
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/alchemy/json5 v0.2.0
