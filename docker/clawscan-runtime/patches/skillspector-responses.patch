@@ -323,3 +323,68 @@ diff --git a/tests/test_mcp_tool_poisoning.py b/tests/test_mcp_tool_poisoning.py
          assert partial[0]["reason_code"] is LedgerReason.OUTPUT_LIMIT
 
      def test_markdown_deadline_stops_before_prefix_and_fence_extraction(
+diff --git a/src/skillspector/nodes/deduplicate.py b/src/skillspector/nodes/deduplicate.py
+--- a/src/skillspector/nodes/deduplicate.py
++++ b/src/skillspector/nodes/deduplicate.py
+@@ -25,7 +25,9 @@ def _occurrences(finding: Finding) -> list[dict[str, object]]:
+     if finding.occurrences:
+         occurrences = [dict(item) for item in finding.occurrences]
+         for occurrence in occurrences:
+-            occurrence.setdefault(OCCURRENCE_FINDING_ID_KEY, finding.finding_id)
++            report_finding_id = occurrence.get(OCCURRENCE_FINDING_ID_KEY)
++            if not isinstance(report_finding_id, str) or not report_finding_id:
++                occurrence[OCCURRENCE_FINDING_ID_KEY] = finding.finding_id
+             occurrence.setdefault(
+                 OCCURRENCE_CODE_SNIPPET_KEY,
+                 finding.code_snippet or finding.context,
+@@ -210,6 +212,7 @@ def deduplicate(findings: list[Finding]) -> list[Finding]:
+                     str(occurrence.get("source_digest") or finding.source_digest or ""),
+                     str(occurrence.get("source_url") or finding.source_url or ""),
+                     _line(occurrence.get("transitive_depth"), finding.transitive_depth),
++                    occurrence.get(OCCURRENCE_FINDING_ID_KEY, finding.finding_id),
+                 )
+                 occurrences.setdefault(
+                     location,
+@@ -246,6 +249,7 @@ def deduplicate(findings: list[Finding]) -> list[Finding]:
+                     source_digest,
+                     source_url,
+                     transitive_depth,
++                    _finding_id,
+                 ),
+                 (report_finding_id, report_code_snippet),
+             ) in sorted(
+@@ -260,6 +264,7 @@ def deduplicate(findings: list[Finding]) -> list[Finding]:
+                     _line(item[0][2], item[0][1]),
+                     _line(item[0][3], -1),
+                     _line(item[0][4], -1),
++                    str(item[0][9]),
+                 ),
+             )
+         ]
+diff --git a/tests/nodes/test_report_occurrence_columns.py b/tests/nodes/test_report_occurrence_columns.py
+--- a/tests/nodes/test_report_occurrence_columns.py
++++ b/tests/nodes/test_report_occurrence_columns.py
+@@ -193,7 +193,7 @@ def test_cross_file_occurrences_keep_their_report_identity_and_snippet() -> None:
+     compacted = deduplicate([*findings, replace(findings[0], finding_id="finding-first-duplicate")])
+
+     assert len(compacted) == 1
+-    assert len(compacted[0].occurrences) == 2
++    assert len(compacted[0].occurrences) == 3
+     assert deduplicate(compacted)[0].to_dict() == compacted[0].to_dict()
+     assert all(
+         set(occurrence)
+@@ -216,6 +216,7 @@ def test_cross_file_occurrences_keep_their_report_identity_and_snippet() -> None:
+         (issue["location"]["file"], issue["finding_id"], issue["code_snippet"]) for issue in issues
+     ] == [
+         ("first.py", "finding-first", "first_context\nsubprocess.run(command)"),
++        ("first.py", "finding-first-duplicate", "first_context\nsubprocess.run(command)"),
+         ("second.py", "finding-second", "second_context\nsubprocess.run(command)"),
+     ]
+     assert "_skillspector_report_" not in result["report_body"]
+@@ -229,5 +230,6 @@ def test_cross_file_occurrences_keep_their_report_identity_and_snippet() -> None:
+         for item in result["sarif_report"]["runs"][0]["results"]
+     ] == [
+         ("first.py", "finding-first", "first_context\nsubprocess.run(command)"),
++        ("first.py", "finding-first-duplicate", "first_context\nsubprocess.run(command)"),
+         ("second.py", "finding-second", "second_context\nsubprocess.run(command)"),
+     ]
