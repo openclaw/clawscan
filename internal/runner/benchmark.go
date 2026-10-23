@@ -75,6 +75,9 @@ type BenchmarkClient interface {
 }
 
 type BenchmarkArtifact struct {
+	Status        string            `json:"status,omitempty"`
+	Complete      bool              `json:"complete"`
+	Error         string            `json:"error,omitempty"`
 	SchemaVersion string            `json:"schemaVersion"`
 	Benchmark     BenchmarkMetadata `json:"benchmark"`
 	StartedAt     string            `json:"startedAt"`
@@ -220,7 +223,8 @@ func runnableBenchmarkScanners(opts Options, kind string) []string {
 	return runnable
 }
 
-func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
+func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, runErr error) {
+	ctx.Context = workContext(ctx.Context)
 	if opts.Benchmark == nil {
 		return BenchmarkArtifact{}, errors.New("missing benchmark options")
 	}
@@ -231,6 +235,9 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	benchmarkOpts := *opts.Benchmark
 	benchmarkOpts.ID = adapter.ID()
 	opts.Benchmark = &benchmarkOpts
+	if err := ValidateOutputPaths([]Options{opts}, opts.OutputPath, ""); err != nil {
+		return artifact, err
+	}
 	if err := validateGateRuleScanners(opts); err != nil {
 		return BenchmarkArtifact{}, err
 	}
@@ -247,16 +254,6 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if err := ValidateRequirements(requirementOpts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
-	if opts.Benchmark.IDsSource != "" {
-		selection, err := LoadBenchmarkIDSelection(opts.Benchmark.IDsSource)
-		if err != nil {
-			return BenchmarkArtifact{}, err
-		}
-		benchmarkOpts.IDsSource = selection.Source
-		benchmarkOpts.IDs = selection.IDs
-		benchmarkOpts.IDsSHA256 = selection.SHA256
-		opts.Benchmark = &benchmarkOpts
-	}
 	now := ctx.Now
 	if now == nil {
 		now = time.Now
@@ -266,7 +263,16 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 	if client == nil {
 		client = HuggingFaceBenchmarkClient{Context: ctx.Context}
 	}
-	artifact := BenchmarkArtifact{
+	switch configured := client.(type) {
+	case HuggingFaceBenchmarkClient:
+		configured.Context = ctx.Context
+		client = configured
+	case *HuggingFaceBenchmarkClient:
+		bound := *configured
+		bound.Context = ctx.Context
+		client = bound
+	}
+	artifact = BenchmarkArtifact{
 		SchemaVersion: "clawscan-benchmark-v1",
 		Benchmark: BenchmarkMetadata{
 			ID:        opts.Benchmark.ID,
@@ -288,50 +294,92 @@ func RunBenchmark(opts Options, ctx RunContext) (BenchmarkArtifact, error) {
 			JudgeStatuses:    map[string]int{},
 		},
 	}
-	cases, err := adapter.RunCases(opts, ctx, env, now, client)
-	if err != nil {
-		return BenchmarkArtifact{}, err
+	defer func() {
+		runErr = errors.Join(runErr, ctx.Context.Err())
+		for _, benchmarkCase := range artifact.Cases {
+			if benchmarkCase.Run.Status != "" && !benchmarkCase.Run.Complete {
+				runErr = errors.Join(runErr, fmt.Errorf("case %s incomplete: %s", benchmarkCase.ID, benchmarkCase.Run.Status))
+			}
+		}
+		artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+		if runErr == nil {
+			if predictionsPath := BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
+				runErr = WriteBenchmarkPredictionsJSONL(predictionsPath, artifact)
+			}
+		}
+		runErr = errors.Join(runErr, ctx.Context.Err())
+		artifact.Status = "completed"
+		artifact.Complete = runErr == nil
+		if runErr != nil {
+			artifact.Status = "failed"
+			if errors.Is(runErr, context.Canceled) {
+				artifact.Status = "canceled"
+			}
+			if errors.Is(runErr, context.DeadlineExceeded) {
+				artifact.Status = "deadline_exceeded"
+			}
+			artifact.Error = runErr.Error()
+		}
+		if opts.OutputPath != "" {
+			if err := writeJSONFile(opts.OutputPath, artifact); err != nil {
+				runErr = errors.Join(runErr, err)
+				artifact.Complete = false
+				if artifact.Status == "completed" {
+					artifact.Status = "failed"
+				}
+				artifact.Error = runErr.Error()
+			}
+		}
+	}()
+	if err := ctx.Context.Err(); err != nil {
+		return artifact, err
 	}
+	if opts.Benchmark.IDsSource != "" {
+		selection, err := LoadBenchmarkIDSelectionContext(ctx.Context, opts.Benchmark.IDsSource)
+		if err != nil {
+			return artifact, err
+		}
+		benchmarkOpts.IDsSource = selection.Source
+		benchmarkOpts.IDs = selection.IDs
+		benchmarkOpts.IDsSHA256 = selection.SHA256
+		opts.Benchmark = &benchmarkOpts
+		artifact.Benchmark.IDsSource = selection.Source
+		artifact.Benchmark.IDsCount = len(selection.IDs)
+		artifact.Benchmark.IDsSHA256 = selection.SHA256
+	}
+	cases, err := adapter.RunCases(opts, ctx, env, now, client)
 	artifact.Benchmark.Rows = len(cases)
 	for _, benchmarkCase := range cases {
 		evaluateBenchmarkCase(&benchmarkCase)
 		artifact.Cases = append(artifact.Cases, benchmarkCase)
 		artifact.Summary.addCase(benchmarkCase)
 	}
-	artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
-	if opts.OutputPath != "" {
-		if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
-			return BenchmarkArtifact{}, err
-		}
-		file, err := os.Create(opts.OutputPath)
-		if err != nil {
-			return BenchmarkArtifact{}, err
-		}
-		defer file.Close()
-		if err := WriteJSON(file, artifact); err != nil {
-			return BenchmarkArtifact{}, err
-		}
-	}
-	if predictionsPath := BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
-		if err := WriteBenchmarkPredictionsJSONL(predictionsPath, artifact); err != nil {
-			return BenchmarkArtifact{}, err
-		}
-	}
-	return artifact, nil
+	return artifact, err
 }
 
 func LoadBenchmarkIDSelection(source string) (BenchmarkIDSelection, error) {
+	return LoadBenchmarkIDSelectionContext(context.Background(), source)
+}
+
+func LoadBenchmarkIDSelectionContext(ctx context.Context, source string) (BenchmarkIDSelection, error) {
+	ctx = workContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return BenchmarkIDSelection{}, err
+	}
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return BenchmarkIDSelection{}, errors.New("--ids source is required")
 	}
-	reader, err := openBenchmarkIDSource(source)
+	reader, err := openBenchmarkIDSourceContext(ctx, source)
 	if err != nil {
 		return BenchmarkIDSelection{}, err
 	}
 	defer reader.Close()
-	ids, err := parseBenchmarkIDs(source, reader)
+	ids, err := parseBenchmarkIDs(source, contextReader{ctx: ctx, reader: reader})
 	if err != nil {
+		return BenchmarkIDSelection{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return BenchmarkIDSelection{}, err
 	}
 	hashInput := strings.Join(ids, "\n") + "\n"
@@ -344,9 +392,20 @@ func LoadBenchmarkIDSelection(source string) (BenchmarkIDSelection, error) {
 }
 
 func openBenchmarkIDSource(source string) (io.ReadCloser, error) {
+	return openBenchmarkIDSourceContext(context.Background(), source)
+}
+
+func openBenchmarkIDSourceContext(ctx context.Context, source string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if parsed, err := url.Parse(source); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 		client := &http.Client{Timeout: 60 * time.Second}
-		resp, err := client.Get(source)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := client.Do(request)
 		if err != nil {
 			return nil, fmt.Errorf("read --ids source %s: %w", source, err)
 		}
@@ -355,6 +414,13 @@ func openBenchmarkIDSource(source string) (io.ReadCloser, error) {
 			return nil, fmt.Errorf("read --ids source %s: HTTP %d", source, resp.StatusCode)
 		}
 		return resp.Body, nil
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return nil, fmt.Errorf("read --ids source %s: %w", source, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("read --ids source %s: expected regular file", source)
 	}
 	file, err := os.Open(source)
 	if err != nil {
@@ -446,27 +512,23 @@ func WriteBenchmarkPredictionsJSONL(path string, artifact BenchmarkArtifact) err
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+	var buffer bytes.Buffer
 	for _, prediction := range predictions {
 		raw, err := json.Marshal(prediction)
 		if err != nil {
 			return err
 		}
-		if _, err := file.Write(append(raw, '\n')); err != nil {
+		if _, err := buffer.Write(append(raw, '\n')); err != nil {
 			return err
 		}
 	}
-	return nil
+	return writePrivateFile(path, buffer.Bytes())
 }
 
 func BenchmarkPredictions(artifact BenchmarkArtifact) ([]BenchmarkPrediction, error) {
+	if artifact.Status != "" && !artifact.Complete {
+		return nil, errors.New("benchmark incomplete: " + artifact.Status)
+	}
 	if artifact.Benchmark.ID != openClawBenchmarkID {
 		return nil, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
 	}
@@ -485,6 +547,17 @@ func BenchmarkPredictions(artifact BenchmarkArtifact) ([]BenchmarkPrediction, er
 }
 
 func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error) {
+	if benchmarkCase.Run.Status != "" && !benchmarkCase.Run.Complete {
+		return "", "", fmt.Errorf("case %s has incomplete required evidence (%s)", benchmarkCase.ID, benchmarkCase.Run.Status)
+	}
+	if benchmarkCase.Run.Judge != nil && benchmarkCase.Run.Judge.Status != "completed" {
+		return "", "", fmt.Errorf("case %s required judge did not complete", benchmarkCase.ID)
+	}
+	for scanner, result := range benchmarkCase.Run.Scanners {
+		if result.Status != "completed" && result.Status != "skipped" {
+			return "", "", fmt.Errorf("case %s required scanner %s did not complete", benchmarkCase.ID, scanner)
+		}
+	}
 	if benchmarkCase.Run.Judge != nil && benchmarkCase.Run.Judge.Status == "completed" {
 		if prediction, ok := predictionFromObject(benchmarkCase.Run.Judge.Result); ok {
 			return prediction, "judge", nil
@@ -652,6 +725,13 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 }
 
 func materializeOpenClawBenchmarkRow(root string, row OpenClawBenchmarkRow) (string, error) {
+	return materializeOpenClawBenchmarkRowContext(context.Background(), root, row)
+}
+
+func materializeOpenClawBenchmarkRowContext(ctx context.Context, root string, row OpenClawBenchmarkRow) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	target := filepath.Join(root, "skill")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return "", err
@@ -660,6 +740,9 @@ func materializeOpenClawBenchmarkRow(root string, row OpenClawBenchmarkRow) (str
 		return "", err
 	}
 	for _, file := range row.SkillBundleContent {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		rel, err := safeBenchmarkPath(file.Path)
 		if err != nil {
 			return "", err
@@ -828,6 +911,9 @@ func (client HuggingFaceBenchmarkClient) FetchSkillTrustBenchRows(dataset string
 	var rows []SkillTrustBenchRow
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	for lineNumber := 1; scanner.Scan(); lineNumber++ {
+		if err := client.requestContext().Err(); err != nil {
+			return nil, err
+		}
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			return nil, fmt.Errorf("fetch benchmark rows: line %d is blank", lineNumber)
@@ -935,7 +1021,7 @@ func fetchHuggingFaceRowsPageOnce(ctx context.Context, httpClient *http.Client, 
 		return nil, 0, nil, err
 	}
 	defer response.Body.Close()
-	raw, err := io.ReadAll(response.Body)
+	raw, err := io.ReadAll(contextReader{ctx: ctx, reader: response.Body})
 	if err != nil {
 		return nil, response.StatusCode, response.Header, err
 	}
@@ -972,14 +1058,21 @@ func huggingFaceRowsBackoff(attempt int, headers http.Header) time.Duration {
 }
 
 func (client HuggingFaceBenchmarkClient) MaterializeSkillTrustBenchRow(root string, row SkillTrustBenchRow) (string, error) {
+	if err := client.requestContext().Err(); err != nil {
+		return "", err
+	}
 	archivePath, err := client.skillTrustBenchArchivePath()
 	if err != nil {
 		return "", err
 	}
-	return materializeSkillTrustBenchArchiveRow(root, row, archivePath)
+	return materializeSkillTrustBenchArchiveRowContext(client.requestContext(), root, row, archivePath)
 }
 
 func (client HuggingFaceBenchmarkClient) skillTrustBenchArchivePath() (string, error) {
+	ctx := client.requestContext()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if client.SkillTrustBenchArchivePath != "" {
 		return client.SkillTrustBenchArchivePath, nil
 	}
@@ -1003,7 +1096,11 @@ func (client HuggingFaceBenchmarkClient) skillTrustBenchArchivePath() (string, e
 	if archiveURL == "" {
 		archiveURL = skillTrustBenchArchiveURL
 	}
-	response, err := httpClient.Get(archiveURL)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
+	if err != nil {
+		return "", err
+	}
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return "", err
 	}
@@ -1011,17 +1108,20 @@ func (client HuggingFaceBenchmarkClient) skillTrustBenchArchivePath() (string, e
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", fmt.Errorf("download SkillTrustBench archive: HTTP %d", response.StatusCode)
 	}
-	tmpPath := fmt.Sprintf("%s.%d.tmp", archivePath, os.Getpid())
-	defer os.Remove(tmpPath)
-	file, err := os.Create(tmpPath)
+	file, err := os.CreateTemp(cacheDir, ".archive-*.tmp")
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(file, response.Body); err != nil {
+	tmpPath := file.Name()
+	defer os.Remove(tmpPath)
+	if _, err := io.Copy(file, contextReader{ctx: ctx, reader: response.Body}); err != nil {
 		file.Close()
 		return "", err
 	}
 	if err := file.Close(); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if err := os.Rename(tmpPath, archivePath); err != nil {
@@ -1031,6 +1131,13 @@ func (client HuggingFaceBenchmarkClient) skillTrustBenchArchivePath() (string, e
 }
 
 func materializeSkillTrustBenchArchiveRow(root string, row SkillTrustBenchRow, archivePath string) (string, error) {
+	return materializeSkillTrustBenchArchiveRowContext(context.Background(), root, row, archivePath)
+}
+
+func materializeSkillTrustBenchArchiveRowContext(ctx context.Context, root string, row SkillTrustBenchRow, archivePath string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	skillPath, err := skillTrustBenchArchiveSkillPath(row)
 	if err != nil {
 		return "", err
@@ -1048,6 +1155,9 @@ func materializeSkillTrustBenchArchiveRow(root string, row SkillTrustBenchRow, a
 	foundAny := false
 	foundSkill := false
 	for _, file := range reader.File {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		name := strings.ReplaceAll(file.Name, "\\", "/")
 		if !strings.HasPrefix(name, prefix) {
 			continue
@@ -1069,7 +1179,7 @@ func materializeSkillTrustBenchArchiveRow(root string, row SkillTrustBenchRow, a
 			}
 			continue
 		}
-		if err := extractSkillTrustBenchFile(file, filepath.Join(target, rel)); err != nil {
+		if err := extractSkillTrustBenchFileContext(ctx, file, filepath.Join(target, rel)); err != nil {
 			return "", err
 		}
 		foundAny = true
@@ -1106,6 +1216,13 @@ func skillTrustBenchArchiveSkillPath(row SkillTrustBenchRow) (string, error) {
 }
 
 func extractSkillTrustBenchFile(file *zip.File, target string) error {
+	return extractSkillTrustBenchFileContext(context.Background(), file, target)
+}
+
+func extractSkillTrustBenchFileContext(ctx context.Context, file *zip.File, target string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
@@ -1118,7 +1235,7 @@ func extractSkillTrustBenchFile(file *zip.File, target string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(destination, source); err != nil {
+	if _, err := io.Copy(destination, contextReader{ctx: ctx, reader: source}); err != nil {
 		destination.Close()
 		return err
 	}

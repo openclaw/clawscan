@@ -90,6 +90,9 @@ func runContext(ctx context.Context, args []string, environ []string) error {
 	if opts.Benchmark != nil {
 		artifact, err := runner.RunBenchmark(opts, scanRunContextWithCaller(ctx, environ))
 		if err != nil {
+			if opts.JSON && artifact.SchemaVersion != "" {
+				err = errors.Join(err, runner.WriteJSON(os.Stdout, artifact))
+			}
 			return err
 		}
 		if opts.JSON {
@@ -349,6 +352,9 @@ func runBenchmarkCommand(ctx context.Context, args []string, environ []string) e
 	}
 	artifact, err := runner.RunBenchmark(opts, scanRunContextWithCaller(ctx, environ))
 	if err != nil {
+		if opts.JSON && artifact.SchemaVersion != "" {
+			err = errors.Join(err, runner.WriteJSON(os.Stdout, artifact))
+		}
 		return err
 	}
 	if opts.JSON {
@@ -372,6 +378,9 @@ func runBenchmarkCommand(ctx context.Context, args []string, environ []string) e
 func runAllProfiles(ctx context.Context, resolved profiles.ResolvedRunSet, environ []string, cwd string) error {
 	if !resolved.JSON && resolved.OutputPath == "" {
 		resolved.OutputPath = defaultOutputPath
+	}
+	if err := runner.ValidateOutputPaths(resolved.Options, resolved.OutputPath, cwd); err != nil {
+		return err
 	}
 	batch, err := runner.RunProfileBatch(resolved.Options, scanRunContextWithCaller(ctx, environ), cwd)
 	err = errors.Join(err, (runner.RunTargetsResult{Batch: &batch}).OperationalError())

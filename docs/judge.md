@@ -2,7 +2,11 @@
 
 `judge.commandStarted` and each parity attempt's `commandStarted` describe the
 local harness **shell**: `false` proves it was not started, `true` proves the
-shell started, and omission means unknown. A prepared challenge, a `running`
+shell started, and omission means unknown. With the Docker sandbox, starting
+the host Docker client does not prove that the container shell started, so
+`commandStarted` remains unknown unless non-start is proven. An independently
+validated inspection receipt still retains its own evidence; it is not a
+Docker/container cleanup receipt. A prepared challenge, a `running`
 checkpoint, or entry into the judge phase does not prove invocation. Shell start
 does not independently prove a native/model invocation or its count; arbitrary
 harnesses may fail before that point or invoke more than once. Keep provider

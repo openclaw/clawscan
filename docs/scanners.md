@@ -45,7 +45,16 @@ Check `status` and `complete` before using a new artifact as a security result:
   stages' raw JSON stays inline and is not exported as a standalone scanner report.
 
 `--output` writes atomic JSON checkpoints before stages and a terminal artifact
-on normal return, including error return. `--json` also emits available partial
+on normal return, including error return. Artifact and raw-report replacements
+are private (at most `0600`, retaining more restrictive existing permissions and
+the process umask). Outputs aliasing explicit targets, scanner fixtures, context,
+config, or on-disk judge prompt/schema inputs are rejected before execution;
+symlinked parents and existing hard links are included in that check. If an
+output is inside a directory target, checkpoints are omitted and only the
+terminal artifact is written after target-dependent work, so scanners and judges
+do not inspect this run's own pending
+output. Existing files in the target are still inspected, not hidden by their
+filenames. `--json` also emits available partial
 evidence on operational failure; readable JSON does not imply exit status zero.
 Filesystem errors can prevent all disk evidence. SIGKILL, process crashes,
 blocked OS I/O and an exhausted supervisor grace period cannot guarantee a final
@@ -70,6 +79,16 @@ supported without a cancelable context; they are not moved into detached
 goroutines to fabricate timely cancellation. HTTP implementations must honor
 the supplied request context. Finalization writes only retained evidence; it
 does not resume scanning, retry the judge, or extend the work deadline.
+
+Benchmark runs carry the same additive `status`, `complete`, and `error` fields.
+Both supported datasets retain already completed and interrupted cases on an
+operational error, with known remaining cases marked `not_started`. Partial
+aggregates are written best-effort and emitted with `--json`, but the command
+fails. ID requests, row requests, retry waits, archive requests and extraction
+share the caller context. A failed required judge/scanner cannot fall back to a
+clean prediction; predictions export rejects incomplete evidence. Applicable
+scanner verdict exits and unsupported-target skips retain their existing
+semantics, and unsuccessful observations remain visible in case evaluations.
 
 ## Adding a built-in scanner adapter
 

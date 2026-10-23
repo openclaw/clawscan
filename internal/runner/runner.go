@@ -464,6 +464,17 @@ func ValidateRequirements(opts Options, env map[string]string) error {
 }
 
 func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
+	validationOpts := opts
+	if validationOpts.Target == "" {
+		var err error
+		validationOpts.Target, err = os.Getwd()
+		if err != nil {
+			return artifact, err
+		}
+	}
+	if err := ValidateOutputPaths([]Options{validationOpts}, opts.OutputPath, ""); err != nil {
+		return artifact, err
+	}
 	ctx.Context = workContext(ctx.Context)
 	now := ctx.Now
 	if now == nil {
@@ -497,6 +508,14 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	artifact.Target.ResolvedPath = target.resolvedPath
 	artifact.Target.Kind = target.kind
 	artifact.Target.ID = target.id
+	checkpointOpts := opts
+	withinTarget, err := outputWithinTarget(opts, target)
+	if err != nil {
+		return artifact, err
+	}
+	if withinTarget {
+		checkpointOpts.OutputPath = ""
+	}
 	if err := ctx.Context.Err(); err != nil {
 		return artifact, err
 	}
@@ -566,7 +585,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		scannerTimerStarted := time.Now()
 		progress.startPhase(scannerProgressPhase(scanner))
 		artifact.Scanners[scanner] = ScannerResult{Status: "running", StartedAt: scannerStartedAt}
-		if err := checkpointArtifact(opts, &artifact, ctx.Context); err != nil {
+		if err := checkpointArtifact(checkpointOpts, &artifact, ctx.Context); err != nil {
 			artifact.Scanners[scanner] = ScannerResult{Status: "not_started"}
 			return artifact, err
 		}
@@ -597,7 +616,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		}
 		progress.startPhase("judge")
 		artifact.Judge = &JudgeResult{Status: "running"}
-		if err := checkpointArtifact(opts, &artifact, ctx.Context); err != nil {
+		if err := checkpointArtifact(checkpointOpts, &artifact, ctx.Context); err != nil {
 			artifact.Judge = &JudgeResult{Status: "not_started", CommandStarted: boolPointer(false)}
 			return artifact, err
 		}
@@ -614,6 +633,9 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 }
 
 func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, error) {
+	if err := ValidateOutputPaths([]Options{opts}, opts.OutputPath, cwd); err != nil {
+		return RunTargetsResult{}, err
+	}
 	ctx.Context = workContext(ctx.Context)
 	if err := ctx.Context.Err(); err != nil {
 		artifact, runErr := Run(opts, ctx)
@@ -808,8 +830,31 @@ func outputBundleSpecFor(outputPath string) outputBundleSpec {
 }
 
 func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error {
+	paths := scannerOutputPaths(spec, artifacts)
+	for index, artifact := range artifacts {
+		for scanner, relPath := range paths[index] {
+			result := artifact.Scanners[scanner]
+			if len(result.Raw) == 0 || artifact.Status != "" && result.Status != "completed" {
+				result.OutputPath = ""
+				artifact.Scanners[scanner] = result
+				continue
+			}
+			absPath := filepath.Join(spec.RootDir, filepath.FromSlash(relPath))
+			if err := writePrivateFile(absPath, result.Raw); err != nil {
+				return err
+			}
+			result.OutputPath = relPath
+			artifact.Scanners[scanner] = result
+		}
+	}
+	return nil
+}
+
+func scannerOutputPaths(spec outputBundleSpec, artifacts []*Artifact) []map[string]string {
+	paths := make([]map[string]string, len(artifacts))
 	usedRunPaths := map[string]int{}
-	for _, artifact := range artifacts {
+	for index, artifact := range artifacts {
+		paths[index] = map[string]string{}
 		runPath := uniqueOutputPath(scannerRunOutputPath(*artifact), usedRunPaths)
 		scanners := make([]string, 0, len(artifact.Scanners))
 		for scanner := range artifact.Scanners {
@@ -818,26 +863,12 @@ func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error
 		sort.Strings(scanners)
 		usedScannerPaths := map[string]int{}
 		for _, scanner := range scanners {
-			result := artifact.Scanners[scanner]
-			if len(result.Raw) == 0 || artifact.Status != "" && result.Status != "completed" {
-				result.OutputPath = ""
-				artifact.Scanners[scanner] = result
-				continue
-			}
 			scannerPath := uniqueOutputPath(safeOutputPathSegment(scanner), usedScannerPaths)
 			relPath := filepath.ToSlash(filepath.Join(spec.PathPrefix, runPath, scannerPath+".json"))
-			absPath := filepath.Join(spec.RootDir, filepath.FromSlash(relPath))
-			if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(absPath, result.Raw, 0o644); err != nil {
-				return err
-			}
-			result.OutputPath = relPath
-			artifact.Scanners[scanner] = result
+			paths[index][scanner] = relPath
 		}
 	}
-	return nil
+	return paths
 }
 
 func scannerRunOutputPath(artifact Artifact) string {
@@ -982,7 +1013,24 @@ func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
 }
 
 func writeJSONFile(path string, value interface{}) error {
+	var buffer bytes.Buffer
+	if err := WriteJSON(&buffer, value); err != nil {
+		return err
+	}
+	return writePrivateFile(path, buffer.Bytes())
+}
+
+func writePrivateFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0o600)
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing non-regular output: %s", path)
+		}
+		mode &= info.Mode().Perm()
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	file, err := os.CreateTemp(filepath.Dir(path), ".clawscan-*.json")
@@ -990,12 +1038,18 @@ func writeJSONFile(path string, value interface{}) error {
 		return err
 	}
 	defer os.Remove(file.Name())
-	writeErr := WriteJSON(file, value)
-	closeErr := file.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
 		return err
 	}
-	if err := os.Chmod(file.Name(), 0o644); err != nil {
+	mode &= info.Mode().Perm()
+	writeErr := file.Chmod(mode)
+	if writeErr == nil {
+		_, writeErr = file.Write(data)
+	}
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
 		return err
 	}
 	return os.Rename(file.Name(), path)

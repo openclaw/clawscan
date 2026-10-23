@@ -203,7 +203,7 @@ func (runner dockerCommandRunner) RunContext(ctx context.Context, command string
 	dockerArgs := []string{"run", "--rm", "--network", "bridge"}
 	if runID := strings.TrimSpace(runner.Env[SandboxRunIDEnv]); runID != "" {
 		if !sandboxRunIDPattern.MatchString(runID) {
-			return CommandOutput{}, fmt.Errorf("%s must be 1-64 letters, digits, dots, underscores or hyphens, starting with a letter or digit", SandboxRunIDEnv)
+			return CommandOutput{Started: boolPointer(false)}, fmt.Errorf("%s must be 1-64 letters, digits, dots, underscores or hyphens, starting with a letter or digit", SandboxRunIDEnv)
 		}
 		dockerArgs = append(dockerArgs,
 			"--label", SandboxRunIDLabel+"="+runID,
@@ -224,7 +224,11 @@ func (runner dockerCommandRunner) RunContext(ctx context.Context, command string
 	dockerArgs = append(dockerArgs, runner.Image, command)
 	dockerArgs = append(dockerArgs, args...)
 	host := &boundCommandRunner{ctx: ctx, runner: runner.Host}
-	return host.Run("docker", dockerArgs, "", timeout)
+	output, err := host.Run("docker", dockerArgs, "", timeout)
+	if output.Started != nil && *output.Started {
+		output.Started = nil
+	}
+	return output, err
 }
 
 func dockerMounts(cwd string, args []string, extra []SandboxMount) []string {

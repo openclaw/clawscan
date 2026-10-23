@@ -144,22 +144,25 @@ func (runner ExternalScannerRunner) runStatic(target string, startedAt string) (
 			Raw:         nil,
 		}, nil
 	}
-	report, err := buildStaticScannerReportContext(workContext(runner.Context), target)
-	if err != nil {
-		return ScannerResult{}, err
-	}
+	report, scanErr := buildStaticScannerReportContext(workContext(runner.Context), target)
 	raw, err := json.Marshal(report)
 	if err != nil {
 		return ScannerResult{}, err
 	}
+	status := "completed"
+	message := ""
+	if scanErr != nil {
+		status = "failed"
+		message = scanErr.Error()
+	}
 	return ScannerResult{
-		Status:      "completed",
+		Status:      status,
 		StartedAt:   startedAt,
 		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Command:     command,
-		Error:       "",
+		Error:       message,
 		Raw:         json.RawMessage(raw),
-	}, nil
+	}, scanErr
 }
 
 func buildStaticScannerReport(target string) (staticScannerReport, error) {
@@ -168,9 +171,6 @@ func buildStaticScannerReport(target string) (staticScannerReport, error) {
 
 func buildStaticScannerReportContext(ctx context.Context, target string) (staticScannerReport, error) {
 	files, findings, err := scanStaticTargetContext(ctx, target)
-	if err != nil {
-		return staticScannerReport{}, err
-	}
 	return staticScannerReport{
 		SchemaVersion: staticScannerVersion,
 		Scanner: staticScannerMetadata{
@@ -181,7 +181,7 @@ func buildStaticScannerReportContext(ctx context.Context, target string) (static
 		},
 		Files:    files,
 		Findings: findings,
-	}, nil
+	}, err
 }
 
 func staticRuleSummaries() []staticRuleSummary {
@@ -286,7 +286,7 @@ func scanStaticTargetContext(ctx context.Context, target string) (staticScannerF
 	}
 	if !info.IsDir() {
 		if err := scanFile(target, filepath.Base(target), info); err != nil {
-			return files, nil, err
+			return files, findings, err
 		}
 		return files, findings, nil
 	}
