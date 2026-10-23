@@ -943,14 +943,18 @@ func scannerResult(opts Options, scanner string, target resolvedTarget, startedA
 		if !json.Valid(raw) {
 			return ScannerResult{}, fmt.Errorf("scanner result %s is not valid JSON: %s", scanner, path)
 		}
-		return ScannerResult{
+		result := ScannerResult{
 			Status:      "completed",
 			StartedAt:   startedAt,
 			CompletedAt: startedAt,
 			Command:     []string{"scanner-result", scanner + "=" + path},
 			Error:       "",
 			Raw:         json.RawMessage(raw),
-		}, nil
+		}
+		if scanner == "skillspector" {
+			result = validateSkillSpectorReport(result)
+		}
+		return result, nil
 	}
 	if !scannerSupportsTargetKindInRegistry(registryForOptions(opts), scanner, target.kind) {
 		return unsupportedTargetKindResult(scanner, target.kind, startedAt), nil
@@ -2205,7 +2209,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 					Raw:         nil,
 				}, nil
 			}
-			return ScannerResult{
+			return validateSkillSpectorReport(ScannerResult{
 				Status:      commandScannerResultStatus(output, runErr),
 				StartedAt:   startedAt,
 				CompletedAt: completedAt,
@@ -2213,7 +2217,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 				Error:       message,
 				ExitCode:    exitCode,
 				Raw:         json.RawMessage(raw),
-			}, nil
+			}), nil
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -2247,7 +2251,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 			Raw:         nil,
 		}, nil
 	}
-	return ScannerResult{
+	return validateSkillSpectorReport(ScannerResult{
 		Status:      "completed",
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
@@ -2255,7 +2259,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		Error:       "",
 		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
-	}, nil
+	}), nil
 }
 
 func defaultSkillSpectorOpenAIProvider(env map[string]string) {

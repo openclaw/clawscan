@@ -76,7 +76,12 @@ func clawHubSkillSpectorAnalysis(artifact Artifact, checkedAtOverride *int64) (a
 	if checkedAtOverride != nil {
 		checkedAt = *checkedAtOverride
 	}
-	return normalizeClawHubSkillSpector(result.Raw, checkedAt)
+	normalized, err := normalizeClawHubSkillSpector(result.Raw, checkedAt)
+	if result.Status == "failed" {
+		normalized.Status = "error"
+		normalized.Error = "SkillSpector command did not complete successfully."
+	}
+	return normalized, err
 }
 
 func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHubNormalizedSkillSpectorAnalysis, error) {
@@ -125,8 +130,13 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 		readMapString(record, "scanner_version", "scannerVersion", "version"),
 		readNestedMapString(record, []string{"metadata"}, "skillspector_version", "skillspectorVersion", "version"),
 	)
+	status := normalizeClawHubSkillSpectorStatus(readMapString(record, "status"), recommendation, score, issueCount)
+	reportError := skillSpectorReportError(record)
+	if reportError != "" {
+		status = "error"
+	}
 	return clawHubNormalizedSkillSpectorAnalysis{
-		Status:         normalizeClawHubSkillSpectorStatus(readMapString(record, "status"), recommendation, score, issueCount),
+		Status:         status,
 		Score:          score,
 		Severity:       severity,
 		Recommendation: recommendation,
@@ -134,6 +144,7 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 		Issues:         issues,
 		ScannerVersion: truncateClawHubText(scannerVersion, maxClawHubSkillSpectorShortTextChars),
 		Summary:        truncateClawHubText(readMapString(record, "summary", "analysis"), maxClawHubSkillSpectorTextChars),
+		Error:          reportError,
 		CheckedAt:      checkedAt,
 	}, nil
 }
