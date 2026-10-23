@@ -7,8 +7,7 @@ toolchain go1.27.3
 require (
 	github.com/alchemy/json5 v0.2.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	golang.org/x/text v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	mvdan.cc/sh/v3 v3.14.1
 )
-
-require golang.org/x/text v0.43.0 // indirect
