@@ -1,14 +1,30 @@
 --- a/skill-scan/skill_scan/utils/llm.py
 +++ b/skill-scan/skill_scan/utils/llm.py
-@@ -18,6 +18,7 @@
+@@ -18,7 +18,15 @@
 
  from __future__ import annotations
 
++import asyncio
++import math
++import random
 +import threading
  import time
++import uuid
++from concurrent.futures import Future, wait
++from datetime import datetime, timezone
++from email.utils import parsedate_to_datetime
 
  import openai
-@@ -74,6 +75,9 @@
+
+@@ -48,6 +56,7 @@
+         )
+         self.context_window = context_window
+         self.stream_timeout = stream_timeout
++        self._responses_headers = dict(default_headers or {})
+
+     def chat(self, message: list[dict], p=False, ret_usage=False) -> str | tuple[str, dict]:
+         ret = ""
+@@ -74,6 +83,9 @@
          return ret
 
      def chat_stream(self, message: list[dict]) -> tuple[str, dict]:
@@ -18,7 +34,7 @@
          started = time.monotonic()
          request_options = {}
          reasoning_effort = (get_env("REASONING_EFFORT") or "").strip()
-@@ -121,6 +125,94 @@
+@@ -121,6 +133,205 @@
 
          return ret, usage
 
@@ -34,81 +50,192 @@
 +                raise ValueError("GPT-6.1 Sol requires AIG text message history")
 +            history.append({"role": role, "content": content})
 +
-+        deadline = getattr(self, "stream_timeout", 300)
 +        started = time.monotonic()
-+        if deadline <= 0:
++        budget = getattr(self, "stream_timeout", 300)
++        if budget <= 0 or not math.isfinite(budget):
 +            raise TimeoutError("LLM streaming response deadline must be positive")
++        deadline = started + budget
 +        effort = (get_env("REASONING_EFFORT") or "").strip()
 +        options = {"reasoning": {"effort": effort}} if effort else {}
 +        tier = (get_env("AIG_SERVICE_TIER") or "default").strip() or "default"
 +        if tier not in {"auto", "default", "flex", "priority"}:
 +            raise ValueError("Unsupported AIG_SERVICE_TIER")
 +        options["service_tier"] = tier
-+        # Bound opening the stream too; automatic SDK retries can exceed the
-+        # overall budget. Other models retain the original client/retry path.
-+        response = self.client.with_options(
-+            timeout=min(60, deadline), max_retries=0
-+        ).responses.create(model=self.model, input=history, stream=True, store=False, **options)
-+        expired = threading.Event()
-+
-+        def expire():
-+            expired.set()
-+            response.close()
-+
-+        # The SDK read timeout resets on each packet. Close even a silent or
-+        # heartbeat-only stream at the complete-response deadline.
-+        watchdog = threading.Timer(max(0, deadline - (time.monotonic() - started)), expire)
-+        watchdog.daemon = True
-+        watchdog.start()
-+        ret = ""
++        call_id = uuid.uuid4().hex
++        outcome = Future()
++        ready = Future()
++        cancelled = threading.Event()
 +        try:
-+            for event in response:
-+                if expired.is_set() or time.monotonic() - started >= deadline:
-+                    raise TimeoutError("LLM streaming response deadline exceeded")
-+                if event.type == "response.output_text.delta":
-+                    ret += event.delta
-+                elif event.type == "response.refusal.delta":
-+                    raise RuntimeError("OpenAI Responses refused the audit request")
-+                elif event.type in {"response.failed", "response.incomplete"}:
-+                    result = event.response
-+                    detail = (
-+                        getattr(getattr(result, "error", None), "code", None)
-+                        or getattr(getattr(result, "incomplete_details", None), "reason", None)
-+                        or "unknown"
-+                    )
-+                    # Do not include server messages, which may echo audit input.
-+                    raise RuntimeError(f"OpenAI Responses {result.status}: {detail}")
-+                elif event.type == "error":
-+                    raise RuntimeError(f"OpenAI Responses stream error: {event.code}")
-+                elif event.type == "response.completed":
-+                    result = event.response
-+                    if result.status != "completed":
-+                        raise RuntimeError(f"OpenAI Responses unexpected status: {result.status}")
-+                    for item in result.output:
-+                        if item.type == "message" and any(
-+                            part.type == "refusal" for part in item.content
-+                        ):
-+                            raise RuntimeError("OpenAI Responses refused the audit request")
-+                    usage = result.usage
-+                    return result.output_text or ret, (
-+                        {
-+                            "prompt_tokens": usage.input_tokens,
-+                            "completion_tokens": usage.output_tokens,
-+                            "total_tokens": usage.total_tokens,
-+                        }
-+                        if usage is not None
-+                        else None
-+                    )
-+            raise RuntimeError("OpenAI Responses stream ended without response.completed")
-+        except Exception as exc:
-+            if expired.is_set() or time.monotonic() - started >= deadline:
++            caller = asyncio.current_task()
++        except RuntimeError:
++            caller = None
++
++        async def complete():
++            ready.set_result((asyncio.get_running_loop(), asyncio.current_task()))
++            if cancelled.is_set():
++                raise asyncio.CancelledError()
++            try:
++                return await asyncio.wait_for(
++                    self._responses_attempts(history, options, deadline, call_id),
++                    timeout=max(0, deadline - time.monotonic()),
++                )
++            except asyncio.TimeoutError:
 +                raise TimeoutError(
-+                    f"LLM streaming response exceeded the {deadline}-second deadline"
-+                ) from exc
++                    f"LLM streaming response exceeded the {budget}-second deadline"
++                ) from None
++
++        def run():
++            try:
++                outcome.set_result(asyncio.run(complete()))
++            except BaseException as exc:
++                outcome.set_exception(exc)
++
++        worker = threading.Thread(target=run, name="aig-responses")
++        worker.start()
++        try:
++            while True:
++                if caller is not None and caller.cancelling():
++                    raise asyncio.CancelledError()
++                if outcome.done():
++                    return outcome.result()
++                wait((outcome,), timeout=0.05)
++        except BaseException:
++            if not outcome.done():
++                cancelled.set()
++                if ready.done():
++                    loop, task = ready.result()
++                    try:
++                        loop.call_soon_threadsafe(task.cancel)
++                    except RuntimeError:
++                        pass
 +            raise
 +        finally:
-+            watchdog.cancel()
-+            response.close()
++            worker.join()
++
++    @staticmethod
++    def _responses_transient(exc):
++        body = exc.body if isinstance(exc.body, dict) else {}
++        code = body.get("code")
++        kind = body.get("type")
++        status = getattr(exc, "status_code", None)
++        if not isinstance(code, (str, type(None))) or not isinstance(kind, (str, type(None))):
++            return None
++        if code == "server_is_overloaded" and kind in {None, "service_unavailable_error"}:
++            return "overload" if status in {None, 503} else None
++        if code == "slow_down" and kind in {None, "rate_limit_error"}:
++            return "slow_down" if status in {None, 429} else None
++        if code == "server_error" and kind in {None, "server_error", "api_error"}:
++            return "server_error" if status in {None, 500, 503} else None
++        if (
++            type(exc) is openai.APIError
++            and status is None
++            and code is None
++            and kind in {None, "server_error", "api_error", "service_unavailable_error"}
++            and body.get("message")
++            == "Our servers are currently overloaded. Please try again later."
++        ):
++            return "legacy_overload"
++        return None
++
++    @staticmethod
++    def _responses_retry_delay(attempt, headers):
++        delay = float(2 ** (attempt - 1))
++        hint = headers.get("retry-after")
++        if hint is not None:
++            try:
++                server_delay = float(hint)
++            except ValueError:
++                try:
++                    server_delay = (
++                        parsedate_to_datetime(hint) - datetime.now(timezone.utc)
++                    ).total_seconds()
++                except (ValueError, TypeError, OverflowError):
++                    server_delay = -1
++            if math.isfinite(server_delay) and server_delay >= 0:
++                delay = max(delay, server_delay)
++        if delay > 10:
++            raise RuntimeError("OpenAI Responses retry delay exceeds limit")
++        return delay + random.uniform(0, min(0.25, 10 - delay))
++
++    async def _responses_attempts(self, history, options, deadline, call_id):
++        async with openai.AsyncOpenAI(
++            api_key=self.api_key,
++            base_url=self.base_url,
++            default_headers=self._responses_headers,
++            max_retries=0,
++            timeout=min(60, max(0.001, deadline - time.monotonic())),
++        ) as client:
++            for attempt in range(1, 4):
++                response = None
++                headers = {}
++                logger.info(f"aig_provider_attempt v=1 call={call_id} attempt={attempt} outcome=started")
++                try:
++                    response = await client.with_options(
++                        timeout=min(60, max(0.001, deadline - time.monotonic())),
++                        max_retries=0,
++                    ).responses.create(
++                        model=self.model, input=history, stream=True, store=False, **options
++                    )
++                    headers = response.response.headers
++                    try:
++                        result = await self._responses_output(response)
++                    finally:
++                        await response.close()
++                except openai.APIError as exc:
++                    category = self._responses_transient(exc)
++                    logger.info(f"aig_provider_attempt v=1 call={call_id} attempt={attempt} outcome=failed category={category or 'nonretryable'}")
++                    if category is None or attempt == 3:
++                        raise RuntimeError("OpenAI Responses provider error; no completed audit") from None
++                    if getattr(exc, "response", None) is not None:
++                        headers = exc.response.headers
++                    delay = self._responses_retry_delay(attempt, headers)
++                    if delay >= deadline - time.monotonic():
++                        raise TimeoutError("OpenAI Responses retry exceeds remaining deadline") from None
++                    await asyncio.sleep(delay)
++                except BaseException:
++                    logger.info(f"aig_provider_attempt v=1 call={call_id} attempt={attempt} outcome=failed category=operational")
++                    raise
++                else:
++                    logger.info(f"aig_provider_attempt v=1 call={call_id} attempt={attempt} outcome=completed")
++                    return result
++
++    async def _responses_output(self, response):
++        async for event in response:
++            if event.type == "response.refusal.delta":
++                raise RuntimeError("OpenAI Responses refused the audit request")
++            elif event.type == "response.incomplete":
++                raise RuntimeError("OpenAI Responses incomplete audit")
++            elif event.type in {"response.failed", "error"}:
++                error = event.response.error if event.type == "response.failed" else event
++                raise openai.APIError(
++                    "OpenAI Responses provider error",
++                    request=response.response.request,
++                    body={
++                        "code": getattr(error, "code", None),
++                        "type": getattr(error, "type", None) if event.type != "error" else None,
++                        "message": getattr(error, "message", None),
++                    },
++                )
++            elif event.type == "response.completed":
++                result = event.response
++                if result.status != "completed":
++                    raise RuntimeError("OpenAI Responses unexpected status")
++                for item in result.output:
++                    if item.type == "message" and any(part.type == "refusal" for part in item.content):
++                        raise RuntimeError("OpenAI Responses refused the audit request")
++                text = result.output_text
++                if not text.strip():
++                    raise RuntimeError("OpenAI Responses completed an empty audit")
++                usage = result.usage
++                return text, (
++                    {
++                        "prompt_tokens": usage.input_tokens,
++                        "completion_tokens": usage.output_tokens,
++                        "total_tokens": usage.total_tokens,
++                    }
++                    if usage is not None else None
++                )
++        raise RuntimeError("OpenAI Responses stream ended without response.completed")
 +
      def _normalize_usage(self, usage) -> dict | None:
          if not usage:

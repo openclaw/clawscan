@@ -142,6 +142,53 @@ before network access without echoing their values. These controls are passed
 through the scanner sandbox allowlist. Other models retain upstream behavior.
 An explicit `auto` override deliberately opts back into provider project defaults.
 
+### AIG transient Responses failures
+
+The exact Sol AIG adapter permits at most **three provider attempts per chat**,
+with SDK automatic retries disabled. Only structured `server_is_overloaded`,
+`slow_down`, or `server_error` errors with compatible types/statuses qualify.
+HTTP overload requires 503, slow-down requires 429, and server errors require
+500/503; streaming error envelopes have no HTTP error status. Unknown codes,
+quota/billing/spend/usage limits, authentication/invalid requests, refusals,
+policy blocks, incomplete responses, and missing/empty completion remain errors.
+
+OpenAI SDK 2.8.1 raises `APIError` for nested SSE error envelopes before the
+typed event consumer sees them. For that streaming exception only, a missing
+code can qualify when its **error-envelope message exactly equals** the retained
+service message `Our servers are currently overloaded. Please try again later.`
+and its type is absent or a compatible server/API error type. This is not a
+substring match and never examines model-output text. A present unknown or
+contradictory code/type cannot be overridden by the message. Production evidence
+retains the message, not its original wire body; the synthetic missing-code
+fixture demonstrates compatibility, not the actual incident's unknown code.
+
+Every attempt, connection/header wait, stream, backoff and cancellation shares
+the original complete-response deadline (300 seconds by default). The Sol path
+uses the same SDK's cancellable async HTTP Responses client in a joined,
+call-local event-loop thread: upstream callers already run inside an async
+CLI, and a synchronous stream watchdog cannot cancel opening/trickling headers.
+Caller interruption cancels the call-local task before joining its worker.
+The synchronous wait observes pending caller-task cancellation, including the
+async CLI's first SIGINT, without waiting for its blocked caller loop to resume.
+No endpoint, HTTP transport protocol, model, reasoning, tier or process budget
+changes. Other models retain their upstream synchronous behavior. Each failed
+stream closes before another attempt; failed partial XML/text is discarded and
+no local tools execute inside retries. Empty output raises instead of entering
+upstream's separate empty-response retry/fallback loop.
+
+Backoff is 1 then 2 seconds plus up to 250 ms jitter. Valid `Retry-After` seconds
+or HTTP dates are minimum delays. A delay above 10 seconds or the remaining
+deadline stops retries rather than retrying early. Terminal API errors are
+sanitized before reaching the CLI traceback; provider bodies are not logged.
+
+Bounded `aig_provider_attempt v=1` stderr/log records contain only a random
+call ID, attempt ordinal, started/failed/completed outcome and allowlisted error
+category. These are **scanner-provider attempts**, not native judge invocations
+or worker retries. The current Go adapter does not retain successful scanner
+stderr, and failure stderr may be truncated: these logs are debugging evidence,
+not authoritative population counts. Missing telemetry stays unknown; a parent-
+owned consumer companion is needed before exposing complete production counts.
+
 The bundled final Codex judges also pass `-c 'service_tier="default"'`
 explicitly, alongside `--ignore-user-config` and high reasoning. A complete
 operator `--judge` command override remains authoritative, including a different
