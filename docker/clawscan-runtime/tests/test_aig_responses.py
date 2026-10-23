@@ -573,6 +573,191 @@ print(json.dumps({"interrupted":True,"requests":len(calls),"closed":True}))
     assert json.loads(result.stdout) == {"interrupted": True, "requests": 1, "closed": True}
 
 
+@pytest.mark.parametrize("phase", ["open", "stream", "backoff", "cleanup"])
+@pytest.mark.parametrize("running_loop,signals", [(False, 1), (False, 2), (False, 5), (True, 1), (True, 2), (True, 5)])
+@pytest.mark.parametrize("cleanup_target", ["client", "response"])
+def test_interrupt_waits_for_real_sdk_cleanup(monkeypatch, tmp_path, phase, running_loop, signals, cleanup_target):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, running_loop, signals, False, cleanup_target)
+
+
+@pytest.mark.parametrize("phase", ["open", "stream", "backoff", "cleanup"])
+@pytest.mark.parametrize("signals", [1, 2, 5])
+def test_task_cancellation_waits_for_real_sdk_cleanup(monkeypatch, tmp_path, phase, signals):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, True, signals, True, "client")
+
+
+def _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, running_loop, signals, task_cancel, cleanup_target):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, json, os, signal, threading, time
+import httpx, openai
+from skill_scan.utils.llm import LLM
+entered, closing, cleaned, response_closed = (threading.Event() for _ in range(4))
+clients, calls, loops, tasks = [], [], [], []
+phase, running_loop, signals, task_cancel, cleanup_target = SETTINGS
+class Silent(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        entered.set()
+        await asyncio.sleep(5)
+        if False:
+            yield b""
+    async def aclose(self):
+        if cleanup_target == "response":
+            closing.set()
+        await asyncio.sleep(0.20 if cleanup_target == "response" else 0.02)
+        response_closed.set()
+        if cleanup_target == "response":
+            cleaned.set()
+async def handler(request):
+    calls.append(1)
+    loops.append(asyncio.get_running_loop())
+    if phase == "open":
+        entered.set()
+        await asyncio.sleep(5)
+    if phase in {"backoff", "cleanup"}:
+        return httpx.Response(200, content=b'data: {"error":{"code":"server_error"}}\n\n')
+    return httpx.Response(200, stream=Silent())
+real = openai.AsyncOpenAI
+def client(**kwargs):
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    close = value.close
+    async def slow_close():
+        if cleanup_target == "client" or phase != "stream":
+            closing.set()
+            await asyncio.sleep(0.20)
+        await close()
+        cleaned.set()
+    value.close = slow_close
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.08 if phase == "cleanup" else 1)
+def delay(*args):
+    if phase == "backoff":
+        entered.set()
+    return 0.5
+llm._responses_retry_delay = delay
+if task_cancel:
+    signal.signal(signal.SIGUSR1, lambda *_: tasks[0].cancel())
+def interrupt():
+    assert (closing if phase == "cleanup" else entered).wait(2)
+    os.kill(os.getpid(), signal.SIGUSR1 if task_cancel else signal.SIGINT)
+    assert closing.wait(2)
+    for ordinal in range(1, signals):
+        time.sleep(0.01)
+        os.kill(os.getpid(), signal.SIGUSR1 if task_cancel else signal.SIGINT)
+sender = threading.Thread(target=interrupt)
+sender.start()
+async def invoke():
+    tasks.append(asyncio.current_task())
+    llm.chat([{"role":"user", "content":"inert fixture"}])
+started = time.monotonic()
+try:
+    if running_loop:
+        asyncio.run(invoke())
+    else:
+        llm.chat([{"role":"user", "content":"inert fixture"}])
+    raise AssertionError("caller abort lost")
+except (KeyboardInterrupt, asyncio.CancelledError) as aborted:
+    assert isinstance(aborted, asyncio.CancelledError if task_cancel else KeyboardInterrupt)
+    assert time.monotonic() - started < 0.4
+    assert calls == [1]
+    assert cleaned.is_set()
+    assert clients and all(value.is_closed() for value in clients)
+    assert phase != "stream" or response_closed.is_set()
+    assert all(loop.is_closed() for loop in loops)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+finally:
+    sender.join()
+    llm.client.close()
+print(json.dumps({"aborted":True,"requests":len(calls),"cleaned":True}))
+'''
+    script = script.replace("SETTINGS", repr((phase, running_loop, signals, task_cancel, cleanup_target)))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"aborted": True, "requests": 1, "cleaned": True}
+
+
+@pytest.mark.parametrize("cleanup_target", ["client", "response"])
+def test_deadline_during_cleanup_waits_for_close(llm_factory, monkeypatch, cleanup_target):
+    llm, requests, wire = llm_factory(happy_events(), stream_timeout=0.08)
+    cleaned = threading.Event()
+    if cleanup_target == "client":
+        original = openai.AsyncOpenAI
+
+        def client(**kwargs):
+            value = original(**kwargs)
+            close = value.close
+
+            async def delayed_close():
+                await asyncio.sleep(0.20)
+                await close()
+                cleaned.set()
+
+            value.close = delayed_close
+            return value
+
+        monkeypatch.setattr(openai, "AsyncOpenAI", client)
+    else:
+        original = AsyncWire.aclose
+
+        async def delayed_close(value):
+            await asyncio.sleep(0.20)
+            await original(value)
+            cleaned.set()
+
+        monkeypatch.setattr(AsyncWire, "aclose", delayed_close)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="deadline"):
+        llm.chat(HISTORY)
+    assert time.monotonic() - started < 0.4
+    assert cleaned.is_set() and wire.closed.is_set()
+    assert len(requests) == 1
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+
+
+def test_concurrent_abort_does_not_cancel_other_call(llm_factory):
+    entered, cancelled, cleaned = (threading.Event() for _ in range(3))
+
+    class CancelledWire(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            entered.set()
+            try:
+                await asyncio.sleep(5)
+            finally:
+                cancelled.set()
+            if False:
+                yield b""
+
+        async def aclose(self):
+            await asyncio.sleep(0.05)
+            cleaned.set()
+
+    llm, requests, _ = llm_factory(stream_timeout=1, attempts=[
+        lambda request: httpx.Response(200, stream=CancelledWire()),
+        lambda request: httpx.Response(200, stream=AsyncWire(WireStream(happy_events()))),
+    ])
+    caller = []
+
+    async def invoke():
+        caller.append(asyncio.current_task())
+        llm.chat(HISTORY)
+
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(asyncio.run, invoke())
+        assert entered.wait(2)
+        caller[0].cancel()
+        second = pool.submit(llm.chat, HISTORY)
+        with pytest.raises(asyncio.CancelledError):
+            first.result(timeout=1)
+        assert second.result(timeout=1) == TEXT
+    assert cancelled.is_set() and cleaned.is_set()
+    assert len(requests) == 2
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+
+
 def test_deadline_cancels_retry_sleep_without_another_attempt(llm_factory):
     llm, requests, wire = llm_factory(
         [{"error": {"message": OVERLOAD_MESSAGE}}], stream_timeout=0.05,

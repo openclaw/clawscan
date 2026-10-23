@@ -164,10 +164,18 @@ fixture demonstrates compatibility, not the actual incident's unknown code.
 
 Every attempt, connection/header wait, stream, backoff and cancellation shares
 the original complete-response deadline (300 seconds by default). The Sol path
-uses the same SDK's cancellable async HTTP Responses client in a joined,
+uses the same SDK's cancellable async HTTP Responses client in a
 call-local event-loop thread: upstream callers already run inside an async
 CLI, and a synchronous stream watchdog cannot cancel opening/trickling headers.
-Caller interruption cancels the call-local task before joining its worker.
+Caller interruption cancels the call-local task once. Repeated interruptions
+preserve the original abort while waiting for response/client closure and event-loop
+finalization. A call-local completion event and actual thread deregistration, not
+`Thread.join()`/`is_alive()` after an interrupted join, establish worker completion.
+As with `asyncio.wait_for`, the deadline initiates cancellation; cooperative
+cleanup can finish after it. Cleanup is shielded from subsequent cancellation,
+not detached or given a fresh request deadline. Python cannot forcibly terminate
+an uncooperative thread/finalizer safely: the existing outer process boundary
+(900 seconds plus 60 seconds cleanup) remains the hard termination backstop.
 The synchronous wait observes pending caller-task cancellation, including the
 async CLI's first SIGINT, without waiting for its blocked caller loop to resume.
 No endpoint, HTTP transport protocol, model, reasoning, tier or process budget
