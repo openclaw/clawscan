@@ -340,6 +340,8 @@ def batch_transport(monkeypatch):
     def finish(request, path):
         with lock:
             observed["active"] -= 1
+        if "after_response" in observed:
+            observed["after_response"]()
         if path in observed["error_paths"]:
             return httpx.Response(
                 400,
@@ -411,7 +413,7 @@ def test_security_discovery_finishes_all_batches_with_shared_budget(
     from skillspector.nodes.analyzers.semantic_security_discovery import node
 
     monkeypatch.setenv("SKILLSPECTOR_MAX_LLM_CONCURRENCY", "5")
-    state = discovery_state(0.8)
+    state = discovery_state(5)
     result = node(state)
     assert result["analyzer_status_events"][0]["status"] == "completed"
     assert sorted(batch_transport["paths"]) == sorted(state["components"])
@@ -477,6 +479,9 @@ def test_security_discovery_deadline_accounts_for_unstarted_batches(monkeypatch,
     from skillspector.nodes.analyzers.semantic_security_discovery import node
 
     monkeypatch.setenv("SKILLSPECTOR_MAX_LLM_CONCURRENCY", "1")
+    clock = {"now": 100.0}
+    monkeypatch.setattr("skillspector.state.monotonic", lambda: clock["now"])
+    batch_transport["after_response"] = lambda: clock.update(now=101.0)
     state = discovery_state(0.15)
     result = node(state)
     assert result["analyzer_status_events"][0]["status"] != "completed"
