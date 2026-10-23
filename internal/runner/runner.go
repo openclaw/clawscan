@@ -966,6 +966,7 @@ const maxTargetFilesBytes = 256 * 1024
 const maxOmittedTargetFileMarkers = 25
 const defaultJudgePromptPath = "./prompt.md"
 const defaultJudgeOutputSchemaPath = "./schema.json"
+const artifactInspectionRequiredFilePlaceholder = "{{ artifact_inspection.required_file }}"
 
 func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
 	var renderErr error
@@ -1435,6 +1436,17 @@ func validateArtifactInspectionReceipt(result map[string]any, expected artifactI
 	if requiredSHA256 != expected.RequiredSHA256 {
 		return errors.New("Judge artifact inspection file hash did not match the required artifact file.")
 	}
+	if version, present := inspection["version"]; present {
+		if version != float64(2) {
+			return errors.New("Judge artifact inspection receipt version was unsupported.")
+		}
+		return validateArtifactInspectionReceiptV2(inspection, expected.RequiredFile)
+	}
+	for _, field := range []string{"required_file", "additional_files_inspected"} {
+		if _, present := inspection[field]; present {
+			return errors.New("Judge artifact inspection v2 fields require receipt version 2.")
+		}
+	}
 	files, ok := inspection["files_inspected"].([]any)
 	if !ok || len(files) == 0 {
 		return errors.New("Judge artifact inspection did not report any inspected artifact files.")
@@ -1574,8 +1586,7 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 		return "", err
 	}
 	template := string(promptTemplate)
-	const requiredFilePlaceholder = "{{ artifact_inspection.required_file }}"
-	if strings.Contains(template, requiredFilePlaceholder) {
+	if strings.Contains(template, artifactInspectionRequiredFilePlaceholder) {
 		if state.inspection == nil {
 			return "", errors.New("prompt references artifact inspection, but no inspection challenge was prepared")
 		}
@@ -1583,7 +1594,7 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 		if err != nil {
 			return "", err
 		}
-		template = strings.ReplaceAll(template, requiredFilePlaceholder, string(requiredFileJSON))
+		template = strings.ReplaceAll(template, artifactInspectionRequiredFilePlaceholder, string(requiredFileJSON))
 	}
 	prompt, err := renderJudgePromptSource(source, template, artifact)
 	if err != nil {
@@ -1750,6 +1761,20 @@ func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, 
 	schema, err := readJudgeSource(source, state)
 	if err != nil {
 		return "", err
+	}
+	if bytes.Contains(schema, []byte(artifactInspectionRequiredFilePlaceholder)) {
+		if state.inspection == nil {
+			return "", errors.New("output schema references artifact inspection, but no inspection challenge was prepared")
+		}
+		placeholderJSON, _ := json.Marshal(artifactInspectionRequiredFilePlaceholder)
+		if bytes.Contains(bytes.ReplaceAll(schema, placeholderJSON, nil), []byte(artifactInspectionRequiredFilePlaceholder)) {
+			return "", errors.New("output schema artifact inspection placeholder must be a complete JSON string")
+		}
+		requiredFileJSON, err := json.Marshal(state.inspection.RequiredFile)
+		if err != nil {
+			return "", err
+		}
+		schema = bytes.ReplaceAll(schema, placeholderJSON, requiredFileJSON)
 	}
 	path := filepath.Join(state.workspace, "schema.json")
 	if err := os.WriteFile(path, schema, 0o644); err != nil {

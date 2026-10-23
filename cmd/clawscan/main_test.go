@@ -1197,7 +1197,7 @@ func TestRunCommandClawHubReceiptExampleUsesRequiredFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := fmt.Sprintf(`"files_inspected": ["artifact/%s"]`, test.manifest)
+			want := fmt.Sprintf(`"required_file": "artifact/%s"`, test.manifest)
 			if !bytes.Contains(prompt, []byte(want)) {
 				t.Fatalf("rendered prompt does not show the challenged file: want %s", want)
 			}

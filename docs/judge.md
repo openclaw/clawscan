@@ -38,6 +38,33 @@ attempt's status, redacted result, validation error, duration, and expected
 inspection challenge/path/hash. The top-level `judge.result` is only the last
 attempt, and consumers must still validate its output schema and security evidence.
 
+## Versioned inspection receipts
+
+The built-in `clawhub` and `clawhub-aig` judges emit version 2 receipts. The
+required file has its own mandatory `required_file` string, constrained by a
+single-value enum in the rendered output schema. `additional_files_inspected`
+records every other inspected artifact file and may be empty. The two fields
+together retain the complete inspected-file record, without requiring the model
+to repeat the selected path inside an unconstrained array.
+
+The workspace challenge and independently computed required-file hash are still
+validated exactly. Neither expected value is included in the prompt or schema.
+No receipt is filled in, converted, or repaired after the judge returns it. A
+wrong or missing `required_file`, incorrect hash/challenge, unknown version, or
+hybrid v1/v2 receipt fails closed. The runner continues to validate unversioned
+v1 receipts using their original `files_inspected` membership check.
+
+Schema templates may use `"{{ artifact_inspection.required_file }}"` as a complete
+JSON string value. The runner replaces that string with the JSON-escaped selected
+workspace path before execution and records the rendered schema's SHA-256.
+Templates without this placeholder are unchanged.
+
+**Consumer upgrade required:** consumers enforcing the previous receipt-key
+allowlist must explicitly support v2 before a new built-in profile is deployed.
+Preserve both returned fields as evidence; do not manufacture a v1 receipt or
+normalize a wrong path. Schema/consumer tests are not proof of live provider
+behavior, latency improvement, or production recovery.
+
 ## Live inspection check
 
 Maintainers can manually run the **CI** workflow with **judge-inspection** enabled,

@@ -83,8 +83,10 @@ jobs:
           print(json.dumps({"status": judge.get("status"), "error": judge.get("error")}))
           assert judge.get("status") == "completed", "Judge did not complete artifact inspection"
           receipt = judge["result"]["artifact_inspection"]
+          assert receipt["version"] == 2
           assert receipt["required_file_sha256"] == hashlib.sha256(manifest).hexdigest()
-          assert "artifact/package.json" in receipt["files_inspected"]
+          assert receipt["required_file"] == "artifact/package.json"
+          assert isinstance(receipt["additional_files_inspected"], list)
 
       - name: Retain redacted CLI report
         if: always()
