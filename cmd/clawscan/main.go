@@ -95,7 +95,7 @@ func run(args []string, environ []string) error {
 		printBenchmarkSummary(os.Stdout, artifact, "")
 		return nil
 	}
-	result, err := runner.RunTargets(opts, runner.RunContext{Env: runner.EnvMap(environ)}, cwd)
+	result, err := runner.RunTargets(opts, scanRunContext(environ), cwd)
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func runOpenClawInstallPolicy(
 		}
 		opts.Target = scanTarget
 	}
-	result, err := runner.RunTargets(opts, runner.RunContext{Env: runner.EnvMap(environ)}, cwd)
+	result, err := runner.RunTargets(opts, scanRunContext(environ), cwd)
 	if err != nil {
 		return failClosed(err)
 	}
@@ -286,7 +286,15 @@ func hasInstallPolicyConfigOverride(args []string) bool {
 func benchmarkRunContext(environ []string) runner.RunContext {
 	// Keep SIGINT at the process default until every benchmark phase observes Context.
 	// A signal-derived context would otherwise swallow interrupts during scanner runs and downloads.
-	return runner.RunContext{Env: runner.EnvMap(environ)}
+	return scanRunContext(environ)
+}
+
+func scanRunContext(environ []string) runner.RunContext {
+	ctx := runner.RunContext{Env: runner.EnvMap(environ)}
+	if ctx.Env["CLAWSCAN_PROGRESS"] == "1" {
+		ctx.Progress = os.Stderr
+	}
+	return ctx
 }
 
 func runBenchmarkCommand(args []string, environ []string) error {
@@ -341,7 +349,7 @@ func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd stri
 	if !resolved.JSON && resolved.OutputPath == "" {
 		resolved.OutputPath = defaultOutputPath
 	}
-	batch, err := runner.RunProfileBatch(resolved.Options, runner.RunContext{Env: runner.EnvMap(environ)}, cwd)
+	batch, err := runner.RunProfileBatch(resolved.Options, scanRunContext(environ), cwd)
 	if err != nil {
 		return err
 	}

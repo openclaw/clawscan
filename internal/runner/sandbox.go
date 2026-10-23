@@ -164,7 +164,7 @@ func commandRunnerForOptions(opts Options, ctx RunContext, env map[string]string
 	}
 	host := ctx.HostCommandRunner
 	if host == nil {
-		host = defaultCommandRunner{Env: env}
+		host = defaultCommandRunner{Env: env, Progress: ctx.progress}
 	}
 	if metadata.Mode == SandboxModeOff {
 		return host, metadata, nil
