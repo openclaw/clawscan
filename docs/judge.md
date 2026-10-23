@@ -37,3 +37,18 @@ deadline still takes precedence. The artifact's `judge.attempts` records each
 attempt's status, redacted result, validation error, duration, and expected
 inspection challenge/path/hash. The top-level `judge.result` is only the last
 attempt, and consumers must still validate its output schema and security evidence.
+
+## Live inspection check
+
+Maintainers can manually run the **CI** workflow with **judge-inspection** enabled,
+or dispatch **Judge Artifact Inspection Smoke** directly. The check uses the
+repository's `OPENAI_API_KEY` and a pinned Codex CLI to inspect a harmless local
+package through the `clawhub` profile. It verifies the completed receipt, the
+package manifest's SHA-256, and the inspected path, then retains the redacted
+report for seven days.
+
+This check runs on Ubuntu 22.04 because Ubuntu 24.04 rejects the judge's nested
+bubblewrap setup. It preserves the judge's read-only sandbox and uses scanner
+fixtures to isolate artifact inspection. It does not perform a full security
+scan or approve or publish a package. Normal push and pull-request CI do not run
+this paid, live check.
