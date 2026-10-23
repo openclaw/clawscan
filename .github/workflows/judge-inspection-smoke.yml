@@ -1,0 +1,92 @@
+name: Judge Artifact Inspection Smoke
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-package:
+    name: Inspect package (Ubuntu 22.04)
+    # Ubuntu 24.04 rejects the judge's nested bubblewrap setup with RTM_NEWADDR.
+    # Keep the real read-only judge proof on a runner that supports it.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Build ClawScan and install pinned judge harness
+        run: |
+          go build -o ./dist/clawscan ./cmd/clawscan
+          npm install -g @openai/codex@0.160.0
+          codex --version
+
+      - name: Verify real judge inspection with worker environment
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+
+          if not os.environ.get("OPENAI_API_KEY"):
+              raise SystemExit("OPENAI_API_KEY is required for this manual proof")
+          binary = Path("dist/clawscan").resolve()
+          report = Path("artifacts/judge-inspection.json").resolve()
+          report.parent.mkdir(parents=True, exist_ok=True)
+          with tempfile.TemporaryDirectory(prefix="clawscan-inspection-smoke-") as temp:
+              root = Path(temp)
+              package = root / "package"
+              package.mkdir()
+              manifest = b'{"name":"inspection-smoke","version":"1.0.0","description":"A local note template"}\n'
+              (package / "package.json").write_bytes(manifest)
+              (package / "README.md").write_text("# Notes\nA local Markdown note template. No code, credentials, or network access.\n")
+              skillspector = root / "skillspector.json"
+              skillspector.write_text('{"status":"clean","findings":[]}')
+              aig = root / "aig.json"
+              aig.write_text('{"version":"2.1.0","runs":[{"results":[]}]}')
+              # Replay the worker's restricted environment. Scanner fixtures isolate
+              # the live judge; this is not a full security scan or publish approval.
+              env = {key: os.environ[key] for key in ("PATH", "LANG", "OPENAI_API_KEY") if key in os.environ}
+              env.update(CODEX_API_KEY=env["OPENAI_API_KEY"], NO_COLOR="1", TMPDIR=temp, TMP=temp, TEMP=temp)
+              subprocess.run([
+                  str(binary), str(package), "--profile", "clawhub", "--sandbox", "off",
+                  "--scanner-result", f"skillspector={skillspector}",
+                  "--scanner-result", f"aig={aig}", "--output", str(report),
+              ], cwd=root, env=env, check=True, timeout=240)
+          artifact = json.loads(report.read_text())
+          judge = artifact.get("judge", {})
+          print(json.dumps({"status": judge.get("status"), "error": judge.get("error")}))
+          assert judge.get("status") == "completed", "Judge did not complete artifact inspection"
+          receipt = judge["result"]["artifact_inspection"]
+          assert receipt["required_file_sha256"] == hashlib.sha256(manifest).hexdigest()
+          assert "artifact/package.json" in receipt["files_inspected"]
+
+      - name: Retain redacted CLI report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: judge-inspection-ubuntu-22.04
+          path: artifacts/judge-inspection.json
+          if-no-files-found: warn
+          retention-days: 7

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Pin CI and release setup explicitly to Go 1.27.3 so setup-go cannot select the older language minimum.
+- Add an opt-in live judge inspection check on Ubuntu 22.04 that verifies package-file receipts without publishing. Thanks @Patrick-Erichsen (#70).
 
 ## 0.2.1 - 2026-10-20
 
