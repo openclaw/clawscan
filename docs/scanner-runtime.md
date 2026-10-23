@@ -164,10 +164,32 @@ fixture demonstrates compatibility, not the actual incident's unknown code.
 
 Every attempt, connection/header wait, stream, backoff and cancellation shares
 the original complete-response deadline (300 seconds by default). The Sol path
-uses the same SDK's cancellable async HTTP Responses client in a joined,
+uses the same SDK's cancellable async HTTP Responses client in a
 call-local event-loop thread: upstream callers already run inside an async
 CLI, and a synchronous stream watchdog cannot cancel opening/trickling headers.
-Caller interruption cancels the call-local task before joining its worker.
+Caller interruption cancels the call-local task once. Repeated interruptions
+preserve the original abort while waiting for response/client closure and event-loop
+finalization. A call-local completion event and actual thread deregistration, not
+`Thread.join()`/`is_alive()` after an interrupted join, establish worker completion.
+Worker startup is inside this barrier too. On the main thread only, callable
+SIGINT handlers are briefly deferred across `Thread.start()`, restored exactly,
+and replayed through the original handler before releasing deferred provider work.
+This prevents SIGINT from leaving CPython 3.12's pre-native-launch registration
+stranded without a real worker. Async Runner and custom-handler semantics are
+preserved; ignored/default OS handlers and non-main threads are not changed.
+A genuine launch failure propagates without waiting for a nonexistent worker.
+As with `asyncio.wait_for`, the deadline initiates cancellation; cooperative
+cleanup can finish after it. Cleanup is shielded from subsequent cancellation,
+not detached or given a fresh request deadline. Python cannot forcibly terminate
+an uncooperative thread/finalizer. Process budgets belong to the caller: ClawHub's
+external consumer supplies a 900-second process budget plus a 60-second cleanup
+allowance. The public CLI instead uses the external-command runner's configured
+timeout (20 minutes by default), cancelling the direct command via Go's
+`exec.CommandContext` without a separate 60-second cleanup phase. That cancellation
+does not guarantee process-tree termination or a strict wall-clock bound on pipe
+cleanup.
+Process termination (`SIG_DFL`, SIGKILL, interpreter/native failure) cannot promise
+in-process cleanup. Deferral changes no persistent signal policy or signal mask.
 The synchronous wait observes pending caller-task cancellation, including the
 async CLI's first SIGINT, without waiting for its blocked caller loop to resume.
 No endpoint, HTTP transport protocol, model, reasoning, tier or process budget

@@ -11,6 +11,7 @@ parsing. Only HTTP transport is replaced; no provider requests are made.
 import copy
 import asyncio
 import importlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -393,17 +394,60 @@ def test_service_message_in_model_output_does_not_trigger_retry(llm_factory):
     assert len(requests) == 1
 
 
+@pytest.fixture
+def retry_after_now(monkeypatch):
+    now = datetime(2026, 10, 23, 12, 45, 26, 750000, tzinfo=timezone.utc)
+
+    class Clock:
+        @staticmethod
+        def now(tz):
+            assert tz is timezone.utc
+            return now
+
+    module = importlib.import_module("skill_scan.utils.llm")
+    monkeypatch.setattr(module, "datetime", Clock)
+    return now
+
+
 @pytest.mark.parametrize("hint,minimum", [
     (None, 1), ("0", 1), ("2.5", 2.5), ("invalid", 1), ("-1", 1),
     ("nan", 1), ("inf", 1),
-    (format_datetime(datetime.now(timezone.utc) + timedelta(seconds=5)), 3),
+    (timedelta(seconds=5), 3),
 ])
-def test_bounded_backoff_honors_valid_retry_after(llm_factory, hint, minimum):
+def test_bounded_backoff_honors_valid_retry_after(llm_factory, retry_after_now, hint, minimum):
     llm, _, _ = llm_factory(retry_delay=None)
+    if isinstance(hint, timedelta):
+        hint = format_datetime(retry_after_now + hint)
     headers = httpx.Headers({"Retry-After": hint} if hint is not None else {})
     delay = llm._responses_retry_delay(1, headers)
     assert minimum <= delay <= 5.25
     assert 2 <= llm._responses_retry_delay(2, {}) <= 2.25
+
+
+@pytest.mark.parametrize("offset,zone,expected", [
+    (5, timezone.utc, 4.25),
+    (5, timezone(timedelta(hours=5, minutes=30)), 4.25),
+    (1, timezone.utc, 1),
+    (0, timezone.utc, 1),
+    (-5, timezone.utc, 1),
+    (5, None, 1),
+])
+@pytest.mark.parametrize("jitter_fraction", [0, 1])
+def test_http_date_backoff_precision_and_expiry(
+    llm_factory, retry_after_now, monkeypatch, offset, zone, expected, jitter_fraction,
+):
+    llm, _, _ = llm_factory(retry_delay=None)
+    date = retry_after_now + timedelta(seconds=offset)
+    date = date.astimezone(zone) if zone is not None else date.replace(tzinfo=None)
+    headers = httpx.Headers({"Retry-After": format_datetime(date)})
+    module = importlib.import_module("skill_scan.utils.llm")
+
+    def jitter(lower, upper):
+        assert (lower, upper) == (0, 0.25)
+        return lower + (upper - lower) * jitter_fraction
+
+    monkeypatch.setattr(module.random, "uniform", jitter)
+    assert llm._responses_retry_delay(1, headers) == expected + 0.25 * jitter_fraction
 
 
 @pytest.mark.parametrize("status", [200, 503])
@@ -507,6 +551,7 @@ closed = threading.Event()
 finished = threading.Event()
 clients = []
 calls = []
+interrupted_at = []
 phase = PHASE
 running_loop = RUNNING_LOOP
 signals = SIGNALS
@@ -540,12 +585,12 @@ llm._responses_retry_delay = delay
 def interrupt():
     assert entered.wait(2)
     time.sleep(0.02)
+    interrupted_at.append(time.monotonic())
     os.kill(os.getpid(), signal.SIGINT)
     if signals == 2 and not finished.wait(0.03):
         os.kill(os.getpid(), signal.SIGINT)
 thread = threading.Thread(target=interrupt)
 thread.start()
-started = time.monotonic()
 async def invoke():
     llm.chat([{"role":"user", "content":"inert fixture"}])
 try:
@@ -555,7 +600,7 @@ try:
         llm.chat([{"role":"user", "content":"inert fixture"}])
     raise AssertionError("caller interruption was lost")
 except KeyboardInterrupt:
-    assert time.monotonic() - started < 0.4
+    assert time.monotonic() - interrupted_at[0] < 0.4
     assert len(calls) == 1
     assert all(value.is_closed() for value in clients)
     assert phase != "stream" or closed.is_set()
@@ -571,6 +616,593 @@ print(json.dumps({"interrupted":True,"requests":len(calls),"closed":True}))
     result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"interrupted": True, "requests": 1, "closed": True}
+
+
+def _install_cleanup_clock(module):
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    initial = time.monotonic()
+    released = [None]
+
+    def clock():
+        return initial if released[0] is None else initial + time.monotonic() - released[0]
+
+    def release():
+        if released[0] is None:
+            released[0] = time.monotonic()
+
+    def loop_factory():
+        loop = asyncio.new_event_loop()
+        loop.time = clock
+        return loop
+
+    def run(coroutine):
+        return asyncio.run(coroutine, loop_factory=loop_factory)
+
+    module.time = SimpleNamespace(**{**vars(time), "monotonic": clock})
+    module.asyncio = SimpleNamespace(**{**vars(asyncio), "run": run})
+    return release
+
+
+@pytest.mark.parametrize("phase", ["open", "stream", "backoff", "cleanup"])
+@pytest.mark.parametrize("running_loop,signals", [(False, 1), (False, 2), (False, 5), (True, 1), (True, 2), (True, 5)])
+@pytest.mark.parametrize("cleanup_target", ["client", "response"])
+def test_interrupt_waits_for_real_sdk_cleanup(monkeypatch, tmp_path, phase, running_loop, signals, cleanup_target):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, running_loop, signals, False, cleanup_target)
+
+
+@pytest.mark.parametrize("phase", ["open", "stream", "backoff", "cleanup"])
+@pytest.mark.parametrize("signals", [1, 2, 5])
+def test_task_cancellation_waits_for_real_sdk_cleanup(monkeypatch, tmp_path, phase, signals):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, True, signals, True, "client")
+
+
+@pytest.mark.parametrize("running_loop", [False, True])
+def test_cleanup_budget_excludes_sdk_preparation(monkeypatch, tmp_path, running_loop):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, "open", running_loop, 5, False, "client", 0.30)
+
+
+@pytest.mark.parametrize("running_loop,signals", [(False, 1), (False, 2), (False, 5), (True, 1), (True, 2), (True, 5)])
+def test_interrupt_during_cold_sdk_preparation(monkeypatch, tmp_path, running_loop, signals):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, "preparation", running_loop, signals, False, "client", 0.10)
+
+
+def _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, running_loop, signals, task_cancel, cleanup_target, preparation_delay=0):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, json, os, signal, threading, time
+import httpx, openai
+from skill_scan.utils.llm import LLM
+entered, closing, cleaned, response_closed = (threading.Event() for _ in range(4))
+clients, calls, loops, tasks = [], [], [], []
+interrupted_at = []
+phase, running_loop, signals, task_cancel, cleanup_target, preparation_delay = SETTINGS
+from skill_scan.utils import llm as llm_module
+release_clock = _install_cleanup_clock(llm_module) if phase == "cleanup" else lambda: None
+class Silent(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        entered.set()
+        await asyncio.sleep(5)
+        if False:
+            yield b""
+    async def aclose(self):
+        if cleanup_target == "response":
+            closing.set()
+        await asyncio.sleep(0.20 if cleanup_target == "response" else 0.02)
+        response_closed.set()
+        if cleanup_target == "response":
+            cleaned.set()
+async def handler(request):
+    calls.append(1)
+    if phase == "open":
+        entered.set()
+        await asyncio.sleep(5)
+    if phase in {"backoff", "cleanup"}:
+        return httpx.Response(200, content=b'data: {"error":{"code":"server_error"}}\n\n')
+    return httpx.Response(200, stream=Silent())
+real = openai.AsyncOpenAI
+def client(**kwargs):
+    loops.append(asyncio.get_running_loop())
+    if phase == "preparation":
+        entered.set()
+    time.sleep(preparation_delay)
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    close = value.close
+    async def slow_close():
+        if cleanup_target == "client" or phase != "stream":
+            release_clock()
+            closing.set()
+            await asyncio.sleep(0.20)
+        await close()
+        cleaned.set()
+    value.close = slow_close
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.08 if phase == "cleanup" else 1)
+def delay(*args):
+    if phase == "backoff":
+        entered.set()
+    return 0.5
+llm._responses_retry_delay = delay
+if task_cancel:
+    signal.signal(signal.SIGUSR1, lambda *_: tasks[0].cancel())
+def interrupt():
+    assert (closing if phase == "cleanup" else entered).wait(2)
+    interrupted_at.append(time.monotonic())
+    os.kill(os.getpid(), signal.SIGUSR1 if task_cancel else signal.SIGINT)
+    assert closing.wait(2)
+    for ordinal in range(1, signals):
+        time.sleep(0.01)
+        os.kill(os.getpid(), signal.SIGUSR1 if task_cancel else signal.SIGINT)
+sender = threading.Thread(target=interrupt)
+sender.start()
+async def invoke():
+    tasks.append(asyncio.current_task())
+    llm.chat([{"role":"user", "content":"inert fixture"}])
+try:
+    if running_loop:
+        asyncio.run(invoke())
+    else:
+        llm.chat([{"role":"user", "content":"inert fixture"}])
+    raise AssertionError("caller abort lost")
+except (KeyboardInterrupt, asyncio.CancelledError) as aborted:
+    assert isinstance(aborted, asyncio.CancelledError if task_cancel else KeyboardInterrupt)
+    assert time.monotonic() - interrupted_at[0] < 0.4
+    assert calls == ([] if phase == "preparation" else [1])
+    assert cleaned.is_set()
+    assert clients and all(value.is_closed() for value in clients)
+    assert phase != "stream" or response_closed.is_set()
+    assert all(loop.is_closed() for loop in loops)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+finally:
+    sender.join()
+    llm.client.close()
+print(json.dumps({"aborted":True,"requests":len(calls),"cleaned":True}))
+'''
+    script = inspect.getsource(_install_cleanup_clock) + script.replace("SETTINGS", repr((phase, running_loop, signals, task_cancel, cleanup_target, preparation_delay)))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"aborted": True, "requests": 0 if phase == "preparation" else 1, "cleaned": True}
+
+
+@pytest.mark.parametrize("cleanup_target", ["client", "response"])
+def test_deadline_during_cleanup_waits_for_close(llm_factory, monkeypatch, cleanup_target):
+    llm, requests, wire = llm_factory(happy_events(), stream_timeout=0.08)
+    module = importlib.import_module("skill_scan.utils.llm")
+    monkeypatch.setattr(module, "time", module.time)
+    monkeypatch.setattr(module, "asyncio", module.asyncio)
+    release_clock = _install_cleanup_clock(module)
+    cleaned = threading.Event()
+    if cleanup_target == "client":
+        original = openai.AsyncOpenAI
+
+        def client(**kwargs):
+            value = original(**kwargs)
+            close = value.close
+
+            async def delayed_close():
+                release_clock()
+                await asyncio.sleep(0.20)
+                await close()
+                cleaned.set()
+
+            value.close = delayed_close
+            return value
+
+        monkeypatch.setattr(openai, "AsyncOpenAI", client)
+    else:
+        original = AsyncWire.aclose
+
+        async def delayed_close(value):
+            release_clock()
+            await asyncio.sleep(0.20)
+            await original(value)
+            cleaned.set()
+
+        monkeypatch.setattr(AsyncWire, "aclose", delayed_close)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="deadline"):
+        llm.chat(HISTORY)
+    assert time.monotonic() - started < 0.4
+    assert cleaned.is_set() and wire.closed.is_set()
+    assert len(requests) == 1
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+
+
+def test_concurrent_abort_does_not_cancel_other_call(llm_factory, monkeypatch):
+    entered, cancelled, cleaned = (threading.Event() for _ in range(3))
+    module = importlib.import_module("skill_scan.utils.llm")
+
+    def unexpected_handler_change(*arguments):
+        raise AssertionError("non-main calls must not change signal handlers")
+
+    monkeypatch.setattr(module.signal, "signal", unexpected_handler_change)
+
+    class CancelledWire(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            entered.set()
+            try:
+                await asyncio.sleep(5)
+            finally:
+                cancelled.set()
+            if False:
+                yield b""
+
+        async def aclose(self):
+            await asyncio.sleep(0.05)
+            cleaned.set()
+
+    llm, requests, _ = llm_factory(stream_timeout=1, attempts=[
+        lambda request: httpx.Response(200, stream=CancelledWire()),
+        lambda request: httpx.Response(200, stream=AsyncWire(WireStream(happy_events()))),
+    ])
+    caller = []
+
+    async def invoke():
+        caller.append(asyncio.current_task())
+        llm.chat(HISTORY)
+
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(asyncio.run, invoke())
+        assert entered.wait(2)
+        caller[0].cancel()
+        second = pool.submit(llm.chat, HISTORY)
+        with pytest.raises(asyncio.CancelledError):
+            first.result(timeout=1)
+        assert second.result(timeout=1) == TEXT
+    assert cancelled.is_set() and cleaned.is_set()
+    assert len(requests) == 2
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+
+
+def test_caller_cancellation_at_worker_completion_is_not_success(llm_factory, monkeypatch):
+    llm, requests, wire = llm_factory(happy_events())
+    original_wait = threading.Event.wait
+    injected = False
+
+    async def invoke():
+        caller = asyncio.current_task()
+
+        def wait(value, timeout=None):
+            nonlocal injected
+            completed = original_wait(value, timeout)
+            if timeout == 0.01 and completed and not injected:
+                while any(worker.name == "aig-responses" for worker in threading.enumerate()):
+                    time.sleep(0.001)
+                injected = True
+                caller.cancel()
+            return completed
+
+        monkeypatch.setattr(threading.Event, "wait", wait)
+        consumed = []
+        with pytest.raises(asyncio.CancelledError):
+            consumed.append(llm.chat(HISTORY))
+        assert not consumed
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(invoke())
+    assert injected and len(requests) == 1 and wire.closed.is_set()
+    assert not any(worker.name == "aig-responses" for worker in threading.enumerate())
+
+
+def test_already_cancelled_caller_does_not_launch_worker(llm_factory, monkeypatch):
+    llm, requests, _ = llm_factory(happy_events())
+
+    def unexpected_launch(worker):
+        raise AssertionError("cancelled caller must not launch a provider worker")
+
+    monkeypatch.setattr(threading.Thread, "start", unexpected_launch)
+
+    async def invoke():
+        asyncio.current_task().cancel()
+        with pytest.raises(asyncio.CancelledError):
+            llm.chat(HISTORY)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(invoke())
+    assert not requests
+    assert not any(worker.name == "aig-responses" for worker in threading.enumerate())
+
+
+@pytest.mark.parametrize("running_loop", [False, True])
+def test_sigint_during_worker_start_waits_for_cleanup(monkeypatch, tmp_path, running_loop):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, json, os, signal, threading
+import httpx, openai
+from skill_scan.utils.llm import LLM
+entered, cleaned = threading.Event(), threading.Event()
+clients, calls = [], []
+async def handler(request):
+    calls.append(1)
+    entered.set()
+    await asyncio.sleep(5)
+real = openai.AsyncOpenAI
+def client(**kwargs):
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    close = value.close
+    async def delayed_close():
+        await asyncio.sleep(0.20)
+        await close()
+        cleaned.set()
+    value.close = delayed_close
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.5)
+start = threading.Thread.start
+def launch(worker):
+    start(worker)
+    if worker.name == "aig-responses":
+        assert entered.wait(2)
+        os.kill(os.getpid(), signal.SIGINT)
+        if RUNNING_LOOP:
+            os.kill(os.getpid(), signal.SIGINT)
+threading.Thread.start = launch
+async def invoke():
+    llm.chat([{"role":"user", "content":"inert fixture"}])
+try:
+    if RUNNING_LOOP:
+        asyncio.run(invoke())
+    else:
+        llm.chat([{"role":"user", "content":"inert fixture"}])
+    raise AssertionError("caller abort lost")
+except KeyboardInterrupt:
+    assert calls == [1]
+    assert cleaned.is_set() and all(value.is_closed() for value in clients)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+finally:
+    llm.client.close()
+print(json.dumps({"interrupted":True,"closed":True,"requests":len(calls)}))
+'''.replace("RUNNING_LOOP", repr(running_loop))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"interrupted": True, "closed": True, "requests": 1}
+
+
+def test_worker_launch_failure_does_not_wait_for_nonexistent_worker(llm_factory, monkeypatch):
+    llm, requests, _ = llm_factory(happy_events())
+    start = threading.Thread.start
+
+    def fail(worker):
+        if worker.name == "aig-responses":
+            raise RuntimeError("fixture launch failure")
+        return start(worker)
+
+    monkeypatch.setattr(threading.Thread, "start", fail)
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="fixture launch failure"):
+        llm.chat(HISTORY)
+    assert time.monotonic() - started < 0.4
+    assert not requests
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+
+
+def _prepare_responses_sdk(events):
+    import asyncio
+    import json
+    import httpx
+    import openai
+
+    async def prepare():
+        requests = []
+
+        async def handler(request):
+            requests.append(json.loads(request.content))
+            body = "".join("data: " + json.dumps(value) + "\n\n" for value in events)
+            return httpx.Response(200, content=body.encode())
+
+        client = openai.AsyncOpenAI(
+            api_key="fixture-not-a-key", base_url="http://fixture.invalid/v1", max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        async with client:
+            stream = await client.responses.create(
+                model="gpt-6.1-sol", input=[{"role": "user", "content": "inert fixture"}],
+                stream=True, store=False, reasoning={"effort": "medium"}, service_tier="default",
+            )
+            async with stream:
+                received = [value async for value in stream]
+        assert received[-1].type == "response.completed"
+        assert len(requests) == 1 and requests[0]["stream"] is True
+        assert client.is_closed()
+
+    asyncio.run(prepare())
+
+
+@pytest.mark.parametrize("running_loop", [False, True])
+def test_cold_sdk_preparation_consumes_original_deadline(monkeypatch, tmp_path, running_loop):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, json, threading, time
+import httpx, openai
+from skill_scan.utils.llm import LLM
+clients, calls, loops = [], [], []
+async def handler(request):
+    calls.append(1)
+    raise AssertionError("expired preparation must not send a request")
+real = openai.AsyncOpenAI
+def client(**kwargs):
+    loops.append(asyncio.get_running_loop())
+    time.sleep(0.10)
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.05)
+async def invoke():
+    llm.chat([{"role":"user", "content":"inert fixture"}])
+started = time.monotonic()
+try:
+    if RUNNING_LOOP:
+        asyncio.run(invoke())
+    else:
+        llm.chat([{"role":"user", "content":"inert fixture"}])
+    raise AssertionError("cold preparation reset or bypassed the response deadline")
+except TimeoutError:
+    assert 0.10 <= time.monotonic() - started < 0.5
+    assert calls == []
+    assert clients and all(value.is_closed() for value in clients)
+    assert loops and all(loop.is_closed() for loop in loops)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+finally:
+    llm.client.close()
+print(json.dumps({"expired": True, "requests": len(calls), "closed": True}))
+'''.replace("RUNNING_LOOP", repr(running_loop))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"expired": True, "requests": 0, "closed": True}
+
+
+@pytest.mark.parametrize("running_loop", [False, True])
+@pytest.mark.parametrize("signals", [1, 2, 5])
+@pytest.mark.parametrize("handler_mode", ["default", "custom-abort", "custom-return", "ignore", "os-default"])
+def test_real_sigint_before_native_launch_restores_handler(monkeypatch, tmp_path, running_loop, signals, handler_mode):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, inspect, json, os, signal, sys, threading, time
+import httpx, openai
+from skill_scan.utils.llm import LLM
+running_loop, signals, mode, events = SETTINGS
+_prepare_responses_sdk(events)
+clients, requests, handled, mutations = [], [], [], []
+def custom(signum, frame):
+    assert signum == signal.SIGINT and frame is not None
+    handled.append(signum)
+    if mode == "custom-abort":
+        raise KeyboardInterrupt("custom-original-abort")
+if mode.startswith("custom"):
+    signal.signal(signal.SIGINT, custom)
+elif mode == "ignore":
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+elif mode == "os-default":
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+real = openai.AsyncOpenAI
+async def handler(request):
+    requests.append(1)
+    body = "".join("data: " + json.dumps(value) + "\n\n" for value in events)
+    return httpx.Response(200, content=body.encode())
+def client(**kwargs):
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.5)
+lines, first = inspect.getsourcelines(threading.Thread.start)
+call_line = first + next(index for index, line in enumerate(lines) if "_start_new_thread(" in line)
+code = threading.Thread.start.__code__
+triggered = []
+def trace(frame, event, arg):
+    if event == "line" and frame.f_code is code and frame.f_lineno == call_line and frame.f_locals["self"].name == "aig-responses":
+        sys.settrace(None)
+        triggered.append(1)
+        assert frame.f_locals["self"] in threading.enumerate()
+        for index in range(signals):
+            os.kill(os.getpid(), signal.SIGINT)
+    return trace
+real_signal = signal.signal
+def set_handler(signum, handler):
+    mutations.append((signum, handler))
+    return real_signal(signum, handler)
+async def invoke():
+    expected = signal.getsignal(signal.SIGINT)
+    expected_mask = signal.pthread_sigmask(signal.SIG_BLOCK, []) if hasattr(signal, "pthread_sigmask") else None
+    signal.signal = set_handler
+    started = time.monotonic()
+    try:
+        sys.settrace(trace)
+        value = llm.chat([{"role":"user", "content":"inert fixture"}])
+        assert mode in {"custom-return", "ignore"}
+        assert value.startswith("<verdict>normal</verdict>")
+    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+        assert mode in {"default", "custom-abort"}
+        if mode == "custom-abort":
+            assert isinstance(exc, KeyboardInterrupt) and str(exc) == "custom-original-abort"
+        if isinstance(exc, asyncio.CancelledError):
+            asyncio.current_task().uncancel()
+    finally:
+        sys.settrace(None)
+        signal.signal = real_signal
+        assert signal.getsignal(signal.SIGINT) is expected
+        if expected_mask is not None:
+            assert signal.pthread_sigmask(signal.SIG_BLOCK, []) == expected_mask
+    assert time.monotonic() - started < 0.4
+    assert triggered == [1]
+    assert len(requests) == (1 if mode in {"custom-return", "ignore"} else 0)
+    assert all(value.is_closed() for value in clients)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+    assert len(mutations) == (2 if callable(expected) else 0)
+    assert len(handled) == (signals if mode.startswith("custom") else 0)
+try:
+    if running_loop:
+        try:
+            asyncio.run(invoke())
+        except KeyboardInterrupt:
+            assert mode == "default"
+    else:
+        coroutine = invoke()
+        try:
+            coroutine.send(None)
+        except StopIteration:
+            pass
+        finally:
+            coroutine.close()
+finally:
+    llm.client.close()
+print(json.dumps({"triggered":True, "requests":len(requests), "closed":True, "restored":True}))
+'''.replace("SETTINGS", repr((running_loop, signals, handler_mode, happy_events())))
+    script = inspect.getsource(_prepare_responses_sdk) + script
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    if handler_mode == "os-default":
+        assert result.returncode == -2, result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"triggered": True, "requests": 1 if handler_mode in {"custom-return", "ignore"} else 0, "closed": True, "restored": True}
+
+
+@pytest.mark.parametrize("native_failure", [False, True])
+def test_launch_failure_restores_custom_sigint_handler(llm_factory, monkeypatch, native_failure):
+    import signal
+
+    llm, requests, _ = llm_factory(happy_events())
+    previous = signal.getsignal(signal.SIGINT)
+    seen = []
+
+    def handler(signum, frame):
+        seen.append(signum)
+
+    def fail(worker):
+        os.kill(os.getpid(), signal.SIGINT)
+        raise RuntimeError("fixture launch failure")
+
+    def fail_native(*arguments):
+        return fail(None)
+
+    signal.signal(signal.SIGINT, handler)
+    if native_failure:
+        monkeypatch.setattr(threading, "_start_new_thread", fail_native)
+    else:
+        monkeypatch.setattr(threading.Thread, "start", fail)
+    try:
+        with pytest.raises(RuntimeError, match="fixture launch failure"):
+            llm.chat(HISTORY)
+        assert signal.getsignal(signal.SIGINT) is handler
+        assert seen == [signal.SIGINT]
+        assert not requests
+        assert not any(value.name == "aig-responses" for value in threading.enumerate())
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 def test_deadline_cancels_retry_sleep_without_another_attempt(llm_factory):
@@ -725,6 +1357,12 @@ def test_sol_preserves_reasoning_effort_overrides(
 def test_other_models_keep_chat_completions_wire_contract(
     llm_factory, monkeypatch, model, effort
 ):
+    module = importlib.import_module("skill_scan.utils.llm")
+
+    def unexpected_handler_change(*arguments):
+        raise AssertionError("other models must not change signal handlers")
+
+    monkeypatch.setattr(module.signal, "signal", unexpected_handler_change)
     monkeypatch.setenv("AIG_SERVICE_TIER", "unsupported")
     if effort:
         monkeypatch.setenv("REASONING_EFFORT", effort)

@@ -1,22 +1,23 @@
 --- a/skill-scan/skill_scan/utils/llm.py
 +++ b/skill-scan/skill_scan/utils/llm.py
-@@ -18,7 +18,15 @@
+@@ -18,7 +18,16 @@
 
  from __future__ import annotations
 
 +import asyncio
 +import math
 +import random
++import signal
 +import threading
  import time
 +import uuid
-+from concurrent.futures import Future, wait
++from concurrent.futures import Future
 +from datetime import datetime, timezone
 +from email.utils import parsedate_to_datetime
 
  import openai
 
-@@ -48,6 +56,7 @@
+@@ -48,6 +57,7 @@
          )
          self.context_window = context_window
          self.stream_timeout = stream_timeout
@@ -24,7 +25,7 @@
 
      def chat(self, message: list[dict], p=False, ret_usage=False) -> str | tuple[str, dict]:
          ret = ""
-@@ -74,6 +83,9 @@
+@@ -74,6 +84,9 @@
          return ret
 
      def chat_stream(self, message: list[dict]) -> tuple[str, dict]:
@@ -34,7 +35,7 @@
          started = time.monotonic()
          request_options = {}
          reasoning_effort = (get_env("REASONING_EFFORT") or "").strip()
-@@ -121,6 +133,205 @@
+@@ -121,6 +134,278 @@
 
          return ret, usage
 
@@ -65,6 +66,9 @@
 +        outcome = Future()
 +        ready = Future()
 +        cancelled = threading.Event()
++        finished = threading.Event()
++        startup_settled = threading.Event()
++        deferred = []
 +        try:
 +            caller = asyncio.current_task()
 +        except RuntimeError:
@@ -72,11 +76,13 @@
 +
 +        async def complete():
 +            ready.set_result((asyncio.get_running_loop(), asyncio.current_task()))
++            while deferred and not startup_settled.is_set():
++                await asyncio.sleep(0.001)
 +            if cancelled.is_set():
 +                raise asyncio.CancelledError()
 +            try:
 +                return await asyncio.wait_for(
-+                    self._responses_attempts(history, options, deadline, call_id),
++                    self._responses_attempts(history, options, deadline, call_id, cancelled),
 +                    timeout=max(0, deadline - time.monotonic()),
 +                )
 +            except asyncio.TimeoutError:
@@ -89,28 +95,69 @@
 +                outcome.set_result(asyncio.run(complete()))
 +            except BaseException as exc:
 +                outcome.set_exception(exc)
++            finally:
++                finished.set()
 +
 +        worker = threading.Thread(target=run, name="aig-responses")
-+        worker.start()
-+        try:
-+            while True:
-+                if caller is not None and caller.cancelling():
-+                    raise asyncio.CancelledError()
-+                if outcome.done():
-+                    return outcome.result()
-+                wait((outcome,), timeout=0.05)
-+        except BaseException:
-+            if not outcome.done():
-+                cancelled.set()
-+                if ready.done():
-+                    loop, task = ready.result()
++        aborted = None
++
++        def defer_interrupt(signum, frame):
++            deferred.append((signum, frame))
++
++        def request_cancel(task):
++            if not task.cancelling():
++                task.cancel()
++
++        abort_scheduled = False
++        startup_attempted = False
++        previous_handler = None
++        replayed = 0
++        while True:
++            try:
++                if not startup_attempted:
++                    startup_attempted = True
 +                    try:
-+                        loop.call_soon_threadsafe(task.cancel)
-+                    except RuntimeError:
-+                        pass
-+            raise
-+        finally:
-+            worker.join()
++                        if caller is not None and caller.cancelling():
++                            raise asyncio.CancelledError()
++                        if threading.current_thread() is threading.main_thread():
++                            handler = signal.getsignal(signal.SIGINT)
++                            if callable(handler):
++                                previous_handler = handler
++                                signal.signal(signal.SIGINT, defer_interrupt)
++                        worker.start()
++                    finally:
++                        if previous_handler is not None:
++                            signal.signal(signal.SIGINT, previous_handler)
++                if replayed < len(deferred):
++                    signum, frame = deferred[replayed]
++                    replayed += 1
++                    previous_handler(signum, frame)
++                    continue
++                if aborted is None and caller is not None and caller.cancelling():
++                    raise asyncio.CancelledError()
++                if aborted is not None and not abort_scheduled:
++                    cancelled.set()
++                    if ready.done() and not outcome.done():
++                        loop, task = ready.result()
++                        try:
++                            loop.call_soon_threadsafe(request_cancel, task)
++                        except RuntimeError:
++                            pass
++                    abort_scheduled = True
++                startup_settled.set()
++                if worker not in threading.enumerate() and (
++                    finished.is_set() or aborted is not None
++                ):
++                    break
++                finished.wait(0.01)
++            except BaseException as exc:
++                if aborted is None:
++                    aborted = exc
++        if aborted is not None:
++            raise aborted
++        if caller is not None and caller.cancelling():
++            raise asyncio.CancelledError()
++        return outcome.result()
 +
 +    @staticmethod
 +    def _responses_transient(exc):
@@ -157,15 +204,40 @@
 +            raise RuntimeError("OpenAI Responses retry delay exceeds limit")
 +        return delay + random.uniform(0, min(0.25, 10 - delay))
 +
-+    async def _responses_attempts(self, history, options, deadline, call_id):
-+        async with openai.AsyncOpenAI(
++    @staticmethod
++    async def _responses_close(close):
++        cleanup = asyncio.create_task(close())
++        aborted = None
++        while True:
++            try:
++                await asyncio.shield(cleanup)
++                break
++            except asyncio.CancelledError as exc:
++                if cleanup.cancelled():
++                    raise
++                if aborted is None:
++                    aborted = exc
++            except BaseException:
++                if aborted is not None:
++                    raise aborted
++                raise
++        if aborted is not None:
++            raise aborted
++
++    async def _responses_attempts(self, history, options, deadline, call_id, cancelled):
++        client = openai.AsyncOpenAI(
 +            api_key=self.api_key,
 +            base_url=self.base_url,
 +            default_headers=self._responses_headers,
 +            max_retries=0,
 +            timeout=min(60, max(0.001, deadline - time.monotonic())),
-+        ) as client:
++        )
++        try:
 +            for attempt in range(1, 4):
++                if cancelled.is_set():
++                    raise asyncio.CancelledError()
++                if time.monotonic() >= deadline:
++                    raise TimeoutError("OpenAI Responses response deadline exceeded")
 +                response = None
 +                headers = {}
 +                logger.info(f"aig_provider_attempt v=1 call={call_id} attempt={attempt} outcome=started")
@@ -180,7 +252,7 @@
 +                    try:
 +                        result = await self._responses_output(response)
 +                    finally:
-+                        await response.close()
++                        await self._responses_close(response.close)
 +                except openai.APIError as exc:
 +                    category = self._responses_transient(exc)
 +                    logger.info(f"aig_provider_attempt v=1 call={call_id} attempt={attempt} outcome=failed category={category or 'nonretryable'}")
@@ -198,6 +270,8 @@
 +                else:
 +                    logger.info(f"aig_provider_attempt v=1 call={call_id} attempt={attempt} outcome=completed")
 +                    return result
++        finally:
++            await self._responses_close(client.close)
 +
 +    async def _responses_output(self, response):
 +        async for event in response:
