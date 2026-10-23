@@ -11,6 +11,7 @@ parsing. Only HTTP transport is replaced; no provider requests are made.
 import copy
 import asyncio
 import importlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -573,6 +574,34 @@ print(json.dumps({"interrupted":True,"requests":len(calls),"closed":True}))
     assert json.loads(result.stdout) == {"interrupted": True, "requests": 1, "closed": True}
 
 
+def _install_cleanup_clock(module):
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    initial = time.monotonic()
+    released = [None]
+
+    def clock():
+        return initial if released[0] is None else initial + time.monotonic() - released[0]
+
+    def release():
+        if released[0] is None:
+            released[0] = time.monotonic()
+
+    def loop_factory():
+        loop = asyncio.new_event_loop()
+        loop.time = clock
+        return loop
+
+    def run(coroutine):
+        return asyncio.run(coroutine, loop_factory=loop_factory)
+
+    module.time = SimpleNamespace(**{**vars(time), "monotonic": clock})
+    module.asyncio = SimpleNamespace(**{**vars(asyncio), "run": run})
+    return release
+
+
 @pytest.mark.parametrize("phase", ["open", "stream", "backoff", "cleanup"])
 @pytest.mark.parametrize("running_loop,signals", [(False, 1), (False, 2), (False, 5), (True, 1), (True, 2), (True, 5)])
 @pytest.mark.parametrize("cleanup_target", ["client", "response"])
@@ -596,6 +625,8 @@ from skill_scan.utils.llm import LLM
 entered, closing, cleaned, response_closed = (threading.Event() for _ in range(4))
 clients, calls, loops, tasks = [], [], [], []
 phase, running_loop, signals, task_cancel, cleanup_target = SETTINGS
+from skill_scan.utils import llm as llm_module
+release_clock = _install_cleanup_clock(llm_module) if phase == "cleanup" else lambda: None
 class Silent(httpx.AsyncByteStream):
     async def __aiter__(self):
         entered.set()
@@ -624,6 +655,7 @@ def client(**kwargs):
     close = value.close
     async def slow_close():
         if cleanup_target == "client" or phase != "stream":
+            release_clock()
             closing.set()
             await asyncio.sleep(0.20)
         await close()
@@ -673,7 +705,7 @@ finally:
     llm.client.close()
 print(json.dumps({"aborted":True,"requests":len(calls),"cleaned":True}))
 '''
-    script = script.replace("SETTINGS", repr((phase, running_loop, signals, task_cancel, cleanup_target)))
+    script = inspect.getsource(_install_cleanup_clock) + script.replace("SETTINGS", repr((phase, running_loop, signals, task_cancel, cleanup_target)))
     env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
     result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
@@ -683,6 +715,10 @@ print(json.dumps({"aborted":True,"requests":len(calls),"cleaned":True}))
 @pytest.mark.parametrize("cleanup_target", ["client", "response"])
 def test_deadline_during_cleanup_waits_for_close(llm_factory, monkeypatch, cleanup_target):
     llm, requests, wire = llm_factory(happy_events(), stream_timeout=0.08)
+    module = importlib.import_module("skill_scan.utils.llm")
+    monkeypatch.setattr(module, "time", module.time)
+    monkeypatch.setattr(module, "asyncio", module.asyncio)
+    release_clock = _install_cleanup_clock(module)
     cleaned = threading.Event()
     if cleanup_target == "client":
         original = openai.AsyncOpenAI
@@ -692,6 +728,7 @@ def test_deadline_during_cleanup_waits_for_close(llm_factory, monkeypatch, clean
             close = value.close
 
             async def delayed_close():
+                release_clock()
                 await asyncio.sleep(0.20)
                 await close()
                 cleaned.set()
@@ -704,6 +741,7 @@ def test_deadline_during_cleanup_waits_for_close(llm_factory, monkeypatch, clean
         original = AsyncWire.aclose
 
         async def delayed_close(value):
+            release_clock()
             await asyncio.sleep(0.20)
             await original(value)
             cleaned.set()
