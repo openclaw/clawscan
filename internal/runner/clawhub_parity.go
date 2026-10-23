@@ -26,16 +26,17 @@ type clawHubContext struct {
 }
 
 type clawHubNormalizedSkillSpectorAnalysis struct {
-	Status         string                     `json:"status"`
-	Score          *float64                   `json:"score,omitempty"`
-	Severity       string                     `json:"severity,omitempty"`
-	Recommendation string                     `json:"recommendation,omitempty"`
-	IssueCount     int                        `json:"issueCount"`
-	Issues         []clawHubSkillSpectorIssue `json:"issues"`
-	ScannerVersion string                     `json:"scannerVersion,omitempty"`
-	Summary        string                     `json:"summary,omitempty"`
-	Error          string                     `json:"error,omitempty"`
-	CheckedAt      int64                      `json:"checkedAt"`
+	Status               string                     `json:"status"`
+	Score                *float64                   `json:"score,omitempty"`
+	Severity             string                     `json:"severity,omitempty"`
+	Recommendation       string                     `json:"recommendation,omitempty"`
+	IssueCount           int                        `json:"issueCount"`
+	Issues               []clawHubSkillSpectorIssue `json:"issues"`
+	ScannerVersion       string                     `json:"scannerVersion,omitempty"`
+	Summary              string                     `json:"summary,omitempty"`
+	Error                string                     `json:"error,omitempty"`
+	CheckedAt            int64                      `json:"checkedAt"`
+	AnalysisCompleteness map[string]any             `json:"analysisCompleteness,omitempty"`
 }
 
 type clawHubSkillSpectorIssue struct {
@@ -132,20 +133,23 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 	)
 	status := normalizeClawHubSkillSpectorStatus(readMapString(record, "status"), recommendation, score, issueCount)
 	reportError := skillSpectorReportError(record)
+	var analysisCompleteness map[string]any
 	if reportError != "" {
 		status = "error"
+		analysisCompleteness = asStringMap(record["analysis_completeness"])
 	}
 	return clawHubNormalizedSkillSpectorAnalysis{
-		Status:         status,
-		Score:          score,
-		Severity:       severity,
-		Recommendation: recommendation,
-		IssueCount:     issueCount,
-		Issues:         issues,
-		ScannerVersion: truncateClawHubText(scannerVersion, maxClawHubSkillSpectorShortTextChars),
-		Summary:        truncateClawHubText(readMapString(record, "summary", "analysis"), maxClawHubSkillSpectorTextChars),
-		Error:          reportError,
-		CheckedAt:      checkedAt,
+		Status:               status,
+		Score:                score,
+		Severity:             severity,
+		Recommendation:       recommendation,
+		IssueCount:           issueCount,
+		Issues:               issues,
+		ScannerVersion:       truncateClawHubText(scannerVersion, maxClawHubSkillSpectorShortTextChars),
+		Summary:              truncateClawHubText(readMapString(record, "summary", "analysis"), maxClawHubSkillSpectorTextChars),
+		Error:                reportError,
+		CheckedAt:            checkedAt,
+		AnalysisCompleteness: analysisCompleteness,
 	}, nil
 }
 
