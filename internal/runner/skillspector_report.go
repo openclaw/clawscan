@@ -22,7 +22,7 @@ func validateSkillSpectorReport(result ScannerResult) ScannerResult {
 		result.Error = "SkillSpector report must be a JSON object."
 		return result
 	}
-	if message := skillSpectorReportError(record); message != "" {
+	if message := skillSpectorReportError(record); message != "" && (!skillSpectorReferenceCaveatsOnly(record) || !skillSpectorUnambiguousJSON(result.Raw)) {
 		result.Status = "failed"
 		if result.Error == "" {
 			result.Error = message

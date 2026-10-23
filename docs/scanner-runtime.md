@@ -98,13 +98,29 @@ fixes, not a new ClawScan model-provider framework:
   provenance records requested and observed model/control data. Do not treat
   configured model names or this source pin as proof of an observed response.
 
-An explicit unsuccessful or incomplete SkillSpector report is a failed scanner
-result, even when the command exits 0 or 1 and writes valid JSON. Exit codes above
-1 also remain operational failures. Raw reports, findings and exit codes are
-retained. The ClawHub prompt projection marks this evidence as an error without
-discarding its issues; legacy reports without completeness fields retain their
-existing interpretation. Neither valid JSON nor a security-finding exit alone
-proves successful inspection.
+An explicit unsuccessful or incomplete SkillSpector report fails the scanner,
+even when the command exits 0 or 1 and writes valid JSON. One narrow exception
+recognizes the pinned 2.12.0 report contract: successful LLM-enabled inspection of
+all reported local files may complete operationally when the only exceptions are
+well-formed missing/ambiguous reference caveats. This requires matching canonical
+file counts, complete required analyzer accounting, reconciled unsuppressed
+findings, and references matching every exception. Unknown schemas, exclusions,
+degraded analyzers, content/inspection limits and actual coverage gaps still fail.
+Known `rejected` references are allowed only with the producer's `out_of_scope`
+disposition, null target, inspected source and valid location/kind/evidence; they
+do not represent missing bundled bytes or require a reference ledger exception.
+Reports with archive/transitive provenance or suppression are not eligible for
+this exception. Exit codes above 1 remain failures.
+
+Operational completion is not clean analysis or publication approval. Raw
+`is_complete: false`, `status: partial`, recommendations, findings and every
+exception remain unchanged. The ClawHub judge projection keeps its conservative
+error status and includes the raw completeness/caveat object alongside issues;
+the full raw scanner report remains available in run evidence. Consumers must
+not infer a benign verdict from scanner completion or discard partial caveats
+when normalizing reports. Legacy reports without completeness fields retain
+their existing interpretation. Neither valid JSON nor a security-finding exit
+alone proves successful inspection.
 
 Docker builds apply patches with `git apply --check` and execute offline tests
 against the actual installed scanner packages and OpenAI SDK serializers.
