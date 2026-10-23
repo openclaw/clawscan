@@ -4,6 +4,7 @@
 
 - Pin CI and release setup explicitly to Go 1.27.3 so setup-go cannot select the older language minimum.
 - Add an opt-in live judge inspection check on Ubuntu 22.04 that verifies package-file receipts without publishing. Thanks @Patrick-Erichsen (#70).
+- Update the text-processing dependency to golang.org/x/text v0.43.0 while retaining the Go 1.27.1 source minimum.
 
 ## 0.2.1 - 2026-10-20
 
