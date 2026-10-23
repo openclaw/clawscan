@@ -1,6 +1,9 @@
 """Wire-contract tests against the patched, installed NVIDIA SkillSpector."""
 
+import asyncio
 import json
+import threading
+import time
 
 import httpx
 import pytest
@@ -23,6 +26,8 @@ def controls(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-credential")
     monkeypatch.setenv("SKILLSPECTOR_PROVIDER", "openai")
     monkeypatch.setenv("SKILLSPECTOR_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
 
 
 def model(monkeypatch, handler, name="gpt-6.1-sol"):
@@ -309,3 +314,174 @@ def test_other_model_ignores_sol_service_tier(monkeypatch):
     monkeypatch.setenv("SKILLSPECTOR_SERVICE_TIER", "unsupported")
     llm = OpenAIProvider().create_chat_model("gpt-5.5", max_tokens=128)
     assert llm.service_tier is None
+
+
+@pytest.fixture
+def batch_transport(monkeypatch):
+    observed = {"active": 0, "peak": 0, "paths": [], "error_paths": set()}
+    lock = threading.Lock()
+
+    def begin(request):
+        body = json.loads(request.content)
+        assert request.url.path == "/v1/responses"
+        assert body["model"] == "gpt-6.1-sol"
+        assert body["reasoning"] == {"effort": "medium"}
+        assert body["service_tier"] == "default"
+        prompt = body["input"][0]["content"]
+        if isinstance(prompt, list):
+            prompt = prompt[0]["text"]
+        path = prompt.split("## File: ", 1)[1].split("\n", 1)[0]
+        with lock:
+            observed["active"] += 1
+            observed["peak"] = max(observed["peak"], observed["active"])
+            observed["paths"].append(path)
+        return path
+
+    def finish(request, path):
+        with lock:
+            observed["active"] -= 1
+        if path in observed["error_paths"]:
+            return httpx.Response(
+                400,
+                request=request,
+                json={"error": {"type": "invalid_request_error", "message": "Inert failure"}},
+            )
+        finding = {
+            "rule_id": "SSD-1",
+            "message": "Synthetic retained finding",
+            "severity": "HIGH",
+            "start_line": 1,
+            "confidence": 0.99,
+            "explanation": "Inert fixture evidence",
+            "remediation": "Inert fixture mitigation",
+        }
+        payload = {"findings": [finding] if path.endswith("19.md") else []}
+        return httpx.Response(
+            200,
+            request=request,
+            json=response([
+                {
+                    "type": "message",
+                    "id": "msg_batch",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{
+                        "type": "output_text",
+                        "text": json.dumps(payload),
+                        "annotations": [],
+                    }],
+                }
+            ]),
+        )
+
+    def send(client, request, **kwargs):
+        path = begin(request)
+        time.sleep(0.05)
+        return finish(request, path)
+
+    async def asend(client, request, **kwargs):
+        path = begin(request)
+        await asyncio.sleep(0.05)
+        return finish(request, path)
+
+    probe = OpenAIProvider().create_chat_model("gpt-6.1-sol", max_tokens=256)
+    monkeypatch.setattr(type(probe.root_client._client), "send", send)
+    monkeypatch.setattr(type(probe.root_async_client._client), "send", asend)
+    return observed
+
+
+def discovery_state(seconds):
+    from skillspector.state import WorkflowResourceBudget
+
+    files = {f"fixture-{index:02}.md": "Inert generated text." for index in range(20)}
+    budget = WorkflowResourceBudget(max_seconds=seconds)
+    budget.start()
+    return {
+        "use_llm": True,
+        "components": list(files),
+        "file_cache": files,
+        "model_config": {"default": "gpt-6.1-sol"},
+        "workflow_resource_budget": budget,
+    }
+
+
+def test_security_discovery_finishes_all_batches_with_shared_budget(
+    monkeypatch, batch_transport
+):
+    from skillspector.nodes.analyzers.semantic_security_discovery import node
+
+    monkeypatch.setenv("SKILLSPECTOR_MAX_LLM_CONCURRENCY", "5")
+    state = discovery_state(0.8)
+    result = node(state)
+    assert result["analyzer_status_events"][0]["status"] == "completed"
+    assert sorted(batch_transport["paths"]) == sorted(state["components"])
+    assert 1 < batch_transport["peak"] <= 5
+    assert batch_transport["active"] == 0
+    assert len(result["inspection_ledger"]) == 20
+    assert result["llm_call_log"][0]["ok"] is True
+    assert len(result["findings"]) == 1
+    assert result["findings"][0].file == "fixture-19.md"
+    assert result["findings"][0].message == "Synthetic retained finding"
+    assert len(result["inference_usage"]) == 20
+
+
+@pytest.mark.parametrize("concurrency", [1, 3])
+def test_security_discovery_respects_configured_pool(monkeypatch, batch_transport, concurrency):
+    from skillspector.nodes.analyzers.semantic_security_discovery import node
+
+    monkeypatch.setenv("SKILLSPECTOR_MAX_LLM_CONCURRENCY", str(concurrency))
+    result = node(discovery_state(5))
+    assert result["analyzer_status_events"][0]["status"] == "completed"
+    assert batch_transport["peak"] <= concurrency
+    assert len(batch_transport["paths"]) == 20
+
+
+def test_security_discovery_shares_pool_with_sibling_analyzers(monkeypatch, batch_transport):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from skillspector.nodes.analyzers.semantic_developer_intent import node as intent
+    from skillspector.nodes.analyzers.semantic_quality_policy import node as quality
+    from skillspector.nodes.analyzers.semantic_security_discovery import node as security
+
+    monkeypatch.setenv("SKILLSPECTOR_MAX_LLM_CONCURRENCY", "5")
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(node, discovery_state(5)) for node in (security, intent, quality)]
+        results = [future.result(timeout=10) for future in futures]
+    assert 1 < batch_transport["peak"] <= 5
+    assert batch_transport["active"] == 0
+    assert len(batch_transport["paths"]) == 60
+    for result in results:
+        assert result["analyzer_status_events"][0]["status"] == "completed"
+        assert len(result["inspection_ledger"]) == 20
+        assert len(result["findings"]) == 1
+
+
+def test_security_discovery_keeps_failed_batch_and_successful_findings(monkeypatch, batch_transport):
+    from skillspector.nodes.analyzers.semantic_security_discovery import node
+
+    monkeypatch.setenv("SKILLSPECTOR_MAX_LLM_CONCURRENCY", "5")
+    batch_transport["error_paths"].add("fixture-00.md")
+    result = node(discovery_state(5))
+    assert result["analyzer_status_events"][0]["status"] != "completed"
+    assert result["llm_call_log"][0]["ok"] is False
+    assert len(result["inspection_ledger"]) == 20
+    assert any(
+        event["path"] == "fixture-00.md" and event["outcome"] == "failed"
+        for event in result["inspection_ledger"]
+    )
+    assert sorted(batch_transport["paths"]) == sorted(discovery_state(5)["components"])
+    assert result["findings"][0].file == "fixture-19.md"
+
+
+def test_security_discovery_deadline_accounts_for_unstarted_batches(monkeypatch, batch_transport):
+    from skillspector.nodes.analyzers.semantic_security_discovery import node
+
+    monkeypatch.setenv("SKILLSPECTOR_MAX_LLM_CONCURRENCY", "1")
+    state = discovery_state(0.15)
+    result = node(state)
+    assert result["analyzer_status_events"][0]["status"] != "completed"
+    assert result["llm_call_log"][0]["ok"] is False
+    assert len(result["inspection_ledger"]) == 20
+    assert sorted(event["path"] for event in result["inspection_ledger"]) == sorted(state["components"])
+    assert 0 < len(batch_transport["paths"]) < 20
+    assert batch_transport["active"] == 0
