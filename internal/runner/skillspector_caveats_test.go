@@ -210,6 +210,105 @@ func TestSkillSpectorReferenceCaveatsFailClosed(t *testing.T) {
 	}
 }
 
+func TestSkillSpectorRejectedReferenceContract(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/skillspector-reference-caveat.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		field   string
+		value   any
+		missing bool
+		valid   bool
+	}{
+		{name: "markdown link", field: "reference_kind", value: "markdown_link", valid: true},
+		{name: "markdown image", field: "reference_kind", value: "markdown_image", valid: true},
+		{name: "inline command", field: "reference_kind", value: "inline_command", valid: true},
+		{name: "quoted or code", field: "reference_kind", value: "quoted_or_code", valid: true},
+		{name: "plain path", field: "reference_kind", value: "plain_path", valid: true},
+		{name: "unicode evidence", field: "evidence", value: strings.Repeat("界", 160), valid: true},
+		{name: "target present", field: "target_path", value: "fixture-001.md"},
+		{name: "target empty", field: "target_path", value: ""},
+		{name: "target missing", field: "target_path", missing: true},
+		{name: "analyzed disposition", field: "disposition", value: "analyzed"},
+		{name: "partial disposition", field: "disposition", value: "partial"},
+		{name: "failed disposition", field: "disposition", value: "failed"},
+		{name: "unknown disposition", field: "disposition", value: "future"},
+		{name: "missing disposition", field: "disposition", missing: true},
+		{name: "out of scope missing", field: "status", value: "missing"},
+		{name: "out of scope ambiguous", field: "status", value: "ambiguous"},
+		{name: "out of scope resolved", field: "status", value: "resolved"},
+		{name: "unknown status", field: "status", value: "future"},
+		{name: "unknown field", field: "future", value: true},
+		{name: "case alias", field: "Disposition", value: "out_of_scope"},
+		{name: "uninspected source", field: "source_path", value: "absent.md"},
+		{name: "escaping source", field: "source_path", value: "../SKILL.md"},
+		{name: "source missing", field: "source_path", missing: true},
+		{name: "line missing", field: "line", missing: true},
+		{name: "line zero", field: "line", value: 0},
+		{name: "line outside source", field: "line", value: 7},
+		{name: "line fractional", field: "line", value: 1.5},
+		{name: "line string", field: "line", value: "6"},
+		{name: "column missing", field: "column", missing: true},
+		{name: "column zero", field: "column", value: 0},
+		{name: "column negative", field: "column", value: -1},
+		{name: "column fractional", field: "column", value: 1.5},
+		{name: "column string", field: "column", value: "1"},
+		{name: "kind missing", field: "reference_kind", missing: true},
+		{name: "kind unknown", field: "reference_kind", value: "future"},
+		{name: "evidence missing", field: "evidence", missing: true},
+		{name: "evidence empty", field: "evidence", value: ""},
+		{name: "evidence null", field: "evidence", value: nil},
+		{name: "evidence multiline", field: "evidence", value: "outside\n../scope.md"},
+		{name: "evidence tab", field: "evidence", value: "outside\t../scope.md"},
+		{name: "evidence unbounded", field: "evidence", value: strings.Repeat("x", 161)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var report map[string]any
+			if err := json.Unmarshal(fixture, &report); err != nil {
+				t.Fatal(err)
+			}
+			accounting := report["analysis_completeness"].(map[string]any)
+			reference := map[string]any{
+				"source_path": "SKILL.md", "line": 6, "column": 1,
+				"evidence":    "An outside-scope path is `../outside-scope.md`.",
+				"target_path": nil, "status": "rejected", "disposition": "out_of_scope",
+				"reference_kind": "quoted_or_code",
+			}
+			if test.missing {
+				delete(reference, test.field)
+			} else {
+				reference[test.field] = test.value
+			}
+			accounting["references"] = append(accounting["references"].([]any), reference)
+			raw, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := &recordingCommandRunner{writeOutput: string(raw), exitCode: intPointer(0)}
+			result, err := (ExternalScannerRunner{CommandRunner: command, Env: map[string]string{}, SkillSpectorCommand: []string{"skillspector"}}).runSkillSpector(t.TempDir(), "now")
+			if err != nil || (result.Status == "completed") != test.valid || !bytes.Equal(result.Raw, raw) {
+				t.Fatalf("rejected reference contract: status=%s err=%v valid=%t", result.Status, err, test.valid)
+			}
+			path := filepath.Join(t.TempDir(), "report.json")
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			imported, err := scannerResult(Options{ScannerResultPaths: map[string]string{"skillspector": path}}, "skillspector", resolvedTarget{}, "now", nil)
+			if err != nil || imported.Status != result.Status || !bytes.Equal(imported.Raw, raw) {
+				t.Fatalf("imported reference contract: status=%s err=%v", imported.Status, err)
+			}
+			if test.valid {
+				normalized, err := normalizeClawHubSkillSpector(raw, 123)
+				if err != nil || normalized.Status != "error" || normalized.AnalysisCompleteness["is_complete"] != false {
+					t.Fatalf("rejected reference lost conservative projection: %#v err=%v", normalized, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSkillSpectorReferenceCaveatTelemetryContract(t *testing.T) {
 	fixture, err := os.ReadFile("testdata/skillspector-reference-caveat.json")
 	if err != nil {
@@ -276,6 +375,37 @@ func TestSkillSpectorReferenceCaveatTelemetryContract(t *testing.T) {
 			}
 			if err != nil || result.Status != want || !bytes.Equal(result.Raw, raw) {
 				t.Fatalf("telemetry contract: status=%s want=%s err=%v", result.Status, want, err)
+			}
+		})
+	}
+}
+
+func TestSkillSpectorProvenanceControlStatus(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/skillspector-reference-caveat.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"invalid_configuration", "configuration_unknown", "controls_not_observed", "provider_defaults", "best_effort_controls_forwarded", "controls_partially_forwarded", "future_failure", "not_applied", "", "BEST_EFFORT_CONTROLS_FORWARDED"} {
+		t.Run(status, func(t *testing.T) {
+			var report map[string]any
+			if err := json.Unmarshal(fixture, &report); err != nil {
+				t.Fatal(err)
+			}
+			metadata := report["metadata"].(map[string]any)
+			provenance := metadata["llm_provenance"].(map[string]any)
+			provenance["determinism"].(map[string]any)["control_status"] = status
+			raw, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := &recordingCommandRunner{writeOutput: string(raw), exitCode: intPointer(0)}
+			result, err := (ExternalScannerRunner{CommandRunner: command, Env: map[string]string{}, SkillSpectorCommand: []string{"skillspector"}}).runSkillSpector(t.TempDir(), "now")
+			want := "completed"
+			if status == "future_failure" || status == "not_applied" || status == "" || status == "BEST_EFFORT_CONTROLS_FORWARDED" {
+				want = "failed"
+			}
+			if err != nil || result.Status != want || !bytes.Equal(result.Raw, raw) {
+				t.Fatalf("provenance control status: status=%s want=%s err=%v", result.Status, want, err)
 			}
 		})
 	}

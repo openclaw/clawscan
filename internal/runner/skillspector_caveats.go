@@ -6,6 +6,8 @@ import (
 	"io"
 	"path"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 type skillSpectorCaveatAccounting struct {
@@ -319,6 +321,14 @@ func skillSpectorReferenceAccountingComplete(accounting skillSpectorCaveatAccoun
 		case "markdown_image", "markdown_link", "inline_command", "quoted_or_code", "plain_path":
 		default:
 			return false
+		}
+		if reference.Status == "rejected" {
+			if reference.Disposition != "out_of_scope" || !bytes.Equal(reference.Target, []byte("null")) || utf8.RuneCountInString(reference.Evidence) > 160 || strings.IndexFunc(reference.Evidence, func(character rune) bool {
+				return character != ' ' && unicode.IsSpace(character)
+			}) >= 0 {
+				return false
+			}
+			continue
 		}
 		if reference.Status == "resolved" {
 			var target string

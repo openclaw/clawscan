@@ -37,6 +37,11 @@ func skillSpectorCaveatTelemetryKnown(metadata map[string]any) bool {
 		return false
 	}
 	provenance := metadata["llm_provenance"].(map[string]any)
+	switch provenance["determinism"].(map[string]any)["control_status"] {
+	case "invalid_configuration", "configuration_unknown", "controls_not_observed", "provider_defaults", "best_effort_controls_forwarded", "controls_partially_forwarded":
+	default:
+		return false
+	}
 	remaining := make(map[string]bool)
 	for _, analyzer := range strings.Fields("mcp_tool_poisoning semantic_developer_intent semantic_quality_policy semantic_security_discovery meta_analyzer") {
 		remaining[analyzer] = true

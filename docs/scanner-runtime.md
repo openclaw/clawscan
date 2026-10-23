@@ -106,6 +106,9 @@ well-formed missing/ambiguous reference caveats. This requires matching canonica
 file counts, complete required analyzer accounting, reconciled unsuppressed
 findings, and references matching every exception. Unknown schemas, exclusions,
 degraded analyzers, content/inspection limits and actual coverage gaps still fail.
+Known `rejected` references are allowed only with the producer's `out_of_scope`
+disposition, null target, inspected source and valid location/kind/evidence; they
+do not represent missing bundled bytes or require a reference ledger exception.
 Reports with archive/transitive provenance or suppression are not eligible for
 this exception. Exit codes above 1 remain failures.
 
