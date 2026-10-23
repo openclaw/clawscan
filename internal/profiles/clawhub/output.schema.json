@@ -101,7 +101,11 @@
         },
         "additional_files_inspected": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^artifact/" }
+          "items": {
+            "type": "string",
+            "description": "Canonical workspace-relative path of an inspected artifact input file, not a directory or workspace report. No empty, dot, or parent components.",
+            "pattern": "^artifact/([^/]{3,}|[^/.][^/]?|[.][^/.])(/([^/]{3,}|[^/.][^/]?|[.][^/.]))*$"
+          }
         }
       }
     }
