@@ -47,8 +47,10 @@ package through the `clawhub` profile. It verifies the completed receipt, the
 package manifest's SHA-256, and the inspected path, then retains the redacted
 report for seven days.
 
-This check runs on Ubuntu 22.04 because Ubuntu 24.04 rejects the judge's nested
-bubblewrap setup. It preserves the judge's read-only sandbox and uses scanner
+This check uses GitHub-hosted Ubuntu 22.04 after a paired GitHub-hosted test found
+a nested bubblewrap setup failure on Ubuntu 24.04. That result does not establish
+that other Ubuntu 24.04 hosts, including Blacksmith, fail or that Ubuntu 22.04
+cannot time out. It preserves the judge's read-only sandbox and uses scanner
 fixtures to isolate artifact inspection. It does not perform a full security
 scan or approve or publish a package. Normal push and pull-request CI do not run
 this paid, live check.
