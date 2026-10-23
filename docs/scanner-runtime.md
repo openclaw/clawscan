@@ -181,8 +181,13 @@ A genuine launch failure propagates without waiting for a nonexistent worker.
 As with `asyncio.wait_for`, the deadline initiates cancellation; cooperative
 cleanup can finish after it. Cleanup is shielded from subsequent cancellation,
 not detached or given a fresh request deadline. Python cannot forcibly terminate
-an uncooperative thread/finalizer; the existing outer process boundary
-(900 seconds plus 60 seconds cleanup) remains the hard termination backstop.
+an uncooperative thread/finalizer. Process budgets belong to the caller: ClawHub's
+external consumer supplies a 900-second process budget plus a 60-second cleanup
+allowance. The public CLI instead uses the external-command runner's configured
+timeout (20 minutes by default), cancelling the direct command via Go's
+`exec.CommandContext` without a separate 60-second cleanup phase. That cancellation
+does not guarantee process-tree termination or a strict wall-clock bound on pipe
+cleanup.
 Process termination (`SIG_DFL`, SIGKILL, interpreter/native failure) cannot promise
 in-process cleanup. Deferral changes no persistent signal policy or signal mask.
 The synchronous wait observes pending caller-task cancellation, including the
