@@ -494,8 +494,8 @@ def test_attempt_logs_are_bounded_provider_only_metadata(llm_factory):
 
 
 @pytest.mark.parametrize("phase", ["open", "stream", "backoff"])
-@pytest.mark.parametrize("running_loop", [False, True])
-def test_caller_interrupt_cancels_worker_before_return(monkeypatch, tmp_path, phase, running_loop):
+@pytest.mark.parametrize("running_loop,signals", [(False, 1), (True, 1), (True, 2)])
+def test_caller_interrupt_cancels_worker_before_return(monkeypatch, tmp_path, phase, running_loop, signals):
     monkeypatch.chdir(tmp_path)
     module = importlib.import_module("skill_scan.utils.llm")
     script = r'''
@@ -504,10 +504,12 @@ import httpx, openai
 from skill_scan.utils.llm import LLM
 entered = threading.Event()
 closed = threading.Event()
+finished = threading.Event()
 clients = []
 calls = []
 phase = PHASE
 running_loop = RUNNING_LOOP
+signals = SIGNALS
 class Silent(httpx.AsyncByteStream):
     async def __aiter__(self):
         entered.set()
@@ -539,8 +541,7 @@ def interrupt():
     assert entered.wait(2)
     time.sleep(0.02)
     os.kill(os.getpid(), signal.SIGINT)
-    if running_loop:
-        time.sleep(0.03)
+    if signals == 2 and not finished.wait(0.03):
         os.kill(os.getpid(), signal.SIGINT)
 thread = threading.Thread(target=interrupt)
 thread.start()
@@ -560,11 +561,12 @@ except KeyboardInterrupt:
     assert phase != "stream" or closed.is_set()
     assert not any(value.name == "aig-responses" for value in threading.enumerate())
 finally:
+    finished.set()
     llm.client.close()
     thread.join()
 print(json.dumps({"interrupted":True,"requests":len(calls),"closed":True}))
 '''
-    script = script.replace("PHASE", repr(phase)).replace("RUNNING_LOOP", repr(running_loop))
+    script = script.replace("PHASE", repr(phase)).replace("RUNNING_LOOP", repr(running_loop)).replace("SIGNALS", repr(signals))
     env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2])}
     result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr

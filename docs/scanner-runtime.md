@@ -168,6 +168,8 @@ uses the same SDK's cancellable async HTTP Responses client in a joined,
 call-local event-loop thread: upstream callers already run inside an async
 CLI, and a synchronous stream watchdog cannot cancel opening/trickling headers.
 Caller interruption cancels the call-local task before joining its worker.
+The synchronous wait observes pending caller-task cancellation, including the
+async CLI's first SIGINT, without waiting for its blocked caller loop to resume.
 No endpoint, HTTP transport protocol, model, reasoning, tier or process budget
 changes. Other models retain their upstream synchronous behavior. Each failed
 stream closes before another attempt; failed partial XML/text is discarded and
