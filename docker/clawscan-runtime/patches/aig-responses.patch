@@ -34,7 +34,7 @@
          started = time.monotonic()
          request_options = {}
          reasoning_effort = (get_env("REASONING_EFFORT") or "").strip()
-@@ -121,6 +133,237 @@
+@@ -121,6 +133,239 @@
 
          return ret, usage
 
@@ -115,6 +115,8 @@
 +                            pass
 +        if aborted is not None:
 +            raise aborted
++        if caller is not None and caller.cancelling():
++            raise asyncio.CancelledError()
 +        return outcome.result()
 +
 +    @staticmethod

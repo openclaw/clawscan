@@ -758,6 +758,36 @@ def test_concurrent_abort_does_not_cancel_other_call(llm_factory):
     assert not any(value.name == "aig-responses" for value in threading.enumerate())
 
 
+def test_caller_cancellation_at_worker_completion_is_not_success(llm_factory, monkeypatch):
+    llm, requests, wire = llm_factory(happy_events())
+    original_wait = threading.Event.wait
+    injected = False
+
+    async def invoke():
+        caller = asyncio.current_task()
+
+        def wait(value, timeout=None):
+            nonlocal injected
+            completed = original_wait(value, timeout)
+            if timeout == 0.01 and completed and not injected:
+                while any(worker.name == "aig-responses" for worker in threading.enumerate()):
+                    time.sleep(0.001)
+                injected = True
+                caller.cancel()
+            return completed
+
+        monkeypatch.setattr(threading.Event, "wait", wait)
+        consumed = []
+        with pytest.raises(asyncio.CancelledError):
+            consumed.append(llm.chat(HISTORY))
+        assert not consumed
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(invoke())
+    assert injected and len(requests) == 1 and wire.closed.is_set()
+    assert not any(worker.name == "aig-responses" for worker in threading.enumerate())
+
+
 def test_deadline_cancels_retry_sleep_without_another_attempt(llm_factory):
     llm, requests, wire = llm_factory(
         [{"error": {"message": OVERLOAD_MESSAGE}}], stream_timeout=0.05,
