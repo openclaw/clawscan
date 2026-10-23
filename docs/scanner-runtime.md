@@ -171,10 +171,13 @@ Caller interruption cancels the call-local task once. Repeated interruptions
 preserve the original abort while waiting for response/client closure and event-loop
 finalization. A call-local completion event and actual thread deregistration, not
 `Thread.join()`/`is_alive()` after an interrupted join, establish worker completion.
+Worker startup is inside this barrier too: an interrupted registered launch is
+drained; a genuine failure before registration propagates without waiting for a worker.
 As with `asyncio.wait_for`, the deadline initiates cancellation; cooperative
 cleanup can finish after it. Cleanup is shielded from subsequent cancellation,
 not detached or given a fresh request deadline. Python cannot forcibly terminate
-an uncooperative thread/finalizer safely: the existing outer process boundary
+an uncooperative thread/finalizer or resolve every ambiguous interrupted native
+launch safely: these cases must fail closed at the existing outer process boundary
 (900 seconds plus 60 seconds cleanup) remains the hard termination backstop.
 The synchronous wait observes pending caller-task cancellation, including the
 async CLI's first SIGINT, without waiting for its blocked caller loop to resume.

@@ -788,6 +788,82 @@ def test_caller_cancellation_at_worker_completion_is_not_success(llm_factory, mo
     assert not any(worker.name == "aig-responses" for worker in threading.enumerate())
 
 
+@pytest.mark.parametrize("running_loop", [False, True])
+def test_sigint_during_worker_start_waits_for_cleanup(monkeypatch, tmp_path, running_loop):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, json, os, signal, threading
+import httpx, openai
+from skill_scan.utils.llm import LLM
+entered, cleaned = threading.Event(), threading.Event()
+clients, calls = [], []
+async def handler(request):
+    calls.append(1)
+    entered.set()
+    await asyncio.sleep(5)
+real = openai.AsyncOpenAI
+def client(**kwargs):
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    close = value.close
+    async def delayed_close():
+        await asyncio.sleep(0.20)
+        await close()
+        cleaned.set()
+    value.close = delayed_close
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.5)
+start = threading.Thread.start
+def launch(worker):
+    start(worker)
+    if worker.name == "aig-responses":
+        assert entered.wait(2)
+        os.kill(os.getpid(), signal.SIGINT)
+        if RUNNING_LOOP:
+            os.kill(os.getpid(), signal.SIGINT)
+threading.Thread.start = launch
+async def invoke():
+    llm.chat([{"role":"user", "content":"inert fixture"}])
+try:
+    if RUNNING_LOOP:
+        asyncio.run(invoke())
+    else:
+        llm.chat([{"role":"user", "content":"inert fixture"}])
+    raise AssertionError("caller abort lost")
+except KeyboardInterrupt:
+    assert calls == [1]
+    assert cleaned.is_set() and all(value.is_closed() for value in clients)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+finally:
+    llm.client.close()
+print(json.dumps({"interrupted":True,"closed":True,"requests":len(calls)}))
+'''.replace("RUNNING_LOOP", repr(running_loop))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"interrupted": True, "closed": True, "requests": 1}
+
+
+def test_worker_launch_failure_does_not_wait_for_nonexistent_worker(llm_factory, monkeypatch):
+    llm, requests, _ = llm_factory(happy_events())
+    start = threading.Thread.start
+
+    def fail(worker):
+        if worker.name == "aig-responses":
+            raise RuntimeError("fixture launch failure")
+        return start(worker)
+
+    monkeypatch.setattr(threading.Thread, "start", fail)
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="fixture launch failure"):
+        llm.chat(HISTORY)
+    assert time.monotonic() - started < 0.4
+    assert not requests
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+
+
 def test_deadline_cancels_retry_sleep_without_another_attempt(llm_factory):
     llm, requests, wire = llm_factory(
         [{"error": {"message": OVERLOAD_MESSAGE}}], stream_timeout=0.05,
