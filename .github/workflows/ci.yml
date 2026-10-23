@@ -43,6 +43,9 @@ jobs:
       - name: Lint workflows
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
+      - name: Test runtime publication contracts with offline command stubs
+        run: python3 -m unittest discover -s scripts/runtime-image -p 'test_*.py' -v
+
   test:
     name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}

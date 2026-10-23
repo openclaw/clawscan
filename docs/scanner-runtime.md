@@ -107,6 +107,36 @@ Upstream pin changes must keep these gates green; remove a patch when upstream
 provides the equivalent tested behavior. The runtime updater follows A.I.G's Git
 HEAD rather than PyPI until a compatible release is available.
 
+## Native image publication
+
+Runtime Image uses the same native Linux amd64 and arm64 build/load/smoke jobs
+for pull requests and publication. Both execute every existing Dockerfile SDK
+test with unchanged deadlines. QEMU is not an equivalent environment for these
+process-, signal-, and wall-clock-sensitive tests. A native pass does not prove
+arbitrary emulation correctness.
+
+Pull requests have read-only repository permissions, no package-write permission,
+no registry login, and no publication. Main, version tags, and manual runs export
+each smoke-tested platform by immutable registry digest with BuildKit provenance.
+The local Docker export cannot retain provenance; the subsequent registry export
+uses the same runner's verified build result and must have the identical image
+config digest, architecture, and source revision before it is accepted.
+
+Only a successful two-platform fan-in can update metadata-generated tags. The
+serialized merge checks this run's source/tree/context identity, both image
+configs, both provenance attachments, and the complete candidate index before
+tagging. Each registry tag points to one complete two-platform index, never a
+partially updated platform list. Multiple tag updates are not a registry-wide
+transaction; a failed write can leave some aliases unchanged, but never authorizes
+an incomplete index. Superseded branch runs fail the final source-ref check.
+
+Download the run's `runtime-image-manifest` artifact for `manifest.json`: it records
+the final immutable digest, revision, native platform proofs, config digests, and
+preserved attestation descriptors. Verify both the artifact and the live registry
+before adopting the image; a green pull request alone is not publication proof.
+Offline workflow and command-stub controls run with `go test ./scripts/runtime-image`
+and `python3 -m unittest discover -s scripts/runtime-image -p 'test_*.py' -v`.
+
 ## Consume without a public release
 
 Check out the exact reviewed ClawScan commit, then build both binary and image:
