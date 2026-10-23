@@ -508,6 +508,7 @@ closed = threading.Event()
 finished = threading.Event()
 clients = []
 calls = []
+interrupted_at = []
 phase = PHASE
 running_loop = RUNNING_LOOP
 signals = SIGNALS
@@ -541,12 +542,12 @@ llm._responses_retry_delay = delay
 def interrupt():
     assert entered.wait(2)
     time.sleep(0.02)
+    interrupted_at.append(time.monotonic())
     os.kill(os.getpid(), signal.SIGINT)
     if signals == 2 and not finished.wait(0.03):
         os.kill(os.getpid(), signal.SIGINT)
 thread = threading.Thread(target=interrupt)
 thread.start()
-started = time.monotonic()
 async def invoke():
     llm.chat([{"role":"user", "content":"inert fixture"}])
 try:
@@ -556,7 +557,7 @@ try:
         llm.chat([{"role":"user", "content":"inert fixture"}])
     raise AssertionError("caller interruption was lost")
 except KeyboardInterrupt:
-    assert time.monotonic() - started < 0.4
+    assert time.monotonic() - interrupted_at[0] < 0.4
     assert len(calls) == 1
     assert all(value.is_closed() for value in clients)
     assert phase != "stream" or closed.is_set()
@@ -615,7 +616,17 @@ def test_task_cancellation_waits_for_real_sdk_cleanup(monkeypatch, tmp_path, pha
     _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, True, signals, True, "client")
 
 
-def _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, running_loop, signals, task_cancel, cleanup_target):
+@pytest.mark.parametrize("running_loop", [False, True])
+def test_cleanup_budget_excludes_sdk_preparation(monkeypatch, tmp_path, running_loop):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, "open", running_loop, 5, False, "client", 0.30)
+
+
+@pytest.mark.parametrize("running_loop,signals", [(False, 1), (False, 2), (False, 5), (True, 1), (True, 2), (True, 5)])
+def test_interrupt_during_cold_sdk_preparation(monkeypatch, tmp_path, running_loop, signals):
+    _assert_cleanup_subprocess(monkeypatch, tmp_path, "preparation", running_loop, signals, False, "client", 0.10)
+
+
+def _assert_cleanup_subprocess(monkeypatch, tmp_path, phase, running_loop, signals, task_cancel, cleanup_target, preparation_delay=0):
     monkeypatch.chdir(tmp_path)
     module = importlib.import_module("skill_scan.utils.llm")
     script = r'''
@@ -624,7 +635,8 @@ import httpx, openai
 from skill_scan.utils.llm import LLM
 entered, closing, cleaned, response_closed = (threading.Event() for _ in range(4))
 clients, calls, loops, tasks = [], [], [], []
-phase, running_loop, signals, task_cancel, cleanup_target = SETTINGS
+interrupted_at = []
+phase, running_loop, signals, task_cancel, cleanup_target, preparation_delay = SETTINGS
 from skill_scan.utils import llm as llm_module
 release_clock = _install_cleanup_clock(llm_module) if phase == "cleanup" else lambda: None
 class Silent(httpx.AsyncByteStream):
@@ -642,7 +654,6 @@ class Silent(httpx.AsyncByteStream):
             cleaned.set()
 async def handler(request):
     calls.append(1)
-    loops.append(asyncio.get_running_loop())
     if phase == "open":
         entered.set()
         await asyncio.sleep(5)
@@ -651,6 +662,10 @@ async def handler(request):
     return httpx.Response(200, stream=Silent())
 real = openai.AsyncOpenAI
 def client(**kwargs):
+    loops.append(asyncio.get_running_loop())
+    if phase == "preparation":
+        entered.set()
+    time.sleep(preparation_delay)
     value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
     close = value.close
     async def slow_close():
@@ -674,6 +689,7 @@ if task_cancel:
     signal.signal(signal.SIGUSR1, lambda *_: tasks[0].cancel())
 def interrupt():
     assert (closing if phase == "cleanup" else entered).wait(2)
+    interrupted_at.append(time.monotonic())
     os.kill(os.getpid(), signal.SIGUSR1 if task_cancel else signal.SIGINT)
     assert closing.wait(2)
     for ordinal in range(1, signals):
@@ -684,7 +700,6 @@ sender.start()
 async def invoke():
     tasks.append(asyncio.current_task())
     llm.chat([{"role":"user", "content":"inert fixture"}])
-started = time.monotonic()
 try:
     if running_loop:
         asyncio.run(invoke())
@@ -693,8 +708,8 @@ try:
     raise AssertionError("caller abort lost")
 except (KeyboardInterrupt, asyncio.CancelledError) as aborted:
     assert isinstance(aborted, asyncio.CancelledError if task_cancel else KeyboardInterrupt)
-    assert time.monotonic() - started < 0.4
-    assert calls == [1]
+    assert time.monotonic() - interrupted_at[0] < 0.4
+    assert calls == ([] if phase == "preparation" else [1])
     assert cleaned.is_set()
     assert clients and all(value.is_closed() for value in clients)
     assert phase != "stream" or response_closed.is_set()
@@ -705,11 +720,11 @@ finally:
     llm.client.close()
 print(json.dumps({"aborted":True,"requests":len(calls),"cleaned":True}))
 '''
-    script = inspect.getsource(_install_cleanup_clock) + script.replace("SETTINGS", repr((phase, running_loop, signals, task_cancel, cleanup_target)))
+    script = inspect.getsource(_install_cleanup_clock) + script.replace("SETTINGS", repr((phase, running_loop, signals, task_cancel, cleanup_target, preparation_delay)))
     env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
     result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"aborted": True, "requests": 1, "cleaned": True}
+    assert json.loads(result.stdout) == {"aborted": True, "requests": 0 if phase == "preparation" else 1, "cleaned": True}
 
 
 @pytest.mark.parametrize("cleanup_target", ["client", "response"])
@@ -927,6 +942,84 @@ def test_worker_launch_failure_does_not_wait_for_nonexistent_worker(llm_factory,
     assert not any(value.name == "aig-responses" for value in threading.enumerate())
 
 
+def _prepare_responses_sdk(events):
+    import asyncio
+    import json
+    import httpx
+    import openai
+
+    async def prepare():
+        requests = []
+
+        async def handler(request):
+            requests.append(json.loads(request.content))
+            body = "".join("data: " + json.dumps(value) + "\n\n" for value in events)
+            return httpx.Response(200, content=body.encode())
+
+        client = openai.AsyncOpenAI(
+            api_key="fixture-not-a-key", base_url="http://fixture.invalid/v1", max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        async with client:
+            stream = await client.responses.create(
+                model="gpt-6.1-sol", input=[{"role": "user", "content": "inert fixture"}],
+                stream=True, store=False, reasoning={"effort": "medium"}, service_tier="default",
+            )
+            async with stream:
+                received = [value async for value in stream]
+        assert received[-1].type == "response.completed"
+        assert len(requests) == 1 and requests[0]["stream"] is True
+        assert client.is_closed()
+
+    asyncio.run(prepare())
+
+
+@pytest.mark.parametrize("running_loop", [False, True])
+def test_cold_sdk_preparation_consumes_original_deadline(monkeypatch, tmp_path, running_loop):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, json, threading, time
+import httpx, openai
+from skill_scan.utils.llm import LLM
+clients, calls, loops = [], [], []
+async def handler(request):
+    calls.append(1)
+    raise AssertionError("expired preparation must not send a request")
+real = openai.AsyncOpenAI
+def client(**kwargs):
+    loops.append(asyncio.get_running_loop())
+    time.sleep(0.10)
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.05)
+async def invoke():
+    llm.chat([{"role":"user", "content":"inert fixture"}])
+started = time.monotonic()
+try:
+    if RUNNING_LOOP:
+        asyncio.run(invoke())
+    else:
+        llm.chat([{"role":"user", "content":"inert fixture"}])
+    raise AssertionError("cold preparation reset or bypassed the response deadline")
+except TimeoutError:
+    assert 0.10 <= time.monotonic() - started < 0.5
+    assert calls == []
+    assert clients and all(value.is_closed() for value in clients)
+    assert loops and all(loop.is_closed() for loop in loops)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+finally:
+    llm.client.close()
+print(json.dumps({"expired": True, "requests": len(calls), "closed": True}))
+'''.replace("RUNNING_LOOP", repr(running_loop))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"expired": True, "requests": 0, "closed": True}
+
+
 @pytest.mark.parametrize("running_loop", [False, True])
 @pytest.mark.parametrize("signals", [1, 2, 5])
 @pytest.mark.parametrize("handler_mode", ["default", "custom-abort", "custom-return", "ignore", "os-default"])
@@ -938,6 +1031,7 @@ import asyncio, inspect, json, os, signal, sys, threading, time
 import httpx, openai
 from skill_scan.utils.llm import LLM
 running_loop, signals, mode, events = SETTINGS
+_prepare_responses_sdk(events)
 clients, requests, handled, mutations = [], [], [], []
 def custom(signum, frame):
     assert signum == signal.SIGINT and frame is not None
@@ -1000,12 +1094,12 @@ async def invoke():
         if expected_mask is not None:
             assert signal.pthread_sigmask(signal.SIG_BLOCK, []) == expected_mask
     assert time.monotonic() - started < 0.4
-    assert len(mutations) == (2 if callable(expected) else 0)
     assert triggered == [1]
-    assert len(handled) == (signals if mode.startswith("custom") else 0)
     assert len(requests) == (1 if mode in {"custom-return", "ignore"} else 0)
     assert all(value.is_closed() for value in clients)
     assert not any(value.name == "aig-responses" for value in threading.enumerate())
+    assert len(mutations) == (2 if callable(expected) else 0)
+    assert len(handled) == (signals if mode.startswith("custom") else 0)
 try:
     if running_loop:
         try:
@@ -1024,6 +1118,7 @@ finally:
     llm.client.close()
 print(json.dumps({"triggered":True, "requests":len(requests), "closed":True, "restored":True}))
 '''.replace("SETTINGS", repr((running_loop, signals, handler_mode, happy_events())))
+    script = inspect.getsource(_prepare_responses_sdk) + script
     env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
     result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
     if handler_mode == "os-default":
