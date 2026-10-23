@@ -8,10 +8,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alchemy/json5"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // skillManifestName and pluginManifestName are the manifest files that mark an
@@ -66,6 +70,47 @@ const (
 // manifest the host runtime accepts is never rejected here for size.
 const maxPluginManifestBytes = 256 * 1024
 
+var bundleManifestDirectories = []string{".codex-plugin", ".claude-plugin", ".cursor-plugin"}
+var bundleIDSeparators = regexp.MustCompile(`[^a-z0-9]+`)
+
+func isBundleManifestDirectory(name string) bool {
+	for _, directory := range bundleManifestDirectories {
+		if name == directory {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBundleManifest(directory string) bool {
+	for _, parent := range bundleManifestDirectories {
+		info, err := os.Lstat(filepath.Join(directory, parent))
+		if err == nil && info.IsDir() && regularManifestExists(filepath.Join(directory, parent, "plugin.json")) {
+			return true
+		}
+	}
+	return false
+}
+
+func bundleManifestPaths(directory string) ([]string, error) {
+	var manifests []string
+	for _, parentName := range bundleManifestDirectories {
+		parent, parentErr := os.Lstat(filepath.Join(directory, parentName))
+		if os.IsNotExist(parentErr) {
+			continue
+		}
+		if parentErr != nil || !parent.IsDir() {
+			return nil, fmt.Errorf("unsafe bundle manifest directory %s", parentName)
+		}
+		manifest := filepath.Join(parentName, "plugin.json")
+		if _, err := os.Lstat(filepath.Join(directory, manifest)); os.IsNotExist(err) {
+			continue
+		}
+		manifests = append(manifests, manifest)
+	}
+	return manifests, nil
+}
+
 // resolvedTarget is the small target abstraction the runner threads from the
 // scan input through scanner dispatch and into the artifact. It carries enough
 // to run scanners (resolvedPath), decide scanner compatibility (kind), and
@@ -118,6 +163,9 @@ func resolveTarget(input string) (resolvedTarget, error) {
 	// found inside the target are untrusted content and never followed; see
 	// regularManifestExists and readPluginID.
 	if info, err := os.Lstat(resolved); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if isBundleManifestDirectory(filepath.Base(filepath.Dir(resolved))) && filepath.Base(resolved) == "plugin.json" {
+			return resolvedTarget{}, errors.New("bundle manifest must not be a symlink")
+		}
 		if evaluated, evalErr := filepath.EvalSymlinks(resolved); evalErr == nil {
 			resolved = evaluated
 		}
@@ -132,9 +180,13 @@ func resolveTarget(input string) (resolvedTarget, error) {
 	// narrowing the scan to that one file.
 	if kind == targetKindPlugin ||
 		(kind == targetKindSkill && sameManifestFile(resolved, skillManifestName) &&
-			regularManifestExists(filepath.Join(filepath.Dir(resolved), pluginManifestName))) {
+			(regularManifestExists(filepath.Join(filepath.Dir(resolved), pluginManifestName)) || hasBundleManifest(filepath.Dir(resolved)))) {
 		if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
+			bundleManifest := isBundleManifestDirectory(filepath.Base(filepath.Dir(resolved))) && sameManifestFile(resolved, "plugin.json")
 			resolved = filepath.Dir(resolved)
+			if kind == targetKindPlugin && bundleManifest {
+				resolved = filepath.Dir(resolved)
+			}
 		}
 	}
 	return resolvedTarget{kind: kind, input: input, resolvedPath: resolved, id: id}, nil
@@ -157,6 +209,22 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 		if sameManifestFile(resolvedPath, pluginManifestName) {
 			dir = filepath.Dir(resolvedPath)
 			explicitPluginManifest = true
+		} else if isBundleManifestDirectory(filepath.Base(filepath.Dir(resolvedPath))) && sameManifestFile(resolvedPath, "plugin.json") {
+			root := filepath.Dir(filepath.Dir(resolvedPath))
+			manifests, err := bundleManifestPaths(root)
+			if err != nil {
+				return "", "", err
+			}
+			if len(manifests) != 1 {
+				return "", "", fmt.Errorf("target %s has ambiguous bundle manifests", displayTargetInput(input))
+			}
+			id, err := readBundlePluginID(root, filepath.Join(filepath.Base(filepath.Dir(resolvedPath)), "plugin.json"))
+			if err != nil {
+				return "", "", fmt.Errorf("target %s is not a valid bundle plugin: %w", displayTargetInput(input), err)
+			}
+			return targetKindPlugin, id, nil
+		} else if filepath.Base(resolvedPath) == "plugin.json" && strings.HasSuffix(filepath.Base(filepath.Dir(resolvedPath)), "-plugin") {
+			return "", "", fmt.Errorf("unsupported bundle manifest format")
 		} else {
 			// SKILL.md or any other single file keeps the historical skill kind.
 			return targetKindSkill, "", nil
@@ -164,6 +232,22 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 	}
 	hasPlugin := regularManifestExists(filepath.Join(dir, pluginManifestName))
 	hasSkill := regularManifestExists(filepath.Join(dir, skillManifestName))
+	if !explicitPluginManifest {
+		bundles, err := bundleManifestPaths(dir)
+		if err != nil {
+			return "", "", err
+		}
+		if len(bundles) > 1 || (len(bundles) > 0 && (hasPlugin || hasSkill)) {
+			return "", "", fmt.Errorf("target %s has ambiguous plugin manifests; point Clawscan directly at the desired manifest", displayTargetInput(input))
+		}
+		if len(bundles) == 1 {
+			id, err := readBundlePluginID(dir, bundles[0])
+			if err != nil {
+				return "", "", fmt.Errorf("target %s is not a valid bundle plugin: %w", displayTargetInput(input), err)
+			}
+			return targetKindPlugin, id, nil
+		}
+	}
 	if !hasPlugin {
 		return targetKindSkill, "", nil
 	}
@@ -175,6 +259,66 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 		return "", "", fmt.Errorf("target %s is not a valid plugin: %w", displayTargetInput(input), err)
 	}
 	return targetKindPlugin, id, nil
+}
+
+func readBundlePluginID(directory, manifest string) (string, error) {
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	parent, err := root.Lstat(filepath.Dir(manifest))
+	if err != nil || !parent.IsDir() {
+		return "", fmt.Errorf("bundle manifest parent must be a real directory")
+	}
+	before, err := root.Lstat(manifest)
+	if err != nil || !before.Mode().IsRegular() {
+		return "", fmt.Errorf("bundle manifest must be a regular file")
+	}
+	file, err := root.OpenFile(manifest, os.O_RDONLY|openNoFollowFlag, 0)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
+		return "", fmt.Errorf("bundle manifest changed while being read")
+	}
+	if opened.Size() > maxPluginManifestBytes {
+		return "", fmt.Errorf("bundle manifest exceeds the %d KiB manifest limit", maxPluginManifestBytes/1024)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxPluginManifestBytes+1))
+	if err != nil || int64(len(data)) > maxPluginManifestBytes {
+		return "", fmt.Errorf("cannot read bounded bundle manifest")
+	}
+	if !utf8.Valid(data) {
+		return "", fmt.Errorf("bundle manifest must be valid UTF-8")
+	}
+	var raw map[string]any
+	if err := json5.Unmarshal(data, &raw); err != nil || raw == nil {
+		return "", fmt.Errorf("bundle manifest must be a JSON object")
+	}
+	name, ok := raw["name"].(string)
+	if !ok || strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("bundle manifest must declare a name")
+	}
+	if strings.ContainsAny(name, `/\`) || strings.ContainsAny(name, "\x00\x7f") {
+		return "", fmt.Errorf("bundle manifest has an unsafe name")
+	}
+	for _, character := range name {
+		if character < 0x20 {
+			return "", fmt.Errorf("bundle manifest has an unsafe name")
+		}
+	}
+	name = strings.TrimSpace(name)
+	if name == "." || name == ".." {
+		return "", fmt.Errorf("bundle manifest has an unsafe name")
+	}
+	id := strings.Trim(bundleIDSeparators.ReplaceAllString(cases.Lower(language.Und).String(name), "-"), "-")
+	if id == "" {
+		return "", fmt.Errorf("bundle manifest name has no canonical identity")
+	}
+	return id, nil
 }
 
 // regularManifestExists reports whether path is an existing regular file

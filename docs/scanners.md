@@ -224,7 +224,7 @@ the result in the artifact `target.kind` field:
 | Kind | Detected when | Notes |
 | --- | --- | --- |
 | `skill` | default for local files and directories | Historical behavior; a directory usually holds `SKILL.md`. |
-| `plugin` | directory (or manifest file) holds `openclaw.plugin.json` | OpenClaw plugin. The stable manifest `id` is recorded in `target.id`; host paths are never used as identity. |
+| `plugin` | directory (or selected manifest) holds `openclaw.plugin.json` or a supported bundle marker | Native identity comes from `id`; bundle identity comes from canonical name normalization. Host paths are never used as identity. |
 | `url` | `http`/`https` input | API-backed and static scanners skip URLs. |
 
 The built-in `clawhub` profile runs `skillspector` and `clawscan-static` for
@@ -235,6 +235,18 @@ unsupported kind, and adapters can opt in per kind as upstream tools add plugin
 support. A directory carrying both `SKILL.md` and `openclaw.plugin.json` is
 rejected as ambiguous rather than guessed; point Clawscan directly at the
 desired manifest to disambiguate a valid dual-layout package.
+
+Supported bundle markers are `.codex-plugin/plugin.json`,
+`.claude-plugin/plugin.json`, and `.cursor-plugin/plugin.json`. Their non-empty
+`name` becomes a lowercase, hyphen-normalized identity, matching OpenClaw. Names
+with path separators or control characters, or without a canonical slug, fail
+closed instead of using an artifact-directory fallback. Bundle metadata reads
+are bounded to 256 KiB, require UTF-8, and cannot follow links outside the root.
+Directories mixing bundle markers, native manifests, or `SKILL.md` are ambiguous;
+select the desired manifest explicitly. A selected bundle manifest scans the
+whole surrounding artifact, not just its marker directory. All companion files
+and suspicious findings remain in scanner and judge scope. Explicit native
+manifest selection and the native identifier grammar are unchanged.
 
 Plugin targets are never auto-discovered. Zero-target discovery still scans only
 child skill directories under `./skills`; pass a plugin directory explicitly to
