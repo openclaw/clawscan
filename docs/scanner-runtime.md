@@ -83,6 +83,11 @@ fixes, not a new ClawScan model-provider framework:
   inspection ledger and failed-batch accounting remain unchanged. This does not
   establish that a particular production timeout was caused by serialization;
   that requires its terminal scanner report and controlled runtime evidence.
+- SkillSpector's MCP purpose check keeps its 64-batch LLM ceiling separate from
+  bounded source applicability checks. Reaching 64 batches does not by itself
+  make subsequent fully examined prose incomplete. Additional applicable code
+  still produces an `output_limit`; file, byte, artifact and runtime limits
+  remain enforced. This is not evidence that production inspection gaps closed.
 - A.I.G reuses the official OpenAI SDK's Responses streaming API for that exact
   model. A.I.G tools are XML in text, so complete text history is replayed, not
   converted to synthetic OpenAI tools. Reasoning effort and usage are mapped;

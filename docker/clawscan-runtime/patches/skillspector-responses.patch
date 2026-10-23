@@ -278,3 +278,48 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              result = node(state)
 
          assert result["findings"] == []
+diff --git a/src/skillspector/nodes/analyzers/mcp_tool_poisoning.py b/src/skillspector/nodes/analyzers/mcp_tool_poisoning.py
+--- a/src/skillspector/nodes/analyzers/mcp_tool_poisoning.py
++++ b/src/skillspector/nodes/analyzers/mcp_tool_poisoning.py
+@@ -1430,14 +1430,6 @@ def _check_tp4(state: SkillspectorState) -> _TP4CheckOutcome:
+                 )
+                 add_partial_once(_tp4_partial_event(path, stop_reason, **stop_metrics))
+                 return None
+-            if len(batches) >= TP4_MAX_BATCHES:
+-                stop_planning(
+-                    LedgerReason.OUTPUT_LIMIT,
+-                    observed_records=len(batches) + 1,
+-                    limit_records=TP4_MAX_BATCHES,
+-                )
+-                add_partial_once(_tp4_partial_event(path, stop_reason, **stop_metrics))
+-                return None
+             remaining_total = TP4_MAX_TOTAL_CODE_BYTES - retained_total_bytes
+             if remaining_total <= 0:
+                 stop_planning(
+diff --git a/tests/test_mcp_tool_poisoning.py b/tests/test_mcp_tool_poisoning.py
+--- a/tests/test_mcp_tool_poisoning.py
++++ b/tests/test_mcp_tool_poisoning.py
+@@ -1473,7 +1473,7 @@ class TestTP4MarkdownFences:
+         assert partial[0]["path"] == "guide.md"
+         assert partial[0]["reason_code"] is LedgerReason.SIZE_LIMIT
+
+-    def test_markdown_batch_cap_stops_before_next_source(self, monkeypatch: pytest.MonkeyPatch):
++    def test_markdown_batch_cap_still_checks_bounded_applicability(self, monkeypatch: pytest.MonkeyPatch):
+         first = "```python\nprint('first')\n```\n"
+         prose = "```text\njust prose\n```\n"
+         later = "```python\nprint('later')\n```\n"
+@@ -1505,11 +1505,11 @@ class TestTP4MarkdownFences:
+         )
+
+         assert structured.calls == 1
+-        assert prefix_inputs == [first]
+-        assert iterator_inputs == [first]
++        assert prefix_inputs == [first, prose, later]
++        assert iterator_inputs == [first, prose, later]
+         partial = [event for event in result.ledger if event["outcome"] is LedgerOutcome.PARTIAL]
+         assert len(partial) == 1
+-        assert partial[0]["path"] == "prose.md"
++        assert partial[0]["path"] == "later.md"
+         assert partial[0]["reason_code"] is LedgerReason.OUTPUT_LIMIT
+
+     def test_markdown_deadline_stops_before_prefix_and_fence_extraction(
