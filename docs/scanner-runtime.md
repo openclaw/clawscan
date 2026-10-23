@@ -1,5 +1,32 @@
 # Scanner runtime compatibility
 
+## Interrupted-run diagnostics
+
+Set `CLAWSCAN_PROGRESS=1` to emit `[clawscan-progress] ` followed by one JSON event
+per line to stderr. Normal CLI output stays unchanged without this opt-in.
+`schemaVersion: "clawscan-progress-v1"` events contain only a fixed phase
+identifier, event type, monotonic elapsed milliseconds within that target run,
+process ID and, when available, duration, exit code and a failure boolean. No
+arguments, paths, environment values, prompts, raw output or error text are logged.
+Custom scanner names are replaced with `scanner:custom`.
+
+`phase_start` / `phase_end` bracket preparation, each scanner and the judge.
+`command_start` / `command_end` bracket default-runner subprocess execution. The
+PID is the direct child (the Docker client or judge shell when applicable), not
+necessarily its nested tool/model process. Injected command runners need their
+own subprocess instrumentation. The built-in static scanner has phase events,
+not command events. A judge receipt retry produces another command pair in the
+same judge phase. Multiple targets restart the elapsed clock at preparation.
+
+Retain stderr on worker timeout to identify the last started unfinished phase,
+including when an outer process-group kill prevents ClawScan from writing its
+final artifact. These are best-effort diagnostics, **never a completed scan or a
+security verdict**: an end event means control returned, not that evidence was
+valid. Require the unchanged final artifact, scanner evidence and judge schema
+validation. An absent final artifact or a deadline at any stage remains an
+operational failure. This instrumentation neither changes deadlines nor repairs
+an underlying scanner/provider stall.
+
 The bundled ClawHub profiles use GPT-6.1 Sol: medium reasoning for the OpenAI
 SkillSpector and A.I.G scanner lanes; high reasoning and default Standard service
 for the final Codex judge. The profile contains explicit non-secret

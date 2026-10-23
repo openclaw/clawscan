@@ -106,6 +106,8 @@ type EnvRequirement struct {
 
 type RunContext struct {
 	Context              context.Context
+	Progress             io.Writer
+	progress             *runProgress
 	Env                  map[string]string
 	Now                  func() time.Time
 	CommandRunner        CommandRunner
@@ -456,6 +458,9 @@ func ValidateRequirements(opts Options, env map[string]string) error {
 }
 
 func Run(opts Options, ctx RunContext) (Artifact, error) {
+	progress := newRunProgress(ctx.Progress)
+	ctx.progress = progress
+	progress.startPhase("prepare")
 	if err := ValidateScannerEnvDefaults(opts.ScannerEnvDefaults); err != nil {
 		return Artifact{}, err
 	}
@@ -524,6 +529,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		artifact.Context = json.RawMessage(context)
 	}
 	scanned := make(map[string]bool, len(opts.Scanners))
+	progress.endPhase(false)
 	for _, scanner := range opts.Scanners {
 		if scanned[scanner] {
 			continue
@@ -531,7 +537,9 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		scanned[scanner] = true
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
+		progress.startPhase(scannerProgressPhase(scanner))
 		result, err := scannerResult(opts, scanner, target, scannerStartedAt, scannerRunner)
+		progress.endPhase(err != nil || result.Status == "failed")
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -540,7 +548,9 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
+		progress.startPhase("judge")
 		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode)
+		progress.endPhase(err != nil || result != nil && result.Status == "failed")
 		if err != nil {
 			return Artifact{}, err
 		}
@@ -2285,7 +2295,8 @@ func discoverSkillSpectorCommand() []string {
 }
 
 type defaultCommandRunner struct {
-	Env map[string]string
+	Env      map[string]string
+	Progress *runProgress
 }
 
 func (runner defaultCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
@@ -2300,7 +2311,14 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	started := time.Now()
+	err := cmd.Start()
+	pid := 0
+	if err == nil {
+		pid = cmd.Process.Pid
+		runner.Progress.emit(progressEvent{Event: "command_start", PID: pid})
+		err = cmd.Wait()
+	}
 	timedOut := ctx.Err() == context.DeadlineExceeded
 	if timedOut {
 		err = fmt.Errorf("command timed out after %s", timeout)
@@ -2312,6 +2330,8 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 			output.ExitCode = &exitCode
 		}
 	}
+	duration := time.Since(started).Milliseconds()
+	runner.Progress.emit(progressEvent{Event: "command_end", PID: pid, DurationMs: &duration, ExitCode: output.ExitCode, Failed: err != nil})
 	return output, err
 }
 
