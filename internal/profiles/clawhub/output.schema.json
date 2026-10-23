@@ -89,17 +89,18 @@
     "artifact_inspection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "challenge", "required_file_sha256", "files_inspected"],
+      "required": ["version", "status", "challenge", "required_file", "required_file_sha256", "additional_files_inspected"],
       "properties": {
+        "version": { "type": "integer", "enum": [2] },
         "status": { "type": "string", "enum": ["completed"] },
         "challenge": { "type": "string", "minLength": 1 },
+        "required_file": { "type": "string", "enum": ["{{ artifact_inspection.required_file }}"] },
         "required_file_sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
         },
-        "files_inspected": {
+        "additional_files_inspected": {
           "type": "array",
-          "minItems": 1,
           "items": { "type": "string", "pattern": "^artifact/" }
         }
       }
