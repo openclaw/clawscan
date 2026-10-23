@@ -77,6 +77,12 @@ fixes, not a new ClawScan model-provider framework:
 - SkillSpector selects LangChain's maintained `use_responses_api=True` path for
   exact `gpt-6.1-sol`, including tool calls, tool results and structured output.
   Unsupported Sol sampling controls fail before network access.
+- SkillSpector's security-discovery batches use the same process-wide bounded
+  pool as its other semantic analyzers, rather than serializing every file and
+  chunk. The upstream concurrency limit, shared workflow deadline, retry policy,
+  inspection ledger and failed-batch accounting remain unchanged. This does not
+  establish that a particular production timeout was caused by serialization;
+  that requires its terminal scanner report and controlled runtime evidence.
 - A.I.G reuses the official OpenAI SDK's Responses streaming API for that exact
   model. A.I.G tools are XML in text, so complete text history is replayed, not
   converted to synthetic OpenAI tools. Reasoning effort and usage are mapped;
@@ -86,6 +92,14 @@ fixes, not a new ClawScan model-provider framework:
 - Scanner JSON/SARIF stays upstream raw evidence. SkillSpector's upstream
   provenance records requested and observed model/control data. Do not treat
   configured model names or this source pin as proof of an observed response.
+
+An explicit unsuccessful or incomplete SkillSpector report is a failed scanner
+result, even when the command exits 0 or 1 and writes valid JSON. Exit codes above
+1 also remain operational failures. Raw reports, findings and exit codes are
+retained. The ClawHub prompt projection marks this evidence as an error without
+discarding its issues; legacy reports without completeness fields retain their
+existing interpretation. Neither valid JSON nor a security-finding exit alone
+proves successful inspection.
 
 Docker builds apply patches with `git apply --check` and execute offline tests
 against the actual installed scanner packages and OpenAI SDK serializers.
