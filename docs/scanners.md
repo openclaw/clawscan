@@ -23,6 +23,54 @@ profile, and scanner names are sanitized for filesystem use; colliding paths
 receive numeric suffixes so every report is preserved. Read the recorded
 `outputPath` instead of reconstructing a filename from a target or scanner ID.
 
+## Cancellation and incomplete evidence
+
+The scan CLI handles SIGINT and SIGTERM as cancellation, stops starting work,
+and best-effort writes already-known evidence before exiting nonzero. A library
+caller's `RunContext.Context` applies across preparation, sequential scanners,
+judge preparation, commands and receipt retries. A stage's existing timeout is
+an additional cap, not a renewal of the caller's deadline. `Now` controls artifact
+timestamps only; deadlines use Go contexts and the monotonic clock.
+
+Check `status` and `complete` before using a new artifact as a security result:
+
+- `completed` with `complete: true` means the requested run finished.
+- `running` with `complete: false` is a checkpoint, not a terminal receipt.
+- `canceled`, `deadline_exceeded`, or `failed` with `complete: false` is an
+  operational failure, never a benign verdict, publisher rejection, or security
+  block. Its `gate` is `error`; completed stages' fired `gateRules` remain visible.
+- Unstarted stages have `status: not_started`; interrupted stages are failed.
+  A failed scanner prevents judge execution. Valid raw evidence, warnings,
+  findings and completeness information remain attached to their stage. Failed
+  stages' raw JSON stays inline and is not exported as a standalone scanner report.
+
+`--output` writes atomic JSON checkpoints before stages and a terminal artifact
+on normal return, including error return. `--json` also emits available partial
+evidence on operational failure; readable JSON does not imply exit status zero.
+Filesystem errors can prevent all disk evidence. SIGKILL, process crashes,
+blocked OS I/O and an exhausted supervisor grace period cannot guarantee a final
+artifact. A checkpoint may survive instead, and must remain incomplete.
+
+ClawScan keeps child commands in the inherited process group. It never signals
+a host/user process group or creates scanner groups that escape a supervisor.
+Its command context kills the direct child and bounds inherited-pipe draining
+to 100ms; this is **not descendant cleanup proof**. `processCleanup: unknown`
+deliberately makes no claim of descendant absence. A process-tree supervisor must
+retain ownership through TERM, KILL and independent absence verification, even
+when the CLI has already returned or the command leader exited early. Plain CLI
+signals and library cancellation alone do not guarantee descendant termination.
+Docker-client cancellation likewise does not prove container termination; the
+container supervisor must clean up exact owned containers, using run/command
+labels where configured. Do not deploy a cancellation contract that assumes
+killing the Docker client removes its containers.
+
+Cancelable custom library implementations must implement `ContextCommandRunner`
+or `ContextScannerRunner` as appropriate. Legacy synchronous callbacks remain
+supported without a cancelable context; they are not moved into detached
+goroutines to fabricate timely cancellation. HTTP implementations must honor
+the supplied request context. Finalization writes only retained evidence; it
+does not resume scanning, retry the judge, or extend the work deadline.
+
 ## Adding a built-in scanner adapter
 
 First evaluate the scanner with a [custom profile](#profile-scanner-configuration)

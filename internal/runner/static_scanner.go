@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -143,7 +144,7 @@ func (runner ExternalScannerRunner) runStatic(target string, startedAt string) (
 			Raw:         nil,
 		}, nil
 	}
-	report, err := buildStaticScannerReport(target)
+	report, err := buildStaticScannerReportContext(workContext(runner.Context), target)
 	if err != nil {
 		return ScannerResult{}, err
 	}
@@ -162,7 +163,11 @@ func (runner ExternalScannerRunner) runStatic(target string, startedAt string) (
 }
 
 func buildStaticScannerReport(target string) (staticScannerReport, error) {
-	files, findings, err := scanStaticTarget(target)
+	return buildStaticScannerReportContext(context.Background(), target)
+}
+
+func buildStaticScannerReportContext(ctx context.Context, target string) (staticScannerReport, error) {
+	files, findings, err := scanStaticTargetContext(ctx, target)
 	if err != nil {
 		return staticScannerReport{}, err
 	}
@@ -192,6 +197,10 @@ func staticRuleSummaries() []staticRuleSummary {
 }
 
 func scanStaticTarget(target string) (staticScannerFiles, []staticFinding, error) {
+	return scanStaticTargetContext(context.Background(), target)
+}
+
+func scanStaticTargetContext(ctx context.Context, target string) (staticScannerFiles, []staticFinding, error) {
 	files := staticScannerFiles{
 		Scanned: []staticScannedFile{},
 		Omitted: []TargetWorkspaceOmission{},
@@ -203,6 +212,9 @@ func scanStaticTarget(target string) (staticScannerFiles, []staticFinding, error
 	var totalBytes int64
 	findings := []staticFinding{}
 	scanFile := func(path string, rel string, info os.FileInfo) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !info.Mode().IsRegular() {
 			files.addOmitted(rel, "not regular file", 0)
 			return nil
@@ -227,8 +239,11 @@ func scanStaticTarget(target string) (staticScannerFiles, []staticFinding, error
 			files.addOmitted(rel, "total file budget exceeded", info.Size())
 			return nil
 		}
-		content, err := os.ReadFile(path)
+		content, err := readContextFile(ctx, path)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			files.addOmitted(rel, "read failed", info.Size())
 			return nil
 		}
@@ -277,6 +292,9 @@ func scanStaticTarget(target string) (staticScannerFiles, []staticFinding, error
 	}
 	var candidates []staticFileCandidate
 	err = filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return files.recordWalkError(target, path, entry)
 		}

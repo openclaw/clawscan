@@ -646,14 +646,9 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 	caseOpts.Target = target
 	caseOpts.Benchmark = nil
 	caseOpts.OutputPath = ""
-	return Run(caseOpts, RunContext{
-		Env:                  env,
-		Now:                  now,
-		CommandRunner:        ctx.CommandRunner,
-		ScannerRunner:        ctx.ScannerRunner,
-		SkillSpectorCommand:  ctx.SkillSpectorCommand,
-		VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
-	})
+	ctx.Env = env
+	ctx.Now = now
+	return Run(caseOpts, ctx)
 }
 
 func materializeOpenClawBenchmarkRow(root string, row OpenClawBenchmarkRow) (string, error) {

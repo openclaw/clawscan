@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
 	"github.com/openclaw/clawscan/internal/installpolicy"
@@ -25,13 +28,24 @@ var (
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Environ()); err != nil {
+	ctx := context.Background()
+	stop := func() {}
+	if len(os.Args) < 2 || os.Args[1] != "install" {
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	}
+	err := runContext(ctx, os.Args[1:], os.Environ())
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 }
 
 func run(args []string, environ []string) error {
+	return runContext(context.Background(), args, environ)
+}
+
+func runContext(ctx context.Context, args []string, environ []string) error {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(os.Stdout, helpText())
 		return nil
@@ -44,7 +58,7 @@ func run(args []string, environ []string) error {
 		return runScanners(args[1:])
 	}
 	if len(args) > 0 && args[0] == "benchmark" {
-		return runBenchmarkCommand(args[1:], environ)
+		return runBenchmarkCommand(ctx, args[1:], environ)
 	}
 	if len(args) > 0 && args[0] == "profiles" {
 		return runProfiles(args[1:])
@@ -53,7 +67,7 @@ func run(args []string, environ []string) error {
 		return runInstall(args[1:], environ)
 	}
 	if len(args) > 0 && args[0] == "openclaw-install-policy" {
-		return runOpenClawInstallPolicy(args[1:], environ, os.Stdin, os.Stdout)
+		return runOpenClawInstallPolicyContext(ctx, args[1:], environ, os.Stdin, os.Stdout)
 	}
 	if len(args) > 0 && looksLikeCommand(args[0]) {
 		return fmt.Errorf("Unknown command: %s", args[0])
@@ -67,14 +81,14 @@ func run(args []string, environ []string) error {
 		return err
 	}
 	if resolved.AllProfiles {
-		return runAllProfiles(resolved, environ, cwd)
+		return runAllProfiles(ctx, resolved, environ, cwd)
 	}
 	opts := resolved.Options[0]
 	if !opts.JSON && opts.OutputPath == "" {
 		opts.OutputPath = defaultOutputPath
 	}
 	if opts.Benchmark != nil {
-		artifact, err := runner.RunBenchmark(opts, benchmarkRunContext(environ))
+		artifact, err := runner.RunBenchmark(opts, scanRunContextWithCaller(ctx, environ))
 		if err != nil {
 			return err
 		}
@@ -95,8 +109,12 @@ func run(args []string, environ []string) error {
 		printBenchmarkSummary(os.Stdout, artifact, "")
 		return nil
 	}
-	result, err := runner.RunTargets(opts, scanRunContext(environ), cwd)
+	result, err := runner.RunTargets(opts, scanRunContextWithCaller(ctx, environ), cwd)
+	err = errors.Join(err, result.OperationalError())
 	if err != nil {
+		if opts.JSON && result.JSONValue() != nil {
+			err = errors.Join(err, runner.WriteJSON(os.Stdout, result.JSONValue()))
+		}
 		return err
 	}
 	if opts.JSON {
@@ -116,6 +134,10 @@ func runOpenClawInstallPolicy(
 	input io.Reader,
 	output io.Writer,
 ) error {
+	return runOpenClawInstallPolicyContext(context.Background(), args, environ, input, output)
+}
+
+func runOpenClawInstallPolicyContext(ctx context.Context, args []string, environ []string, input io.Reader, output io.Writer) error {
 	failClosed := func(err error) error {
 		return installpolicy.WriteResponse(output, installpolicy.FailureResponse(err.Error()))
 	}
@@ -177,7 +199,7 @@ func runOpenClawInstallPolicy(
 		}
 		opts.Target = scanTarget
 	}
-	result, err := runner.RunTargets(opts, scanRunContext(environ), cwd)
+	result, err := runner.RunTargets(opts, scanRunContextWithCaller(ctx, environ), cwd)
 	if err != nil {
 		return failClosed(err)
 	}
@@ -284,20 +306,22 @@ func hasInstallPolicyConfigOverride(args []string) bool {
 }
 
 func benchmarkRunContext(environ []string) runner.RunContext {
-	// Keep SIGINT at the process default until every benchmark phase observes Context.
-	// A signal-derived context would otherwise swallow interrupts during scanner runs and downloads.
 	return scanRunContext(environ)
 }
 
 func scanRunContext(environ []string) runner.RunContext {
-	ctx := runner.RunContext{Env: runner.EnvMap(environ)}
+	return scanRunContextWithCaller(nil, environ)
+}
+
+func scanRunContextWithCaller(caller context.Context, environ []string) runner.RunContext {
+	ctx := runner.RunContext{Context: caller, Env: runner.EnvMap(environ)}
 	if ctx.Env["CLAWSCAN_PROGRESS"] == "1" {
 		ctx.Progress = os.Stderr
 	}
 	return ctx
 }
 
-func runBenchmarkCommand(args []string, environ []string) error {
+func runBenchmarkCommand(ctx context.Context, args []string, environ []string) error {
 	switch {
 	case len(args) == 1 && args[0] == "list":
 		printBenchmarkCatalog(os.Stdout, runner.DefaultBenchmarkRegistry())
@@ -323,7 +347,7 @@ func runBenchmarkCommand(args []string, environ []string) error {
 	if !opts.JSON && opts.OutputPath == "" {
 		opts.OutputPath = defaultOutputPath
 	}
-	artifact, err := runner.RunBenchmark(opts, benchmarkRunContext(environ))
+	artifact, err := runner.RunBenchmark(opts, scanRunContextWithCaller(ctx, environ))
 	if err != nil {
 		return err
 	}
@@ -345,12 +369,19 @@ func runBenchmarkCommand(args []string, environ []string) error {
 	return nil
 }
 
-func runAllProfiles(resolved profiles.ResolvedRunSet, environ []string, cwd string) error {
+func runAllProfiles(ctx context.Context, resolved profiles.ResolvedRunSet, environ []string, cwd string) error {
 	if !resolved.JSON && resolved.OutputPath == "" {
 		resolved.OutputPath = defaultOutputPath
 	}
-	batch, err := runner.RunProfileBatch(resolved.Options, scanRunContext(environ), cwd)
+	batch, err := runner.RunProfileBatch(resolved.Options, scanRunContextWithCaller(ctx, environ), cwd)
+	err = errors.Join(err, (runner.RunTargetsResult{Batch: &batch}).OperationalError())
 	if err != nil {
+		if resolved.OutputPath != "" {
+			err = errors.Join(err, runner.WriteRunTargetsResultBundle(resolved.OutputPath, runner.RunTargetsResult{Batch: &batch}))
+		}
+		if resolved.JSON {
+			err = errors.Join(err, runner.WriteJSON(os.Stdout, batch))
+		}
 		return err
 	}
 	if resolved.JSON {

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/csv"
 	"fmt"
@@ -195,6 +196,10 @@ func dockerAvailable() error {
 }
 
 func (runner dockerCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	return runner.RunContext(context.Background(), command, args, cwd, timeout)
+}
+
+func (runner dockerCommandRunner) RunContext(ctx context.Context, command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	dockerArgs := []string{"run", "--rm", "--network", "bridge"}
 	if runID := strings.TrimSpace(runner.Env[SandboxRunIDEnv]); runID != "" {
 		if !sandboxRunIDPattern.MatchString(runID) {
@@ -218,7 +223,8 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	}
 	dockerArgs = append(dockerArgs, runner.Image, command)
 	dockerArgs = append(dockerArgs, args...)
-	return runner.Host.Run("docker", dockerArgs, "", timeout)
+	host := &boundCommandRunner{ctx: ctx, runner: runner.Host}
+	return host.Run("docker", dockerArgs, "", timeout)
 }
 
 func dockerMounts(cwd string, args []string, extra []SandboxMount) []string {

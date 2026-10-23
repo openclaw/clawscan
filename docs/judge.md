@@ -1,5 +1,20 @@
 # Judge Harness
 
+`judge.commandStarted` and each parity attempt's `commandStarted` describe the
+local harness **shell**: `false` proves it was not started, `true` proves the
+shell started, and omission means unknown. A prepared challenge, a `running`
+checkpoint, or entry into the judge phase does not prove invocation. Shell start
+does not independently prove a native/model invocation or its count; arbitrary
+harnesses may fail before that point or invoke more than once. Keep provider
+exposure unknown unless independently evidenced. Pre-command workspace failures
+retain a failed judge with `commandStarted: false`; canceled started commands
+retain failed results and receipt-attempt history, never a manufactured receipt.
+
+Receipt retries share `RunContext.Context` as well as the judge's existing
+timeout. No retry starts after cancellation. Even a readable valid receipt
+cannot complete a canceled run; consumers must reject incomplete top-level
+artifacts before considering scanner or judge verdicts.
+
 `--judge` hands scanner evidence to an external agent command so it can inspect
 the skill, do its own research in the scan workspace, and write a final JSON
 verdict:

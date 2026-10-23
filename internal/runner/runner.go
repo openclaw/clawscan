@@ -131,11 +131,16 @@ type CommandOutput struct {
 	Stdout   string
 	Stderr   string
 	ExitCode *int
+	Started  *bool
 }
 
 type Artifact struct {
-	SchemaVersion string `json:"schemaVersion"`
-	Profile       string `json:"profile,omitempty"`
+	ProcessCleanup string `json:"processCleanup,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Complete       bool   `json:"complete"`
+	Error          string `json:"error,omitempty"`
+	SchemaVersion  string `json:"schemaVersion"`
+	Profile        string `json:"profile,omitempty"`
 	// ConfigSource deliberately lacks omitempty: null positively claims no config
 	// influenced the run, unlike older artifacts that omitted the field.
 	ConfigSource *string                  `json:"configSource"`
@@ -241,6 +246,7 @@ type TargetWorkspaceOmission struct {
 }
 
 type JudgeResult struct {
+	CommandStarted   *bool          `json:"commandStarted,omitempty"`
 	Status           string         `json:"status"`
 	Command          string         `json:"command,omitempty"`
 	ConfiguredModel  string         `json:"configuredModel,omitempty"`
@@ -457,26 +463,42 @@ func ValidateRequirements(opts Options, env map[string]string) error {
 	return errors.New(strings.Join(lines, "\n"))
 }
 
-func Run(opts Options, ctx RunContext) (Artifact, error) {
-	progress := newRunProgress(ctx.Progress)
-	ctx.progress = progress
-	progress.startPhase("prepare")
-	if err := ValidateScannerEnvDefaults(opts.ScannerEnvDefaults); err != nil {
-		return Artifact{}, err
-	}
-	if err := validateGateRuleScanners(opts); err != nil {
-		return Artifact{}, err
+func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
+	ctx.Context = workContext(ctx.Context)
+	now := ctx.Now
+	if now == nil {
+		now = time.Now
 	}
 	env := ctx.Env
 	if env == nil {
 		env = EnvMap(os.Environ())
 	}
-	// Each run owns its defaults; profile batches must not mutate their shared environment.
 	env = maps.Clone(env)
 	applyRuntimeEnvDefaults(opts, env)
+	startedAt := now().UTC().Format(time.RFC3339Nano)
+	artifact = pendingArtifact(opts, startedAt, env)
+	defer finishArtifact(&artifact, opts, ctx.Context, now, &runErr)
+	if err := ctx.Context.Err(); err != nil {
+		return artifact, err
+	}
+	progress := newRunProgress(ctx.Progress)
+	ctx.progress = progress
+	progress.startPhase("prepare")
+	if err := ValidateScannerEnvDefaults(opts.ScannerEnvDefaults); err != nil {
+		return artifact, err
+	}
+	if err := validateGateRuleScanners(opts); err != nil {
+		return artifact, err
+	}
 	target, err := resolveTargetForOptions(opts)
 	if err != nil {
-		return Artifact{}, err
+		return artifact, err
+	}
+	artifact.Target.ResolvedPath = target.resolvedPath
+	artifact.Target.Kind = target.kind
+	artifact.Target.ID = target.id
+	if err := ctx.Context.Err(); err != nil {
+		return artifact, err
 	}
 	// Requirement validation and sandbox gating only consider scanners that
 	// will run for this target kind; a scanner that can only skip must not
@@ -484,17 +506,19 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 	gatingOpts := opts
 	gatingOpts.Scanners = runnableScanners(opts, target.kind)
 	if err := ValidateRequirements(gatingOpts, env); err != nil {
-		return Artifact{}, err
+		return artifact, err
 	}
-	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
-	startedAt := now().UTC().Format(time.RFC3339Nano)
 	commandRunner, sandbox, err := commandRunnerForOptions(gatingOpts, ctx, env)
 	if err != nil {
-		return Artifact{}, err
+		return artifact, err
 	}
+	commands := &boundCommandRunner{ctx: ctx.Context, runner: commandRunner}
+	defer func() {
+		if commands.attempted {
+			artifact.ProcessCleanup = "unknown"
+		}
+	}()
+	commandRunner = commands
 	scannerRunner := ctx.ScannerRunner
 	if scannerRunner == nil {
 		scannerSandboxMode := sandbox.Mode
@@ -502,6 +526,7 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			scannerSandboxMode = SandboxModeOff
 		}
 		scannerRunner = ExternalScannerRunner{
+			Context:              ctx.Context,
 			CommandRunner:        commandRunner,
 			Env:                  env,
 			Profile:              opts.Profile,
@@ -514,23 +539,25 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 			Timeout:              20 * time.Minute,
 		}
 	}
-	artifact := NewArtifact(opts, target.resolvedPath, startedAt, startedAt, env)
 	artifact.Sandbox = sandbox
 	artifact.Target.Kind = target.kind
 	artifact.Target.ID = target.id
 	if opts.ContextPath != "" {
-		context, err := os.ReadFile(opts.ContextPath)
+		context, err := readContextFile(ctx.Context, opts.ContextPath)
 		if err != nil {
-			return Artifact{}, fmt.Errorf("read context JSON: %w", err)
+			return artifact, fmt.Errorf("read context JSON: %w", err)
 		}
 		if !json.Valid(context) {
-			return Artifact{}, fmt.Errorf("context JSON is not valid: %s", opts.ContextPath)
+			return artifact, fmt.Errorf("context JSON is not valid: %s", opts.ContextPath)
 		}
 		artifact.Context = json.RawMessage(context)
 	}
 	scanned := make(map[string]bool, len(opts.Scanners))
 	progress.endPhase(false)
 	for _, scanner := range opts.Scanners {
+		if err := ctx.Context.Err(); err != nil {
+			return artifact, err
+		}
 		if scanned[scanner] {
 			continue
 		}
@@ -538,53 +565,79 @@ func Run(opts Options, ctx RunContext) (Artifact, error) {
 		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
 		progress.startPhase(scannerProgressPhase(scanner))
-		result, err := scannerResult(opts, scanner, target, scannerStartedAt, scannerRunner)
+		artifact.Scanners[scanner] = ScannerResult{Status: "running", StartedAt: scannerStartedAt}
+		if err := checkpointArtifact(opts, &artifact, ctx.Context); err != nil {
+			artifact.Scanners[scanner] = ScannerResult{Status: "not_started"}
+			return artifact, err
+		}
+		result, err := scannerResultContext(ctx.Context, opts, scanner, target, scannerStartedAt, scannerRunner)
+		err = errors.Join(err, commands.failure, ctx.Context.Err())
 		progress.endPhase(err != nil || result.Status == "failed")
 		if err != nil {
-			return Artifact{}, err
+			result.Status = "failed"
+			result.StartedAt = scannerStartedAt
+			result.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+			result.Error = commandError(err, result.Error, env)
 		}
 		result.DurationMs = time.Since(scannerTimerStarted).Milliseconds()
 		artifact.Scanners[scanner] = result
+		if err != nil {
+			return artifact, err
+		}
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
-		progress.startPhase("judge")
-		result, err := RunJudge(*opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode)
-		progress.endPhase(err != nil || result != nil && result.Status == "failed")
-		if err != nil {
-			return Artifact{}, err
+		if err := ctx.Context.Err(); err != nil {
+			return artifact, err
 		}
-		artifact.Judge = result
-	}
-	artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
-	if opts.OutputPath != "" {
-		if err := WriteRunTargetsResultBundle(opts.OutputPath, RunTargetsResult{Single: &artifact}); err != nil {
-			return Artifact{}, err
+		for scanner, result := range artifact.Scanners {
+			if result.Status == "failed" {
+				return artifact, fmt.Errorf("judge not started: scanner %s failed", scanner)
+			}
+		}
+		progress.startPhase("judge")
+		artifact.Judge = &JudgeResult{Status: "running"}
+		if err := checkpointArtifact(opts, &artifact, ctx.Context); err != nil {
+			artifact.Judge = &JudgeResult{Status: "not_started", CommandStarted: boolPointer(false)}
+			return artifact, err
+		}
+		result, err := RunJudgeContext(ctx.Context, *opts.Judge, artifact, commandRunner, 20*time.Minute, env, sandbox.Mode)
+		progress.endPhase(err != nil || result != nil && result.Status == "failed")
+		if result != nil {
+			artifact.Judge = result
+		}
+		if err != nil {
+			return artifact, err
 		}
 	}
 	return artifact, nil
 }
 
 func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, error) {
+	ctx.Context = workContext(ctx.Context)
+	if err := ctx.Context.Err(); err != nil {
+		artifact, runErr := Run(opts, ctx)
+		return RunTargetsResult{Single: &artifact}, runErr
+	}
 	targetInputs, err := ResolveTargetInputs(opts, cwd)
 	if err != nil {
-		return RunTargetsResult{}, err
+		now := ctx.Now
+		if now == nil {
+			now = time.Now
+		}
+		env := ctx.Env
+		if env == nil {
+			env = EnvMap(os.Environ())
+		}
+		artifact := pendingArtifact(opts, now().UTC().Format(time.RFC3339Nano), env)
+		finishArtifact(&artifact, opts, ctx.Context, now, &err)
+		return RunTargetsResult{Single: &artifact}, err
 	}
 	if len(targetInputs) == 1 {
 		runOpts := opts
 		runOpts.Target = targetInputs[0]
-		outputPath := runOpts.OutputPath
-		runOpts.OutputPath = ""
 		artifact, err := Run(runOpts, ctx)
-		if err != nil {
-			return RunTargetsResult{}, err
-		}
-		if outputPath != "" {
-			if err := WriteRunTargetsResultBundle(outputPath, RunTargetsResult{Single: &artifact}); err != nil {
-				return RunTargetsResult{}, err
-			}
-		}
-		return RunTargetsResult{Single: &artifact}, nil
+		return RunTargetsResult{Single: &artifact}, err
 	}
 
 	env := ctx.Env
@@ -611,14 +664,13 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 			ScannerStatuses: map[string]map[string]int{},
 		},
 	}
+	var runErrors error
 	for _, targetInput := range targetInputs {
 		runOpts := opts
 		runOpts.Target = targetInput
 		runOpts.OutputPath = ""
 		artifact, err := Run(runOpts, runCtx)
-		if err != nil {
-			return RunTargetsResult{}, err
-		}
+		runErrors = errors.Join(runErrors, err)
 		batch.Runs = append(batch.Runs, artifact)
 		for scanner, result := range artifact.Scanners {
 			if batch.Summary.ScannerStatuses[scanner] == nil {
@@ -626,14 +678,17 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 			}
 			batch.Summary.ScannerStatuses[scanner][result.Status]++
 		}
+		if err != nil && ctx.Context.Err() == nil {
+			break
+		}
 	}
 	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
 		if err := WriteRunTargetsResultBundle(opts.OutputPath, RunTargetsResult{Batch: &batch}); err != nil {
-			return RunTargetsResult{}, err
+			runErrors = errors.Join(runErrors, err)
 		}
 	}
-	return RunTargetsResult{Batch: &batch}, nil
+	return RunTargetsResult{Batch: &batch}, runErrors
 }
 
 func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtifact, error) {
@@ -670,7 +725,6 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 		result, err := RunTargets(runOpts, runCtx, cwd)
 		if err != nil {
 			batch.Errors = append(batch.Errors, BatchError{Profile: runOpts.Profile, Error: err.Error()})
-			continue
 		}
 		if result.Single != nil {
 			addBatchRun(&batch, *result.Single, targets)
@@ -683,7 +737,7 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 	}
 	batch.Summary.TargetCount = len(targets)
 	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
-	return batch, nil
+	return batch, workContext(ctx.Context).Err()
 }
 
 func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]bool) {
@@ -708,19 +762,24 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 	spec := outputBundleSpecFor(outputPath)
 	switch {
 	case result.Single != nil:
-		if err := writeScannerOutputFiles(spec, []*Artifact{result.Single}); err != nil {
-			return err
+		outputErr := writeScannerOutputFiles(spec, []*Artifact{result.Single})
+		if outputErr != nil {
+			result.Single.Complete = false
+			result.Single.Status = "failed"
+			result.Single.Gate = "error"
+			result.Single.Error = strings.TrimSpace(result.Single.Error + "\n" + outputErr.Error())
 		}
-		return writeJSONFile(spec.ArtifactPath, result.Single)
+		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Single))
 	case result.Batch != nil:
 		runs := make([]*Artifact, 0, len(result.Batch.Runs))
 		for i := range result.Batch.Runs {
 			runs = append(runs, &result.Batch.Runs[i])
 		}
-		if err := writeScannerOutputFiles(spec, runs); err != nil {
-			return err
+		outputErr := writeScannerOutputFiles(spec, runs)
+		if outputErr != nil {
+			result.Batch.Errors = append(result.Batch.Errors, BatchError{Error: outputErr.Error()})
 		}
-		return writeJSONFile(spec.ArtifactPath, result.Batch)
+		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Batch))
 	default:
 		return errors.New("run targets result is empty")
 	}
@@ -760,7 +819,7 @@ func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error
 		usedScannerPaths := map[string]int{}
 		for _, scanner := range scanners {
 			result := artifact.Scanners[scanner]
-			if len(result.Raw) == 0 {
+			if len(result.Raw) == 0 || artifact.Status != "" && result.Status != "completed" {
 				result.OutputPath = ""
 				artifact.Scanners[scanner] = result
 				continue
@@ -926,17 +985,32 @@ func writeJSONFile(path string, value interface{}) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	file, err := os.Create(path)
+	file, err := os.CreateTemp(filepath.Dir(path), ".clawscan-*.json")
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	return WriteJSON(file, value)
+	defer os.Remove(file.Name())
+	writeErr := WriteJSON(file, value)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return err
+	}
+	if err := os.Chmod(file.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }
 
 func scannerResult(opts Options, scanner string, target resolvedTarget, startedAt string, scannerRunner ScannerRunner) (ScannerResult, error) {
+	return scannerResultContext(context.Background(), opts, scanner, target, startedAt, scannerRunner)
+}
+
+func scannerResultContext(ctx context.Context, opts Options, scanner string, target resolvedTarget, startedAt string, scannerRunner ScannerRunner) (ScannerResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ScannerResult{}, err
+	}
 	if path := opts.ScannerResultPaths[scanner]; path != "" {
-		raw, err := os.ReadFile(path)
+		raw, err := readContextFile(ctx, path)
 		if err != nil {
 			return ScannerResult{}, err
 		}
@@ -959,6 +1033,12 @@ func scannerResult(opts Options, scanner string, target resolvedTarget, startedA
 	if !scannerSupportsTargetKindInRegistry(registryForOptions(opts), scanner, target.kind) {
 		return unsupportedTargetKindResult(scanner, target.kind, startedAt), nil
 	}
+	if contextual, ok := scannerRunner.(ContextScannerRunner); ok {
+		return contextual.RunScannerContext(ctx, scanner, target.resolvedPath, startedAt)
+	}
+	if ctx.Done() != nil {
+		return ScannerResult{}, errors.New("cancelable work requires a ContextScannerRunner")
+	}
 	return scannerRunner.RunScanner(scanner, target.resolvedPath, startedAt)
 }
 
@@ -973,10 +1053,17 @@ const defaultJudgeOutputSchemaPath = "./schema.json"
 const artifactInspectionRequiredFilePlaceholder = "{{ artifact_inspection.required_file }}"
 
 func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
+	return renderPromptTemplateContext(context.Background(), template, artifact)
+}
+
+func renderPromptTemplateContext(ctx context.Context, template string, artifact Artifact) (string, error) {
 	var renderErr error
 	var targetFiles string
 	targetFilesRendered := false
 	rendered := promptPlaceholderPattern.ReplaceAllStringFunc(template, func(match string) string {
+		if err := ctx.Err(); err != nil {
+			renderErr = err
+		}
 		if renderErr != nil {
 			return match
 		}
@@ -986,7 +1073,7 @@ func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
 		}
 		if parts[1] == "target.files" {
 			if !targetFilesRendered {
-				targetFiles, renderErr = renderTargetFiles(artifact.Target.ResolvedPath)
+				targetFiles, renderErr = renderTargetFilesContext(ctx, artifact.Target.ResolvedPath)
 				targetFilesRendered = true
 			}
 			return targetFiles
@@ -1014,6 +1101,13 @@ func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
 }
 
 func renderTargetFiles(target string) (string, error) {
+	return renderTargetFilesContext(context.Background(), target)
+}
+
+func renderTargetFilesContext(ctx context.Context, target string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	var paths []string
 	type targetFileOmission struct {
 		path   string
@@ -1028,6 +1122,9 @@ func renderTargetFiles(target string) (string, error) {
 		paths = append(paths, target)
 	} else {
 		if err := filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if err != nil {
 				precomputedOmissions = append(precomputedOmissions, targetFileOmission{path: path, reason: "read failed"})
 				if entry != nil && entry.IsDir() {
@@ -1075,6 +1172,9 @@ func renderTargetFiles(target string) (string, error) {
 		suppressedOmissions++
 	}
 	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return "", err
@@ -1087,7 +1187,7 @@ func renderTargetFiles(target string) (string, error) {
 			addOmission(path, "total file budget exceeded")
 			continue
 		}
-		content, err := os.ReadFile(path)
+		content, err := readContextFile(ctx, path)
 		if err != nil {
 			if isSourceReadError(err, path) {
 				addOmission(path, "read failed")
@@ -1225,6 +1325,7 @@ func sha256Hex(value string) string {
 }
 
 type judgeCommandState struct {
+	context          context.Context
 	workspace        string
 	judgeSandbox     string
 	outputPath       string
@@ -1245,16 +1346,20 @@ type judgeShellSpec struct {
 	quote   func(string) string
 }
 
-func runJudgeAttempt(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
+func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
+	if err := ctx.Err(); err != nil {
+		return judgeAttemptOutcome{}, err
+	}
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
 		return judgeAttemptOutcome{}, err
 	}
 	defer os.RemoveAll(workspace)
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareJudgeWorkspaceContext(ctx, workspace, artifact); err != nil {
 		return judgeAttemptOutcome{}, err
 	}
 	state := &judgeCommandState{
+		context:      ctx,
 		workspace:    workspace,
 		judgeSandbox: judgeSandboxMode(sandboxMode),
 		outputPath:   filepath.Join(workspace, "judge-output.json"),
@@ -1262,7 +1367,7 @@ func runJudgeAttempt(opts JudgeOptions, artifact Artifact, commandRunner Command
 	}
 	if isClawHubParityProfile(artifact.Profile) {
 		state.outputPath = filepath.Join(workspace, "codex-result.json")
-		state.inspection, err = prepareArtifactInspectionChallenge(workspace)
+		state.inspection, err = prepareArtifactInspectionChallengeContext(ctx, workspace)
 		if err != nil {
 			return judgeAttemptOutcome{}, err
 		}
@@ -1274,14 +1379,18 @@ func runJudgeAttempt(opts JudgeOptions, artifact Artifact, commandRunner Command
 	}
 	var output CommandOutput
 	var runErr error
-	if remaining := time.Until(deadline); remaining > 0 {
+	if remaining := time.Until(deadline); remaining > 0 && ctx.Err() == nil {
 		output, runErr = commandRunner.Run(shell.command, append(shell.args, command), workspace, remaining)
 	} else {
-		runErr = errors.New("Judge timeout budget exhausted before command start.")
+		output.Started = boolPointer(false)
+		runErr = context.DeadlineExceeded
+		if ctx.Err() != nil {
+			runErr = ctx.Err()
+		}
 	}
 	raw := strings.TrimSpace(output.Stdout)
 	if state.outputUsed {
-		outputBytes, readErr := os.ReadFile(state.outputPath)
+		outputBytes, readErr := readContextFile(context.Background(), state.outputPath)
 		if readErr == nil {
 			raw = strings.TrimSpace(string(outputBytes))
 		} else if runErr == nil {
@@ -1289,6 +1398,7 @@ func runJudgeAttempt(opts JudgeOptions, artifact Artifact, commandRunner Command
 		}
 	}
 	result := &JudgeResult{
+		CommandStarted:   output.Started,
 		Status:           "completed",
 		ConfiguredModel:  configuredJudgeModel(command, runtime.GOOS, env),
 		PromptPath:       state.promptSource,
@@ -1356,11 +1466,15 @@ type artifactInspectionChallenge struct {
 }
 
 func prepareArtifactInspectionChallenge(workspace string) (*artifactInspectionChallenge, error) {
+	return prepareArtifactInspectionChallengeContext(context.Background(), workspace)
+}
+
+func prepareArtifactInspectionChallengeContext(ctx context.Context, workspace string) (*artifactInspectionChallenge, error) {
 	random := make([]byte, 32)
 	if _, err := rand.Read(random); err != nil {
 		return nil, fmt.Errorf("generate artifact inspection challenge: %w", err)
 	}
-	requiredFile, requiredSHA256, err := selectArtifactInspectionFile(workspace)
+	requiredFile, requiredSHA256, err := selectArtifactInspectionFileContext(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -1381,6 +1495,13 @@ func prepareArtifactInspectionChallenge(workspace string) (*artifactInspectionCh
 }
 
 func selectArtifactInspectionFile(workspace string) (string, string, error) {
+	return selectArtifactInspectionFileContext(context.Background(), workspace)
+}
+
+func selectArtifactInspectionFileContext(ctx context.Context, workspace string) (string, string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
 	artifactDir := filepath.Join(workspace, "artifact")
 	candidates := []string{}
 	for _, preferred := range []string{"SKILL.md", "package.json"} {
@@ -1391,6 +1512,9 @@ func selectArtifactInspectionFile(workspace string) (string, string, error) {
 	}
 	if len(candidates) == 0 {
 		err := filepath.WalkDir(artifactDir, func(path string, entry os.DirEntry, walkErr error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if walkErr != nil {
 				return walkErr
 			}
@@ -1418,7 +1542,7 @@ func selectArtifactInspectionFile(workspace string) (string, string, error) {
 	}
 	defer file.Close()
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
+	if _, err := io.Copy(hash, contextReader{ctx: ctx, reader: file}); err != nil {
 		return "", "", fmt.Errorf("hash artifact inspection file: %w", err)
 	}
 	return "artifact/" + filepath.ToSlash(relative), hex.EncodeToString(hash.Sum(nil)), nil
@@ -1490,8 +1614,14 @@ func judgeJSONType(value any) string {
 }
 
 func renderJudgeCommand(command string, artifact Artifact, state *judgeCommandState, quote func(string) string) (string, error) {
+	if err := workContext(state.context).Err(); err != nil {
+		return "", err
+	}
 	var renderErr error
 	rendered := judgePlaceholderPattern.ReplaceAllStringFunc(command, func(match string) string {
+		if err := workContext(state.context).Err(); err != nil {
+			renderErr = err
+		}
 		if renderErr != nil {
 			return match
 		}
@@ -1600,7 +1730,12 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 		}
 		template = strings.ReplaceAll(template, artifactInspectionRequiredFilePlaceholder, string(requiredFileJSON))
 	}
-	prompt, err := renderJudgePromptSource(source, template, artifact)
+	var prompt string
+	if isClawHubParityProfile(artifact.Profile) && judgeSourceKey(source) == "clawhub/prompt.md" {
+		prompt, err = RenderClawHubPrompt(template, artifact)
+	} else {
+		prompt, err = renderPromptTemplateContext(workContext(state.context), template, artifact)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -1791,12 +1926,15 @@ func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, 
 }
 
 func readJudgeSource(source string, state *judgeCommandState) ([]byte, error) {
+	if err := workContext(state.context).Err(); err != nil {
+		return nil, err
+	}
 	if state.files != nil {
 		if data, ok := state.files[judgeSourceKey(source)]; ok {
 			return data, nil
 		}
 	}
-	return os.ReadFile(source)
+	return readContextFile(workContext(state.context), source)
 }
 
 func judgeSourceKey(source string) string {
@@ -1804,11 +1942,15 @@ func judgeSourceKey(source string) string {
 }
 
 func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
+	return prepareJudgeWorkspaceContext(context.Background(), workspace, artifact)
+}
+
+func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifact Artifact) error {
 	if artifact.Target.Kind == "url" {
 		return fmt.Errorf("judge workspace copying is unsupported for URL targets: %s", artifact.Target.Input)
 	}
 	// Every profile receives the complete artifact before its metadata layout is written.
-	manifest, err := copyTargetToWorkspace(artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
+	manifest, err := copyTargetToWorkspaceContext(ctx, artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
 	if err != nil {
 		return err
 	}
@@ -1838,6 +1980,9 @@ func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
 		return err
 	}
 	for name, result := range artifact.Scanners {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		raw := result.Raw
 		if len(raw) == 0 {
 			raw = json.RawMessage("null")
@@ -1862,7 +2007,14 @@ func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
 }
 
 func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManifest, error) {
+	return copyTargetToWorkspaceContext(context.Background(), source, destRoot)
+}
+
+func copyTargetToWorkspaceContext(ctx context.Context, source string, destRoot string) (TargetWorkspaceManifest, error) {
 	manifest := TargetWorkspaceManifest{}
+	if err := ctx.Err(); err != nil {
+		return manifest, err
+	}
 	info, err := os.Lstat(source)
 	if err != nil {
 		return manifest, err
@@ -1874,7 +2026,7 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 		if !info.Mode().IsRegular() {
 			return manifest, fmt.Errorf("refusing non-regular judge target: %s", source)
 		}
-		if err := copyFile(source, filepath.Join(destRoot, filepath.Base(source))); err != nil {
+		if err := copyFileContext(ctx, source, filepath.Join(destRoot, filepath.Base(source))); err != nil {
 			return manifest, err
 		}
 		manifest.addCopied(filepath.Base(source), info.Size())
@@ -1891,6 +2043,9 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 	}
 	var candidates []workspaceFileCandidate
 	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}
@@ -1947,6 +2102,9 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 	// Complete workspaces are a parity invariant: fail the run on copy errors
 	// instead of silently giving scanners or the judge a truncated artifact.
 	for _, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return manifest, err
+		}
 		if candidate.linkTarget != "" {
 			dest := filepath.Join(destRoot, candidate.rel)
 			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -1960,7 +2118,7 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 		}
 		info := candidate.info
 		rel := candidate.rel
-		if err := copyFile(candidate.path, filepath.Join(destRoot, rel)); err != nil {
+		if err := copyFileContext(ctx, candidate.path, filepath.Join(destRoot, rel)); err != nil {
 			return manifest, err
 		}
 		manifest.addCopied(rel, info.Size())
@@ -2023,6 +2181,13 @@ func relativeManifestPath(root string, path string) string {
 }
 
 func copyFile(source string, dest string) error {
+	return copyFileContext(context.Background(), source, dest)
+}
+
+func copyFileContext(ctx context.Context, source string, dest string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -2036,7 +2201,7 @@ func copyFile(source string, dest string) error {
 		return err
 	}
 	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := io.Copy(out, contextReader{ctx: ctx, reader: in}); err != nil {
 		return err
 	}
 	return out.Close()
@@ -2051,6 +2216,7 @@ func isSourceReadError(err error, source string) bool {
 }
 
 type ExternalScannerRunner struct {
+	Context              context.Context
 	CommandRunner        CommandRunner
 	Env                  map[string]string
 	Profile              string
@@ -2064,6 +2230,12 @@ type ExternalScannerRunner struct {
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
+	if err := workContext(runner.Context).Err(); err != nil {
+		return ScannerResult{}, err
+	}
+	if runner.CommandRunner != nil && runner.Context != nil {
+		runner.CommandRunner = &boundCommandRunner{ctx: runner.Context, runner: runner.CommandRunner}
+	}
 	registry := runner.Registry
 	if registry.isZero() {
 		registry = DefaultScannerRegistry()
@@ -2080,6 +2252,11 @@ func (runner ExternalScannerRunner) RunScanner(name string, target string, start
 		}, nil
 	}
 	return adapter.Run(runner, target, startedAt)
+}
+
+func (runner ExternalScannerRunner) RunScannerContext(ctx context.Context, name string, target string, startedAt string) (ScannerResult, error) {
+	runner.Context = ctx
+	return runner.RunScanner(name, target, startedAt)
 }
 
 func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt string) (ScannerResult, error) {
@@ -2172,7 +2349,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	cwd := ""
 	resultName := "skillspector-report.json"
 	if isClawHubParityProfile(runner.Profile) {
-		if _, err := copyTargetToWorkspace(target, filepath.Join(resultDir, "artifact")); err != nil {
+		if _, err := copyTargetToWorkspaceContext(workContext(runner.Context), target, filepath.Join(resultDir, "artifact")); err != nil {
 			return ScannerResult{}, fmt.Errorf("prepare ClawHub SkillSpector workspace: %w", err)
 		}
 		scanTarget = "artifact"
@@ -2329,9 +2506,14 @@ type defaultCommandRunner struct {
 }
 
 func (runner defaultCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return runner.RunContext(context.Background(), command, args, cwd, timeout)
+}
+
+func (runner defaultCommandRunner) RunContext(parent context.Context, command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	ctx, cancel := context.WithTimeout(workContext(parent), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.WaitDelay = 100 * time.Millisecond
 	cmd.Dir = cwd
 	if runner.Env != nil {
 		cmd.Env = envMapToEnviron(runner.Env)
@@ -2358,12 +2540,14 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 			childProgress.finish()
 		}
 	}
-	timedOut := ctx.Err() == context.DeadlineExceeded
-	if timedOut {
-		err = fmt.Errorf("command timed out after %s", timeout)
+	if ctx.Err() != nil {
+		err = fmt.Errorf("command stopped: %w", ctx.Err())
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("command timed out after %s: %w", timeout, ctx.Err())
+		}
 	}
-	output := CommandOutput{Stdout: stdout.String(), Stderr: stderr.String()}
-	if !timedOut && cmd.ProcessState != nil {
+	output := CommandOutput{Stdout: stdout.String(), Stderr: stderr.String(), Started: boolPointer(pid != 0)}
+	if ctx.Err() == nil && !errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil {
 		exitCode := cmd.ProcessState.ExitCode()
 		if exitCode >= 0 {
 			output.ExitCode = &exitCode

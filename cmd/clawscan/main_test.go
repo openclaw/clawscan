@@ -1227,8 +1227,8 @@ func TestRunCommandClawHubRejectsMalformedPackageReceipts(t *testing.T) {
 				if err := run([]string{
 					target, "--profile", "clawhub", "--scanner", "clawscan-static",
 					"--judge", command, "--sandbox", "off", "--json",
-				}, []string{}); err != nil {
-					t.Fatal(err)
+				}, []string{}); err == nil {
+					t.Fatal("malformed receipt must return an operational failure")
 				}
 			})
 			var artifact runner.Artifact
@@ -1237,6 +1237,9 @@ func TestRunCommandClawHubRejectsMalformedPackageReceipts(t *testing.T) {
 			}
 			if artifact.Judge == nil || artifact.Judge.Status != "failed" || !strings.Contains(artifact.Judge.Error, test.wantError) {
 				t.Fatalf("judge = %#v; want failed with %q", artifact.Judge, test.wantError)
+			}
+			if artifact.Complete || artifact.Status != "failed" || artifact.Gate != "error" {
+				t.Fatal("malformed receipt claimed complete security evidence")
 			}
 		})
 	}
