@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -171,6 +172,20 @@ func TestRunOpenClawInstallPolicyScansSkillAndPluginTargets(t *testing.T) {
 				t.Fatalf("response = %s", output.String())
 			}
 		})
+	}
+}
+
+func TestInstallPolicyKeepsCallerCancellationAfterRequestIngestion(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "SKILL.md"), "# Inert skill\n")
+	request := fmt.Sprintf(`{"protocolVersion":1,"targetType":"skill","targetName":"generated","sourcePath":%q,"sourcePathKind":"directory","origin":{"type":"test"},"request":{"kind":"skill-install","mode":"install"}}`, root)
+	caller, cancel := context.WithCancel(context.Background())
+	cancel()
+	var output bytes.Buffer
+	err := runOpenClawInstallPolicyContext(caller, []string{"--scanner", "clawscan-static", "--sandbox", "off"}, []string{}, strings.NewReader(request), &output)
+	var response installpolicy.Response
+	if err != nil || json.Unmarshal(output.Bytes(), &response) != nil || response.Decision != "block" || !strings.Contains(response.Reason, "context canceled") {
+		t.Fatalf("policy scan dropped caller cancellation: %s, %v", output.String(), err)
 	}
 }
 

@@ -135,6 +135,8 @@ type CommandOutput struct {
 }
 
 type Artifact struct {
+	outputSafety   outputSafety
+	targetConsumed bool
 	ProcessCleanup string `json:"processCleanup,omitempty"`
 	Status         string `json:"status,omitempty"`
 	Complete       bool   `json:"complete"`
@@ -181,6 +183,7 @@ func (result RunTargetsResult) JSONValue() interface{} {
 }
 
 type BatchArtifact struct {
+	outputSafety  outputSafety
 	SchemaVersion string            `json:"schemaVersion"`
 	Profile       string            `json:"profile,omitempty"`
 	StartedAt     string            `json:"startedAt"`
@@ -472,7 +475,8 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 			return artifact, err
 		}
 	}
-	if err := ValidateOutputPaths([]Options{validationOpts}, opts.OutputPath, ""); err != nil {
+	safety, err := prepareOutputSafety([]Options{validationOpts}, opts.OutputPath, "")
+	if err != nil {
 		return artifact, err
 	}
 	ctx.Context = workContext(ctx.Context)
@@ -488,6 +492,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	applyRuntimeEnvDefaults(opts, env)
 	startedAt := now().UTC().Format(time.RFC3339Nano)
 	artifact = pendingArtifact(opts, startedAt, env)
+	artifact.outputSafety = safety
 	defer finishArtifact(&artifact, opts, ctx.Context, now, &runErr)
 	if err := ctx.Context.Err(); err != nil {
 		return artifact, err
@@ -513,7 +518,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	if err != nil {
 		return artifact, err
 	}
-	if withinTarget {
+	if withinTarget || opts.OutputPath != "" && safety.validateWrite(opts.OutputPath) != nil {
 		checkpointOpts.OutputPath = ""
 	}
 	if err := ctx.Context.Err(); err != nil {
@@ -603,6 +608,9 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		if err != nil {
 			return artifact, err
 		}
+		if result.Status == "completed" && opts.ScannerResultPaths[scanner] == "" {
+			artifact.targetConsumed = true
+		}
 	}
 	evaluateGate(&artifact, opts)
 	if opts.Judge != nil {
@@ -624,6 +632,9 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		progress.endPhase(err != nil || result != nil && result.Status == "failed")
 		if result != nil {
 			artifact.Judge = result
+			if err == nil && result.Status == "completed" {
+				artifact.targetConsumed = true
+			}
 		}
 		if err != nil {
 			return artifact, err
@@ -633,15 +644,15 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 }
 
 func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, error) {
-	if err := ValidateOutputPaths([]Options{opts}, opts.OutputPath, cwd); err != nil {
+	safety, err := prepareOutputSafety([]Options{opts}, opts.OutputPath, cwd)
+	if err != nil {
 		return RunTargetsResult{}, err
 	}
 	ctx.Context = workContext(ctx.Context)
-	if err := ctx.Context.Err(); err != nil {
-		artifact, runErr := Run(opts, ctx)
-		return RunTargetsResult{Single: &artifact}, runErr
-	}
 	targetInputs, err := ResolveTargetInputs(opts, cwd)
+	if callerErr := ctx.Context.Err(); callerErr != nil {
+		err = callerErr
+	}
 	if err != nil {
 		now := ctx.Now
 		if now == nil {
@@ -652,6 +663,7 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 			env = EnvMap(os.Environ())
 		}
 		artifact := pendingArtifact(opts, now().UTC().Format(time.RFC3339Nano), env)
+		artifact.outputSafety = safety
 		finishArtifact(&artifact, opts, ctx.Context, now, &err)
 		return RunTargetsResult{Single: &artifact}, err
 	}
@@ -675,6 +687,7 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 	runCtx.Env = env
 	runCtx.Now = now
 	batch := BatchArtifact{
+		outputSafety:  safety,
 		SchemaVersion: "clawscan-batch-v1",
 		Profile:       opts.Profile,
 		StartedAt:     startedAt,
@@ -714,6 +727,10 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 }
 
 func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtifact, error) {
+	safety, err := prepareOutputSafety(optsList, "", cwd)
+	if err != nil {
+		return BatchArtifact{}, err
+	}
 	env := ctx.Env
 	if env == nil {
 		env = EnvMap(os.Environ())
@@ -727,6 +744,7 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 	runCtx.Env = env
 	runCtx.Now = now
 	batch := BatchArtifact{
+		outputSafety:  safety,
 		SchemaVersion: "clawscan-batch-v1",
 		StartedAt:     startedAt,
 		Env:           map[string]string{},
@@ -784,12 +802,20 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 	spec := outputBundleSpecFor(outputPath)
 	switch {
 	case result.Single != nil:
-		outputErr := writeScannerOutputFiles(spec, []*Artifact{result.Single})
+		safety := result.Single.outputSafety.withArtifacts([]*Artifact{result.Single})
+		outputErr := writeScannerOutputFiles(spec, []*Artifact{result.Single}, safety)
+		mainErr := safety.validateWrite(spec.ArtifactPath)
+		outputErr = errors.Join(outputErr, mainErr)
 		if outputErr != nil {
 			result.Single.Complete = false
-			result.Single.Status = "failed"
+			if result.Single.Status == "completed" || result.Single.Status == "" {
+				result.Single.Status = "failed"
+			}
 			result.Single.Gate = "error"
 			result.Single.Error = strings.TrimSpace(result.Single.Error + "\n" + outputErr.Error())
+		}
+		if mainErr != nil {
+			return outputErr
 		}
 		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Single))
 	case result.Batch != nil:
@@ -797,9 +823,15 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 		for i := range result.Batch.Runs {
 			runs = append(runs, &result.Batch.Runs[i])
 		}
-		outputErr := writeScannerOutputFiles(spec, runs)
+		safety := result.Batch.outputSafety.withArtifacts(runs)
+		outputErr := writeScannerOutputFiles(spec, runs, safety)
+		mainErr := safety.validateWrite(spec.ArtifactPath)
+		outputErr = errors.Join(outputErr, mainErr)
 		if outputErr != nil {
 			result.Batch.Errors = append(result.Batch.Errors, BatchError{Error: outputErr.Error()})
+		}
+		if mainErr != nil {
+			return outputErr
 		}
 		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Batch))
 	default:
@@ -829,8 +861,18 @@ func outputBundleSpecFor(outputPath string) outputBundleSpec {
 	return outputBundleSpec{ArtifactPath: clean, RootDir: rootDir, PathPrefix: prefix}
 }
 
-func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error {
+func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact, safety outputSafety) error {
 	paths := scannerOutputPaths(spec, artifacts)
+	var outputErr error
+	outputs := []string{spec.ArtifactPath}
+	for _, runPaths := range paths {
+		for _, path := range runPaths {
+			outputs = append(outputs, filepath.Join(spec.RootDir, filepath.FromSlash(path)))
+		}
+	}
+	if err := validateOutputInventory(outputs, nil); err != nil {
+		return err
+	}
 	for index, artifact := range artifacts {
 		for scanner, relPath := range paths[index] {
 			result := artifact.Scanners[scanner]
@@ -840,14 +882,23 @@ func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact) error
 				continue
 			}
 			absPath := filepath.Join(spec.RootDir, filepath.FromSlash(relPath))
+			if err := safety.validateWrite(absPath); err != nil {
+				result.OutputPath = ""
+				artifact.Scanners[scanner] = result
+				outputErr = errors.Join(outputErr, err)
+				continue
+			}
 			if err := writePrivateFile(absPath, result.Raw); err != nil {
-				return err
+				result.OutputPath = ""
+				artifact.Scanners[scanner] = result
+				outputErr = errors.Join(outputErr, err)
+				continue
 			}
 			result.OutputPath = relPath
 			artifact.Scanners[scanner] = result
 		}
 	}
-	return nil
+	return outputErr
 }
 
 func scannerOutputPaths(spec outputBundleSpec, artifacts []*Artifact) []map[string]string {

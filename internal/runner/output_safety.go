@@ -8,16 +8,18 @@ import (
 	"strings"
 )
 
+type outputSafety struct {
+	inputs  []string
+	targets []string
+}
+
 func ValidateOutputPaths(optsList []Options, outputPath string, cwd string) error {
-	if outputPath == "" {
-		hasPredictions := false
-		for _, opts := range optsList {
-			hasPredictions = hasPredictions || BenchmarkPredictionsOutputPath(opts) != ""
-		}
-		if !hasPredictions {
-			return nil
-		}
-	}
+	_, err := prepareOutputSafety(optsList, outputPath, cwd)
+	return err
+}
+
+func prepareOutputSafety(optsList []Options, outputPath string, cwd string) (outputSafety, error) {
+	safety := outputSafety{}
 	outputs := []string{}
 	if outputPath != "" {
 		outputs = append(outputs, outputPath)
@@ -63,23 +65,47 @@ func ValidateOutputPaths(optsList []Options, outputPath string, cwd string) erro
 		}
 		targets, err := ResolveTargetInputs(opts, cwd)
 		if err != nil {
+			root := cwd
+			if root == "" {
+				root, err = os.Getwd()
+				if err != nil {
+					return safety, err
+				}
+			}
+			safety.targets = append(safety.targets, filepath.Join(root, "skills"))
 			continue
 		}
 		for _, target := range targets {
 			if !isURLTarget(target) {
 				inputs = append(inputs, target)
 			}
-			artifact := NewArtifact(opts, "", "", "", nil)
-			artifact.Target.Input = target
+			targetOpts := opts
+			targetOpts.Target = target
+			resolved, _ := resolveTargetForOptions(targetOpts)
+			artifact := NewArtifact(targetOpts, resolved.resolvedPath, "", "", nil)
+			if !isURLTarget(target) {
+				source := resolved.resolvedPath
+				if source == "" {
+					source = target
+				}
+				safety.targets = append(safety.targets, source)
+			}
 			artifacts = append(artifacts, &artifact)
 		}
 	}
 	spec := outputBundleSpecFor(outputPath)
-	for _, paths := range scannerOutputPaths(spec, artifacts) {
-		for _, path := range paths {
-			outputs = append(outputs, filepath.Join(spec.RootDir, filepath.FromSlash(path)))
+	if outputPath != "" {
+		for _, paths := range scannerOutputPaths(spec, artifacts) {
+			for _, path := range paths {
+				outputs = append(outputs, filepath.Join(spec.RootDir, filepath.FromSlash(path)))
+			}
 		}
 	}
+	safety.inputs = inputs
+	return safety, validateOutputInventory(outputs, inputs)
+}
+
+func validateOutputInventory(outputs []string, inputs []string) error {
 	for index, output := range outputs {
 		for _, input := range append(inputs, outputs[:index]...) {
 			if input == "" {
@@ -100,6 +126,93 @@ func ValidateOutputPaths(optsList []Options, outputPath string, cwd string) erro
 		}
 	}
 	return nil
+}
+
+func (safety outputSafety) validateWrite(output string) error {
+	if err := validateOutputInventory([]string{output}, safety.inputs); err != nil {
+		return err
+	}
+	if _, err := os.Stat(output); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	for _, target := range safety.targets {
+		resolved, err := canonicalFilePath(target)
+		if err != nil {
+			return err
+		}
+		err = filepath.WalkDir(resolved, func(source string, entry os.DirEntry, walkErr error) error {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			same, err := sameFilePath(output, source)
+			if err != nil {
+				return err
+			}
+			if same {
+				return fmt.Errorf("output %s aliases unconsumed submitted source %s", output, source)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (safety outputSafety) withArtifacts(artifacts []*Artifact) outputSafety {
+	combined := outputSafety{inputs: append([]string(nil), safety.inputs...), targets: append([]string(nil), safety.targets...)}
+	for _, artifact := range artifacts {
+		combined.inputs = append(combined.inputs, artifact.outputSafety.inputs...)
+		combined.targets = append(combined.targets, artifact.outputSafety.targets...)
+		if artifact.ConfigSource != nil && *artifact.ConfigSource != "built-in" {
+			combined.inputs = append(combined.inputs, *artifact.ConfigSource)
+		}
+		if !isURLTarget(artifact.Target.Input) {
+			combined.inputs = append(combined.inputs, artifact.Target.Input)
+			target := artifact.Target.ResolvedPath
+			if target == "" {
+				target = artifact.Target.Input
+			}
+			if target != "" {
+				combined.targets = append(combined.targets, target)
+			}
+		}
+	}
+	pending := []string{}
+	for _, target := range combined.targets {
+		consumed := false
+		for _, artifact := range artifacts {
+			source := artifact.Target.ResolvedPath
+			if source == "" {
+				source = artifact.Target.Input
+			}
+			if source == "" || isURLTarget(source) {
+				continue
+			}
+			same, err := sameFilePath(target, source)
+			if err != nil || !same {
+				continue
+			}
+			consumed = artifact.Complete && artifact.targetConsumed
+			if !consumed {
+				break
+			}
+		}
+		if !consumed {
+			pending = append(pending, target)
+		}
+	}
+	combined.targets = pending
+	return combined
 }
 
 func canonicalFilePath(path string) (string, error) {

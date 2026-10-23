@@ -235,7 +235,8 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 	benchmarkOpts := *opts.Benchmark
 	benchmarkOpts.ID = adapter.ID()
 	opts.Benchmark = &benchmarkOpts
-	if err := ValidateOutputPaths([]Options{opts}, opts.OutputPath, ""); err != nil {
+	safety, err := prepareOutputSafety([]Options{opts}, opts.OutputPath, "")
+	if err != nil {
 		return artifact, err
 	}
 	if err := validateGateRuleScanners(opts); err != nil {
@@ -304,7 +305,10 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 		artifact.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 		if runErr == nil {
 			if predictionsPath := BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
-				runErr = WriteBenchmarkPredictionsJSONL(predictionsPath, artifact)
+				runErr = safety.validateWrite(predictionsPath)
+				if runErr == nil {
+					runErr = WriteBenchmarkPredictionsJSONL(predictionsPath, artifact)
+				}
 			}
 		}
 		runErr = errors.Join(runErr, ctx.Context.Err())
@@ -321,7 +325,11 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 			artifact.Error = runErr.Error()
 		}
 		if opts.OutputPath != "" {
-			if err := writeJSONFile(opts.OutputPath, artifact); err != nil {
+			outputErr := safety.validateWrite(opts.OutputPath)
+			if outputErr == nil {
+				outputErr = writeJSONFile(opts.OutputPath, artifact)
+			}
+			if err := outputErr; err != nil {
 				runErr = errors.Join(runErr, err)
 				artifact.Complete = false
 				if artifact.Status == "completed" {

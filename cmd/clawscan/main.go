@@ -33,7 +33,9 @@ func main() {
 	if len(os.Args) < 2 || os.Args[1] != "install" {
 		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	}
+	restoreSignals := context.AfterFunc(ctx, stop)
 	err := runContext(ctx, os.Args[1:], os.Environ())
+	restoreSignals()
 	stop()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())

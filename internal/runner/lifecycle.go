@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -159,7 +158,7 @@ func finishArtifact(artifact *Artifact, opts Options, ctx context.Context, now f
 				artifact.Status = "failed"
 			}
 			artifact.Gate = "error"
-			artifact.Error = strings.TrimSpace(artifact.Error + "\n" + outputErr.Error())
+			artifact.Error = (*runErr).Error()
 		}
 		if err := ctx.Err(); err != nil && artifact.Complete {
 			artifact.Complete = false
@@ -197,6 +196,9 @@ func checkpointArtifact(opts Options, artifact *Artifact, ctx context.Context) e
 	}
 	if opts.OutputPath == "" {
 		return nil
+	}
+	if err := artifact.outputSafety.validateWrite(opts.OutputPath); err != nil {
+		return err
 	}
 	return writeJSONFile(outputBundleSpecFor(opts.OutputPath).ArtifactPath, artifact)
 }
