@@ -756,8 +756,14 @@ def test_deadline_during_cleanup_waits_for_close(llm_factory, monkeypatch, clean
     assert not any(value.name == "aig-responses" for value in threading.enumerate())
 
 
-def test_concurrent_abort_does_not_cancel_other_call(llm_factory):
+def test_concurrent_abort_does_not_cancel_other_call(llm_factory, monkeypatch):
     entered, cancelled, cleaned = (threading.Event() for _ in range(3))
+    module = importlib.import_module("skill_scan.utils.llm")
+
+    def unexpected_handler_change(*arguments):
+        raise AssertionError("non-main calls must not change signal handlers")
+
+    monkeypatch.setattr(module.signal, "signal", unexpected_handler_change)
 
     class CancelledWire(httpx.AsyncByteStream):
         async def __aiter__(self):
@@ -823,6 +829,25 @@ def test_caller_cancellation_at_worker_completion_is_not_success(llm_factory, mo
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(invoke())
     assert injected and len(requests) == 1 and wire.closed.is_set()
+    assert not any(worker.name == "aig-responses" for worker in threading.enumerate())
+
+
+def test_already_cancelled_caller_does_not_launch_worker(llm_factory, monkeypatch):
+    llm, requests, _ = llm_factory(happy_events())
+
+    def unexpected_launch(worker):
+        raise AssertionError("cancelled caller must not launch a provider worker")
+
+    monkeypatch.setattr(threading.Thread, "start", unexpected_launch)
+
+    async def invoke():
+        asyncio.current_task().cancel()
+        with pytest.raises(asyncio.CancelledError):
+            llm.chat(HISTORY)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(invoke())
+    assert not requests
     assert not any(worker.name == "aig-responses" for worker in threading.enumerate())
 
 
@@ -900,6 +925,146 @@ def test_worker_launch_failure_does_not_wait_for_nonexistent_worker(llm_factory,
     assert time.monotonic() - started < 0.4
     assert not requests
     assert not any(value.name == "aig-responses" for value in threading.enumerate())
+
+
+@pytest.mark.parametrize("running_loop", [False, True])
+@pytest.mark.parametrize("signals", [1, 2, 5])
+@pytest.mark.parametrize("handler_mode", ["default", "custom-abort", "custom-return", "ignore", "os-default"])
+def test_real_sigint_before_native_launch_restores_handler(monkeypatch, tmp_path, running_loop, signals, handler_mode):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, inspect, json, os, signal, sys, threading, time
+import httpx, openai
+from skill_scan.utils.llm import LLM
+running_loop, signals, mode, events = SETTINGS
+clients, requests, handled, mutations = [], [], [], []
+def custom(signum, frame):
+    assert signum == signal.SIGINT and frame is not None
+    handled.append(signum)
+    if mode == "custom-abort":
+        raise KeyboardInterrupt("custom-original-abort")
+if mode.startswith("custom"):
+    signal.signal(signal.SIGINT, custom)
+elif mode == "ignore":
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+elif mode == "os-default":
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+real = openai.AsyncOpenAI
+async def handler(request):
+    requests.append(1)
+    body = "".join("data: " + json.dumps(value) + "\n\n" for value in events)
+    return httpx.Response(200, content=body.encode())
+def client(**kwargs):
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=0.5)
+lines, first = inspect.getsourcelines(threading.Thread.start)
+call_line = first + next(index for index, line in enumerate(lines) if "_start_new_thread(" in line)
+code = threading.Thread.start.__code__
+triggered = []
+def trace(frame, event, arg):
+    if event == "line" and frame.f_code is code and frame.f_lineno == call_line and frame.f_locals["self"].name == "aig-responses":
+        sys.settrace(None)
+        triggered.append(1)
+        assert frame.f_locals["self"] in threading.enumerate()
+        for index in range(signals):
+            os.kill(os.getpid(), signal.SIGINT)
+    return trace
+real_signal = signal.signal
+def set_handler(signum, handler):
+    mutations.append((signum, handler))
+    return real_signal(signum, handler)
+async def invoke():
+    expected = signal.getsignal(signal.SIGINT)
+    expected_mask = signal.pthread_sigmask(signal.SIG_BLOCK, []) if hasattr(signal, "pthread_sigmask") else None
+    signal.signal = set_handler
+    started = time.monotonic()
+    try:
+        sys.settrace(trace)
+        value = llm.chat([{"role":"user", "content":"inert fixture"}])
+        assert mode in {"custom-return", "ignore"}
+        assert value.startswith("<verdict>normal</verdict>")
+    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+        assert mode in {"default", "custom-abort"}
+        if mode == "custom-abort":
+            assert isinstance(exc, KeyboardInterrupt) and str(exc) == "custom-original-abort"
+        if isinstance(exc, asyncio.CancelledError):
+            asyncio.current_task().uncancel()
+    finally:
+        sys.settrace(None)
+        signal.signal = real_signal
+        assert signal.getsignal(signal.SIGINT) is expected
+        if expected_mask is not None:
+            assert signal.pthread_sigmask(signal.SIG_BLOCK, []) == expected_mask
+    assert time.monotonic() - started < 0.4
+    assert len(mutations) == (2 if callable(expected) else 0)
+    assert triggered == [1]
+    assert len(handled) == (signals if mode.startswith("custom") else 0)
+    assert len(requests) == (1 if mode in {"custom-return", "ignore"} else 0)
+    assert all(value.is_closed() for value in clients)
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+try:
+    if running_loop:
+        try:
+            asyncio.run(invoke())
+        except KeyboardInterrupt:
+            assert mode == "default"
+    else:
+        coroutine = invoke()
+        try:
+            coroutine.send(None)
+        except StopIteration:
+            pass
+        finally:
+            coroutine.close()
+finally:
+    llm.client.close()
+print(json.dumps({"triggered":True, "requests":len(requests), "closed":True, "restored":True}))
+'''.replace("SETTINGS", repr((running_loop, signals, handler_mode, happy_events())))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2]), "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    if handler_mode == "os-default":
+        assert result.returncode == -2, result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"triggered": True, "requests": 1 if handler_mode in {"custom-return", "ignore"} else 0, "closed": True, "restored": True}
+
+
+@pytest.mark.parametrize("native_failure", [False, True])
+def test_launch_failure_restores_custom_sigint_handler(llm_factory, monkeypatch, native_failure):
+    import signal
+
+    llm, requests, _ = llm_factory(happy_events())
+    previous = signal.getsignal(signal.SIGINT)
+    seen = []
+
+    def handler(signum, frame):
+        seen.append(signum)
+
+    def fail(worker):
+        os.kill(os.getpid(), signal.SIGINT)
+        raise RuntimeError("fixture launch failure")
+
+    def fail_native(*arguments):
+        return fail(None)
+
+    signal.signal(signal.SIGINT, handler)
+    if native_failure:
+        monkeypatch.setattr(threading, "_start_new_thread", fail_native)
+    else:
+        monkeypatch.setattr(threading.Thread, "start", fail)
+    try:
+        with pytest.raises(RuntimeError, match="fixture launch failure"):
+            llm.chat(HISTORY)
+        assert signal.getsignal(signal.SIGINT) is handler
+        assert seen == [signal.SIGINT]
+        assert not requests
+        assert not any(value.name == "aig-responses" for value in threading.enumerate())
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 def test_deadline_cancels_retry_sleep_without_another_attempt(llm_factory):
@@ -1054,6 +1219,12 @@ def test_sol_preserves_reasoning_effort_overrides(
 def test_other_models_keep_chat_completions_wire_contract(
     llm_factory, monkeypatch, model, effort
 ):
+    module = importlib.import_module("skill_scan.utils.llm")
+
+    def unexpected_handler_change(*arguments):
+        raise AssertionError("other models must not change signal handlers")
+
+    monkeypatch.setattr(module.signal, "signal", unexpected_handler_change)
     monkeypatch.setenv("AIG_SERVICE_TIER", "unsupported")
     if effort:
         monkeypatch.setenv("REASONING_EFFORT", effort)
