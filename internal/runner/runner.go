@@ -2311,13 +2311,23 @@ func (runner defaultCommandRunner) Run(command string, args []string, cwd string
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	childProgress := newChildProgressWriter(runner.Progress, runner.Env)
+	if childProgress != nil {
+		cmd.Stdout = io.MultiWriter(&stdout, childProgress)
+	}
 	started := time.Now()
 	err := cmd.Start()
 	pid := 0
 	if err == nil {
 		pid = cmd.Process.Pid
 		runner.Progress.emit(progressEvent{Event: "command_start", PID: pid})
+		if childProgress != nil {
+			childProgress.start(pid)
+		}
 		err = cmd.Wait()
+		if childProgress != nil {
+			childProgress.finish()
+		}
 	}
 	timedOut := ctx.Err() == context.DeadlineExceeded
 	if timedOut {

@@ -68,7 +68,11 @@ jobs:
               # Replay the worker's restricted environment. Scanner fixtures isolate
               # the live judge; this is not a full security scan or publish approval.
               env = {key: os.environ[key] for key in ("PATH", "LANG", "OPENAI_API_KEY") if key in os.environ}
-              env.update(CODEX_API_KEY=env["OPENAI_API_KEY"], NO_COLOR="1", TMPDIR=temp, TMP=temp, TEMP=temp)
+              env.update(
+                  CODEX_API_KEY=env["OPENAI_API_KEY"], NO_COLOR="1",
+                  CLAWSCAN_PROGRESS="1", CLAWSCAN_CHILD_PROGRESS="1",
+                  TMPDIR=temp, TMP=temp, TEMP=temp,
+              )
               subprocess.run([
                   str(binary), str(package), "--profile", "clawhub", "--sandbox", "off",
                   "--scanner-result", f"skillspector={skillspector}",

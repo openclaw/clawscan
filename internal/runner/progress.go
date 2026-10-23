@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -16,9 +17,14 @@ type progressEvent struct {
 	DurationMs    *int64 `json:"durationMs,omitempty"`
 	ExitCode      *int   `json:"exitCode,omitempty"`
 	Failed        bool   `json:"failed,omitempty"`
+	ChildEvent    string `json:"childEvent,omitempty"`
+	ChildItem     string `json:"childItem,omitempty"`
+	ChildState    string `json:"childState,omitempty"`
+	Sequence      int    `json:"sequence,omitempty"`
 }
 
 type runProgress struct {
+	mutex        sync.Mutex
 	writer       io.Writer
 	started      time.Time
 	phase        string
@@ -36,6 +42,12 @@ func (progress *runProgress) emit(event progressEvent) {
 	if progress == nil {
 		return
 	}
+	progress.mutex.Lock()
+	defer progress.mutex.Unlock()
+	progress.emitLocked(event)
+}
+
+func (progress *runProgress) emitLocked(event progressEvent) {
 	event.SchemaVersion = "clawscan-progress-v1"
 	event.Phase = progress.phase
 	event.ElapsedMs = time.Since(progress.started).Milliseconds()
@@ -49,17 +61,21 @@ func (progress *runProgress) startPhase(phase string) {
 	if progress == nil {
 		return
 	}
+	progress.mutex.Lock()
+	defer progress.mutex.Unlock()
 	progress.phase = phase
 	progress.phaseStarted = time.Now()
-	progress.emit(progressEvent{Event: "phase_start", PID: os.Getpid()})
+	progress.emitLocked(progressEvent{Event: "phase_start", PID: os.Getpid()})
 }
 
 func (progress *runProgress) endPhase(failed bool) {
 	if progress == nil {
 		return
 	}
+	progress.mutex.Lock()
+	defer progress.mutex.Unlock()
 	duration := time.Since(progress.phaseStarted).Milliseconds()
-	progress.emit(progressEvent{Event: "phase_end", PID: os.Getpid(), DurationMs: &duration, Failed: failed})
+	progress.emitLocked(progressEvent{Event: "phase_end", PID: os.Getpid(), DurationMs: &duration, Failed: failed})
 }
 
 func scannerProgressPhase(scanner string) string {

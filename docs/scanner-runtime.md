@@ -18,6 +18,35 @@ own subprocess instrumentation. The built-in static scanner has phase events,
 not command events. A judge receipt retry produces another command pair in the
 same judge phase. Multiple targets restart the elapsed clock at preparation.
 
+For opt-in inner judge diagnostics, also set `CLAWSCAN_CHILD_PROGRESS=1`. The
+default command runner then observes judge stdout as it arrives, projecting
+recognized Codex `exec --json` JSONL lifecycle records into `child_event` events
+under the same prefix/schema. Only `childEvent` (thread/turn/item lifecycle or
+error), `childItem` (a fixed item-type enum), `childState` (in_progress,
+completed, failed or declined), and a bounded per-command `sequence` are added.
+No child IDs, commands, output, text, usage, paths, or errors are copied. The
+existing PID still identifies the direct shell/Docker client, not an inner tool.
+Stdout/stderr capture, command exit semantics, artifacts and sandbox policy are
+unchanged. Both opt-ins are required; other scanner phases are not observed.
+
+Observation accepts at most 64 KiB per JSONL record and 512 diagnostic records
+per direct command. Oversized records are discarded through their newline and
+produce `child_event_dropped`; exceeding the event budget produces a single
+`child_event_limit` and stops observation, not execution. Malformed JSON and
+unknown event/item types are ignored. Complete newline-terminated records are
+emitted immediately; a final unterminated record is considered only at normal
+command return. Custom/Docker commands must forward JSONL stdout to be observed.
+Progress sinks must return promptly, as with existing phase diagnostics.
+
+These records are untrusted child-reported activity, not provider telemetry or
+proof of a native invocation, tool success, sandbox failure, or valid verdict.
+An unfinished command item suggests a tool wait; repeated completed items suggest
+ongoing activity. Silence cannot distinguish provider waiting from model
+reasoning, local startup, ignored/oversized records, or non-JSONL output. Consumers
+that strictly validate the phase schema must explicitly admit the new allowlisted
+fields/events before counting them as diagnostics. Never use them as verdict
+evidence or infer zero operational failures from them.
+
 Retain stderr on worker timeout to identify the last started unfinished phase,
 including when an outer process-group kill prevents ClawScan from writing its
 final artifact. These are best-effort diagnostics, **never a completed scan or a
