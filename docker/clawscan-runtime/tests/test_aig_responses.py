@@ -394,17 +394,60 @@ def test_service_message_in_model_output_does_not_trigger_retry(llm_factory):
     assert len(requests) == 1
 
 
+@pytest.fixture
+def retry_after_now(monkeypatch):
+    now = datetime(2026, 10, 23, 12, 45, 26, 750000, tzinfo=timezone.utc)
+
+    class Clock:
+        @staticmethod
+        def now(tz):
+            assert tz is timezone.utc
+            return now
+
+    module = importlib.import_module("skill_scan.utils.llm")
+    monkeypatch.setattr(module, "datetime", Clock)
+    return now
+
+
 @pytest.mark.parametrize("hint,minimum", [
     (None, 1), ("0", 1), ("2.5", 2.5), ("invalid", 1), ("-1", 1),
     ("nan", 1), ("inf", 1),
-    (format_datetime(datetime.now(timezone.utc) + timedelta(seconds=5)), 3),
+    (timedelta(seconds=5), 3),
 ])
-def test_bounded_backoff_honors_valid_retry_after(llm_factory, hint, minimum):
+def test_bounded_backoff_honors_valid_retry_after(llm_factory, retry_after_now, hint, minimum):
     llm, _, _ = llm_factory(retry_delay=None)
+    if isinstance(hint, timedelta):
+        hint = format_datetime(retry_after_now + hint)
     headers = httpx.Headers({"Retry-After": hint} if hint is not None else {})
     delay = llm._responses_retry_delay(1, headers)
     assert minimum <= delay <= 5.25
     assert 2 <= llm._responses_retry_delay(2, {}) <= 2.25
+
+
+@pytest.mark.parametrize("offset,zone,expected", [
+    (5, timezone.utc, 4.25),
+    (5, timezone(timedelta(hours=5, minutes=30)), 4.25),
+    (1, timezone.utc, 1),
+    (0, timezone.utc, 1),
+    (-5, timezone.utc, 1),
+    (5, None, 1),
+])
+@pytest.mark.parametrize("jitter_fraction", [0, 1])
+def test_http_date_backoff_precision_and_expiry(
+    llm_factory, retry_after_now, monkeypatch, offset, zone, expected, jitter_fraction,
+):
+    llm, _, _ = llm_factory(retry_delay=None)
+    date = retry_after_now + timedelta(seconds=offset)
+    date = date.astimezone(zone) if zone is not None else date.replace(tzinfo=None)
+    headers = httpx.Headers({"Retry-After": format_datetime(date)})
+    module = importlib.import_module("skill_scan.utils.llm")
+
+    def jitter(lower, upper):
+        assert (lower, upper) == (0, 0.25)
+        return lower + (upper - lower) * jitter_fraction
+
+    monkeypatch.setattr(module.random, "uniform", jitter)
+    assert llm._responses_retry_delay(1, headers) == expected + 0.25 * jitter_fraction
 
 
 @pytest.mark.parametrize("status", [200, 503])
