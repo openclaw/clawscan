@@ -12,6 +12,10 @@ import copy
 import asyncio
 import importlib
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -224,7 +228,7 @@ def llm_factory(monkeypatch, tmp_path):
     yield make
     for client in clients:
         if isinstance(client, real_async_client):
-            assert client.is_closed
+            assert client.is_closed()
         else:
             client.close()
 
@@ -487,6 +491,84 @@ def test_attempt_logs_are_bounded_provider_only_metadata(llm_factory):
     assert all(len(value) < 170 for value in logs)
     assert not any(secret in "\n".join(logs) for secret in [TEXT, OVERLOAD_MESSAGE, "fixture-key", "judge", "SKILL.md", "authorization"])
     assert len(requests) == 2
+
+
+@pytest.mark.parametrize("phase", ["open", "stream", "backoff"])
+@pytest.mark.parametrize("running_loop", [False, True])
+def test_caller_interrupt_cancels_worker_before_return(monkeypatch, tmp_path, phase, running_loop):
+    monkeypatch.chdir(tmp_path)
+    module = importlib.import_module("skill_scan.utils.llm")
+    script = r'''
+import asyncio, json, os, signal, threading, time
+import httpx, openai
+from skill_scan.utils.llm import LLM
+entered = threading.Event()
+closed = threading.Event()
+clients = []
+calls = []
+phase = PHASE
+running_loop = RUNNING_LOOP
+class Silent(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        entered.set()
+        await asyncio.sleep(5)
+        if False:
+            yield b""
+    async def aclose(self):
+        closed.set()
+async def handler(request):
+    calls.append(1)
+    if phase == "open":
+        entered.set()
+        await asyncio.sleep(5)
+    if phase == "backoff":
+        return httpx.Response(200, content=b'data: {"error":{"code":"server_error"}}\n\n')
+    return httpx.Response(200, stream=Silent())
+real = openai.AsyncOpenAI
+def client(**kwargs):
+    value = real(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+    clients.append(value)
+    return value
+openai.AsyncOpenAI = client
+llm = LLM("gpt-6.1-sol", "fixture-not-a-key", "http://fixture.invalid/v1", stream_timeout=1)
+def delay(*args):
+    entered.set()
+    return 0.5
+llm._responses_retry_delay = delay
+def interrupt():
+    assert entered.wait(2)
+    time.sleep(0.02)
+    os.kill(os.getpid(), signal.SIGINT)
+    if running_loop:
+        time.sleep(0.03)
+        os.kill(os.getpid(), signal.SIGINT)
+thread = threading.Thread(target=interrupt)
+thread.start()
+started = time.monotonic()
+async def invoke():
+    llm.chat([{"role":"user", "content":"inert fixture"}])
+try:
+    if running_loop:
+        asyncio.run(invoke())
+    else:
+        llm.chat([{"role":"user", "content":"inert fixture"}])
+    raise AssertionError("caller interruption was lost")
+except KeyboardInterrupt:
+    assert time.monotonic() - started < 0.4
+    assert len(calls) == 1
+    assert all(value.is_closed() for value in clients)
+    assert phase != "stream" or closed.is_set()
+    assert not any(value.name == "aig-responses" for value in threading.enumerate())
+finally:
+    llm.client.close()
+    thread.join()
+print(json.dumps({"interrupted":True,"requests":len(calls),"closed":True}))
+'''
+    script = script.replace("PHASE", repr(phase)).replace("RUNNING_LOOP", repr(running_loop))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "PYTHONPATH": str(Path(module.__file__).parents[2])}
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"interrupted": True, "requests": 1, "closed": True}
 
 
 def test_deadline_cancels_retry_sleep_without_another_attempt(llm_factory):
@@ -759,15 +841,8 @@ def test_completed_refusal_is_not_an_empty_success(llm_factory):
     assert wire.closed.is_set()
 
 
-@pytest.mark.parametrize(
-    "code,error_type",
-    [
-        (401, openai.AuthenticationError),
-        (429, openai.RateLimitError),
-        (500, openai.InternalServerError),
-    ],
-)
-def test_http_errors_propagate_without_sdk_retries(llm_factory, code, error_type):
+@pytest.mark.parametrize("code", [401, 429, 500])
+def test_http_errors_fail_closed_without_sdk_retries(llm_factory, code):
     llm, requests, _ = llm_factory(
         status=code,
         body={

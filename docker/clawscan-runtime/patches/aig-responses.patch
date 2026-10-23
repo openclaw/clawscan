@@ -34,7 +34,7 @@
          started = time.monotonic()
          request_options = {}
          reasoning_effort = (get_env("REASONING_EFFORT") or "").strip()
-@@ -121,6 +133,181 @@
+@@ -121,6 +133,196 @@
 
          return ret, usage
 
@@ -63,8 +63,13 @@
 +        options["service_tier"] = tier
 +        call_id = uuid.uuid4().hex
 +        outcome = Future()
++        ready = Future()
++        cancelled = threading.Event()
 +
 +        async def complete():
++            ready.set_result((asyncio.get_running_loop(), asyncio.current_task()))
++            if cancelled.is_set():
++                raise asyncio.CancelledError()
 +            try:
 +                return await asyncio.wait_for(
 +                    self._responses_attempts(history, options, deadline, call_id),
@@ -85,6 +90,16 @@
 +        worker.start()
 +        try:
 +            return outcome.result()
++        except BaseException:
++            if not outcome.done():
++                cancelled.set()
++                if ready.done():
++                    loop, task = ready.result()
++                    try:
++                        loop.call_soon_threadsafe(task.cancel)
++                    except RuntimeError:
++                        pass
++            raise
 +        finally:
 +            worker.join()
 +

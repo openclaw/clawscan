@@ -167,6 +167,7 @@ the original complete-response deadline (300 seconds by default). The Sol path
 uses the same SDK's cancellable async HTTP Responses client in a joined,
 call-local event-loop thread: upstream callers already run inside an async
 CLI, and a synchronous stream watchdog cannot cancel opening/trickling headers.
+Caller interruption cancels the call-local task before joining its worker.
 No endpoint, HTTP transport protocol, model, reasoning, tier or process budget
 changes. Other models retain their upstream synchronous behavior. Each failed
 stream closes before another attempt; failed partial XML/text is discarded and
