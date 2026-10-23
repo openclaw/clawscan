@@ -47,6 +47,17 @@ records every other inspected artifact file and may be empty. The two fields
 together retain the complete inspected-file record, without requiring the model
 to repeat the selected path inside an unconstrained array.
 
+Additional paths use canonical workspace-relative `artifact/` file paths: no
+empty, `.` or `..` components, artifact root, or trailing slash. The generation
+schema expresses the same lexical rule as the independent Go receipt guard;
+neither infers file existence or file type from a path string. The prompt requires
+files, not directories, and preserves literal spaces, Unicode, and hidden names.
+Workspace challenge, metadata, and scanner-report files outside `artifact/` remain
+judge evidence, not artifact input paths to list in the receipt. Every inspected
+additional artifact file must still be reported; no per-file enum or array cap
+truncates that record. Malformed returned paths still fail and may trigger the
+existing bounded retry; they are never cleaned, removed, or rewritten.
+
 The workspace challenge and independently computed required-file hash are still
 validated exactly. Neither expected value is included in the prompt or schema.
 No receipt is filled in, converted, or repaired after the judge returns it. A
