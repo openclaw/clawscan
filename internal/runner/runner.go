@@ -239,16 +239,17 @@ type TargetWorkspaceOmission struct {
 }
 
 type JudgeResult struct {
-	Status           string      `json:"status"`
-	Command          string      `json:"command,omitempty"`
-	ConfiguredModel  string      `json:"configuredModel,omitempty"`
-	PromptPath       string      `json:"promptPath,omitempty"`
-	OutputSchemaPath string      `json:"outputSchemaPath,omitempty"`
-	OutputPath       string      `json:"outputPath,omitempty"`
-	PromptSHA        string      `json:"promptSha256,omitempty"`
-	OutputSchemaSHA  string      `json:"outputSchemaSha256,omitempty"`
-	Error            string      `json:"error"`
-	Result           interface{} `json:"result"`
+	Status           string         `json:"status"`
+	Command          string         `json:"command,omitempty"`
+	ConfiguredModel  string         `json:"configuredModel,omitempty"`
+	PromptPath       string         `json:"promptPath,omitempty"`
+	OutputSchemaPath string         `json:"outputSchemaPath,omitempty"`
+	OutputPath       string         `json:"outputPath,omitempty"`
+	PromptSHA        string         `json:"promptSha256,omitempty"`
+	OutputSchemaSHA  string         `json:"outputSchemaSha256,omitempty"`
+	Error            string         `json:"error"`
+	Result           interface{}    `json:"result"`
+	Attempts         []JudgeAttempt `json:"attempts,omitempty"`
 }
 
 func ScannerIDs() []string {
@@ -1229,17 +1230,14 @@ type judgeShellSpec struct {
 	quote   func(string) string
 }
 
-func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string) (*JudgeResult, error) {
+func runJudgeAttempt(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
 	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
 	if err != nil {
-		return nil, err
+		return judgeAttemptOutcome{}, err
 	}
 	defer os.RemoveAll(workspace)
 	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
-		return nil, err
-	}
-	if timeout == 0 {
-		timeout = 20 * time.Minute
+		return judgeAttemptOutcome{}, err
 	}
 	state := &judgeCommandState{
 		workspace:    workspace,
@@ -1251,15 +1249,21 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		state.outputPath = filepath.Join(workspace, "codex-result.json")
 		state.inspection, err = prepareArtifactInspectionChallenge(workspace)
 		if err != nil {
-			return nil, err
+			return judgeAttemptOutcome{}, err
 		}
 	}
 	shell := judgeShellForGOOS(runtime.GOOS)
 	command, err := renderJudgeCommand(opts.Command, artifact, state, shell.quote)
 	if err != nil {
-		return nil, err
+		return judgeAttemptOutcome{}, err
 	}
-	output, runErr := commandRunner.Run(shell.command, append(shell.args, command), workspace, timeout)
+	var output CommandOutput
+	var runErr error
+	if remaining := time.Until(deadline); remaining > 0 {
+		output, runErr = commandRunner.Run(shell.command, append(shell.args, command), workspace, remaining)
+	} else {
+		runErr = errors.New("Judge timeout budget exhausted before command start.")
+	}
 	raw := strings.TrimSpace(output.Stdout)
 	if state.outputUsed {
 		outputBytes, readErr := os.ReadFile(state.outputPath)
@@ -1280,28 +1284,29 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		Error:            "",
 		Result:           nil,
 	}
+	outcome := judgeAttemptOutcome{result: result, inspection: state.inspection}
 	if runErr != nil {
 		result.Status = "failed"
 		result.Error = commandError(runErr, output.Stderr, env)
 	}
 	if raw == "" {
 		if result.Status == "failed" {
-			return result, nil
+			return outcome, nil
 		}
 		result.Status = "failed"
 		result.Error = "Judge command did not produce JSON output."
-		return result, nil
+		return outcome, nil
 	}
 	var parsed any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		if result.Status == "failed" {
 			result.Result = redactEnvValues(raw, env)
-			return result, nil
+			return outcome, nil
 		}
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced invalid JSON: %v", err)
 		result.Result = redactEnvValues(raw, env)
-		return result, nil
+		return outcome, nil
 	}
 	parsed = redactJudgeResult(parsed, env)
 	parsedObject, ok := parsed.(map[string]any)
@@ -1309,16 +1314,17 @@ func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner,
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced %s; expected JSON object.", judgeJSONType(parsed))
 		result.Result = parsed
-		return result, nil
+		return outcome, nil
 	}
 	result.Result = parsed
 	if state.inspection != nil {
 		if err := validateArtifactInspectionReceipt(parsedObject, *state.inspection); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
+			outcome.retryable = runErr == nil
 		}
 	}
-	return result, nil
+	return outcome, nil
 }
 
 func judgeSandboxMode(outerSandboxMode string) string {
