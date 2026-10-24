@@ -188,7 +188,7 @@ func TestBenchmarkTargetForwardsCancellation(t *testing.T) {
 func TestRunRejectsNonContextualCallbackForCancelableWork(t *testing.T) {
 	caller, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	artifact, err := Run(Options{Target: "missing", Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{Context: caller, Env: map[string]string{}, ScannerRunner: staticScannerRunner{}})
+	artifact, err := Run(Options{Target: t.TempDir(), Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{Context: caller, Env: map[string]string{}, ScannerRunner: staticScannerRunner{}})
 	if err == nil || !strings.Contains(err.Error(), "ContextScannerRunner") || artifact.Complete {
 		t.Fatalf("uninterruptible callback silently accepted: %+v, %v", artifact, err)
 	}

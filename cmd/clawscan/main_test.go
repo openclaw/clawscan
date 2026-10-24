@@ -1503,6 +1503,9 @@ func TestVersionStringIncludesBuildMetadata(t *testing.T) {
 }
 
 func TestRunCommandDoesNotLeakPresentSecrets(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	writeFile(t, filepath.Join(root, "README.md"), "# Generated inert input\n")
 	err := run([]string{"./README.md", "--scanner", "virustotal", "--scanner", "snyk"}, []string{"SNYK_TOKEN=secret-snyk"})
 	if err == nil {
 		t.Fatal("expected error")

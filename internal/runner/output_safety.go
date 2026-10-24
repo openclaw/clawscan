@@ -9,8 +9,9 @@ import (
 )
 
 type outputSafety struct {
-	inputs  []string
-	targets []string
+	inputs          []string
+	targets         []string
+	unresolvedRoots []string
 }
 
 func ValidateOutputPaths(optsList []Options, outputPath string, cwd string) error {
@@ -73,7 +74,9 @@ func prepareOutputSafety(optsList []Options, outputPath string, cwd string) (out
 					return safety, err
 				}
 			}
-			safety.targets = append(safety.targets, filepath.Join(root, "skills"))
+			discoveryRoot := filepath.Join(root, "skills")
+			safety.targets = append(safety.targets, discoveryRoot)
+			safety.unresolvedRoots = append(safety.unresolvedRoots, discoveryRoot)
 			continue
 		}
 		for _, target := range targets {
@@ -133,6 +136,26 @@ func (safety outputSafety) validateWrite(output string) error {
 	if err := validateOutputInventory([]string{output}, safety.inputs); err != nil {
 		return err
 	}
+	unresolvedRoots := append([]string(nil), safety.unresolvedRoots...)
+	for _, target := range safety.targets {
+		if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+			unresolvedRoots = append(unresolvedRoots, target)
+		}
+	}
+	for _, target := range unresolvedRoots {
+		root, err := canonicalFilePath(target)
+		if err != nil {
+			return err
+		}
+		resolved, err := canonicalFilePath(output)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, resolved)
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("output %s would create scan input under unresolved target %s", output, target)
+		}
+	}
 	if _, err := os.Stat(output); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
@@ -170,10 +193,11 @@ func (safety outputSafety) validateWrite(output string) error {
 }
 
 func (safety outputSafety) withArtifacts(artifacts []*Artifact) outputSafety {
-	combined := outputSafety{inputs: append([]string(nil), safety.inputs...), targets: append([]string(nil), safety.targets...)}
+	combined := outputSafety{inputs: append([]string(nil), safety.inputs...), targets: append([]string(nil), safety.targets...), unresolvedRoots: append([]string(nil), safety.unresolvedRoots...)}
 	for _, artifact := range artifacts {
 		combined.inputs = append(combined.inputs, artifact.outputSafety.inputs...)
 		combined.targets = append(combined.targets, artifact.outputSafety.targets...)
+		combined.unresolvedRoots = append(combined.unresolvedRoots, artifact.outputSafety.unresolvedRoots...)
 		if artifact.ConfigSource != nil && *artifact.ConfigSource != "built-in" {
 			combined.inputs = append(combined.inputs, *artifact.ConfigSource)
 		}
@@ -254,14 +278,11 @@ func sameFilePath(first string, second string) (bool, error) {
 }
 
 func outputWithinTarget(opts Options, target resolvedTarget) (bool, error) {
-	if opts.OutputPath == "" || target.kind == targetKindURL {
+	if target.kind == targetKindURL {
 		return false, nil
 	}
 	info, err := os.Stat(target.resolvedPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil || !info.IsDir() {
+	if err != nil || !info.IsDir() || opts.OutputPath == "" {
 		return false, err
 	}
 	root, err := canonicalFilePath(target.resolvedPath)

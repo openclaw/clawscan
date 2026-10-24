@@ -41,8 +41,10 @@ func TestWriteRunTargetsResultBundlePreservesCollidingEvidence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
+			t.Chdir(dir)
 			batch := BatchArtifact{SchemaVersion: "clawscan-batch-v1"}
 			for i, target := range tt.targets {
+				writeSkill(t, filepath.Join(dir, target), "# Generated collision fixture\n")
 				artifact := Artifact{
 					SchemaVersion: "clawscan-run-v1",
 					Target:        Target{Kind: "skill", Input: target, ResolvedPath: filepath.Join(dir, target)},

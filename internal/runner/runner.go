@@ -651,9 +651,6 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 	}
 	ctx.Context = workContext(ctx.Context)
 	targetInputs, err := ResolveTargetInputs(opts, cwd)
-	if callerErr := ctx.Context.Err(); callerErr != nil {
-		err = callerErr
-	}
 	if err != nil {
 		now := ctx.Now
 		if now == nil {
@@ -783,7 +780,9 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 
 func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]bool) {
 	batch.Runs = append(batch.Runs, artifact)
-	targets[artifact.Target.Input] = true
+	if artifact.Target.Input != "" {
+		targets[artifact.Target.Input] = true
+	}
 	for scanner, result := range artifact.Scanners {
 		if batch.Summary.ScannerStatuses[scanner] == nil {
 			batch.Summary.ScannerStatuses[scanner] = map[string]int{}
