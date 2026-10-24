@@ -4,11 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
+
+func requireOutputSymlinkFixture(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	const windowsPrivilegeNotHeld = syscall.Errno(1314)
+	if errors.Is(err, os.ErrPermission) || errors.Is(err, errors.ErrUnsupported) || runtime.GOOS == "windows" && errors.Is(err, windowsPrivilegeNotHeld) {
+		t.Skipf("directory symlink fixture unavailable: %v", err)
+	}
+	t.Fatal(err)
+}
 
 func TestUnconsumedDirectorySourceSurvivesFinalization(t *testing.T) {
 	for _, scenario := range []string{"missing-env", "canceled", "hardlink", "symlink-parent", "supplied-report"} {
@@ -36,9 +51,7 @@ func TestUnconsumedDirectorySourceSurvivesFinalization(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "symlink-parent":
-				if err := os.Symlink(target, filepath.Join(root, "alias")); err != nil {
-					t.Fatal(err)
-				}
+				requireOutputSymlinkFixture(t, os.Symlink(target, filepath.Join(root, "alias")))
 				opts.OutputPath = filepath.Join(root, "alias", "SKILL.md")
 			case "supplied-report":
 				fixture := filepath.Join(root, "scanner.json")
@@ -125,9 +138,7 @@ func TestRunRejectsOutputInputAliasesBeforeWriting(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "symlink-parent":
-				if err := os.Symlink(root, filepath.Join(root, "alias")); err != nil {
-					t.Fatal(err)
-				}
+				requireOutputSymlinkFixture(t, os.Symlink(root, filepath.Join(root, "alias")))
 				opts.OutputPath = filepath.Join(root, "alias", "fixture.json")
 			}
 			before, err := os.ReadFile(protected)

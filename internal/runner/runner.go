@@ -698,12 +698,27 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		},
 	}
 	var runErrors error
+	var stopErr error
 	for _, targetInput := range targetInputs {
 		runOpts := opts
 		runOpts.Target = targetInput
 		runOpts.OutputPath = ""
-		artifact, err := Run(runOpts, runCtx)
-		runErrors = errors.Join(runErrors, err)
+		var artifact Artifact
+		if stopErr != nil {
+			pendingEnv := maps.Clone(env)
+			applyRuntimeEnvDefaults(runOpts, pendingEnv)
+			artifact = pendingArtifact(runOpts, now().UTC().Format(time.RFC3339Nano), pendingEnv)
+			artifact.outputSafety = safety
+			pendingErr := fmt.Errorf("not started after prior target error: %w", stopErr)
+			finishArtifact(&artifact, runOpts, ctx.Context, now, &pendingErr)
+		} else {
+			var err error
+			artifact, err = Run(runOpts, runCtx)
+			runErrors = errors.Join(runErrors, err)
+			if err != nil && ctx.Context.Err() == nil {
+				stopErr = err
+			}
+		}
 		batch.Runs = append(batch.Runs, artifact)
 		for scanner, result := range artifact.Scanners {
 			if batch.Summary.ScannerStatuses[scanner] == nil {
@@ -711,10 +726,8 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 			}
 			batch.Summary.ScannerStatuses[scanner][result.Status]++
 		}
-		if err != nil && ctx.Context.Err() == nil {
-			break
-		}
 	}
+	runErrors = errors.Join(runErrors, ctx.Context.Err())
 	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
 		if err := WriteRunTargetsResultBundle(opts.OutputPath, RunTargetsResult{Batch: &batch}); err != nil {

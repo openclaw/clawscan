@@ -82,9 +82,7 @@ func TestRunTargetsDiscoveryFailureStillRejectsInputOutputAliases(t *testing.T) 
 					t.Fatal(err)
 				}
 			} else if source == "symlink-parent" {
-				if err := os.Symlink(root, filepath.Join(root, "alias")); err != nil {
-					t.Fatal(err)
-				}
+				requireOutputSymlinkFixture(t, os.Symlink(root, filepath.Join(root, "alias")))
 				opts.OutputPath = filepath.Join(root, "alias", "input.json")
 			}
 			result, err := RunTargets(opts, RunContext{Env: map[string]string{}}, root)
