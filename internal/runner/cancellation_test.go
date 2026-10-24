@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -100,45 +101,109 @@ func TestDefaultCommandCancellationIsNotSuccess(t *testing.T) {
 	}
 }
 
-type cancellationReceiptRunner struct {
-	calls   int
-	budgets []time.Duration
-}
+type cancellationReceiptRunner func(context.Context, time.Duration) (CommandOutput, error)
 
 func (runner *cancellationReceiptRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
-	return runner.RunContext(context.Background(), command, args, cwd, timeout)
+	return CommandOutput{}, errors.New("fixture requires ContextCommandRunner")
 }
 
 func (runner *cancellationReceiptRunner) RunContext(ctx context.Context, command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
-	runner.calls++
-	runner.budgets = append(runner.budgets, timeout)
-	if runner.calls == 1 {
-		output, err := (defaultCommandRunner{}).RunContext(ctx, "/bin/sh", []string{"-c", "printf '{\"verdict\":\"suspicious\"}'; exec /bin/sleep 0.025"}, cwd, timeout)
-		return output, err
-	}
-	return (defaultCommandRunner{}).RunContext(ctx, "/bin/sh", []string{"-c", "printf '{\"verdict\":\"benign\"}'; exec /bin/sleep 0.3"}, cwd, timeout)
+	return (*runner)(ctx, timeout)
 }
 
 func TestRunJudgeContextReceiptRetrySharesCallerBudget(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX inert command fixture")
+	for _, test := range []struct {
+		name          string
+		firstDuration time.Duration
+		cancelOnRetry bool
+		wantError     error
+		wantBudgets   []time.Duration
+		wantVerdicts  []string
+	}{
+		{"deadline_while_retry_active", 25 * time.Millisecond, false, context.DeadlineExceeded, []time.Duration{100 * time.Millisecond, 75 * time.Millisecond}, []string{"suspicious", "benign"}},
+		{"cancellation_while_retry_active", 25 * time.Millisecond, true, context.Canceled, []time.Duration{100 * time.Millisecond, 75 * time.Millisecond}, []string{"suspicious", "benign"}},
+		{"late_first_attempt_leaves_retry_budget", 75 * time.Millisecond, false, context.DeadlineExceeded, []time.Duration{100 * time.Millisecond, 25 * time.Millisecond}, []string{"suspicious", "benign"}},
+		{"first_attempt_exhausts_caller_budget", 120 * time.Millisecond, false, context.DeadlineExceeded, []time.Duration{100 * time.Millisecond}, []string{"suspicious"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				caller, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+				defer cancel()
+				deadline, _ := caller.Deadline()
+				retryEntered := make(chan struct{})
+				if test.cancelOnRetry {
+					go func() {
+						select {
+						case <-retryEntered:
+							cancel()
+						case <-caller.Done():
+						}
+					}()
+				}
+				var budgets []time.Duration
+				command := cancellationReceiptRunner(func(ctx context.Context, timeout time.Duration) (CommandOutput, error) {
+					attemptIndex := len(budgets)
+					budgets = append(budgets, timeout)
+					observedDeadline, ok := ctx.Deadline()
+					if !ok || !observedDeadline.Equal(deadline) || ctx.Err() != nil {
+						t.Fatalf("attempt %d lost live caller deadline: deadline=%v, err=%v", attemptIndex+1, observedDeadline, ctx.Err())
+					}
+					if attemptIndex >= len(test.wantBudgets) || timeout != test.wantBudgets[attemptIndex] {
+						t.Fatalf("attempt %d renewed caller budget: budgets=%v, want=%v", attemptIndex+1, budgets, test.wantBudgets)
+					}
+					if attemptIndex == 0 {
+						time.Sleep(test.firstDuration)
+						return CommandOutput{Stdout: `{"verdict":"suspicious"}`, Started: boolPointer(true)}, ctx.Err()
+					}
+					close(retryEntered)
+					<-ctx.Done()
+					if !errors.Is(ctx.Err(), test.wantError) {
+						t.Fatalf("active retry did not observe caller cancellation: got=%v, want=%v", ctx.Err(), test.wantError)
+					}
+					return CommandOutput{Stdout: `{"verdict":"benign"}`, Started: boolPointer(true)}, ctx.Err()
+				})
+				result, err := RunJudgeContext(caller, JudgeOptions{Command: "fixture"}, judgeRetryArtifact(t), &command, time.Second, nil, SandboxModeOff)
+				if !errors.Is(err, test.wantError) || !errors.Is(caller.Err(), test.wantError) || result == nil || result.Status != "failed" || len(budgets) != len(test.wantBudgets) || len(result.Attempts) != len(test.wantVerdicts) {
+					t.Fatalf("caller budget/cancellation lost attempt evidence: %+v, %v, budgets=%v, caller=%v", result, err, budgets, caller.Err())
+				}
+				if result.CommandStarted == nil || !*result.CommandStarted || !strings.Contains(result.Error, test.wantError.Error()) {
+					t.Fatalf("judge lost started flag or caller failure: %+v", result)
+				}
+				for attemptIndex, attempt := range result.Attempts {
+					if attempt.CommandStarted == nil || !*attempt.CommandStarted || attempt.Status != "failed" || !strings.Contains(attempt.Error, "required artifact inspection receipt") {
+						t.Fatalf("failed started attempt lost exposure/receipt failure: %+v", attempt)
+					}
+					raw, ok := attempt.Result.(map[string]any)
+					if !ok || len(raw) != 1 || raw["verdict"] != test.wantVerdicts[attemptIndex] {
+						t.Fatalf("attempt %d lost exact raw result: %+v", attemptIndex+1, attempt)
+					}
+					if attempt.Challenge == "" || attempt.RequiredFile != "artifact/SKILL.md" || attempt.RequiredSHA256 != sha256Hex("# Demo") {
+						t.Fatalf("attempt %d lost receipt challenge: %+v", attemptIndex+1, attempt)
+					}
+				}
+				raw, ok := result.Result.(map[string]any)
+				if !ok || len(raw) != 1 || raw["verdict"] != test.wantVerdicts[len(test.wantVerdicts)-1] {
+					t.Fatalf("judge lost final raw result: %+v", result)
+				}
+				t.Logf("synthetic executor calls=%d, recorded attempts=%d, remaining budgets=%v, caller=%v; no native/provider startup", len(budgets), len(result.Attempts), budgets, caller.Err())
+			})
+		})
 	}
-	command := &cancellationReceiptRunner{}
-	caller, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+}
+
+func TestRunJudgeContextSpentCallerBudgetDoesNotStart(t *testing.T) {
+	caller, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	started := time.Now()
-	result, err := RunJudgeContext(caller, JudgeOptions{Command: "fixture"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
-	if !errors.Is(err, context.DeadlineExceeded) || result == nil || result.Status != "failed" || command.calls != 2 || len(result.Attempts) != 2 {
-		t.Fatalf("retry escaped caller cancellation: %+v, %v, calls=%d", result, err, command.calls)
+	calls := 0
+	command := cancellationReceiptRunner(func(context.Context, time.Duration) (CommandOutput, error) {
+		calls++
+		return CommandOutput{Stdout: `{"verdict":"benign"}`, Started: boolPointer(true)}, nil
+	})
+	result, err := RunJudgeContext(caller, JudgeOptions{Command: "fixture"}, judgeRetryArtifact(t), &command, time.Second, nil, SandboxModeOff)
+	if !errors.Is(err, context.DeadlineExceeded) || result == nil || result.Status != "failed" || calls != 0 || len(result.Attempts) != 0 || result.Result != nil || result.CommandStarted == nil || *result.CommandStarted || !strings.Contains(result.Error, context.DeadlineExceeded.Error()) {
+		t.Fatalf("spent caller budget invented invocation or raw result: %+v, %v, calls=%d", result, err, calls)
 	}
-	if command.budgets[1] >= command.budgets[0] || time.Since(started) > 250*time.Millisecond {
-		t.Fatalf("retry renewed caller budget: %v, elapsed=%s", command.budgets, time.Since(started))
-	}
-	for _, attempt := range result.Attempts {
-		if attempt.CommandStarted == nil || !*attempt.CommandStarted || attempt.Status != "failed" || attempt.Result == nil {
-			t.Fatalf("failed started attempt lost exposure/raw result: %+v", attempt)
-		}
-	}
+	t.Logf("synthetic executor calls=%d, recorded attempts=%d, commandStarted=%v", calls, len(result.Attempts), *result.CommandStarted)
 }
 
 func TestRunJudgeWorkspaceFailureDoesNotInventInvocation(t *testing.T) {
