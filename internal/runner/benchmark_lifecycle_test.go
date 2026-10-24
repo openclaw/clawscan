@@ -4,15 +4,51 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"testing"
 )
+
+func TestBenchmarkVerdictExitHelper(t *testing.T) {
+	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "clawscan-benchmark-verdict-exit-helper" {
+		return
+	}
+	exitCode, err := strconv.Atoi(os.Args[len(os.Args)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(os.Stdout, `{"verdict":"clean","fixture":"benchmark-exit-helper","exitCode":%d}`, exitCode)
+	os.Exit(exitCode)
+}
+
+func benchmarkVerdictExitCommand(t *testing.T, exitCode int) string {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("%s -test.run=TestBenchmarkVerdictExitHelper -- clawscan-benchmark-verdict-exit-helper %d", judgeShellForGOOS(runtime.GOOS).quote(executable), exitCode)
+}
+
+func requireBenchmarkHelperPayload(t *testing.T, raw []byte, exitCode int) {
+	t.Helper()
+	var payload struct {
+		Verdict  string `json:"verdict"`
+		Fixture  string `json:"fixture"`
+		ExitCode int    `json:"exitCode"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Verdict != "clean" || payload.Fixture != "benchmark-exit-helper" || payload.ExitCode != exitCode {
+		t.Fatalf("real child did not return the expected verdict-bearing payload: %s, %v", raw, err)
+	}
+}
 
 func TestBenchmarkRequiredJudgeFailureCannotFallBackToClean(t *testing.T) {
 	opts := benchmarkTestOptions(t, openClawBenchmarkID, "eval_holdout", 0, 0, "")
 	opts.OutputPath = filepath.Join(t.TempDir(), "artifact.json")
-	opts.Judge = &JudgeOptions{Command: `printf '{"verdict":"clean"}'; exit 1`}
+	opts.Judge = &JudgeOptions{Command: benchmarkVerdictExitCommand(t, 1)}
 	opts.Sandbox.Mode = SandboxModeOff
 	artifact, runErr := RunBenchmark(opts, RunContext{Env: map[string]string{}, BenchmarkClient: staticBenchmarkClient{rows: []OpenClawBenchmarkRow{{ID: "generated-case", ClawScanVerdict: "clean", SkillMDContent: "# Inert\n"}}}})
 	if len(artifact.Cases) != 1 {
@@ -21,6 +57,15 @@ func TestBenchmarkRequiredJudgeFailureCannotFallBackToClean(t *testing.T) {
 	if artifact.Cases[0].Run.Judge == nil || artifact.Cases[0].Run.Judge.Status != "failed" || artifact.Cases[0].Run.Complete {
 		t.Fatal("fixture did not reach required judge failure")
 	}
+	judge := artifact.Cases[0].Run.Judge
+	if judge.CommandStarted == nil || !*judge.CommandStarted {
+		t.Fatal("judge child never started")
+	}
+	judgePayload, err := json.Marshal(judge.Result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireBenchmarkHelperPayload(t, judgePayload, 1)
 	if runErr == nil {
 		t.Fatal("required judge failure was not operational")
 	}
@@ -48,9 +93,9 @@ func TestBenchmarkRequiredJudgeFailureCannotFallBackToClean(t *testing.T) {
 }
 
 func TestBenchmarkRequiredScannerFailureIsNotCleanPrediction(t *testing.T) {
-	for _, exitCode := range []string{"1", "125"} {
-		t.Run("exit-"+exitCode, func(t *testing.T) {
-			registry, err := DefaultScannerRegistry().WithAdapters(NewUserDefinedScanner(UserDefinedScannerConfig{ID: "generated", Command: `printf '{"verdict":"clean"}'; exit ` + exitCode, Targets: []string{"skill"}}))
+	for _, exitCode := range []int{1, 125} {
+		t.Run(fmt.Sprintf("exit-%d", exitCode), func(t *testing.T) {
+			registry, err := DefaultScannerRegistry().WithAdapters(NewUserDefinedScanner(UserDefinedScannerConfig{ID: "generated", Command: benchmarkVerdictExitCommand(t, exitCode), Targets: []string{"skill"}}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,12 +108,14 @@ func TestBenchmarkRequiredScannerFailureIsNotCleanPrediction(t *testing.T) {
 			if len(artifact.Cases) != 1 {
 				t.Fatal("lost failure observation")
 			}
+			stage := artifact.Cases[0].Run.Scanners["generated"]
+			requireBenchmarkHelperPayload(t, stage.Raw, exitCode)
 			predictions, predictionErr := BenchmarkPredictions(artifact)
-			if exitCode == "1" {
-				if err != nil || predictionErr != nil || len(predictions) != 1 || artifact.Cases[0].Run.Gate != "block" || !artifact.Cases[0].Run.Complete {
+			if exitCode == 1 {
+				if stage.Status != "completed" || stage.ExitCode == nil || *stage.ExitCode != 1 || err != nil || predictionErr != nil || len(predictions) != 1 || artifact.Cases[0].Run.Gate != "block" || !artifact.Cases[0].Run.Complete {
 					t.Fatalf("intentional verdict-bearing exit was treated as infrastructure failure: %v %v", err, predictionErr)
 				}
-			} else if err == nil || predictionErr == nil || artifact.Summary.Evaluation.Scored != 0 {
+			} else if stage.Status != "failed" || stage.ExitCode != nil || err == nil || predictionErr == nil || artifact.Summary.Evaluation.Scored != 0 {
 				t.Fatalf("infrastructure failure accepted clean fallback: err=%v predictions=%v predictionErr=%v", err, predictions, predictionErr)
 			}
 		})

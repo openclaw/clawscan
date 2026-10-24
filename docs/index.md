@@ -51,7 +51,11 @@ full_results: /tmp/clawscan-csv-summarizer.json
 The results bundle keeps the top-level artifact plus per-scanner JSON reports.
 Output paths, including scanner sidecars and benchmark predictions, must not
 alias declared inputs. Existing files inside a directory target remain submitted
-source: ClawScan does not hide them by report filename. They can be replaced by
+source: ClawScan does not hide them by report filename. Loaded config files stay
+protected even when the selected profile is built-in; benchmark ID sources use
+the same whitespace normalization for reading and output protection. A failed
+explicit plugin manifest keeps its enclosing package's unconsumed files protected.
+Submitted source can be replaced by
 authorized final output only after successful target scanning; preparation
 errors, cancellation, and supplied scanner reports alone do not authorize that
 replacement. Unsafe writes fail while retaining raw evidence in memory and in

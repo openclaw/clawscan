@@ -27,7 +27,7 @@ func prepareOutputSafety(optsList []Options, outputPath string, cwd string) (out
 	inputs := []string{}
 	artifacts := []*Artifact{}
 	for _, opts := range optsList {
-		inputs = append(inputs, opts.ContextPath)
+		inputs = append(inputs, opts.ContextPath, opts.LoadedConfigPath)
 		if opts.ConfigSource != "built-in" {
 			inputs = append(inputs, opts.ConfigSource)
 		}
@@ -55,8 +55,9 @@ func prepareOutputSafety(optsList []Options, outputPath string, cwd string) (out
 			}
 		}
 		if opts.Benchmark != nil {
-			if !isURLTarget(opts.Benchmark.IDsSource) {
-				inputs = append(inputs, opts.Benchmark.IDsSource)
+			source := normalizeBenchmarkIDSource(opts.Benchmark.IDsSource)
+			if !isBenchmarkIDURL(source) {
+				inputs = append(inputs, source)
 			}
 			if predictionPath := BenchmarkPredictionsOutputPath(opts); predictionPath != "" {
 				outputs = append(outputs, predictionPath)

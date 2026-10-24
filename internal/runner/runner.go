@@ -33,6 +33,7 @@ type Options struct {
 	TargetKind         string
 	Profile            string
 	ConfigSource       string
+	LoadedConfigPath   string
 	DiscoverConfig     bool
 	ContextPath        string
 	Benchmark          *BenchmarkOptions

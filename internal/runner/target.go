@@ -164,7 +164,7 @@ func resolveTarget(input string) (resolvedTarget, error) {
 	// regularManifestExists and readPluginID.
 	if info, err := os.Lstat(resolved); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		if isBundleManifestDirectory(filepath.Base(filepath.Dir(resolved))) && filepath.Base(resolved) == "plugin.json" {
-			return resolvedTarget{}, errors.New("bundle manifest must not be a symlink")
+			return failedLocalTarget(input, resolved), errors.New("bundle manifest must not be a symlink")
 		}
 		if evaluated, evalErr := filepath.EvalSymlinks(resolved); evalErr == nil {
 			resolved = evaluated
@@ -172,7 +172,7 @@ func resolveTarget(input string) (resolvedTarget, error) {
 	}
 	kind, id, err := classifyLocalTarget(resolved, input)
 	if err != nil {
-		return resolvedTarget{}, err
+		return failedLocalTarget(input, resolved), err
 	}
 	// A plugin classified via its manifest file is scanned as its directory so
 	// scanners see the plugin code, not just the manifest. In a dual-layout
@@ -190,6 +190,20 @@ func resolveTarget(input string) (resolvedTarget, error) {
 		}
 	}
 	return resolvedTarget{kind: kind, input: input, resolvedPath: resolved, id: id}, nil
+}
+
+func failedLocalTarget(input string, resolved string) resolvedTarget {
+	root := resolved
+	if sameManifestFile(resolved, pluginManifestName) {
+		root = filepath.Dir(resolved)
+	} else if isBundleManifestDirectory(filepath.Base(filepath.Dir(resolved))) {
+		selected, selectedErr := os.Lstat(resolved)
+		manifest, manifestErr := os.Lstat(filepath.Join(filepath.Dir(resolved), "plugin.json"))
+		if selectedErr == nil && manifestErr == nil && os.SameFile(selected, manifest) && (manifest.Mode().IsRegular() || manifest.Mode()&os.ModeSymlink != 0) {
+			root = filepath.Dir(filepath.Dir(resolved))
+		}
+	}
+	return resolvedTarget{input: input, resolvedPath: root}
 }
 
 // classifyLocalTarget decides whether a resolved local path is a skill or an

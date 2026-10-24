@@ -234,6 +234,8 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 	}
 	benchmarkOpts := *opts.Benchmark
 	benchmarkOpts.ID = adapter.ID()
+	hasIDsSource := benchmarkOpts.IDsSource != ""
+	benchmarkOpts.IDsSource = normalizeBenchmarkIDSource(benchmarkOpts.IDsSource)
 	opts.Benchmark = &benchmarkOpts
 	safety, err := prepareOutputSafety([]Options{opts}, opts.OutputPath, "")
 	if err != nil {
@@ -342,7 +344,7 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 	if err := ctx.Context.Err(); err != nil {
 		return artifact, err
 	}
-	if opts.Benchmark.IDsSource != "" {
+	if hasIDsSource {
 		selection, err := LoadBenchmarkIDSelectionContext(ctx.Context, opts.Benchmark.IDsSource)
 		if err != nil {
 			return artifact, err
@@ -374,7 +376,7 @@ func LoadBenchmarkIDSelectionContext(ctx context.Context, source string) (Benchm
 	if err := ctx.Err(); err != nil {
 		return BenchmarkIDSelection{}, err
 	}
-	source = strings.TrimSpace(source)
+	source = normalizeBenchmarkIDSource(source)
 	if source == "" {
 		return BenchmarkIDSelection{}, errors.New("--ids source is required")
 	}
@@ -403,11 +405,20 @@ func openBenchmarkIDSource(source string) (io.ReadCloser, error) {
 	return openBenchmarkIDSourceContext(context.Background(), source)
 }
 
+func normalizeBenchmarkIDSource(source string) string {
+	return strings.TrimSpace(source)
+}
+
+func isBenchmarkIDURL(source string) bool {
+	parsed, err := url.Parse(source)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https")
+}
+
 func openBenchmarkIDSourceContext(ctx context.Context, source string) (io.ReadCloser, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if parsed, err := url.Parse(source); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+	if isBenchmarkIDURL(source) {
 		client := &http.Client{Timeout: 60 * time.Second}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 		if err != nil {
