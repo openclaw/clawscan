@@ -1724,6 +1724,7 @@ profiles:
 
 func TestUserDefinedScannerRegistrySurvivesDiscoveredTargetBatch(t *testing.T) {
 	dir := t.TempDir()
+	t.Chdir(dir)
 	writeFile(t, filepath.Join(dir, "skills", "alpha", "SKILL.md"), "# Alpha\n")
 	writeFile(t, filepath.Join(dir, "skills", "beta", "SKILL.md"), "# Beta\n")
 	config := filepath.Join(dir, ".clawscan.yml")

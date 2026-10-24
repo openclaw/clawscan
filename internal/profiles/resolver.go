@@ -258,6 +258,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 
 	profileName := ""
 	configSource := ""
+	loadedConfigPath := ""
 	selected := resolvedProfile{profile: Profile{}}
 	if intent.profileSet || intent.configPath != "" || intent.discoverConfig {
 		registry, loadedConfig, err := loadConfigs(cwd, intent.configPath, intent.discoverConfig)
@@ -266,6 +267,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		}
 		if loadedConfig != "" {
 			configSource = loadedConfig
+			loadedConfigPath = loadedConfig
 		}
 		if intent.profileSet {
 			profileName = intent.profile
@@ -299,6 +301,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	opts.Profile = profileName
 	opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 	opts.ConfigSource = configSource
+	opts.LoadedConfigPath = loadedConfigPath
 	opts.DiscoverConfig = intent.discoverConfig
 	if opts.Judge != nil {
 		opts.Judge.Files = files
@@ -402,6 +405,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		opts.Profile = profileName
 		opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 		opts.ConfigSource = filepath.Clean(projectPath)
+		opts.LoadedConfigPath = filepath.Clean(projectPath)
 		opts.OutputPath = ""
 		opts.JSON = false
 		if opts.Judge != nil {

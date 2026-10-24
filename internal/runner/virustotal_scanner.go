@@ -79,7 +79,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 			Raw:         nil,
 		}, nil
 	}
-	artifact, err := virusTotalArtifact(target, runner.TargetKind, runner.TargetID)
+	artifact, err := virusTotalArtifactContext(workContext(runner.Context), target, runner.TargetKind, runner.TargetID)
 	if err != nil {
 		return ScannerResult{}, err
 	}
@@ -89,7 +89,7 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(workContext(runner.Context), timeout)
 	defer cancel()
 	client := runner.VirusTotalHTTPClient
 	if client == nil {
@@ -180,6 +180,13 @@ func (runner ExternalScannerRunner) runVirusTotal(target string, startedAt strin
 }
 
 func virusTotalArtifact(target string, targetKind string, targetID string) (virusTotalScanArtifact, error) {
+	return virusTotalArtifactContext(context.Background(), target, targetKind, targetID)
+}
+
+func virusTotalArtifactContext(ctx context.Context, target string, targetKind string, targetID string) (virusTotalScanArtifact, error) {
+	if err := ctx.Err(); err != nil {
+		return virusTotalScanArtifact{}, err
+	}
 	info, err := os.Stat(target)
 	if err != nil {
 		return virusTotalScanArtifact{}, fmt.Errorf("stat target: %v", err)
@@ -200,7 +207,7 @@ func virusTotalArtifact(target string, targetKind string, targetID string) (viru
 			filename = "plugin.zip"
 			slug = pluginID
 		}
-		bytes, err := buildVirusTotalDirectoryZip(target, slug)
+		bytes, err := buildVirusTotalDirectoryZipContext(ctx, target, slug)
 		if err != nil {
 			return virusTotalScanArtifact{}, err
 		}
@@ -214,7 +221,7 @@ func virusTotalArtifact(target string, targetKind string, targetID string) (viru
 	if !info.Mode().IsRegular() {
 		return virusTotalScanArtifact{}, fmt.Errorf("VirusTotal scanner supports local file or directory targets in v1; non-regular files are unsupported")
 	}
-	bytes, err := os.ReadFile(target)
+	bytes, err := readContextFile(ctx, target)
 	if err != nil {
 		return virusTotalScanArtifact{}, err
 	}
@@ -371,8 +378,15 @@ func buildVirusTotalSkillZip(root string) ([]byte, error) {
 }
 
 func buildVirusTotalDirectoryZip(root string, slug string) ([]byte, error) {
+	return buildVirusTotalDirectoryZipContext(context.Background(), root, slug)
+}
+
+func buildVirusTotalDirectoryZipContext(ctx context.Context, root string, slug string) ([]byte, error) {
 	var files []string
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}
@@ -411,8 +425,11 @@ func buildVirusTotalDirectoryZip(root string, slug string) ([]byte, error) {
 		return newFlateWriter(w)
 	})
 	for _, rel := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fullPath := filepath.Join(root, filepath.FromSlash(rel))
-		content, err := os.ReadFile(fullPath)
+		content, err := readContextFile(ctx, fullPath)
 		if err != nil {
 			return nil, err
 		}

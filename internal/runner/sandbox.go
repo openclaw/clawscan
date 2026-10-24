@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/csv"
 	"fmt"
@@ -195,10 +196,14 @@ func dockerAvailable() error {
 }
 
 func (runner dockerCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	return runner.RunContext(context.Background(), command, args, cwd, timeout)
+}
+
+func (runner dockerCommandRunner) RunContext(ctx context.Context, command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	dockerArgs := []string{"run", "--rm", "--network", "bridge"}
 	if runID := strings.TrimSpace(runner.Env[SandboxRunIDEnv]); runID != "" {
 		if !sandboxRunIDPattern.MatchString(runID) {
-			return CommandOutput{}, fmt.Errorf("%s must be 1-64 letters, digits, dots, underscores or hyphens, starting with a letter or digit", SandboxRunIDEnv)
+			return CommandOutput{Started: boolPointer(false)}, fmt.Errorf("%s must be 1-64 letters, digits, dots, underscores or hyphens, starting with a letter or digit", SandboxRunIDEnv)
 		}
 		dockerArgs = append(dockerArgs,
 			"--label", SandboxRunIDLabel+"="+runID,
@@ -218,7 +223,12 @@ func (runner dockerCommandRunner) Run(command string, args []string, cwd string,
 	}
 	dockerArgs = append(dockerArgs, runner.Image, command)
 	dockerArgs = append(dockerArgs, args...)
-	return runner.Host.Run("docker", dockerArgs, "", timeout)
+	host := &boundCommandRunner{ctx: ctx, runner: runner.Host}
+	output, err := host.Run("docker", dockerArgs, "", timeout)
+	if output.Started != nil && *output.Started {
+		output.Started = nil
+	}
+	return output, err
 }
 
 func dockerMounts(cwd string, args []string, extra []SandboxMount) []string {

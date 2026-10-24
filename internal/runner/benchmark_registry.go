@@ -200,29 +200,37 @@ func (adapter openClawBenchmarkAdapter) RunCases(opts Options, ctx RunContext, e
 	}
 	cases := make([]BenchmarkCase, 0, len(rows))
 	for _, row := range rows {
-		benchmarkCase, err := adapter.runCase(opts, ctx, env, now, row)
-		if err != nil {
-			return nil, err
+		cases = append(cases, openClawBenchmarkCase(opts, env, row))
+	}
+	for index, row := range rows {
+		if err := workContext(ctx.Context).Err(); err != nil {
+			return cases, err
 		}
-		cases = append(cases, benchmarkCase)
+		cases[index], err = adapter.runCase(opts, ctx, env, now, row)
+		if err != nil {
+			return cases, err
+		}
 	}
 	return cases, nil
 }
 
-func (openClawBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, row OpenClawBenchmarkRow) (BenchmarkCase, error) {
+func (openClawBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, row OpenClawBenchmarkRow) (benchmarkCase BenchmarkCase, runErr error) {
+	benchmarkCase = openClawBenchmarkCase(opts, env, row)
+	defer finishBenchmarkCase(&benchmarkCase, opts, ctx, now, &runErr)
 	dir, err := os.MkdirTemp("", "clawscan-benchmark-*")
 	if err != nil {
-		return BenchmarkCase{}, err
+		return benchmarkCase, err
 	}
 	defer os.RemoveAll(dir)
-	target, err := materializeOpenClawBenchmarkRow(dir, row)
+	target, err := materializeOpenClawBenchmarkRowContext(workContext(ctx.Context), dir, row)
 	if err != nil {
-		return BenchmarkCase{}, err
+		return benchmarkCase, err
 	}
-	run, err := runBenchmarkTarget(opts, ctx, env, now, target)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
+	benchmarkCase.Run, err = runBenchmarkTarget(opts, ctx, env, now, target)
+	return benchmarkCase, err
+}
+
+func openClawBenchmarkCase(opts Options, env map[string]string, row OpenClawBenchmarkRow) BenchmarkCase {
 	return BenchmarkCase{
 		ID:           row.ID,
 		SkillSlug:    row.SkillSlug,
@@ -234,8 +242,23 @@ func (openClawBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[st
 			Summary:    row.ClawScanSummary,
 			Context:    normalizedRawMessage(row.ClawScanContext),
 		},
-		Run: run,
-	}, nil
+		Run: unstartedBenchmarkRun(opts, env),
+	}
+}
+
+func unstartedBenchmarkRun(opts Options, env map[string]string) Artifact {
+	artifact := pendingArtifact(opts, "", env)
+	artifact.Status = "not_started"
+	artifact.Gate = "error"
+	return artifact
+}
+
+func finishBenchmarkCase(benchmarkCase *BenchmarkCase, opts Options, ctx RunContext, now func() time.Time, runErr *error) {
+	if *runErr == nil || benchmarkCase.Run.Status != "not_started" {
+		return
+	}
+	opts.OutputPath = ""
+	finishArtifact(&benchmarkCase.Run, opts, workContext(ctx.Context), now, runErr)
 }
 
 func scannerRequested(opts Options, scanner string) bool {
@@ -305,11 +328,20 @@ func (adapter skillTrustBenchBenchmarkAdapter) RunCases(opts Options, ctx RunCon
 	}
 	cases := make([]BenchmarkCase, 0, len(rows))
 	for _, row := range rows {
-		benchmarkCase, err := adapter.runCase(opts, ctx, env, now, client, row)
+		expected, err := adapter.expected(row)
 		if err != nil {
-			return nil, err
+			return cases, err
 		}
-		cases = append(cases, benchmarkCase)
+		cases = append(cases, BenchmarkCase{ID: row.ID, SkillSlug: row.ID, SkillVersion: skillTrustBenchVersion, Expected: expected, Run: unstartedBenchmarkRun(opts, env)})
+	}
+	for index, row := range rows {
+		if err := workContext(ctx.Context).Err(); err != nil {
+			return cases, err
+		}
+		cases[index], err = adapter.runCase(opts, ctx, env, now, client, row)
+		if err != nil {
+			return cases, err
+		}
 	}
 	return cases, nil
 }
@@ -330,31 +362,24 @@ func selectSkillTrustBenchRows(rows []SkillTrustBenchRow, ids []string, split st
 	return selected, nil
 }
 
-func (adapter skillTrustBenchBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient, row SkillTrustBenchRow) (BenchmarkCase, error) {
+func (adapter skillTrustBenchBenchmarkAdapter) runCase(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient, row SkillTrustBenchRow) (benchmarkCase BenchmarkCase, runErr error) {
+	expected, err := adapter.expected(row)
+	benchmarkCase = BenchmarkCase{ID: row.ID, SkillSlug: row.ID, SkillVersion: skillTrustBenchVersion, Expected: expected, Run: unstartedBenchmarkRun(opts, env)}
+	defer finishBenchmarkCase(&benchmarkCase, opts, ctx, now, &runErr)
+	if err != nil {
+		return benchmarkCase, err
+	}
 	dir, err := os.MkdirTemp("", "clawscan-benchmark-*")
 	if err != nil {
-		return BenchmarkCase{}, err
+		return benchmarkCase, err
 	}
 	defer os.RemoveAll(dir)
 	target, err := client.MaterializeSkillTrustBenchRow(dir, row)
 	if err != nil {
-		return BenchmarkCase{}, err
+		return benchmarkCase, err
 	}
-	run, err := runBenchmarkTarget(opts, ctx, env, now, target)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	expected, err := adapter.expected(row)
-	if err != nil {
-		return BenchmarkCase{}, err
-	}
-	return BenchmarkCase{
-		ID:           row.ID,
-		SkillSlug:    row.ID,
-		SkillVersion: skillTrustBenchVersion,
-		Expected:     expected,
-		Run:          run,
-	}, nil
+	benchmarkCase.Run, err = runBenchmarkTarget(opts, ctx, env, now, target)
+	return benchmarkCase, err
 }
 
 func (adapter skillTrustBenchBenchmarkAdapter) expected(row SkillTrustBenchRow) (BenchmarkExpected, error) {

@@ -2,6 +2,14 @@
 
 ## Interrupted-run diagnostics
 
+On Unix, the first SIGINT or SIGTERM requests cooperative cancellation. Default
+signal handling is then restored, so a subsequent signal can terminate a CLI
+blocked in non-cancelable I/O, including install-policy stdin awaiting EOF. That
+forced exit may prevent final artifact or policy-response output. It does not
+prove cleanup of containers or escaped descendants. Windows console interrupt
+and termination behavior differs; Unix process-group controls are not a Windows
+cleanup guarantee.
+
 Set `CLAWSCAN_PROGRESS=1` to emit `[clawscan-progress] ` followed by one JSON event
 per line to stderr. Normal CLI output stays unchanged without this opt-in.
 `schemaVersion: "clawscan-progress-v1"` events contain only a fixed phase

@@ -84,9 +84,7 @@ func TestProgressSurvivesOuterKill(t *testing.T) {
 	if commandPID == 0 {
 		t.Fatalf("external command never started: %s", stderr.String())
 	}
-	if _, err := os.Stat(artifactPath); !os.IsNotExist(err) {
-		t.Fatal("killed scan must not emit a final artifact")
-	}
+	assertInterruptedCheckpoint(t, artifactPath)
 	foundStage, foundCommand := false, false
 	for _, line := range strings.Split(stderr.String(), "\n") {
 		if !strings.HasPrefix(line, "[clawscan-progress] ") {
@@ -202,8 +200,28 @@ func TestJudgeChildProgressSurvivesOuterKill(t *testing.T) {
 			t.Fatalf("unfinished judge leaked data or claimed completion: %q", forbidden)
 		}
 	}
-	if _, err := os.Stat(artifactPath); !os.IsNotExist(err) || stdout.Len() != 0 {
-		t.Fatal("interrupted judge emitted a final artifact or stdout")
+	assertInterruptedCheckpoint(t, artifactPath)
+	if stdout.Len() != 0 {
+		t.Fatal("interrupted judge emitted terminal stdout")
+	}
+}
+
+func assertInterruptedCheckpoint(t *testing.T, artifactPath string) {
+	t.Helper()
+	raw, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact struct {
+		Status      string `json:"status"`
+		Complete    bool   `json:"complete"`
+		CompletedAt string `json:"completedAt"`
+	}
+	if err := json.Unmarshal(raw, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Status != "running" || artifact.Complete || artifact.CompletedAt != "" {
+		t.Fatalf("forced kill must not manufacture a terminal outcome: %s", raw)
 	}
 }
 

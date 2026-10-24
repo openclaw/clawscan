@@ -1792,7 +1792,7 @@ func TestRunExitCodeGateActionsAndPrecedence(t *testing.T) {
 		{
 			name: "failed scanner does not fire", results: map[string]ScannerResult{"clawscan-static": {Status: "failed", ExitCode: intPointer(2)}},
 			rules: map[string]ScannerGatePolicy{"clawscan-static": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}}},
-			want:  "pass",
+			want:  "error",
 		},
 	}
 	for _, test := range tests {
@@ -2264,7 +2264,7 @@ func TestRunDeclarativeGatePolicySkipsInfrastructureFailureEvidence(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Gate != "pass" || len(artifact.GateRules) != 0 {
+	if artifact.Gate != "error" || artifact.Complete || len(artifact.GateRules) != 0 {
 		t.Fatalf("gate = %q, rules = %#v", artifact.Gate, artifact.GateRules)
 	}
 	if string(artifact.Scanners["demo"].Raw) != `{"result":{"risk":"critical"}}` {

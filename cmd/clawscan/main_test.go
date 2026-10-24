@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -171,6 +172,20 @@ func TestRunOpenClawInstallPolicyScansSkillAndPluginTargets(t *testing.T) {
 				t.Fatalf("response = %s", output.String())
 			}
 		})
+	}
+}
+
+func TestInstallPolicyKeepsCallerCancellationAfterRequestIngestion(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "SKILL.md"), "# Inert skill\n")
+	request := fmt.Sprintf(`{"protocolVersion":1,"targetType":"skill","targetName":"generated","sourcePath":%q,"sourcePathKind":"directory","origin":{"type":"test"},"request":{"kind":"skill-install","mode":"install"}}`, root)
+	caller, cancel := context.WithCancel(context.Background())
+	cancel()
+	var output bytes.Buffer
+	err := runOpenClawInstallPolicyContext(caller, []string{"--scanner", "clawscan-static", "--sandbox", "off"}, []string{}, strings.NewReader(request), &output)
+	var response installpolicy.Response
+	if err != nil || json.Unmarshal(output.Bytes(), &response) != nil || response.Decision != "block" || !strings.Contains(response.Reason, "context canceled") {
+		t.Fatalf("policy scan dropped caller cancellation: %s, %v", output.String(), err)
 	}
 }
 
@@ -1227,8 +1242,8 @@ func TestRunCommandClawHubRejectsMalformedPackageReceipts(t *testing.T) {
 				if err := run([]string{
 					target, "--profile", "clawhub", "--scanner", "clawscan-static",
 					"--judge", command, "--sandbox", "off", "--json",
-				}, []string{}); err != nil {
-					t.Fatal(err)
+				}, []string{}); err == nil {
+					t.Fatal("malformed receipt must return an operational failure")
 				}
 			})
 			var artifact runner.Artifact
@@ -1237,6 +1252,9 @@ func TestRunCommandClawHubRejectsMalformedPackageReceipts(t *testing.T) {
 			}
 			if artifact.Judge == nil || artifact.Judge.Status != "failed" || !strings.Contains(artifact.Judge.Error, test.wantError) {
 				t.Fatalf("judge = %#v; want failed with %q", artifact.Judge, test.wantError)
+			}
+			if artifact.Complete || artifact.Status != "failed" || artifact.Gate != "error" {
+				t.Fatal("malformed receipt claimed complete security evidence")
 			}
 		})
 	}
@@ -1485,6 +1503,9 @@ func TestVersionStringIncludesBuildMetadata(t *testing.T) {
 }
 
 func TestRunCommandDoesNotLeakPresentSecrets(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	writeFile(t, filepath.Join(root, "README.md"), "# Generated inert input\n")
 	err := run([]string{"./README.md", "--scanner", "virustotal", "--scanner", "snyk"}, []string{"SNYK_TOKEN=secret-snyk"})
 	if err == nil {
 		t.Fatal("expected error")
