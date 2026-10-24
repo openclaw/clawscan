@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-23
+
+**Highlights:** Retain opt-in scan and judge lifecycle evidence, protect scan inputs during cancellation, and strengthen inspection receipts and runtime certificate trust.
+
+- Add opt-in phase and bounded child-judge lifecycle diagnostics that survive outer scan interruption without exposing commands, paths, or raw output. Thanks @Patrick-Erichsen (#77, #79).
+- Preserve cancellation and preparation evidence, reject unsafe output aliases, and protect scan inputs and loaded configuration from overwrite. Thanks @Patrick-Erichsen (#91).
+- Bind versioned judge inspection receipts to required-file hashes and canonical inspected paths, and retry invalid inspection once within the original deadline. Consumers validating receipt keys must accept the version 2 schema. Thanks @Patrick-Erichsen (#76, #80, #82).
+- Retry transient A.I.G stream overload within the original deadline and finish cleanup before returning caller interrupts. Thanks @Patrick-Erichsen (#81, #83).
+- Parallelize SkillSpector discovery while rejecting incomplete evidence; preserve distinct finding identities, recognize fully inspected reference caveats, separate MCP applicability from batch admission, and resolve bundle plugins by canonical family identity. Thanks @Patrick-Erichsen (#84, #86, #87, #88, #90).
+- Update the bundled Claude runtime to reject compromised certificate-authority keys and pin Node releases with incident-key rejection. Thanks @joshavant (#74, #75).
+- Publish runtime images only from verified native platform builds (#85).
 - Pin CI and release setup explicitly to Go 1.27.3 so setup-go cannot select the older language minimum.
 - Add an opt-in live judge inspection check on Ubuntu 22.04 that verifies package-file receipts without publishing. Thanks @Patrick-Erichsen (#70).
 - Update the text-processing dependency to golang.org/x/text v0.43.0 while retaining the Go 1.27.1 source minimum.
