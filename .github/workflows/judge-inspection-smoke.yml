@@ -29,12 +29,12 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Build ClawScan and install pinned judge harness
         run: |
           go build -o ./dist/clawscan ./cmd/clawscan
-          npm install -g @openai/codex@0.160.0
+          npm install -g @openai/codex@0.164.0
           codex --version
 
       - name: Verify real judge inspection with worker environment
