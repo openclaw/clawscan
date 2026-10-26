@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh the frozen SkillSpector certificate bundle to certifi 2026.10.23, preserving the Responses adapter patch. Runtime Python delivery remains a separate requirement for incident-key rejection. Thanks @joshavant. (#94)
+
 ## 0.3.0 - 2026-10-23
 
 **Highlights:** Retain opt-in scan and judge lifecycle evidence, protect scan inputs during cancellation, and strengthen inspection receipts and runtime certificate trust.
