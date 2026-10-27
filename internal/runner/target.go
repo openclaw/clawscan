@@ -225,13 +225,13 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 			explicitPluginManifest = true
 		} else if isBundleManifestDirectory(filepath.Base(filepath.Dir(resolvedPath))) && sameManifestFile(resolvedPath, "plugin.json") {
 			root := filepath.Dir(filepath.Dir(resolvedPath))
-			manifests, err := bundleManifestPaths(root)
+			_, err := bundleManifestPaths(root)
 			if err != nil {
 				return "", "", err
 			}
-			if len(manifests) != 1 {
-				return "", "", fmt.Errorf("target %s has ambiguous bundle manifests", displayTargetInput(input))
-			}
+			// An explicit manifest disambiguates a multi-harness bundle just as
+			// an explicit native manifest disambiguates a dual-layout package.
+			// Keep validating manifest paths and scan the complete artifact root.
 			id, err := readBundlePluginID(root, filepath.Join(filepath.Base(filepath.Dir(resolvedPath)), "plugin.json"))
 			if err != nil {
 				return "", "", fmt.Errorf("target %s is not a valid bundle plugin: %w", displayTargetInput(input), err)
