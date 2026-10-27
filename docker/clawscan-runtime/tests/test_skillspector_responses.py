@@ -13,6 +13,43 @@ from skillspector.providers.chat_models import UnsupportedControlError
 from skillspector.providers.openai import OpenAIProvider
 
 
+@pytest.mark.parametrize("count", [194, 257])
+def test_osv_inspects_large_advisory_sets_under_aggregate_caps(monkeypatch, count):
+    from skillspector.nodes.analyzers import osv_client as osv
+
+    osv.clear_cache()
+    real_client = httpx.Client
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"results": [{"vulns": [{"id": f"GENERATED-{n}"} for n in range(count)]}]})
+        return httpx.Response(200, json={"id": request.url.path.rsplit("/", 1)[1], "summary": "Generated inert advisory", "database_specific": {"severity": "CRITICAL"}})
+
+    monkeypatch.setattr(osv.httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    budget = osv.OsvQueryBudget.create(timeout_seconds=30)
+    result = osv.query_batch([("generated", "1.0.0")], osv.ECOSYSTEM_PYPI, budget=budget)
+    assert len(result[0]) == min(count, 256)
+    assert result[0][-1].vuln_id == f"GENERATED-{min(count, 256) - 1}"
+    assert result[0][-1].severity == "CRITICAL"
+    assert budget.detail_requests == min(count, 256)
+    assert budget.results_retained == min(count, 256)
+    if count > 256:
+        assert any(item.reason is osv.LedgerReason.OUTPUT_LIMIT for item in result.limitations)
+    else:
+        assert not result.limitations
+        # Cached results consume the same aggregate ceiling across manifests;
+        # they cannot make a larger retained result silently appear complete.
+        request_count = len(requests)
+        cached = osv.query_batch([("generated", "1.0.0")], osv.ECOSYSTEM_PYPI, budget=budget)
+        assert len(requests) == request_count
+        assert len(cached[0]) == 62
+        assert budget.results_retained == 256
+        assert any(item.reason is osv.LedgerReason.OUTPUT_LIMIT for item in cached.limitations)
+    osv.clear_cache()
+
+
 def test_structured_permission_manifest_preserves_every_declaration(tmp_path):
     from skillspector.nodes.build_context import build_context
     from skillspector.nodes.meta_analyzer import _format_metadata

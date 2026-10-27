@@ -450,3 +450,41 @@ index 252134d..02c72c2 100644
      return "\n".join(parts) if parts else "No metadata available"
  
  
+diff --git a/src/skillspector/nodes/analyzers/osv_client.py b/src/skillspector/nodes/analyzers/osv_client.py
+index 7fc577c..af7a741 100644
+--- a/src/skillspector/nodes/analyzers/osv_client.py
++++ b/src/skillspector/nodes/analyzers/osv_client.py
+@@ -58,10 +58,12 @@ if (env_val := os.environ.get("SKILLSPECTOR_OSV_TIMEOUT")) is not None:
+ MAX_OSV_PACKAGES = 256
+ MAX_OSV_QUERY_BATCHES = 4
+ MAX_OSV_QUERIES_PER_BATCH = 64
+-MAX_OSV_DETAIL_REQUESTS = 64
++MAX_OSV_DETAIL_REQUESTS = 256
+ MAX_OSV_RESPONSE_BYTES = 4 * 1024 * 1024
+ MAX_OSV_RESULTS = 256
+-MAX_OSV_VULNS_PER_PACKAGE = 16
++# One established package can have hundreds of historical advisories. Inspect
++# them under the existing aggregate result, response-byte and deadline budgets.
++MAX_OSV_VULNS_PER_PACKAGE = 256
+ MAX_OSV_LIMITATIONS = 16
+ MAX_OSV_CACHE_ENTRIES = 4_096
+ MAX_OSV_PACKAGE_NAME_CHARS = 256
+@@ -646,7 +648,17 @@ def query_batch(
+         key = _cache_key(name, version, ecosystem)
+         cached = _get_cached(key)
+         if cached is not None:
+-            all_results[i] = cached
++            remaining = max(0, active_budget.max_results - active_budget.results_retained)
++            if len(cached) > remaining:
++                active_budget.note(
++                    OsvQueryLimitation(
++                        reason=LedgerReason.OUTPUT_LIMIT,
++                        observed_records=active_budget.results_retained + len(cached),
++                        limit_records=active_budget.max_results,
++                    )
++                )
++            all_results[i] = cached[:remaining]
++            active_budget.results_retained += len(all_results[i])
+         else:
+             uncached_indices.append(i)
+             uncached_queries.append(_build_query(name, version, ecosystem))
