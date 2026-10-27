@@ -100,6 +100,12 @@ fixes, not a new ClawScan model-provider framework:
   when their rule, match and location coincide. Ledger counts are not lowered to
   match a compacted projection; explicit suppression and output limits remain
   separate. This does not attribute or resolve any production count discrepancy.
+- SkillSpector's completeness checker recognizes structural JSON quotes in
+  explicitly delimited YAML frontmatter. The whole bounded prefix must compose
+  as a standard YAML mapping without constructing values; only top-level flow
+  collections that also validate as strict JSON acquire source quote spans.
+  Node, depth, byte and runtime limits remain enforced. Raw findings and marker
+  reconstruction are unchanged, and a completed scan still requires the judge.
 - A.I.G reuses the official OpenAI SDK's Responses streaming API for that exact
   model. A.I.G tools are XML in text, so complete text history is replayed, not
   converted to synthetic OpenAI tools. Reasoning effort and usage are mapped;
