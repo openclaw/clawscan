@@ -53,6 +53,73 @@ func TestSkillSpectorReferenceCaveatCompletion(t *testing.T) {
 	}
 }
 
+func TestSkillSpectorReferenceCaveatsWithHiddenFiles(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/skillspector-reference-caveat.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name           string
+		path           string
+		missingVisible bool
+		missingStatic  bool
+		completed      bool
+	}{
+		{name: "hidden root file", path: ".clawhubignore", completed: true},
+		{name: "nested hidden directory", path: ".config/settings.json", completed: true},
+		{name: "nested hidden file", path: "assets/.gitkeep", completed: true},
+		{name: "visible suffix is not hidden", path: "settings.hidden.json"},
+		{name: "visible work must complete", path: ".clawhubignore", missingVisible: true},
+		{name: "hidden static work must complete", path: ".clawhubignore", missingStatic: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var report map[string]any
+			if err := json.Unmarshal(fixture, &report); err != nil {
+				t.Fatal(err)
+			}
+			components := report["components"].([]any)
+			hidden := map[string]any{}
+			for field, value := range components[1].(map[string]any) {
+				hidden[field] = value
+			}
+			hidden["path"] = test.path
+			report["components"] = append(components, hidden)
+			accounting := report["analysis_completeness"].(map[string]any)
+			for _, field := range []string{"total_components", "scanned_components", "fully_inspected_files"} {
+				accounting[field] = float64(3)
+			}
+			for _, value := range accounting["analyzer_statuses"].([]any) {
+				analyzer := value.(map[string]any)
+				id := analyzer["analyzer_id"].(string)
+				perFile := id == "artifact_integrity" || id == "static_yara" || strings.HasPrefix(id, "static_patterns_")
+				if perFile {
+					count := float64(3)
+					if test.missingStatic {
+						count = 2
+					}
+					analyzer["planned_work"], analyzer["completed"] = count, count
+				}
+				if test.missingVisible && strings.HasPrefix(id, "semantic_") {
+					analyzer["planned_work"], analyzer["completed"] = float64(1), float64(1)
+				}
+			}
+			raw, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := &recordingCommandRunner{writeOutput: string(raw), exitCode: intPointer(0)}
+			result, err := (ExternalScannerRunner{CommandRunner: command, Env: map[string]string{}, SkillSpectorCommand: []string{"skillspector"}}).runSkillSpector(t.TempDir(), "now")
+			expected := "failed"
+			if test.completed {
+				expected = "completed"
+			}
+			if err != nil || result.Status != expected || !bytes.Equal(result.Raw, raw) {
+				t.Fatalf("status=%s want=%s error=%s err=%v; raw preserved=%v", result.Status, expected, result.Error, err, bytes.Equal(result.Raw, raw))
+			}
+		})
+	}
+}
+
 func TestSkillSpectorReferenceCaveatsFailClosed(t *testing.T) {
 	fixture, err := os.ReadFile("testdata/skillspector-reference-caveat.json")
 	if err != nil {

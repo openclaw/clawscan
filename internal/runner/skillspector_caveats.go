@@ -148,6 +148,7 @@ func skillSpectorReferenceCaveatsOnly(record map[string]any) bool {
 		return false
 	}
 	lines := make(map[string]int, total)
+	semanticTotal := 0
 	for _, value := range components {
 		component, ok := value.(map[string]any)
 		if !ok || !skillSpectorKnownFields(component, "path type lines executable size_bytes source_url source_identity source_digest") {
@@ -172,8 +173,20 @@ func skillSpectorReferenceCaveatsOnly(record map[string]any) bool {
 			return false
 		}
 		lines[name] = lineCount
+		// The pinned SkillSpector source retains hidden files in its static
+		// inventory but does not submit them to external semantic models.
+		hidden := false
+		for _, segment := range strings.Split(name, "/") {
+			if strings.HasPrefix(segment, ".") {
+				hidden = true
+				break
+			}
+		}
+		if !hidden {
+			semanticTotal++
+		}
 	}
-	if !skillSpectorCaveatAnalyzersComplete(accounting.Analyzers, total) {
+	if !skillSpectorCaveatAnalyzersComplete(accounting.Analyzers, total, semanticTotal) {
 		return false
 	}
 	issues, issuesOK := record["issues"].([]any)
@@ -262,7 +275,7 @@ func skillSpectorCaveatSchemaKnown(completeness map[string]any) bool {
 	return true
 }
 
-func skillSpectorCaveatAnalyzersComplete(analyzers []skillSpectorCaveatAnalyzer, total int) bool {
+func skillSpectorCaveatAnalyzersComplete(analyzers []skillSpectorCaveatAnalyzer, total, semanticTotal int) bool {
 	required := strings.Fields("artifact_integrity behavioral_ast behavioral_taint_tracking bundled_execution_surface mcp_least_privilege mcp_rug_pull mcp_tool_poisoning meta_analyzer semantic_developer_intent semantic_quality_policy semantic_security_discovery static_patterns_agent_snooping static_patterns_anti_refusal static_patterns_data_exfiltration static_patterns_deserialization static_patterns_excessive_agency static_patterns_harmful_content static_patterns_memory_poisoning static_patterns_output_handling static_patterns_privilege_escalation static_patterns_prompt_injection static_patterns_rogue_agent static_patterns_ssrf static_patterns_supply_chain static_patterns_system_prompt_leakage static_patterns_tool_misuse static_yara")
 	remaining := make(map[string]bool, len(required))
 	for _, name := range required {
@@ -274,7 +287,11 @@ func skillSpectorCaveatAnalyzersComplete(analyzers []skillSpectorCaveatAnalyzer,
 		}
 		delete(remaining, analyzer.ID)
 		perFile := analyzer.ID == "artifact_integrity" || analyzer.ID == "static_yara" || strings.HasPrefix(analyzer.ID, "static_patterns_") || strings.HasPrefix(analyzer.ID, "semantic_")
-		if perFile && *analyzer.Planned != total {
+		expected := total
+		if strings.HasPrefix(analyzer.ID, "semantic_") {
+			expected = semanticTotal
+		}
+		if perFile && *analyzer.Planned != expected {
 			return false
 		}
 		if analyzer.ID == "mcp_tool_poisoning" && *analyzer.Planned > 128 {
