@@ -400,7 +400,7 @@ index 4878677..beb26dc 100644
  resolution-markers = [
      "python_full_version >= '3.14' and sys_platform == 'win32'",
 @@ -228,11 +228,11 @@ filecache = [
- 
+
  [[package]]
  name = "certifi"
 -version = "2026.6.17"
@@ -412,7 +412,7 @@ index 4878677..beb26dc 100644
 -    { url = "https://files.pythonhosted.org/packages/ef/2f/c5464532e965badff2f4c4c1a3a83f5697f0d7c407ed0cda44aaa99bb451/certifi-2026.6.17-py3-none-any.whl", hash = "sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db", size = 133289, upload-time = "2026-06-17T10:31:06.348Z" },
 +    { url = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1", size = 135082, upload-time = "2026-10-23T11:36:14.763Z" },
  ]
- 
+
  [[package]]
 @@ -2738,6 +2738,7 @@ dependencies = [
      { name = "langchain-openai" },
@@ -436,7 +436,7 @@ index 15b9b4c..06921d5 100644
 +++ b/src/skillspector/nodes/build_context.py
 @@ -2448,7 +2448,14 @@ def _project_manifest(
          manifest["version"] = _scalar_text(version)
- 
+
      manifest["triggers"] = _string_list(data.get("triggers", []))
 -    manifest["permissions"] = _string_list(data.get("permissions", []))
 +    permissions = data.get("permissions", [])
@@ -452,7 +452,7 @@ index 15b9b4c..06921d5 100644
      # `Bash(git status:*) Read` stays two grants.
 @@ -2496,7 +2503,7 @@ def _parse_manifest(
      """Parse SKILL.md or skill.md YAML frontmatter into a manifest dict.
- 
+
      Returns dict with name, description, version, triggers (list), permissions
 -    (list), allowed-tools (list), parameters (list). Returns {} if no file or
 +    (list or mapping), allowed-tools (list), parameters (list). Returns {} if no file or
@@ -470,13 +470,24 @@ index 252134d..02c72c2 100644
 +    elif isinstance(permissions, dict) and permissions:
 +        parts.append(f"Permissions: {json.dumps(permissions, ensure_ascii=False, sort_keys=True)}")
      return "\n".join(parts) if parts else "No metadata available"
- 
- 
+
+
 diff --git a/src/skillspector/nodes/analyzers/osv_client.py b/src/skillspector/nodes/analyzers/osv_client.py
-index 7fc577c..af7a741 100644
+index 7fc577c..64c006e 100644
 --- a/src/skillspector/nodes/analyzers/osv_client.py
 +++ b/src/skillspector/nodes/analyzers/osv_client.py
-@@ -58,10 +58,12 @@ if (env_val := os.environ.get("SKILLSPECTOR_OSV_TIMEOUT")) is not None:
+@@ -39,6 +39,10 @@ from skillspector.logging_config import get_logger
+
+ logger = get_logger(__name__)
+
++_OSV_QUERY_URL = "https://api.osv.dev/v1/query"
++# Full package queries avoid serial detail-request fanout; this is not a coverage cap.
++_FULL_QUERY_THRESHOLD = 16
++
+ _OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch"
+ _OSV_VULN_URL = "https://api.osv.dev/v1/vulns"
+ _REQUEST_TIMEOUT: float = 30.0
+@@ -58,10 +62,12 @@ if (env_val := os.environ.get("SKILLSPECTOR_OSV_TIMEOUT")) is not None:
  MAX_OSV_PACKAGES = 256
  MAX_OSV_QUERY_BATCHES = 4
  MAX_OSV_QUERIES_PER_BATCH = 64
@@ -491,7 +502,90 @@ index 7fc577c..af7a741 100644
  MAX_OSV_LIMITATIONS = 16
  MAX_OSV_CACHE_ENTRIES = 4_096
  MAX_OSV_PACKAGE_NAME_CHARS = 256
-@@ -646,7 +648,17 @@ def query_batch(
+@@ -481,6 +487,82 @@ def _request_json_bounded(
+     raise ValueError("OSV response was unavailable")
+
+
++def _fetch_package_details(
++    vuln_ids: list[str],
++    query: dict[str, object],
++    *,
++    client: httpx.Client,
++    budget: OsvQueryBudget,
++) -> list[VulnResult]:
++    """Fetch the exact batch advisory set in one bounded full query.
++
++    Provider drift, pagination or malformed responses remain incomplete; never
++    cache a partial response or turn a missing advisory into a clean lookup.
++    """
++    remaining_results = max(0, budget.max_results - budget.results_retained)
++    results: list[VulnResult] | None = None
++    try:
++        if len(vuln_ids) > remaining_results:
++            budget.note(
++                OsvQueryLimitation(
++                    reason=LedgerReason.OUTPUT_LIMIT,
++                    observed_records=budget.results_retained + len(vuln_ids),
++                    limit_records=budget.max_results,
++                )
++            )
++            raise _OsvLimitReachedError("results")
++        if budget.detail_requests >= budget.max_detail_requests:
++            budget.note(
++                OsvQueryLimitation(
++                    reason=LedgerReason.OUTPUT_LIMIT,
++                    observed_records=budget.detail_requests + 1,
++                    limit_records=budget.max_detail_requests,
++                )
++            )
++            raise _OsvLimitReachedError("requests")
++        budget.detail_requests += 1
++        payload = _request_json_bounded(
++            client,
++            "POST",
++            _OSV_QUERY_URL,
++            budget=budget,
++            payload=query,
++        )
++        if not isinstance(payload, dict) or payload.get("next_page_token") not in (None, ""):
++            raise ValueError("Incomplete full OSV response")
++        records = payload.get("vulns")
++        if not isinstance(records, list) or len(records) != len(vuln_ids):
++            raise ValueError("Full OSV advisory set changed")
++        by_id: dict[str, dict] = {}
++        for record in records:
++            if not isinstance(record, dict):
++                raise ValueError("Invalid full OSV advisory")
++            vuln_id = record.get("id")
++            if not isinstance(vuln_id, str) or vuln_id not in vuln_ids or vuln_id in by_id:
++                raise ValueError("Full OSV advisory binding changed")
++            by_id[vuln_id] = record
++        parsed = [_parse_vuln(by_id[vuln_id]) for vuln_id in vuln_ids]
++        if budget.remaining_seconds() <= 0:
++            budget.note_runtime_limit()
++            raise _OsvLimitReachedError("runtime")
++        results = parsed
++    except _OsvLimitReachedError:
++        pass
++    except httpx.TimeoutException:
++        budget.note_runtime_limit()
++    except (httpx.HTTPError, ValueError, KeyError, TypeError, RecursionError) as exc:
++        budget.note(
++            OsvQueryLimitation(
++                reason=LedgerReason.ANALYZER_RUNTIME_ERROR,
++                error_class=type(exc).__name__,
++            )
++        )
++    if results is None:
++        results = [_fallback_vuln(vuln_id) for vuln_id in vuln_ids[:remaining_results]]
++    budget.results_retained += len(results)
++    return results
++
++
+ def _fetch_vuln_details(
+     vuln_ids: list[str],
+     *,
+@@ -646,7 +728,17 @@ def query_batch(
          key = _cache_key(name, version, ecosystem)
          cached = _get_cached(key)
          if cached is not None:
@@ -510,6 +604,34 @@ index 7fc577c..af7a741 100644
          else:
              uncached_indices.append(i)
              uncached_queries.append(_build_query(name, version, ecosystem))
+@@ -775,11 +867,22 @@ def query_batch(
+                             continue
+                         if vuln_id not in vuln_ids:
+                             vuln_ids.append(vuln_id)
+-                    vuln_details = _fetch_vuln_details(
+-                        vuln_ids,
+-                        client=client,
+-                        budget=active_budget,
+-                    )
++                    if (
++                        len(vuln_ids) > _FULL_QUERY_THRESHOLD
++                        and active_budget.limitation_generation == package_generation
++                    ):
++                        vuln_details = _fetch_package_details(
++                            vuln_ids,
++                            _build_query(name, version, ecosystem),
++                            client=client,
++                            budget=active_budget,
++                        )
++                    else:
++                        vuln_details = _fetch_vuln_details(
++                            vuln_ids,
++                            client=client,
++                            budget=active_budget,
++                        )
+                     all_results[idx] = vuln_details
+                     if active_budget.limitation_generation == package_generation:
+                         _put_cache(_cache_key(name, version, ecosystem), vuln_details)
 diff --git a/pyproject.toml b/pyproject.toml
 index bb21ad0..db909ed 100644
 --- a/pyproject.toml
@@ -707,18 +829,18 @@ index 3095bc3..dc2b2b1 100644
  from skillspector.security_reconstruction import (
      MAX_DECLARED_MARKER_RIGHT_CONTEXT_CHARS,
 @@ -2048,7 +2049,7 @@ def _restore_source_lines(
- 
- 
+
+
  def _window_string_closer(
 -    python_strings: PythonStringClosers, window_start: int
 +    python_strings: PythonStringClosers | MarkdownCodeSpanClosers, window_start: int
  ) -> Callable[[int], bool]:
      """Answer string-closer queries in one window's source coordinates."""
- 
+
 @@ -2120,11 +2121,15 @@ def _scan_declared_marker_views(
              )
          return True
- 
+
 -    # A complete Python module proves which quotes close its string literals.
 -    # The proof covers the whole artifact, so it holds in every window. It is
 -    # computed only when a loose quoted directive header reaches a quote.
@@ -733,7 +855,7 @@ index 3095bc3..dc2b2b1 100644
 +        if _infer_file_type(path) == "markdown" and complete_context
 +        else None
      )
- 
+
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
 diff --git a/src/skillspector/security_reconstruction.py b/src/skillspector/security_reconstruction.py
 index 8c8fcc5..1082330 100644
@@ -742,16 +864,170 @@ index 8c8fcc5..1082330 100644
 @@ -757,12 +757,12 @@ def _view_string_closer(
  ) -> Callable[[int], bool]:
      """Map a source-offset string-closer test onto ``view`` character indexes.
- 
+
 -    A derived view keeps the source offset of every character, so only an ASCII
 -    quote that maps onto a proven closing delimiter is that delimiter.
 +    A derived view keeps the source offset of every character, so only a quote
 +    or backtick that maps onto a proven closing delimiter is that delimiter.
      """
- 
+
      def closes_owned_string(index: int) -> bool:
 -        return view.text[index] in "'\"" and validated_string_closer(view.source_offset(index))
 +        return view.text[index] in "'\"`" and validated_string_closer(view.source_offset(index))
- 
+
      return closes_owned_string
- 
+
+diff --git a/tests/unit/test_osv_client.py b/tests/unit/test_osv_client.py
+index 74c304a..4699cbb 100644
+--- a/tests/unit/test_osv_client.py
++++ b/tests/unit/test_osv_client.py
+@@ -533,3 +533,149 @@ class TestQueryResourceBounds:
+         assert results == [[]]
+         assert client.post.call_count == 0
+         assert any(item.reason is LedgerReason.RUNTIME_LIMIT for item in results.limitations)
++
++
++def test_large_advisory_set_uses_one_full_query_without_detail_fanout(monkeypatch):
++    from skillspector.nodes.analyzers import osv_client as osv
++
++    requests = []
++    ids = [f"GHSA-fixture-{i}" for i in range(194)]
++
++    def respond(request):
++        requests.append((request.method, request.url.path))
++        if request.url.path == "/v1/querybatch":
++            return httpx.Response(200, json={"results": [{"vulns": [{"id": i} for i in ids]}]})
++        if request.url.path == "/v1/query":
++            return httpx.Response(
++                200,
++                json={"vulns": [{"id": i, "summary": "Retained fixture advisory"} for i in ids]},
++            )
++        return httpx.Response(
++            200,
++            json={
++                "id": request.url.path.rsplit("/", 1)[-1],
++                "summary": "Retained fixture advisory",
++            },
++        )
++
++    client = httpx.Client(transport=httpx.MockTransport(respond))
++    monkeypatch.setattr(osv.httpx, "Client", lambda **kwargs: client)
++    results = osv.query_batch([("Pillow", None)], "PyPI")
++    assert [v.vuln_id for v in results[0]] == ids
++    assert not results.limitations
++    assert requests == [("POST", "/v1/querybatch"), ("POST", "/v1/query")]
++
++
++@pytest.mark.parametrize(
++    "invalid", ["missing", "extra", "duplicate", "pagination", "shape", "record", "id"]
++)
++def test_full_advisory_mismatch_remains_incomplete_and_is_not_cached(monkeypatch, invalid):
++    from skillspector.nodes.analyzers import osv_client as osv
++
++    ids = [f"GHSA-fixture-{i}" for i in range(17)]
++    requests = []
++
++    def respond(request):
++        requests.append(request)
++        if request.url.path == "/v1/querybatch":
++            return httpx.Response(200, json={"results": [{"vulns": [{"id": i} for i in ids]}]})
++        records = [{"id": i, "summary": "Fixture advisory"} for i in reversed(ids)]
++        payload = {"vulns": records}
++        if invalid == "missing":
++            records.pop()
++        elif invalid == "extra":
++            records.append({"id": "foreign"})
++        elif invalid == "duplicate":
++            records[-1] = records[0]
++        elif invalid == "pagination":
++            payload["next_page_token"] = "more"
++        elif invalid == "shape":
++            payload["vulns"] = {}
++        elif invalid == "record":
++            records[-1] = None
++        elif invalid == "id":
++            records[-1] = {"id": 42}
++        return httpx.Response(200, json=payload)
++
++    original_client = httpx.Client
++
++    def make_client(**kwargs):
++        return original_client(transport=httpx.MockTransport(respond))
++
++    monkeypatch.setattr(osv.httpx, "Client", make_client)
++    for _ in range(2):
++        results = osv.query_batch([("demo", "1.2.3")], "PyPI")
++        assert [v.vuln_id for v in results[0]] == ids
++        assert results.limitations
++        assert not osv._cache
++    assert len(requests) == 4
++
++
++@pytest.mark.parametrize("cap", ["bytes", "results", "requests", "deadline"])
++def test_full_query_preserves_aggregate_budgets(monkeypatch, cap):
++    import time
++
++    from skillspector.nodes.analyzers import osv_client as osv
++
++    ids = [f"GHSA-fixture-{i}" for i in range(17)]
++    budget = OsvQueryBudget.create(timeout_seconds=10)
++    requests = []
++
++    def respond(request):
++        requests.append(request)
++        if request.url.path == "/v1/querybatch":
++            return httpx.Response(200, json={"results": [{"vulns": [{"id": i} for i in ids]}]})
++        if cap == "deadline":
++            budget.deadline = time.monotonic() - 1
++        return httpx.Response(200, json={"vulns": [{"id": i, "summary": "x" * 512} for i in ids]})
++
++    original_client = httpx.Client
++    monkeypatch.setattr(
++        osv.httpx,
++        "Client",
++        lambda **kwargs: original_client(transport=httpx.MockTransport(respond)),
++    )
++    if cap == "bytes":
++        budget.max_response_bytes = 1000
++    elif cap == "results":
++        budget.max_results = 10
++    elif cap == "requests":
++        budget.max_detail_requests = 0
++    results = osv.query_batch([("demo", None)], "PyPI", budget=budget)
++    assert results.limitations
++    assert budget.results_retained <= budget.max_results
++    assert budget.response_bytes <= budget.max_response_bytes
++    assert budget.detail_requests <= budget.max_detail_requests
++    assert len(requests) == (1 if cap in ("results", "requests") else 2)
++    assert not osv._cache
++
++
++def test_full_query_binds_version_and_reorders_provider_records(monkeypatch):
++    import json
++
++    from skillspector.nodes.analyzers import osv_client as osv
++
++    ids = [f"GHSA-fixture-{i}" for i in range(17)]
++    requests = []
++
++    def respond(request):
++        requests.append(request)
++        if request.url.path == "/v1/querybatch":
++            return httpx.Response(200, json={"results": [{"vulns": [{"id": i} for i in ids]}]})
++        assert json.loads(request.content) == {
++            "package": {"name": "demo", "ecosystem": "PyPI"},
++            "version": "1.2.3",
++        }
++        return httpx.Response(200, json={"vulns": [{"id": i, "summary": i} for i in reversed(ids)]})
++
++    original_client = httpx.Client
++    monkeypatch.setattr(
++        osv.httpx,
++        "Client",
++        lambda **kwargs: original_client(transport=httpx.MockTransport(respond)),
++    )
++    results = osv.query_batch([("demo", "1.2.3")], "PyPI")
++    assert [v.summary for v in results[0]] == ids
++    assert not results.limitations
++    assert len(requests) == 2
++    assert len(osv._cache) == 1

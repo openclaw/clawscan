@@ -23,8 +23,10 @@ def test_osv_inspects_large_advisory_sets_under_aggregate_caps(monkeypatch, coun
 
     def handler(request):
         requests.append(request)
-        if request.method == "POST":
+        if request.url.path == "/v1/querybatch":
             return httpx.Response(200, json={"results": [{"vulns": [{"id": f"GENERATED-{n}"} for n in range(count)]}]})
+        if request.url.path == "/v1/query":
+            return httpx.Response(200, json={"vulns": [{"id": f"GENERATED-{n}", "summary": "Generated inert advisory", "database_specific": {"severity": "CRITICAL"}} for n in range(count)]})
         return httpx.Response(200, json={"id": request.url.path.rsplit("/", 1)[1], "summary": "Generated inert advisory", "database_specific": {"severity": "CRITICAL"}})
 
     monkeypatch.setattr(osv.httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
@@ -33,12 +35,13 @@ def test_osv_inspects_large_advisory_sets_under_aggregate_caps(monkeypatch, coun
     assert len(result[0]) == min(count, 256)
     assert result[0][-1].vuln_id == f"GENERATED-{min(count, 256) - 1}"
     assert result[0][-1].severity == "CRITICAL"
-    assert budget.detail_requests == min(count, 256)
+    assert budget.detail_requests == (1 if count <= 256 else 256)
     assert budget.results_retained == min(count, 256)
     if count > 256:
         assert any(item.reason is osv.LedgerReason.OUTPUT_LIMIT for item in result.limitations)
     else:
         assert not result.limitations
+        assert [(r.method, r.url.path) for r in requests] == [("POST", "/v1/querybatch"), ("POST", "/v1/query")]
         # Cached results consume the same aggregate ceiling across manifests;
         # they cannot make a larger retained result silently appear complete.
         request_count = len(requests)
@@ -766,3 +769,124 @@ def test_markdown_inline_allocation_shares_the_document_budget(monkeypatch, coun
     owner = MarkdownCodeSpanClosers(text, lambda: None)
     assert pushes <= 8192
     assert not any(owner.closes_string(i) for i, char in enumerate(text) if char == "`")
+
+
+@pytest.mark.parametrize(
+    "invalid", ["missing", "extra", "duplicate", "pagination", "shape", "record", "id"]
+)
+def test_full_advisory_mismatch_remains_incomplete_and_is_not_cached(monkeypatch, invalid):
+    from skillspector.nodes.analyzers import osv_client as osv
+
+    osv.clear_cache()
+
+    ids = [f"GHSA-fixture-{i}" for i in range(17)]
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path == "/v1/querybatch":
+            return httpx.Response(200, json={"results": [{"vulns": [{"id": i} for i in ids]}]})
+        records = [{"id": i, "summary": "Fixture advisory"} for i in reversed(ids)]
+        payload = {"vulns": records}
+        if invalid == "missing":
+            records.pop()
+        elif invalid == "extra":
+            records.append({"id": "foreign"})
+        elif invalid == "duplicate":
+            records[-1] = records[0]
+        elif invalid == "pagination":
+            payload["next_page_token"] = "more"
+        elif invalid == "shape":
+            payload["vulns"] = {}
+        elif invalid == "record":
+            records[-1] = None
+        elif invalid == "id":
+            records[-1] = {"id": 42}
+        return httpx.Response(200, json=payload)
+
+    original_client = httpx.Client
+
+    def make_client(**kwargs):
+        return original_client(transport=httpx.MockTransport(respond))
+
+    monkeypatch.setattr(osv.httpx, "Client", make_client)
+    for _ in range(2):
+        results = osv.query_batch([("demo", "1.2.3")], "PyPI")
+        assert [v.vuln_id for v in results[0]] == ids
+        assert results.limitations
+        assert not osv._cache
+    assert len(requests) == 4
+
+
+@pytest.mark.parametrize("cap", ["bytes", "results", "requests", "deadline"])
+def test_full_query_preserves_aggregate_budgets(monkeypatch, cap):
+    import time
+
+    from skillspector.nodes.analyzers import osv_client as osv
+
+    osv.clear_cache()
+
+    ids = [f"GHSA-fixture-{i}" for i in range(17)]
+    budget = osv.OsvQueryBudget.create(timeout_seconds=10)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path == "/v1/querybatch":
+            return httpx.Response(200, json={"results": [{"vulns": [{"id": i} for i in ids]}]})
+        if cap == "deadline":
+            budget.deadline = time.monotonic() - 1
+        return httpx.Response(200, json={"vulns": [{"id": i, "summary": "x" * 512} for i in ids]})
+
+    original_client = httpx.Client
+    monkeypatch.setattr(
+        osv.httpx,
+        "Client",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond)),
+    )
+    if cap == "bytes":
+        budget.max_response_bytes = 1000
+    elif cap == "results":
+        budget.max_results = 10
+    elif cap == "requests":
+        budget.max_detail_requests = 0
+    results = osv.query_batch([("demo", None)], "PyPI", budget=budget)
+    assert results.limitations
+    assert budget.results_retained <= budget.max_results
+    assert budget.response_bytes <= budget.max_response_bytes
+    assert budget.detail_requests <= budget.max_detail_requests
+    assert len(requests) == (1 if cap in ("results", "requests") else 2)
+    assert not osv._cache
+
+
+def test_full_query_binds_version_and_reorders_provider_records(monkeypatch):
+    import json
+
+    from skillspector.nodes.analyzers import osv_client as osv
+
+    osv.clear_cache()
+
+    ids = [f"GHSA-fixture-{i}" for i in range(17)]
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path == "/v1/querybatch":
+            return httpx.Response(200, json={"results": [{"vulns": [{"id": i} for i in ids]}]})
+        assert json.loads(request.content) == {
+            "package": {"name": "demo", "ecosystem": "PyPI"},
+            "version": "1.2.3",
+        }
+        return httpx.Response(200, json={"vulns": [{"id": i, "summary": i} for i in reversed(ids)]})
+
+    original_client = httpx.Client
+    monkeypatch.setattr(
+        osv.httpx,
+        "Client",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond)),
+    )
+    results = osv.query_batch([("demo", "1.2.3")], "PyPI")
+    assert [v.summary for v in results[0]] == ids
+    assert not results.limitations
+    assert len(requests) == 2
+    assert len(osv._cache) == 1
