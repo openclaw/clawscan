@@ -389,15 +389,19 @@ diff --git a/tests/nodes/test_report_occurrence_columns.py b/tests/nodes/test_re
          ("second.py", "finding-second", "second_context\nsubprocess.run(command)"),
      ]
 diff --git a/uv.lock b/uv.lock
-index 4878677..0079882 100644
+index 4878677..beb26dc 100644
 --- a/uv.lock
 +++ b/uv.lock
-@@ -1,3 +1,3 @@
+@@ -1,5 +1,5 @@
  version = 1
 -revision = 3
 +revision = 5
  requires-python = ">=3.12, <3.15"
-@@ -230,7 +230,7 @@ filecache = [
+ resolution-markers = [
+     "python_full_version >= '3.14' and sys_platform == 'win32'",
+@@ -228,11 +228,11 @@ filecache = [
+ 
+ [[package]]
  name = "certifi"
 -version = "2026.6.17"
 +version = "2026.10.23"
@@ -408,6 +412,24 @@ index 4878677..0079882 100644
 -    { url = "https://files.pythonhosted.org/packages/ef/2f/c5464532e965badff2f4c4c1a3a83f5697f0d7c407ed0cda44aaa99bb451/certifi-2026.6.17-py3-none-any.whl", hash = "sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db", size = 133289, upload-time = "2026-06-17T10:31:06.348Z" },
 +    { url = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1", size = 135082, upload-time = "2026-10-23T11:36:14.763Z" },
  ]
+ 
+ [[package]]
+@@ -2738,6 +2738,7 @@ dependencies = [
+     { name = "langchain-openai" },
+     { name = "langgraph" },
+     { name = "langsmith" },
++    { name = "markdown-it-py" },
+     { name = "openai" },
+     { name = "packaging" },
+     { name = "pydantic" },
+@@ -2784,6 +2785,7 @@ requires-dist = [
+     { name = "langgraph", specifier = ">=1.0.10" },
+     { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'langgraph-dev'", specifier = ">=0.4.14" },
+     { name = "langsmith", specifier = ">=0.7.30" },
++    { name = "markdown-it-py", specifier = "==4.2.0" },
+     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.29.0,<2.0.0" },
+     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.0" },
+     { name = "openai", specifier = ">=2.25.0" },
 diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
 index 15b9b4c..06921d5 100644
 --- a/src/skillspector/nodes/build_context.py
@@ -488,3 +510,248 @@ index 7fc577c..af7a741 100644
          else:
              uncached_indices.append(i)
              uncached_queries.append(_build_query(name, version, ecosystem))
+diff --git a/pyproject.toml b/pyproject.toml
+index bb21ad0..db909ed 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -33,6 +33,7 @@ dependencies = [
+     # Typer <0.24 uses click>=8.0.0; 0.24+ requires click>=8.2.1 which conflicts with semgrep (click 8.1.x)
+     "typer>=0.23.0,<0.24",
+     "rich>=14.3.0",
++    "markdown-it-py==4.2.0",
+     "httpx>=0.28.0",
+     "pywhatwgurl==0.1.1",
+     "regex==2026.5.9",
+diff --git a/src/skillspector/markdown_tokens.py b/src/skillspector/markdown_tokens.py
+new file mode 100644
+--- /dev/null
++++ b/src/skillspector/markdown_tokens.py
+@@ -0,0 +1,167 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""Conservative raw-source ownership for CommonMark inline code delimiters."""
++
++from array import array
++from collections.abc import Callable
++
++from markdown_it import MarkdownIt
++from markdown_it.rules_inline.backticks import backtick
++
++
++class MarkdownCodeSpanClosers:
++    """Prove closing backticks without hiding the contents of a code span.
++
++    A block's inline source must map uniquely and verbatim to the original
++    text. Containers that remove prefixes from continuation lines, escaped
++    delimiters, uncertain mappings and oversized documents grant no ownership.
++    Tables, fenced/indented code and raw HTML never grant inline ownership.
++    """
++
++    def __init__(self, content: str, check_runtime: Callable[[], None]):
++        self._closers: set[int] = set()
++        check_runtime()
++        # This optional proof only refines the existing lexical fallback. If
++        # unavailable, preserve that fallback rather than asserting coverage.
++        if len(content) > 1_048_576:
++            return
++        # CommonMark normalizes physical newlines before inline parsing. Keep
++        # an exact map back to raw characters; the artifact is never rewritten.
++        source_offsets = array("I")
++        normalized = []
++        cursor = 0
++        while cursor < len(content):
++            if cursor % 4096 == 0:
++                check_runtime()
++            char = content[cursor]
++            source_offsets.append(cursor)
++            normalized.append("\n" if char == "\r" else char)
++            cursor += 2 if content.startswith("\r\n", cursor) else 1
++        content = "".join(normalized)
++        parser = MarkdownIt("commonmark").enable("table")
++        # Observe the original document parse, including its reference-link
++        # environment. Each nested image state has a distinct source object;
++        # keep strong source references so identities cannot be reused.
++        records: dict[int, tuple[str, set[int]]] = {}
++
++        def record_backtick(state, silent):
++            check_runtime()
++            before = len(state.tokens)
++            matched = backtick(state, silent)
++            if matched and not silent and len(state.tokens) > before:
++                token = state.tokens[-1]
++                if token.type == "code_inline":
++                    _, closers = records.setdefault(id(state.src), (state.src, set()))
++                    closers.update(
++                        i for i in range(state.pos - len(token.markup), state.pos)
++                        if state.src[i] == "`"
++                    )
++            return matched
++
++        parser.inline.ruler.at("backticks", record_backtick)
++        # GFM tables can synthesize many empty cells from very little source.
++        # Enforce one shared document-wide budget BEFORE block or inline token
++        # allocation, including nested states and pending-text tokens. Inline
++        # emphasis/delimiter expansion can amplify source just as tables do.
++        class OwnershipBudgetExceeded(Exception):
++            pass
++
++        remaining_tokens = 8192
++
++        def install_allocation_budget(state):
++            if getattr(state, "_ownership_budgeted", False):
++                return
++            original_push = state.push
++            original_pending = getattr(state, "pushPending", None)
++
++            def consume_token():
++                nonlocal remaining_tokens
++                check_runtime()
++                if remaining_tokens <= 0:
++                    raise OwnershipBudgetExceeded
++                remaining_tokens -= 1
++
++            def bounded_push(*args):
++                consume_token()
++                return original_push(*args)
++
++            def bounded_pending(*args):
++                consume_token()
++                return original_pending(*args)
++
++            state.push = bounded_push
++            if original_pending is not None:
++                state.pushPending = bounded_pending
++            state._ownership_budgeted = True
++
++        original_tokenize = parser.block.tokenize
++
++        def bounded_tokenize(state, start_line, end_line):
++            check_runtime()
++            # The canonical block parser silently discards the remaining source
++            # at its nesting limit, including document-wide link definitions.
++            # Such a partial parse cannot establish any delimiter ownership.
++            if state.level >= state.md.options.maxNesting:
++                raise OwnershipBudgetExceeded
++            install_allocation_budget(state)
++            return original_tokenize(state, start_line, end_line)
++
++        parser.block.tokenize = bounded_tokenize
++        original_inline_tokenize = parser.inline.tokenize
++        original_skip_token = parser.inline.skipToken
++
++        def bounded_inline_tokenize(state):
++            check_runtime()
++            if state.level >= state.md.options.maxNesting:
++                raise OwnershipBudgetExceeded
++            install_allocation_budget(state)
++            return original_inline_tokenize(state)
++
++        def bounded_skip_token(state):
++            check_runtime()
++            if state.level >= state.md.options.maxNesting:
++                raise OwnershipBudgetExceeded
++            return original_skip_token(state)
++
++        # Inline lookahead also skips source silently at the same depth limit.
++        parser.inline.tokenize = bounded_inline_tokenize
++        parser.inline.skipToken = bounded_skip_token
++        try:
++            blocks = parser.parse(content)
++        except OwnershipBudgetExceeded:
++            # Optional delimiter proof is all-or-nothing for allocation and
++            # nesting cutoffs alike. Never trust a partially parsed document.
++            return
++        check_runtime()
++        # CommonMark line maps count only normalized LF, not Unicode line
++        # separators that str.splitlines() would also treat as boundaries.
++        starts = [0, *(i + 1 for i, char in enumerate(content) if char == "\n"), len(content)]
++        table_depth = 0
++        for block in blocks:
++            check_runtime()
++            if block.type == "table_open":
++                table_depth += 1
++            elif block.type == "table_close":
++                table_depth -= 1
++            # Table cells unescape pipes and share a whole-row map. A substring
++            # elsewhere in that row is not proof of this cell's raw origin.
++            if table_depth or block.type == "table_close":
++                continue
++            if block.type != "inline" or not block.map or not block.content:
++                continue
++            start_line, end_line = block.map
++            if end_line >= len(starts):
++                continue
++            start, end = starts[start_line], starts[end_line]
++            origin = content.find(block.content, start, end)
++            if origin < 0 or content.find(block.content, origin + 1, end) >= 0:
++                continue
++            record = records.get(id(block.content))
++            if record is None or record[0] is not block.content:
++                continue
++            # Only events from this complete inline block can own its raw
++            # positions; substring-local image label events remain unassigned.
++            self._closers.update(source_offsets[origin + offset] for offset in record[1])
++
++    def closes_string(self, offset: int) -> bool:
++        return offset in self._closers
+diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
+index 3095bc3..dc2b2b1 100644
+--- a/src/skillspector/nodes/analyzers/static_runner.py
++++ b/src/skillspector/nodes/analyzers/static_runner.py
+@@ -67,6 +67,7 @@ from skillspector.python_ast import (
+     may_be_python_source,
+     resolve_python_source_classification,
+ )
++from skillspector.markdown_tokens import MarkdownCodeSpanClosers
+ from skillspector.python_tokens import PythonStringClosers
+ from skillspector.security_reconstruction import (
+     MAX_DECLARED_MARKER_RIGHT_CONTEXT_CHARS,
+@@ -2048,7 +2049,7 @@ def _restore_source_lines(
+ 
+ 
+ def _window_string_closer(
+-    python_strings: PythonStringClosers, window_start: int
++    python_strings: PythonStringClosers | MarkdownCodeSpanClosers, window_start: int
+ ) -> Callable[[int], bool]:
+     """Answer string-closer queries in one window's source coordinates."""
+ 
+@@ -2120,11 +2121,15 @@ def _scan_declared_marker_views(
+             )
+         return True
+ 
+-    # A complete Python module proves which quotes close its string literals.
+-    # The proof covers the whole artifact, so it holds in every window. It is
+-    # computed only when a loose quoted directive header reaches a quote.
++    # Whole-artifact parsing proves literal closing delimiters before windowing.
++    # A Markdown closer is syntax, not the next marker's opening backtick. The
++    # code-span body remains available to every analyzer and explicit directive.
+     python_strings = (
+-        PythonStringClosers(content, check_runtime) if _infer_file_type(path) == "python" else None
++        PythonStringClosers(content, check_runtime)
++        if _infer_file_type(path) == "python"
++        else MarkdownCodeSpanClosers(content, check_runtime)
++        if _infer_file_type(path) == "markdown" and complete_context
++        else None
+     )
+ 
+     for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
+diff --git a/src/skillspector/security_reconstruction.py b/src/skillspector/security_reconstruction.py
+index 8c8fcc5..1082330 100644
+--- a/src/skillspector/security_reconstruction.py
++++ b/src/skillspector/security_reconstruction.py
+@@ -757,12 +757,12 @@ def _view_string_closer(
+ ) -> Callable[[int], bool]:
+     """Map a source-offset string-closer test onto ``view`` character indexes.
+ 
+-    A derived view keeps the source offset of every character, so only an ASCII
+-    quote that maps onto a proven closing delimiter is that delimiter.
++    A derived view keeps the source offset of every character, so only a quote
++    or backtick that maps onto a proven closing delimiter is that delimiter.
+     """
+ 
+     def closes_owned_string(index: int) -> bool:
+-        return view.text[index] in "'\"" and validated_string_closer(view.source_offset(index))
++        return view.text[index] in "'\"`" and validated_string_closer(view.source_offset(index))
+ 
+     return closes_owned_string
+ 
