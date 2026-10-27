@@ -389,18 +389,11 @@ diff --git a/tests/nodes/test_report_occurrence_columns.py b/tests/nodes/test_re
          ("second.py", "finding-second", "second_context\nsubprocess.run(command)"),
      ]
 diff --git a/uv.lock b/uv.lock
-index 4878677..beb26dc 100644
+index 4878677..e9d1833 100644
 --- a/uv.lock
 +++ b/uv.lock
-@@ -1,5 +1,5 @@
- version = 1
--revision = 3
-+revision = 5
- requires-python = ">=3.12, <3.15"
- resolution-markers = [
-     "python_full_version >= '3.14' and sys_platform == 'win32'",
 @@ -228,11 +228,11 @@ filecache = [
-
+ 
  [[package]]
  name = "certifi"
 -version = "2026.6.17"
@@ -412,17 +405,210 @@ index 4878677..beb26dc 100644
 -    { url = "https://files.pythonhosted.org/packages/ef/2f/c5464532e965badff2f4c4c1a3a83f5697f0d7c407ed0cda44aaa99bb451/certifi-2026.6.17-py3-none-any.whl", hash = "sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db", size = 133289, upload-time = "2026-06-17T10:31:06.348Z" },
 +    { url = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1", size = 135082, upload-time = "2026-10-23T11:36:14.763Z" },
  ]
-
+ 
  [[package]]
-@@ -2738,6 +2738,7 @@ dependencies = [
+@@ -1448,6 +1448,86 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/ce/62/b40b382fa0c66fee1478073eb8db352a4a6beda4a1adccf1df911d8c289c/librt-0.11.0-cp314-cp314t-win_arm64.whl", hash = "sha256:dee008f20b542e3cd162ba338a7f9ec0f6d23d395f66fe8aeeec3c9d067ea253", size = 102572, upload-time = "2026-05-10T18:17:06.809Z" },
+ ]
+ 
++[[package]]
++name = "lxml"
++version = "6.1.3"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/23/ad/28ecd7cb894d172f3c9c80a075eeeb2017ac62e3632cee05a5f9493547eb/lxml-6.1.3.tar.gz", hash = "sha256:45222d94ddd511536f3b2f7d9deae3b2339b4ce0f075f1ca25703b07cad9dd21", size = 4211198, upload-time = "2026-09-02T14:48:02.287Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/dd/1f/a180b57d9eeabaab77f9d5aa30356898ea749c4795596a8f66d1eb6bef2e/lxml-6.1.3-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:0c0710ac085a157b593c38fbcacd950f15c4afa8e2057527185875ab302752bc", size = 8602094, upload-time = "2026-09-02T14:47:26.054Z" },
++    { url = "https://files.pythonhosted.org/packages/a8/25/070c92013a1c029a602b03560d68772313d918268667fa993da7961759c9/lxml-6.1.3-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:623c8799c17128753c65699f1c3aa32402657393a9ad6db09ed8b98ddf76611d", size = 4638308, upload-time = "2026-09-02T14:47:29.587Z" },
++    { url = "https://files.pythonhosted.org/packages/1e/1c/722e88883173097a1a375153e3c2447eba3060d0231522cf6596e99f4195/lxml-6.1.3-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:f683dc6300317700025e41d89a43e0276692ded16113a3c43eab704d605c58e5", size = 4939696, upload-time = "2026-09-02T14:47:32.997Z" },
++    { url = "https://files.pythonhosted.org/packages/db/36/aa413bc214dc4f785ad2b2ddd8cc99aae7062d49ab155e91e6011af00daf/lxml-6.1.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:379f8a75cf6eb7eef0af074b55f49ab73b868388a98de14646abcdfa4564bb11", size = 5105247, upload-time = "2026-09-02T14:47:36.734Z" },
++    { url = "https://files.pythonhosted.org/packages/a3/a0/a1f7f1313795bfec67b77f01ef3b1128d49f2d7f66a8413fa55d47f4e25f/lxml-6.1.3-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b37772102d44bb6628186accca3a121b1fa3a6b3d97518a8c29a5229ca4c0d0a", size = 5011915, upload-time = "2026-09-02T14:47:39.846Z" },
++    { url = "https://files.pythonhosted.org/packages/b9/78/840e7e3f1d0cc7a5cfac5d8505b97e25b6427fd774ac4bae672aaebfb4b5/lxml-6.1.3-cp312-cp312-manylinux_2_26_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:ddcf547bea2aee967d6a77779376a45e77e610e8465147a1f3d7e20d539d6e32", size = 5638175, upload-time = "2026-09-02T14:47:43.644Z" },
++    { url = "https://files.pythonhosted.org/packages/0a/20/e022dbc6b4753a9bc9fc5fb28a27163430c1731b9913997f6544c1b2518c/lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:909f4e927bb051f7740d6367285fc60cdcfdaf0258c2dba4ff5ba7eadadc250c", size = 5244675, upload-time = "2026-09-02T14:47:47.635Z" },
++    { url = "https://files.pythonhosted.org/packages/99/83/82cde81d2b5eb38d1539fdfdf318abdd014a7e604f4df01c9cd3deb18f2a/lxml-6.1.3-cp312-cp312-manylinux_2_28_i686.whl", hash = "sha256:a5c18810318303ce9afb3f95e2ddb54834f96fa699a8600433fd5a93dcf44c56", size = 5358205, upload-time = "2026-09-02T14:47:50.306Z" },
++    { url = "https://files.pythonhosted.org/packages/d2/a1/f3b057371c8cb29f2a9c9c44ea320592446e40b74a4b0af68c3d8e65bc73/lxml-6.1.3-cp312-cp312-manylinux_2_31_armv7l.whl", hash = "sha256:3e42265103fb385d8642a78672edf376c6f7e1d3598a7a4f9cb1278f2f6b5f6f", size = 4704495, upload-time = "2026-09-02T14:47:53.251Z" },
++    { url = "https://files.pythonhosted.org/packages/1a/a4/230eb28be5d412152ffc3c679b51fe1aeede5a53f3a8eb6e9748f2f4754f/lxml-6.1.3-cp312-cp312-manylinux_2_38_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:21402998e4b78e7cce237d2788841aaa21ac9a4d1574d04dc2d12ee41ae807b5", size = 5255117, upload-time = "2026-09-02T14:47:55.963Z" },
++    { url = "https://files.pythonhosted.org/packages/a3/18/1969f56763af24ce42ea156007b0b2d73fddea552e283b2010416394f0f4/lxml-6.1.3-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:38fc4e4e4e084e0bd491949482527d406788045c546d4f8789e93fc527b91385", size = 5054424, upload-time = "2026-09-02T14:47:58.131Z" },
++    { url = "https://files.pythonhosted.org/packages/f4/d4/2a90acc1f6fabaa3a8db9340437822bd8d041b205d626a4b3e8621aaa390/lxml-6.1.3-cp312-cp312-musllinux_1_2_armv7l.whl", hash = "sha256:5609efdb0d3c95499c00046bc53648b3482ec2175b5503d6e611b3f0555dc71d", size = 4785572, upload-time = "2026-09-02T14:48:01.029Z" },
++    { url = "https://files.pythonhosted.org/packages/a5/1e/b90e845b1dcd0f2f3f26b98283d857f25909223aacd265eee032c34ab8b1/lxml-6.1.3-cp312-cp312-musllinux_1_2_ppc64le.whl", hash = "sha256:97ce49699d87ebf8aad631b55d65b33219a4f1bfefbbf5bff19dc9af160aeaf9", size = 5656516, upload-time = "2026-09-02T14:48:03.419Z" },
++    { url = "https://files.pythonhosted.org/packages/eb/ab/0a1b802c57f3fba5c4efd77d5c6b78adaa8f7b681f0c90456b140fe8bf6c/lxml-6.1.3-cp312-cp312-musllinux_1_2_riscv64.whl", hash = "sha256:48542c9acba9ff9450bd18d871d2c2c8787fdb283572b623d206f1b927cd7d9e", size = 5245982, upload-time = "2026-09-02T14:48:06.109Z" },
++    { url = "https://files.pythonhosted.org/packages/da/ee/2c016fbceb3778137459292538d9dfa7e3ad9070fe409c15254ddd90d2cc/lxml-6.1.3-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:c55e71a9b1db1f107efb60da49c093689b74c5c31a708e5379e2fd9439d4fbb5", size = 5267340, upload-time = "2026-09-02T14:48:08.374Z" },
++    { url = "https://files.pythonhosted.org/packages/9c/b1/736d18fd6f0835761923b7bac1f0c27d60c1200384e9093f05d8c5100525/lxml-6.1.3-cp312-cp312-win32.whl", hash = "sha256:b3ff39654f0ce6ebd4db154211136dbe7e8157bcc3bed2344c87f32c7c6ecb6c", size = 3602606, upload-time = "2026-09-02T14:48:10.384Z" },
++    { url = "https://files.pythonhosted.org/packages/3a/5b/6ed903e4e6278a020c8a6f0dbbe78030d041840a6b4a64ea441a1e414077/lxml-6.1.3-cp312-cp312-win_amd64.whl", hash = "sha256:3e9a00d1c2c30936f7add097c41afc5da6556c580909104aafd382cac92a855c", size = 4005999, upload-time = "2026-09-02T14:48:12.51Z" },
++    { url = "https://files.pythonhosted.org/packages/e4/1b/7bcebb7b6332cb3ae85e9c13b139adb6f23f75c71d84041c56a5005d9a29/lxml-6.1.3-cp312-cp312-win_arm64.whl", hash = "sha256:1aeca87830c4fe649dcf93fe2b059525b71c72587f21be4ae4af7103082a79fa", size = 3666631, upload-time = "2026-09-02T14:48:14.567Z" },
++    { url = "https://files.pythonhosted.org/packages/52/05/3ef45db776baea068044c799bbba68f3ca00a440c0e930a17c572f3d9639/lxml-6.1.3-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:3a48093cdb058a93af842ede9703520e810b05dcd0fc6d7190a06376c3bfb6bd", size = 8590357, upload-time = "2026-09-02T14:48:17.413Z" },
++    { url = "https://files.pythonhosted.org/packages/8c/a5/eee2fc77eee5ea68e4a4334b1def1781a3beaeefd3d98e81b4a38dc447b7/lxml-6.1.3-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:887c021d9a977cff89cb273047c1352997b772a8908a25c21836861f69b92be1", size = 4632616, upload-time = "2026-09-02T14:48:20.745Z" },
++    { url = "https://files.pythonhosted.org/packages/35/42/df27b56848acd29d8a720acc28977911aab36f2a09df4208d5502e887415/lxml-6.1.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:611a51e61c92f62345a50b0035df6fc0d678f9299f33728826d831598862f59d", size = 4936186, upload-time = "2026-09-02T14:48:22.94Z" },
++    { url = "https://files.pythonhosted.org/packages/ab/8d/8a7b91df0b54d09d25f5f44885d6b3e0a6d6643a8c070191580318d20c42/lxml-6.1.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b477912f42c5c33405a10c759d22f80cf5af043ae02d95b9d8e5e5bc555739ed", size = 5093324, upload-time = "2026-09-02T14:48:25.132Z" },
++    { url = "https://files.pythonhosted.org/packages/c6/7e/8f340ddcd43790332fb0de8a26628d571a492da3300cd191821698407c96/lxml-6.1.3-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5cffe18571ccc51d742cd08cbb3f8b756de9311d18c7ea98f5d92f37b8fb60c2", size = 4998850, upload-time = "2026-09-02T14:48:27.394Z" },
++    { url = "https://files.pythonhosted.org/packages/c5/c1/9c5bb572f1f09ec9e4322bd4a4e9f4ad48347fc56ef94cf4df58a5279dc8/lxml-6.1.3-cp313-cp313-manylinux_2_26_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:75cc6569e86be5785b6188ef1642670c6adbc984e81ec35e224842ecd9eefcc8", size = 5626813, upload-time = "2026-09-02T14:48:29.61Z" },
++    { url = "https://files.pythonhosted.org/packages/ac/7d/8bf1fd8bae8247743968bb76d027a1ac5bd2c4b44495fba6a71b30d10706/lxml-6.1.3-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d85dfab42dd672f87a7f76e9de7172962aee69fa12044f0d6e1a23cbd53fb80e", size = 5232385, upload-time = "2026-09-02T14:48:31.969Z" },
++    { url = "https://files.pythonhosted.org/packages/7b/2e/6cef69ed81cb7df0d03b0dd09d08e6e2cf5061a743ff6f42f0b741548e9b/lxml-6.1.3-cp313-cp313-manylinux_2_28_i686.whl", hash = "sha256:42632b4024ab24a6b488f559ac851312509888b6b80ae2aa11cf29a646a0d245", size = 5347088, upload-time = "2026-09-02T14:48:34.13Z" },
++    { url = "https://files.pythonhosted.org/packages/5f/e1/8e5fd8ddc8c7d685badb0f2db149e3c9da84eefc2827c01c658df2c4e3cb/lxml-6.1.3-cp313-cp313-manylinux_2_31_armv7l.whl", hash = "sha256:febd35ef45f603c2d74b74655efdbf45e14f55fc0aef4ac82b663ca829b283e0", size = 4707227, upload-time = "2026-09-02T14:48:36.62Z" },
++    { url = "https://files.pythonhosted.org/packages/7a/7e/00041382a11be40a88bf405ebff11c8efabd3de79f2691e1638b1c47a8a0/lxml-6.1.3-cp313-cp313-manylinux_2_38_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:a43b3bdf11e477dc7770609d3477316f974354dfc8425d596f64f471cc8daf6e", size = 5240208, upload-time = "2026-09-02T14:48:38.893Z" },
++    { url = "https://files.pythonhosted.org/packages/fd/fe/316538b5cff0936fa63d45d421c655730fcbb5a28dcac728c175083002bc/lxml-6.1.3-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:5d582042c69857c364e8153de6e18e0da9b7b515a6a8113caf69a6ec8e0520f2", size = 5050271, upload-time = "2026-09-02T14:48:41.213Z" },
++    { url = "https://files.pythonhosted.org/packages/c9/91/455bcccb3ac725373007344d351151810cd19762d1673b64b811f4359a42/lxml-6.1.3-cp313-cp313-musllinux_1_2_armv7l.whl", hash = "sha256:8e49a646acfab83c68974f4aa1d0a2acca9e88d7d627ae0fc13201b14b76d310", size = 4780433, upload-time = "2026-09-02T14:48:43.779Z" },
++    { url = "https://files.pythonhosted.org/packages/cb/f6/580440e2f52cf00bba5c5e1080bfa88cdfcde73be71a11d95170ddbb663f/lxml-6.1.3-cp313-cp313-musllinux_1_2_ppc64le.whl", hash = "sha256:0dee106e9aa97fb00541b1ed7827070564d0549c3d3fba8920e6b20fd980f748", size = 5645928, upload-time = "2026-09-02T14:48:46.187Z" },
++    { url = "https://files.pythonhosted.org/packages/f6/dc/d123c1f244306543d545f62443f794959e4f1ea709fe100f8740d514e74a/lxml-6.1.3-cp313-cp313-musllinux_1_2_riscv64.whl", hash = "sha256:dd5e90f34cffcfed97f36cf066325773d2b6021c60c29942e53a18b028501b1d", size = 5231184, upload-time = "2026-09-02T14:48:48.691Z" },
++    { url = "https://files.pythonhosted.org/packages/c3/3c/fe55b2bd5c6113c906511cd88f6a470195c5fbff1124f19970ab706c3477/lxml-6.1.3-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:d9b3e7d71bf6acff341233417abbdface29c647e3113892d9aaedc02eb4aa2bc", size = 5255814, upload-time = "2026-09-02T14:48:50.948Z" },
++    { url = "https://files.pythonhosted.org/packages/e7/a7/485df55acf55dc35e4ca89d2f48f03889e5a3241826b18b85102b32ce9d8/lxml-6.1.3-cp313-cp313-win32.whl", hash = "sha256:160fcf381f76c3aeac28a756bec44f48942a8f7245a87aa28e3a523b4d90cd87", size = 3602214, upload-time = "2026-09-02T14:48:53.236Z" },
++    { url = "https://files.pythonhosted.org/packages/c0/28/e46a7702bd95e9043291f7c3539b6184cba66f96cea9936f20939b284eeb/lxml-6.1.3-cp313-cp313-win_amd64.whl", hash = "sha256:e477aca0bc0d19f3b4ae9e4f2a1cfd687c31bf772d78734910658186b40b2477", size = 4004091, upload-time = "2026-09-02T14:48:55.699Z" },
++    { url = "https://files.pythonhosted.org/packages/8a/1d/154c78e20479a43916e63f19cb720d83f44f024b03228be44c92d9a97b24/lxml-6.1.3-cp313-cp313-win_arm64.whl", hash = "sha256:b1cc980905221a5d8b3c476330730b3adb40ff80add71ffbdb6215ba055656f1", size = 3665468, upload-time = "2026-09-02T14:48:57.703Z" },
++    { url = "https://files.pythonhosted.org/packages/0c/15/fc75a70b0af6021d0ea16811f1fc71cc42cd06ce90fe10f007a69b2eed84/lxml-6.1.3-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:2bec13085dc8ef48a3fe62f7dfcacfeda2c785cdf19cc8eeda2bb9ed081da165", size = 8609725, upload-time = "2026-09-02T14:49:00.156Z" },
++    { url = "https://files.pythonhosted.org/packages/84/ef/398fcf9018f881ec9aeaafae1ddd6586dfb13314a35d35e899de373dcae0/lxml-6.1.3-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:4f4db7c7e954d289d71878938348b3d91b904a3e8210a11939359fb758a58e7d", size = 4639629, upload-time = "2026-09-02T14:49:02.81Z" },
++    { url = "https://files.pythonhosted.org/packages/a7/2d/49b6a6ad7ce8f64b07b9fe852ff0c6d3fcbb26db61bee4f63d4120180a1c/lxml-6.1.3-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:2cae5d5c90a62d9139c512a0cb1aad1d182b022b5740daea2617eb5bf7fc658e", size = 4965074, upload-time = "2026-09-02T14:49:05.133Z" },
++    { url = "https://files.pythonhosted.org/packages/66/bc/6230cf80e4331c33383b0b6b73dc31a393dd76edd4cb73d761de5123034d/lxml-6.1.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:c6c0c13128a32eb04a51357e56a094e13aa8e6d3d1884de2e9ae923f6915e1a8", size = 5099355, upload-time = "2026-09-02T14:49:07.343Z" },
++    { url = "https://files.pythonhosted.org/packages/ac/cf/d1143d9b7717e07a82f158a1fc9ce6e581fdad1226734950af869e3ffde4/lxml-6.1.3-cp314-cp314-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2221e88679d1351e9a40aaee54bc65679b9795bbd0160bc3d5e36b163344eb75", size = 5036795, upload-time = "2026-09-02T14:49:09.65Z" },
++    { url = "https://files.pythonhosted.org/packages/31/6f/194bb00ffb89712c30f5a7e1b8e685590e140fad6c8261fec172c09a3dc0/lxml-6.1.3-cp314-cp314-manylinux_2_26_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:cfb398886a7eb4c719161c3efcff2a1248febc53a4d8e5072d2d8a87fed84ac9", size = 5658740, upload-time = "2026-09-02T14:49:11.9Z" },
++    { url = "https://files.pythonhosted.org/packages/e9/44/27e3cee3dcdb3b7bc09727b642bdbfcd098490ea77df04611db9060d7722/lxml-6.1.3-cp314-cp314-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a7eb78ba28b187e1e9203a55c60fcf70df2d22cb205fe6d51b9383d6097419f0", size = 5245991, upload-time = "2026-09-02T14:49:14.154Z" },
++    { url = "https://files.pythonhosted.org/packages/ca/e9/8312560579fc980bbd2233a8a673cc46f7d613d3633f2bf08a21e8f4ad13/lxml-6.1.3-cp314-cp314-manylinux_2_28_i686.whl", hash = "sha256:ea6b1e9105b4b24a34c722432d9fb578f9ed83af21fa1abda639011e0f22bbb6", size = 5354136, upload-time = "2026-09-02T14:49:16.459Z" },
++    { url = "https://files.pythonhosted.org/packages/74/d8/eda60f4f73a9c780b5d6e1175484f66e6c81a2c93346e2906a1fec9c7a02/lxml-6.1.3-cp314-cp314-manylinux_2_31_armv7l.whl", hash = "sha256:e8b17e23df3e827a69d25af70990ca2420e92668aaffaeeb3cd2351d7916a023", size = 4704379, upload-time = "2026-09-02T14:49:19.032Z" },
++    { url = "https://files.pythonhosted.org/packages/ba/c8/c9cc60057be78ac34bd2b842e45e6e88edbfe5e532e82c3b82381b7aab49/lxml-6.1.3-cp314-cp314-manylinux_2_38_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:1b7c37339d7e75cab9a123a04248e243cefefb302ad6db566ea0c77cbcde421e", size = 5258676, upload-time = "2026-09-02T14:49:21.306Z" },
++    { url = "https://files.pythonhosted.org/packages/41/7b/66894008fee8d1785b8db129747ae963fd427b68f456918df7f2f24a8b98/lxml-6.1.3-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:83e3a51e7933db700a0da0db31849db3a24022d9970da9bb73001e1d0326fd92", size = 5090069, upload-time = "2026-09-02T14:49:23.562Z" },
++    { url = "https://files.pythonhosted.org/packages/8b/31/c1b60404859f4c3cd1f41f29c65a24e25cea78fde822d9574a21f66810be/lxml-6.1.3-cp314-cp314-musllinux_1_2_armv7l.whl", hash = "sha256:9bde9ae026a55b9a192078dfa6e27dd0ca4a050171ab6272e92f97b757dfdf48", size = 4741958, upload-time = "2026-09-02T14:49:26.037Z" },
++    { url = "https://files.pythonhosted.org/packages/23/b8/6285f0cf546f14da2554cabdeaf7c2c2ff3190c74807f0de2e8810a786f9/lxml-6.1.3-cp314-cp314-musllinux_1_2_ppc64le.whl", hash = "sha256:1a635e837b50a1819bebfedaac5916498ea024120969da8790500148fb0a894d", size = 5683245, upload-time = "2026-09-02T14:49:28.438Z" },
++    { url = "https://files.pythonhosted.org/packages/d3/f6/2168cab44336dcb15fed0f0b78577225b83297cdf0dee349c95420c3dcb0/lxml-6.1.3-cp314-cp314-musllinux_1_2_riscv64.whl", hash = "sha256:d0c5c362bc94f1929dc7e96e715bbe7bd17037f802e6d8f0d1545df9133c0559", size = 5246087, upload-time = "2026-09-02T14:49:30.955Z" },
++    { url = "https://files.pythonhosted.org/packages/f5/89/32f5de69a0a31f30e6164981851f87b37ecb2c4ee838e504b88d49d4818e/lxml-6.1.3-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:c59e4265608da6a041f54646ecc0c9ecdbb19aaf14c4c684bb6c2114998cc415", size = 5269352, upload-time = "2026-09-02T14:49:33.502Z" },
++    { url = "https://files.pythonhosted.org/packages/a2/a1/741d952ed3a7ef7a50055c6415aec3f067015e97f72f4389ce77b09657ba/lxml-6.1.3-cp314-cp314-win32.whl", hash = "sha256:2e62c569ec7531b679b184cbfe335c501c1d13c4b363560013019962eb630e6d", size = 3662783, upload-time = "2026-09-02T14:50:23.751Z" },
++    { url = "https://files.pythonhosted.org/packages/0f/bc/5811cc73cac05e324e05ba9b0924e1a163a317a167ede8a9c748b11db30a/lxml-6.1.3-cp314-cp314-win_amd64.whl", hash = "sha256:66299564c046bc7e0cc5de5106601eae907e9fa5904cd68a323380a8502f7861", size = 4073951, upload-time = "2026-09-02T14:50:26.348Z" },
++    { url = "https://files.pythonhosted.org/packages/92/18/3768c8b01ac3a9bed1914715e6011711b00e2a11628ffa6f7fa37f8e0269/lxml-6.1.3-cp314-cp314-win_arm64.whl", hash = "sha256:ebd054ad1737a68fb7c5c073d405cef2b88bb824e294de3b4a4e995b47f0e376", size = 3749279, upload-time = "2026-09-02T14:50:28.749Z" },
++    { url = "https://files.pythonhosted.org/packages/72/38/84684784738d9451db2b330de2483f496690c3a5c642071df24135739b37/lxml-6.1.3-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:5a143e6207579de8baeded4eaac9134413200359f1969d636f0bfb98ee8c3c8f", size = 8860296, upload-time = "2026-09-02T14:49:36.346Z" },
++    { url = "https://files.pythonhosted.org/packages/24/b7/fc4c50bb1b38e864010ea396046cabe85129bf9e65b11edcfbc37d356241/lxml-6.1.3-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:a1cec0f99b9b914d39176347a93b7610dc09324491aee1cbc57cd291a41a1d55", size = 4755190, upload-time = "2026-09-02T14:49:39.872Z" },
++    { url = "https://files.pythonhosted.org/packages/94/e2/ee9aa6ed2b666b2db1f6f7fd48964ff9da39ebe827ef5eac0ab881f639d9/lxml-6.1.3-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:f6b9d2aad499c769ee8287609ab0e6de99d8bcea99c6e6c2e64945259fd52fb2", size = 4979517, upload-time = "2026-09-02T14:49:42.153Z" },
++    { url = "https://files.pythonhosted.org/packages/29/e3/e7763d1661b283ddd4fa36f91b9a497db6b8d2aff55028b16c7f642e0755/lxml-6.1.3-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:28a23fefdb345b2d4d0ff2860571b5ff9a89a28b6a120f720e8fb0324d346626", size = 5115270, upload-time = "2026-09-02T14:49:44.493Z" },
++    { url = "https://files.pythonhosted.org/packages/2d/cd/22205d5b4d177e3f4156f780412426ee7c7f8107809f119f0dcc40fa51e3/lxml-6.1.3-cp314-cp314t-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:545ccc14fb05485f48b4439ec35beb16d5b5280eb6c81c658bd4707a2a119414", size = 5032449, upload-time = "2026-09-02T14:49:46.841Z" },
++    { url = "https://files.pythonhosted.org/packages/da/43/06a4626c3bb79ef8c501b674afab8100d64e798665bb2a97d1c960636a49/lxml-6.1.3-cp314-cp314t-manylinux_2_26_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:93476b6514b373fc6ca67d26c442784f7807c86f00635bfe79f935c3eab2af17", size = 5603325, upload-time = "2026-09-02T14:49:49.664Z" },
++    { url = "https://files.pythonhosted.org/packages/d0/9c/733682a0c2de9f5779ba207bbb3f3f6be8c6bda863fc01739b186b38783a/lxml-6.1.3-cp314-cp314t-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8db38ff3fb7aee7d6a82ae4da2eef1178656fe1216841fbd24870062a9d60473", size = 5229023, upload-time = "2026-09-02T14:49:52.447Z" },
++    { url = "https://files.pythonhosted.org/packages/c6/8a/e69cdaca3fd33a647942925664f01b20908d41a6968c182305be9c38fb11/lxml-6.1.3-cp314-cp314t-manylinux_2_28_i686.whl", hash = "sha256:25f4118c438f96bb466e83108506d03d5c31b1bd2387e83e5b070bda6ded9c37", size = 5317811, upload-time = "2026-09-02T14:49:55.25Z" },
++    { url = "https://files.pythonhosted.org/packages/2e/b2/0c397588174403c2ab68fc464abf97e03e7324f9c6cb6a99023104707195/lxml-6.1.3-cp314-cp314t-manylinux_2_31_armv7l.whl", hash = "sha256:1beb0f9909b26cee938df9ba56b15252a84429b1fc30ce6fca161390b9789a70", size = 4646516, upload-time = "2026-09-02T14:49:57.761Z" },
++    { url = "https://files.pythonhosted.org/packages/56/7e/cfea25afafbe49db8b225764f7f74bb37c2a7f5e717d917d3d4a5e098ed4/lxml-6.1.3-cp314-cp314t-manylinux_2_38_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:3a27ac6c780c8b8a1cd231b58407634cafc1c4cc28cd6c7141362df0f36351e7", size = 5240626, upload-time = "2026-09-02T14:50:00.279Z" },
++    { url = "https://files.pythonhosted.org/packages/a1/75/7a587771bb52ebb0e2c57b6dbe9fd96a70fbb54d72ddd97d54c5f8ec18d5/lxml-6.1.3-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:a1932d7ce78a561367512c594fe66eac2b2ec9b9264cfd9b5f950622f4a116e2", size = 5086619, upload-time = "2026-09-02T14:50:03.245Z" },
++    { url = "https://files.pythonhosted.org/packages/1e/01/94c0ebe6d831861542d251e038052e52bf6d33f1d18f1cfffdc82851065a/lxml-6.1.3-cp314-cp314t-musllinux_1_2_armv7l.whl", hash = "sha256:7d0f5976aa2701996f759b30172925829867547bb073af0ae67d1307a0f0262c", size = 4758828, upload-time = "2026-09-02T14:50:05.873Z" },
++    { url = "https://files.pythonhosted.org/packages/1f/f1/938d67bd0e5b1fdfa52be28aefdffbad57e1f6b8e921c2aab88542c75f40/lxml-6.1.3-cp314-cp314t-musllinux_1_2_ppc64le.whl", hash = "sha256:c5e7ce578aa8a80910a72a8ca0bbea3baae10100827249001999726a788456d8", size = 5627083, upload-time = "2026-09-02T14:50:08.555Z" },
++    { url = "https://files.pythonhosted.org/packages/d8/65/4e51522f6c214650db0abb7b16ccd11b1238b8a05a8d59aa4ebed59c9f67/lxml-6.1.3-cp314-cp314t-musllinux_1_2_riscv64.whl", hash = "sha256:d97c5227621af74b111882a290b10f371780a38eef9d9e730408fba2259b52fb", size = 5235170, upload-time = "2026-09-02T14:50:11.255Z" },
++    { url = "https://files.pythonhosted.org/packages/92/c2/e73d19365665f6b16ef84df21199befc3b06e4c539046ad2d9595f6fb9ea/lxml-6.1.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:da707f14ea3c35ee463d50acd596d6488e4b2b4ae7cf77a5bf93f55c023d63e8", size = 5252273, upload-time = "2026-09-02T14:50:13.782Z" },
++    { url = "https://files.pythonhosted.org/packages/48/a9/7f386c84c9fe2854e1ca6e231c285e1c8f392971ac353c6865e6ec49faff/lxml-6.1.3-cp314-cp314t-win32.whl", hash = "sha256:9efe56a68179f3adc4de41861c9358931db03837c48dd5e1c78077b84dd07f3a", size = 3902712, upload-time = "2026-09-02T14:50:16.171Z" },
++    { url = "https://files.pythonhosted.org/packages/82/a6/8a3eb793f7900ef01c7f99e6f5fcbcfbdff35251cfaef66b32a4c16352d6/lxml-6.1.3-cp314-cp314t-win_amd64.whl", hash = "sha256:c9389b3784b56c58d933b5e0aecdf28f901b073ff385358d8a7d40907f6e14b2", size = 4400979, upload-time = "2026-09-02T14:50:18.621Z" },
++    { url = "https://files.pythonhosted.org/packages/cc/c4/3807bea283b4fe9e9d9f5dde46a73df91178472b335d2778e10b2a37aa22/lxml-6.1.3-cp314-cp314t-win_arm64.whl", hash = "sha256:32a409be3190b088f960ac92bfedfbef2f86c49ff940765e1548177592d20026", size = 3823401, upload-time = "2026-09-02T14:50:21.119Z" },
++]
++
+ [[package]]
+ name = "markdown-it-py"
+ version = "4.2.0"
+@@ -1920,6 +2000,102 @@ install = [
+     { name = "backports-zstd", marker = "python_full_version < '3.14'" },
+ ]
+ 
++[[package]]
++name = "pikepdf"
++version = "10.17.0"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "lxml" },
++    { name = "packaging" },
++    { name = "pillow" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/b8/c3/8fc5695947a711263e17786c1d913b0cea660a1b174a9e0e944ad037732c/pikepdf-10.17.0.tar.gz", hash = "sha256:de4ccaae83628e86c1fd473b384c09c6ff1dd35a583a8dacbf61d2aa4bea843b", size = 9973818, upload-time = "2026-10-11T23:11:19.91Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/00/59/e68fb9ed0bdb6365f5ccdf57e407d854d719af7a6ccc0dfece1453a60dec/pikepdf-10.17.0-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:ff192cda8d7e368547f382d10ecb48696049057c57a37365a7621b415fdd9ec3", size = 2098618, upload-time = "2026-10-11T23:10:04.554Z" },
++    { url = "https://files.pythonhosted.org/packages/b0/15/0a9fdc16b4ede4473c7d4f0c819b4ffbe1ed89d15d72bb6ad7e537cf0e2a/pikepdf-10.17.0-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:69ed0bf3895ab82a7d3908c76c54afe8f3fd2a03091559877347f2273d5da268", size = 2450383, upload-time = "2026-10-11T23:10:06.47Z" },
++    { url = "https://files.pythonhosted.org/packages/df/7e/6d1fd4f06e20a79736dcd7436100475a5ab2d569b478a1baec7d0461550b/pikepdf-10.17.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f76e2ac6777b2d2a74a71eb73fa2438734ad453177c66f5a5a246b5e2660336b", size = 2665560, upload-time = "2026-10-11T23:10:08.235Z" },
++    { url = "https://files.pythonhosted.org/packages/4c/9a/5dae0282d32f917957d833c3a316bc5458182cd32b328186d5c8e0068b0a/pikepdf-10.17.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:f514e73e24450f35903e4f0b6427abdd3ddbabf03270b4372956322032861337", size = 4090633, upload-time = "2026-10-11T23:10:10.372Z" },
++    { url = "https://files.pythonhosted.org/packages/25/d1/ce331ce240fe599af704a953514739417a39fd54e7d686bb32bea64bbe84/pikepdf-10.17.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:bc8464257e9cf82bf2f82f1bb4ba64330da51ede0ecf0f9dfa6fbbe61aa23cc2", size = 4308336, upload-time = "2026-10-11T23:10:12.571Z" },
++    { url = "https://files.pythonhosted.org/packages/8f/17/f255304189ec3e7818fd4415348a06bfdc964fc618ef805063559d875ab5/pikepdf-10.17.0-cp312-cp312-win_amd64.whl", hash = "sha256:5598f0e69fb46e50c933518185160129d52d9140169af8eeb7f890c41a2ea691", size = 3817129, upload-time = "2026-10-11T23:10:14.857Z" },
++    { url = "https://files.pythonhosted.org/packages/4e/17/e064de62dae0f726dbd5e2583ca52dff73a2010047b1d4f1e8a8d7063966/pikepdf-10.17.0-cp312-cp312-win_arm64.whl", hash = "sha256:9e0f2da8ca5c9551c8fbefd155f216fe5ac02c906d5327ee6d791a26287acc09", size = 4308458, upload-time = "2026-10-11T23:10:16.904Z" },
++    { url = "https://files.pythonhosted.org/packages/e5/79/7b9a3e237f8bcc737f2a248a0b68f89357be51a27e53d6c4f5252d9a4b81/pikepdf-10.17.0-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:ebf78c8e0a4eae6fb68b587cba2b1d795146c10d9fbc159cc76e1d62292a032b", size = 2098719, upload-time = "2026-10-11T23:10:18.639Z" },
++    { url = "https://files.pythonhosted.org/packages/64/c9/45cd525ac3596033b3f61c31f0ba971195fe2cb65b41fadd7e20498507e8/pikepdf-10.17.0-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:eb5c07d29a07283086d75c6ce7a834daaea77e64fc38df425dfd9ef51bc31301", size = 2450452, upload-time = "2026-10-11T23:10:20.851Z" },
++    { url = "https://files.pythonhosted.org/packages/25/87/2b42abe9399cf5d526c17ca5c21fea45afec2c84c223cd37d22fd85d0728/pikepdf-10.17.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3df92d71de08569bea46e9b7e98c7b76dd69fbb0749b7f7acbedb373552983fe", size = 2665585, upload-time = "2026-10-11T23:10:23.924Z" },
++    { url = "https://files.pythonhosted.org/packages/7a/bc/df6b19fadb1c901bde28bb435d040627b1159a83c587dbe381cd99eb5e85/pikepdf-10.17.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:40db4f5e8c52825ad587533e23d6290f2a3c6272ea90c56d22d149019282e9d1", size = 4090860, upload-time = "2026-10-11T23:10:25.788Z" },
++    { url = "https://files.pythonhosted.org/packages/52/08/9ee6ff46af873ad6ecea5afe5cefc94597cf738d356b205f5fc1ee89af9b/pikepdf-10.17.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:d981a8477f57e5eb277ffe494596ca24fb0b36adbeb128ff73bfd0b9a38d4963", size = 4308341, upload-time = "2026-10-11T23:10:27.969Z" },
++    { url = "https://files.pythonhosted.org/packages/37/a2/c8b2f2f0296dd19d528101cd57808393bbb040b670d2041323c24ef55e0a/pikepdf-10.17.0-cp313-cp313-win_amd64.whl", hash = "sha256:8fe0aca0174cec0dfd8e367e4b663db029cd13fbdb13faf087e4f2d4955ee16d", size = 3817159, upload-time = "2026-10-11T23:10:30.071Z" },
++    { url = "https://files.pythonhosted.org/packages/ae/66/40601fa136af45aca3d1c87850ea615870dc28c53502a19f4df5678b8997/pikepdf-10.17.0-cp313-cp313-win_arm64.whl", hash = "sha256:b6f976b21b64f9856c1b106814de1cdfc24cafb99ff37910f603b03aa1ff7cb6", size = 4308440, upload-time = "2026-10-11T23:10:32.362Z" },
++    { url = "https://files.pythonhosted.org/packages/ff/67/fddcca144ec7a6ae7c82901a9ceb892b9ad4b49b1c93992b40d79985265b/pikepdf-10.17.0-cp314-abi3-macosx_15_0_arm64.whl", hash = "sha256:f4c755c7fed444339e0d4c5fb77b05fad3f8f6d7954e34ce0894a07cf0870d9f", size = 2098111, upload-time = "2026-10-11T23:10:34.747Z" },
++    { url = "https://files.pythonhosted.org/packages/79/81/4f394176a6856ebce23bbc3cc0820a3c5224b90dc09178f2c591c3825320/pikepdf-10.17.0-cp314-abi3-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2e134a994cee18018e06ab7f14685c57903985f39e14c3f6afb760aab71602f2", size = 2447992, upload-time = "2026-10-11T23:10:36.686Z" },
++    { url = "https://files.pythonhosted.org/packages/3a/32/6a3669fb79b7b82b9b8abdbc31eb2d32cbf2399eadb6b98b101f1eb24784/pikepdf-10.17.0-cp314-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e527aa20ca2e2cb97b5148847d1d394460f92de38d92b2ead4046cfb2c593f73", size = 2662993, upload-time = "2026-10-11T23:10:38.716Z" },
++    { url = "https://files.pythonhosted.org/packages/1e/29/e07f3ea0ac0167b2b181b982f57e16736f87aeaa1d6537a02f0e6d675f5f/pikepdf-10.17.0-cp314-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:1a6d7bb5923bd3c48f95af01b3dff064d6216f02f04426af85a5fe4f4b297758", size = 4088391, upload-time = "2026-10-11T23:10:40.549Z" },
++    { url = "https://files.pythonhosted.org/packages/b5/41/f31ccd8837a935efa2de586661e412455192bd76cba4dddc62a74be6381a/pikepdf-10.17.0-cp314-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:c3a6e81f7979063e8f861df71fd18e701605d3b3b5fd8bd1c36ac0c61a4c5889", size = 4306039, upload-time = "2026-10-11T23:10:42.573Z" },
++    { url = "https://files.pythonhosted.org/packages/c4/9f/f711c00110f5ed37d4937de55dbf6b1ae5747364b1a8306a9fd8fe9b5694/pikepdf-10.17.0-cp314-abi3-win_amd64.whl", hash = "sha256:c1778c3e9dcb0caae239910bb3d438d2d68b1d1b278b4322ddd1a91d267e1dcf", size = 3912795, upload-time = "2026-10-11T23:10:44.766Z" },
++    { url = "https://files.pythonhosted.org/packages/c7/6c/7523b0fad4d38dedc544a632e9ab0fd943acb0e6e3b4070bf58ddad6dec2/pikepdf-10.17.0-cp314-abi3-win_arm64.whl", hash = "sha256:d9c1eb3f5333525b14c3e27cf083d388a8838e3c284d34c1376b0bd532eacb8d", size = 4422797, upload-time = "2026-10-11T23:10:47.077Z" },
++    { url = "https://files.pythonhosted.org/packages/0a/24/82b0f0db4f4529ab5556a7c9734a2654e73803233d99e60446cbeba89a90/pikepdf-10.17.0-cp314-cp314t-macosx_15_0_arm64.whl", hash = "sha256:c8e2cc2d281896279cc8adcab602265301b5193abd878d2413f2137686115a52", size = 2105711, upload-time = "2026-10-11T23:10:49.148Z" },
++    { url = "https://files.pythonhosted.org/packages/e5/c0/42432cc41623c02f8dbcd62e23e14d0b5d14250be760489f50a9629177bf/pikepdf-10.17.0-cp314-cp314t-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:929d8719f844d70070a547494aeebb2bc1f43958ffb3de901e65e9d8e20a1ccd", size = 2455633, upload-time = "2026-10-11T23:10:51.226Z" },
++    { url = "https://files.pythonhosted.org/packages/02/96/3daaf280ba1604392c468ce1c09a0051febc5e4cfbc4b8617dbbd51f8635/pikepdf-10.17.0-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:16643238adad4f5d21f80d047c67bb011f274b9acb4310300f3346c8cc409816", size = 2668670, upload-time = "2026-10-11T23:10:53.214Z" },
++    { url = "https://files.pythonhosted.org/packages/87/d1/87a6df243d140595a3475607ee4346cdedd8a38ba10cd6b9a8d2e8d526e5/pikepdf-10.17.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:53a3cd0e3cfbe1653395fa32ab6e75d14ad084dd03e9b4f8a3933ba5c9f12630", size = 4097669, upload-time = "2026-10-11T23:10:55.383Z" },
++    { url = "https://files.pythonhosted.org/packages/9a/77/cd101347ea8ff64ddc1d2c5b900effcf723fc70268fb82b5f8d5b6e2fe91/pikepdf-10.17.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:cff443b14f960549d3bd1d32293ac470f17f44cdc9bff18be5dbb347d3a6c6ec", size = 4314337, upload-time = "2026-10-11T23:10:57.424Z" },
++    { url = "https://files.pythonhosted.org/packages/37/71/955af764bca7d21f112e84113f6e85181c82237dab7f46fa0d9b39fb9f71/pikepdf-10.17.0-cp314-cp314t-win_amd64.whl", hash = "sha256:88992160d429cc69c32a945776aee27ae2824328dbabf36d11df2ca69214eadf", size = 3952707, upload-time = "2026-10-11T23:10:59.678Z" },
++    { url = "https://files.pythonhosted.org/packages/6a/22/ea951fd50f529303c6b870734550c5fab16470cc687dfb0c314a75239861/pikepdf-10.17.0-cp314-cp314t-win_arm64.whl", hash = "sha256:fc795b9190e236309d7ab59bcbea897af4a1a92344a22b2c5b87d50f56f11f81", size = 4450383, upload-time = "2026-10-11T23:11:01.822Z" },
++]
++
++[[package]]
++name = "pillow"
++version = "13.0.0"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/ce/a4/9cc30690a394a8305e8be4c9036aa16d0dfddadd09079860b582f562496d/pillow-13.0.0.tar.gz", hash = "sha256:cdcd1ba258178f7356d74170c9a81ba4eab6a5d55748bc402a5a2a6fe6be3510", size = 47058631, upload-time = "2026-10-16T22:18:09.718Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/7a/b8/58d79332229482eb0d27c82973850808c19d37e5bdc14443d3417bd373f5/pillow-13.0.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:67c8d44ad89fa7eb88de5d6ef6199b1e03dd24974f85a67639fc8badb801fe79", size = 5568643, upload-time = "2026-10-16T22:15:44.474Z" },
++    { url = "https://files.pythonhosted.org/packages/39/4b/f2ed53d83aa44ac19599ac0a54897f867fafb95f406980d1e24083f8cbe3/pillow-13.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:fc481f742ccda20e9ed760b8f978dff50f2a4e9bc253ac167fb0a05b0783ef52", size = 4852329, upload-time = "2026-10-16T22:15:46.284Z" },
++    { url = "https://files.pythonhosted.org/packages/3b/bb/9e30e8ed18c20800ee327a12107d5249ad8dc444867b3adfcc21654e3c71/pillow-13.0.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8bf295fe459343bc6093c8e5e0df60bfa189e0fcb775a22e2c2488fdeccc6c0d", size = 6519309, upload-time = "2026-10-16T22:15:48.14Z" },
++    { url = "https://files.pythonhosted.org/packages/e6/99/fdf65cc539e266ab93546c261bdf98411fe165c6e4e13f9dbf597097192b/pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca", size = 7144542, upload-time = "2026-10-16T22:15:50.093Z" },
++    { url = "https://files.pythonhosted.org/packages/26/9b/f38b7c4d8f599537e2d1a6d546cec9beef7536ff8f5c49a3f9c78179d8ac/pillow-13.0.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:4bd024d567eca931b668978d672dba914d4b8e2628e2c3073a2ad178de8a2620", size = 6618042, upload-time = "2026-10-16T22:15:52.054Z" },
++    { url = "https://files.pythonhosted.org/packages/a8/7c/45ee28531f89ee4582967d8a17f7a26d71ca64cd902b93c269590cd60a00/pillow-13.0.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:23edf4ec4b6f4f240e8df6e4985e9ee2ced86474632433e55fb1e2548744bf40", size = 7228137, upload-time = "2026-10-16T22:15:54.009Z" },
++    { url = "https://files.pythonhosted.org/packages/01/bc/9c2a969cb1b70201d04fa17fd5aedf02a732870b8da86bceaaa30b0ca385/pillow-13.0.0-cp312-cp312-win32.whl", hash = "sha256:02464da86f561f410e13b061ec37c3068a9cb557a095494157742d07b3c24a27", size = 6515423, upload-time = "2026-10-16T22:15:56.25Z" },
++    { url = "https://files.pythonhosted.org/packages/ff/cd/73a79ecdc822076002eb24b5e1e4a530b0bb5310fcb6d239abbec877110b/pillow-13.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:ff3fe9eb621fbb9db4c4be33ab946f6bac5f98ab50ca8d3260503653656c961b", size = 7272166, upload-time = "2026-10-16T22:15:58.597Z" },
++    { url = "https://files.pythonhosted.org/packages/4a/a3/be5a1236efd085b3984e4305da8f179ae9dab80c991d2ad78f2bd5c4c843/pillow-13.0.0-cp312-cp312-win_arm64.whl", hash = "sha256:c3bc8ee0271387e0b1e3ad0ff893645990a656e79bf9c42f4f734a3642b11d51", size = 2698943, upload-time = "2026-10-16T22:16:00.637Z" },
++    { url = "https://files.pythonhosted.org/packages/82/e2/9132d38df320e8099e2642d9fa538f18a7dfebf68a875a31725dc2a115aa/pillow-13.0.0-cp313-cp313-ios_13_0_arm64_iphoneos.whl", hash = "sha256:e98b4f91f99b24b1da72e10621ba181f7281922384a7403094debb4199de6c00", size = 4190620, upload-time = "2026-10-16T22:16:02.527Z" },
++    { url = "https://files.pythonhosted.org/packages/cb/be/436dac0996876f65ef1916ffb711c5ef4af2ebc57414b6f16642e07f6b47/pillow-13.0.0-cp313-cp313-ios_13_0_arm64_iphonesimulator.whl", hash = "sha256:34fb3db1149c879343861831728c243c432d4a5afc8f1878ca7612ef8de2a033", size = 4290286, upload-time = "2026-10-16T22:16:04.861Z" },
++    { url = "https://files.pythonhosted.org/packages/60/16/7c1007162e4169ea0d5bec47e2e0b2174f56c50cf5b8c02a1dc23e41037e/pillow-13.0.0-cp313-cp313-ios_13_0_x86_64_iphonesimulator.whl", hash = "sha256:2d50500a4a3bc6469adcdb319cf05d688b08ca3bf0f22a05339f3b25b433a599", size = 3723169, upload-time = "2026-10-16T22:16:06.956Z" },
++    { url = "https://files.pythonhosted.org/packages/08/bc/578ab2eaa04705a8978bd9be0fe15c3d43a8fc95097c4f7e39540e79e4fa/pillow-13.0.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:ef5fe6b7db3f501c56000ba8fe7c7e1a35ca1d45824fbeb95a67daa85cff4dbe", size = 5568469, upload-time = "2026-10-16T22:16:08.664Z" },
++    { url = "https://files.pythonhosted.org/packages/98/c8/ccede3dcc4f274b80fb49199eed1ef34ba05566c8b71976b9d1f111da2e3/pillow-13.0.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:f11a3c1358bb3c68012a7b1f41b223c3db9f7bfde90b481df028cfe1c3363313", size = 4852187, upload-time = "2026-10-16T22:16:10.693Z" },
++    { url = "https://files.pythonhosted.org/packages/fb/3c/cd0770e96d20bfd990db024bcbd43897ff3e88da1f4782cf90ea231b1d4f/pillow-13.0.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:19b66ca0a4d25cc0200b381ce824c7ea090db61427315e73cfb05dbf1b35c369", size = 6515908, upload-time = "2026-10-16T22:16:12.896Z" },
++    { url = "https://files.pythonhosted.org/packages/ef/fe/f5cdaa2d1c4086e757430f368c271a58ee29cfe7378e7ae7b9d964015c25/pillow-13.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5f56499c1a74d2b862beb0c33b8016f99d095858455df9d21583bbbc1c15b582", size = 7142544, upload-time = "2026-10-16T22:16:14.844Z" },
++    { url = "https://files.pythonhosted.org/packages/fb/b5/a54f6d44adbcd23737c8c12953f42be107e4cca64e247c0ca3a5b563061c/pillow-13.0.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:a2a14cd73d5e6c927f644b0110ee81f59c4ef506259ec9183904747f2caacc81", size = 6613097, upload-time = "2026-10-16T22:16:16.893Z" },
++    { url = "https://files.pythonhosted.org/packages/e6/b4/9e6c1207c21b2e91db0d15c16d30f3701ce5add1bd4da0e787761e66cb6e/pillow-13.0.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:08b826a9bf1265c76de04a42061d61ea6b109418b7826f28ff1ecdfaa26c5502", size = 7224846, upload-time = "2026-10-16T22:16:19.195Z" },
++    { url = "https://files.pythonhosted.org/packages/78/9f/d3c3cb0518f3dd1eee0ef501535f53d15597a53c5c4118d178086143397a/pillow-13.0.0-cp313-cp313-win32.whl", hash = "sha256:12b0fa15879fe5a9d9eebe66e4e2d74128a773b1a4448010c9c714f45e04b9d8", size = 6516013, upload-time = "2026-10-16T22:16:21.389Z" },
++    { url = "https://files.pythonhosted.org/packages/d7/ed/1b16fb66a37e1b9e41370b93b2c614c7da761a5b2a41dc333f7af4639962/pillow-13.0.0-cp313-cp313-win_amd64.whl", hash = "sha256:9dda0788a9932776a75d8bcc020076edc308ce2508b51f6739a45e3158b3fc42", size = 7284777, upload-time = "2026-10-16T22:16:23.393Z" },
++    { url = "https://files.pythonhosted.org/packages/87/7d/8d02eba9f7ecc87f8e90f731e032cc4773802f2a843763afd0c66a535ff4/pillow-13.0.0-cp313-cp313-win_arm64.whl", hash = "sha256:40a266371ece581e5de13b6635ef78d7487824af80561b6ca27694a88c19bc0f", size = 2698826, upload-time = "2026-10-16T22:16:25.382Z" },
++    { url = "https://files.pythonhosted.org/packages/8e/45/fbad9c7f5e2f1745c373a434d46072bc84eddfefaa28b852425ac957fda6/pillow-13.0.0-cp314-cp314-ios_13_0_arm64_iphoneos.whl", hash = "sha256:44629d4498c9cb6b2051806155f22141df0d8a929c56134b166655232dfb2f8c", size = 4190721, upload-time = "2026-10-16T22:16:27.524Z" },
++    { url = "https://files.pythonhosted.org/packages/a2/bf/2074902a259a90692c5dbf132885d21671644cbbd3f690047516243a55db/pillow-13.0.0-cp314-cp314-ios_13_0_arm64_iphonesimulator.whl", hash = "sha256:bf97ba1b5542050e9b0c74e632323b6d8136cc99d64e193abebee22fe6013c76", size = 4290236, upload-time = "2026-10-16T22:16:29.562Z" },
++    { url = "https://files.pythonhosted.org/packages/ff/a5/3d1bb93b8ea38d15d21356c1b8e9f50971ac592aaa248f7fb71739094c0e/pillow-13.0.0-cp314-cp314-ios_13_0_x86_64_iphonesimulator.whl", hash = "sha256:aa694c49787040943570d61c9b8fc01271bd2a2cfdd55f0d896f8aecdce1a981", size = 3723093, upload-time = "2026-10-16T22:16:31.249Z" },
++    { url = "https://files.pythonhosted.org/packages/84/a1/be060135d85187b25fa8b2573786c0e45c62ae27527fff5257675eb97f4a/pillow-13.0.0-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:49c12af515073e9bf511e4ef736743bf70d531a643668722279314b937742ba4", size = 5572253, upload-time = "2026-10-16T22:16:33.103Z" },
++    { url = "https://files.pythonhosted.org/packages/b5/f4/0bf6f1ac9ba7ee2ffe9914aeb410a1035a0c1a3c42f122388d7fc950bc4b/pillow-13.0.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:d9b0a2bee3f3e03e9f29057aedb807dbf1e1d96ee1b9d0f422d9db6c8583271d", size = 4852269, upload-time = "2026-10-16T22:16:35.102Z" },
++    { url = "https://files.pythonhosted.org/packages/83/16/b603274617b3e6728da3a0133d4fba1ea8d7fbe0c4ea5fef9cbffa398b8b/pillow-13.0.0-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5933fcea5a5ba64c686f55c886a115cbfd92f2900460784a1e79909fdbafd7b6", size = 6516058, upload-time = "2026-10-16T22:16:37.228Z" },
++    { url = "https://files.pythonhosted.org/packages/1d/f2/1371707ce438ba9a43f9d24089828494ec6f9396e28cd7903aa704dd6306/pillow-13.0.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e91c2b1cbeae768c98752e67e717e283d68dae45717b41f2d91eaee648e37b7d", size = 7142574, upload-time = "2026-10-16T22:16:39.172Z" },
++    { url = "https://files.pythonhosted.org/packages/b9/a9/62cf68587f910bc87c5951bcb6e9430c7643a65076adf5f18b4bf350e2bd/pillow-13.0.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:7f6299e494e46253d40c34653cac369412f44ca53b5f85d848d3f95b1ed0546c", size = 6614295, upload-time = "2026-10-16T22:16:41.117Z" },
++    { url = "https://files.pythonhosted.org/packages/6c/c9/9e9b48178649730299be0bafbf5f810a5b6977538f5a92d47e4ba5f5d608/pillow-13.0.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:f9bd7d260d986f3553518c5d723544346fa48031f8aef3265d786aeb59845bc0", size = 7224841, upload-time = "2026-10-16T22:16:43.118Z" },
++    { url = "https://files.pythonhosted.org/packages/8f/48/c44e91384b1b6c072a714a63d00608acc16a6a968735e478e4be4384e5ac/pillow-13.0.0-cp314-cp314-win32.whl", hash = "sha256:2e31c4e68cffd7b1f116127626813b82fcba19edf6b940a7b0c266d6484d0055", size = 6508694, upload-time = "2026-10-16T22:16:45.883Z" },
++    { url = "https://files.pythonhosted.org/packages/50/e2/7ad17747517e4c813dca78257d6bb593466f8231baf1384bc98d92745edb/pillow-13.0.0-cp314-cp314-win_amd64.whl", hash = "sha256:f7cbb7a64e7ec664775195e4f81923bc8a93d9451b963f844e59118f63147a7a", size = 7281830, upload-time = "2026-10-16T22:16:47.725Z" },
++    { url = "https://files.pythonhosted.org/packages/41/9f/e5b51f2ce8ef4563215334035403ce61a244f93a2e65c24a940131618f87/pillow-13.0.0-cp314-cp314-win_arm64.whl", hash = "sha256:a6aaa7871aebca081eb5c45f83e845bbd9712ae99fa9286dbfdcee835e63f4b4", size = 2695468, upload-time = "2026-10-16T22:16:49.515Z" },
++    { url = "https://files.pythonhosted.org/packages/97/73/a53502f731f6c84805a4ce87a8881e86d07a65aee64728b900d112dc703e/pillow-13.0.0-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:7b999816b5850a35ada08443e6e03945f1f6488144a83afe2d37b240a552aafa", size = 5578196, upload-time = "2026-10-16T22:16:51.291Z" },
++    { url = "https://files.pythonhosted.org/packages/21/50/7e949959a56b5559c78ef172b70fc6025706acb289f3f648a15329e4fa6f/pillow-13.0.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:67871a13cf47275201553b536c025da777f997fa562a19eb798af4ad4b97c18f", size = 4857276, upload-time = "2026-10-16T22:16:53.399Z" },
++    { url = "https://files.pythonhosted.org/packages/c9/52/43ded0ac08e77e39d17bd6d894162572201b5e8fdc4a022b14c55a1960a4/pillow-13.0.0-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e8ca8f69b7c77fa96dad99f8638c1fc4f1c0bed4acaa1baf7a3c31bdb80a0ab1", size = 6607008, upload-time = "2026-10-16T22:16:55.525Z" },
++    { url = "https://files.pythonhosted.org/packages/0d/2e/4a57ed216d5bf877387cba4d44c02aa87abe51ad2e06404aa6b597c4da39/pillow-13.0.0-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6bce6a29c3898191f4c9998e4d4e8f69790caeabde46e54da4bc235ce5bde683", size = 7224281, upload-time = "2026-10-16T22:16:57.738Z" },
++    { url = "https://files.pythonhosted.org/packages/5c/3d/2929b248e135752d63aaeabf53f6de797e905b7b6263f9c1e2adade20aba/pillow-13.0.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:816752a5ef76a80484c8c441c85593b7ea9304f6231fc5776ad1fbff7e773058", size = 6695600, upload-time = "2026-10-16T22:16:59.842Z" },
++    { url = "https://files.pythonhosted.org/packages/bc/33/fb0da992cf084ed1ee6ee05e96b6191e35c351eb707ca2df874feb24ce47/pillow-13.0.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:5bdb38ba220b61b4ec31dd1046dea6b016d3c6850a23f43ed8b58332b2fc668e", size = 7300589, upload-time = "2026-10-16T22:17:01.686Z" },
++    { url = "https://files.pythonhosted.org/packages/bb/af/c30dd9ef6a3dce84ecb1b2393cac629047a32e66279056c6cb46c3ffd65c/pillow-13.0.0-cp314-cp314t-win32.whl", hash = "sha256:06903aac074d00c988e77a1fc435286dc498506d4ca8d6f69df9babddf4ecc15", size = 6517204, upload-time = "2026-10-16T22:17:03.722Z" },
++    { url = "https://files.pythonhosted.org/packages/85/d5/ef3a8ae7609c8ab26570abf18194882534b480d245a9148b895a2262c004/pillow-13.0.0-cp314-cp314t-win_amd64.whl", hash = "sha256:9a635068d9793c7f0d929f39f18b58f1bd86c236e8e7b64167b86af9232ebca0", size = 7286695, upload-time = "2026-10-16T22:17:05.543Z" },
++    { url = "https://files.pythonhosted.org/packages/84/3c/0861db0c69a03689ebe3e7599d35668a414deb5aaafd8255215e4e62e3d3/pillow-13.0.0-cp314-cp314t-win_arm64.whl", hash = "sha256:0d1a9cf7bc6917538b20f8d06b9ab2147e542f68849e96fc58eb66bdf6acc692", size = 2698098, upload-time = "2026-10-16T22:17:07.674Z" },
++    { url = "https://files.pythonhosted.org/packages/60/da/f6d644e631c5b370c5d0b899f3ccadd2780aab070b29a110527cf4e1fd2c/pillow-13.0.0-pp312-pypy312_pp80-macosx_10_15_x86_64.whl", hash = "sha256:8619685cad8efc4c38c66d3b36aad854523297c43d748b3b6f0cc03c90ba3463", size = 5523188, upload-time = "2026-10-16T22:17:59.334Z" },
++    { url = "https://files.pythonhosted.org/packages/e4/b0/2594f202d743a35d4fe80682bfd96f277e5ca7aecb27cf64ef5bfc1d000b/pillow-13.0.0-pp312-pypy312_pp80-macosx_11_0_arm64.whl", hash = "sha256:7e91e97a929232cdb828889ee6ad0e48d7f40f4ec38818f4e4a8968b2b1af22e", size = 4806808, upload-time = "2026-10-16T22:18:01.188Z" },
++    { url = "https://files.pythonhosted.org/packages/8e/ed/d504165ef79af6fafe25c76726cf30f544cc236002f7ed054f1d51adc4ff/pillow-13.0.0-pp312-pypy312_pp80-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:93ff9c9c3663ce23aaa5d0b6b6abac55359e2a0c06c7e30f3771829af816be63", size = 5464358, upload-time = "2026-10-16T22:18:02.779Z" },
++    { url = "https://files.pythonhosted.org/packages/7b/fe/a10aba5503ca13e9e009b8bd0a1a4ce5584bdce246245fd6f3a83701369c/pillow-13.0.0-pp312-pypy312_pp80-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e65dd6e75de67b2362a4fa3e16aa627595f65054dc4ec73d64680c84d592fa61", size = 6043514, upload-time = "2026-10-16T22:18:04.538Z" },
++    { url = "https://files.pythonhosted.org/packages/c0/37/66b12dc476041fe523bca29c9d58fbf1ea92a4eaf73acfb9e993948f1191/pillow-13.0.0-pp312-pypy312_pp80-win_amd64.whl", hash = "sha256:567f20f1c75897d7663830da6ea8af719e03d712b1d9ee7f813319f9ece42e5a", size = 7366030, upload-time = "2026-10-16T22:18:06.638Z" },
++]
++
+ [[package]]
+ name = "pkginfo"
+ version = "1.12.1.2"
+@@ -2738,8 +2914,10 @@ dependencies = [
      { name = "langchain-openai" },
      { name = "langgraph" },
      { name = "langsmith" },
 +    { name = "markdown-it-py" },
      { name = "openai" },
      { name = "packaging" },
++    { name = "pikepdf" },
      { name = "pydantic" },
-@@ -2784,6 +2785,7 @@ requires-dist = [
+     { name = "pywhatwgurl" },
+     { name = "pyyaml" },
+@@ -2784,10 +2962,12 @@ requires-dist = [
      { name = "langgraph", specifier = ">=1.0.10" },
      { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'langgraph-dev'", specifier = ">=0.4.14" },
      { name = "langsmith", specifier = ">=0.7.30" },
@@ -430,13 +616,18 @@ index 4878677..beb26dc 100644
      { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.29.0,<2.0.0" },
      { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.0" },
      { name = "openai", specifier = ">=2.25.0" },
+     { name = "packaging", specifier = ">=24.0" },
++    { name = "pikepdf", specifier = "==10.17.0" },
+     { name = "poetry", marker = "extra == 'dev'", specifier = ">=2.3.0" },
+     { name = "pydantic", specifier = ">=2.12.0" },
+     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.0" },
 diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
-index 15b9b4c..06921d5 100644
+index 15b9b4c..1dc6e88 100644
 --- a/src/skillspector/nodes/build_context.py
 +++ b/src/skillspector/nodes/build_context.py
 @@ -2448,7 +2448,14 @@ def _project_manifest(
          manifest["version"] = _scalar_text(version)
-
+ 
      manifest["triggers"] = _string_list(data.get("triggers", []))
 -    manifest["permissions"] = _string_list(data.get("permissions", []))
 +    permissions = data.get("permissions", [])
@@ -452,13 +643,81 @@ index 15b9b4c..06921d5 100644
      # `Bash(git status:*) Read` stays two grants.
 @@ -2496,7 +2503,7 @@ def _parse_manifest(
      """Parse SKILL.md or skill.md YAML frontmatter into a manifest dict.
-
+ 
      Returns dict with name, description, version, triggers (list), permissions
 -    (list), allowed-tools (list), parameters (list). Returns {} if no file or
 +    (list or mapping), allowed-tools (list), parameters (list). Returns {} if no file or
      parse fails.
      Parsing is restricted to a bounded byte prefix, including for direct helper
      callers that do not provide the bundle's already-bounded raw cache.
+@@ -3651,6 +3658,67 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+             )
+         )
+ 
++    # Decode only a structurally validated passive PDF subset. Unknown/active
++    # content retains an explicit incomplete interpretation. Original bytes stay
++    # in raw_file_cache; the canonical single-line view carries its byte digest.
++    from skillspector.pdf_passive import inspect_pdf
++
++    pdf_view_bytes = 0
++    for artifact in artifact_inventory:
++        path = artifact["path"]
++        raw_pdf = raw_file_cache.get(path)
++        if (
++            raw_pdf is None
++            or not raw_pdf.startswith(b"%PDF-")
++            or path in excluded_nested_components
++            or artifact["disposition"] == ArtifactDisposition.FAILED
++            or source_classifications.get(path) is not PythonSourceClassification.NON_PYTHON
++        ):
++            continue
++        inspected = inspect_pdf(
++            raw_pdf, timeout_seconds=max(0.0, processing_deadline - monotonic())
++        )
++        reason = inspected.reason
++        if monotonic() >= processing_deadline:
++            reason = "runtime_limit"
++        view_size = len(inspected.text.encode()) if inspected.text is not None else 0
++        remaining = max(
++            0,
++            MAX_TOTAL_CACHED_BYTES
++            - sum(len(data) for data in raw_file_cache.values())
++            - pdf_view_bytes,
++        )
++        shared_remaining = transitive_remaining_bytes(state)
++        if shared_remaining is not None:
++            remaining = min(remaining, max(0, shared_remaining))
++        if view_size > remaining:
++            reason = "total_bytes_limit"
++        if reason is not None or inspected.text is None:
++            if artifact["disposition"] != ArtifactDisposition.PARTIAL:
++                artifact["reason"] = reason or "opaque_content"
++            artifact["disposition"] = ArtifactDisposition.PARTIAL
++            content_interpretation_events.append(
++                ledger_event(
++                    outcome=LedgerOutcome.PARTIAL,
++                    record_type=LedgerRecordType.SYSTEM,
++                    phase="pdf_structure_inspection",
++                    path=path,
++                    reason=LedgerReason(reason or "opaque_content"),
++                )
++            )
++            continue
++        pdf_view_bytes += view_size
++        if callable(record_bytes):
++            record_bytes(view_size)
++        local_file_cache[path] = inspected.text
++        original_extension_classification = artifact["misleading_extension"]
++        promote_artifact_to_decoded_text(artifact)
++        artifact["misleading_extension"] = original_extension_classification
++        if not source_local_only and (
++            path in llm_file_cache or not _is_hidden_path(path) and "!/" not in path
++        ):
++            llm_file_cache[path] = _redact_for_external_model(path, inspected.text)
++
+     # Python's successful source decode takes precedence over a magic prefix.
+     for artifact in artifact_inventory:
+         path = artifact["path"]
 diff --git a/src/skillspector/nodes/meta_analyzer.py b/src/skillspector/nodes/meta_analyzer.py
 index 252134d..02c72c2 100644
 --- a/src/skillspector/nodes/meta_analyzer.py
@@ -715,7 +974,7 @@ index 7fc577c..e59ce17 100644
                      if active_budget.limitation_generation == package_generation:
                          _put_cache(_cache_key(name, version, ecosystem), vuln_details)
 diff --git a/pyproject.toml b/pyproject.toml
-index bb21ad0..db909ed 100644
+index bb21ad0..d703b4b 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -33,6 +33,7 @@ dependencies = [
@@ -726,6 +985,14 @@ index bb21ad0..db909ed 100644
      "httpx>=0.28.0",
      "pywhatwgurl==0.1.1",
      "regex==2026.5.9",
+@@ -49,6 +50,7 @@ dependencies = [
+     "langsmith>=0.7.30",
+     "yara-python>=4.5.0",
+     "google-auth[requests]>=2.53.0",
++    "pikepdf==10.17.0",
+ ]
+ 
+ [project.optional-dependencies]
 diff --git a/src/skillspector/markdown_tokens.py b/src/skillspector/markdown_tokens.py
 new file mode 100644
 --- /dev/null
@@ -1237,3 +1504,471 @@ new file mode 100644
 +        check_runtime()
 +        spans.extend((start + a, start + b) for a, b in _json_string_spans(raw, check_runtime))
 +    return sorted(set(spans))
+diff --git a/src/skillspector/pdf_passive.py b/src/skillspector/pdf_passive.py
+new file mode 100644
+index 0000000..371b103
+--- /dev/null
++++ b/src/skillspector/pdf_passive.py
+@@ -0,0 +1,462 @@
++"""Bounded format-aware decoding of a deliberately small passive PDF subset.
++
++Unknown dictionaries, fonts, operators, orphan objects and active features are
++unsupported. No PDF is rendered. qpdf runs in a separate resource-limited
++process, and successful output contains both decoded text and the original
++printable view so existing binary instruction signals remain available.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import io
++import json
++import math
++import re
++import subprocess
++import sys
++from dataclasses import dataclass
++from pathlib import Path
++
++MAX_PDF_BYTES = 512 * 1024
++MAX_PDF_VIEW_BYTES = 256 * 1024
++MAX_PDF_OBJECTS = 256
++MAX_PDF_OPERATORS = 4096
++MAX_PDF_SECONDS = 5.0
++
++
++@dataclass(frozen=True)
++class PdfInspection:
++    text: str | None
++    reason: str | None = None
++
++
++class UnsupportedPdfError(ValueError):
++    pass
++
++
++def _decode_passive(data: bytes) -> list[str]:
++    import pikepdf
++
++    terminal = re.search(rb"startxref\s+(\d+)\s+%%EOF\s*\Z", data)
++    if not data.startswith(b"%PDF-") or terminal is None or data.count(b"%%EOF") != 1:
++        raise UnsupportedPdfError
++    if not data[int(terminal.group(1)) :].startswith(b"xref"):
++        raise UnsupportedPdfError
++    text: list[str] = []
++    glyph_text: list[str] = []
++    visited: dict[tuple[int, int], str] = {}
++    font_names: set[str] = set()
++    active: dict[tuple[int, int], str] = {}
++    steps = 0
++
++    def spend() -> None:
++        nonlocal steps
++        steps += 1
++        if steps > MAX_PDF_OPERATORS:
++            raise UnsupportedPdfError
++
++    def string(value: object) -> None:
++        if not isinstance(value, pikepdf.String):
++            raise UnsupportedPdfError
++        text.append(str(value))
++
++    def number(value: object) -> None:
++        from decimal import Decimal
++
++        if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
++            raise UnsupportedPdfError
++        if not math.isfinite(float(value)) or abs(value) > 1_000_000_000:
++            raise UnsupportedPdfError
++
++    def array(value: object, size: int | None = None) -> None:
++        if not isinstance(value, pikepdf.Array) or size is not None and len(value) != size:
++            raise UnsupportedPdfError
++        if len(value) > MAX_PDF_OBJECTS:
++            raise UnsupportedPdfError
++
++    def name(value: object, allowed: set[str]) -> None:
++        if not isinstance(value, pikepdf.Name) or str(value) not in allowed:
++            raise UnsupportedPdfError
++
++    def dictionary(value: object, allowed: set[str], required: set[str] = frozenset()) -> None:
++        if not isinstance(value, (pikepdf.Dictionary, pikepdf.Stream)):
++            raise UnsupportedPdfError
++        keys = set(value.keys())
++        if not required <= keys or not keys <= allowed:
++            raise UnsupportedPdfError
++
++    class TextLayout:
++        """Only horizontal black Helvetica text with provable reading order."""
++
++        def __init__(self, width: float, height: float):
++            self.width, self.height = width, height
++            self.in_text = False
++            self.font_size: float | None = None
++            self.x: float | None = None
++            self.y: float | None = None
++            self.shown = False
++            self.last_y: float | None = None
++            self.last_size = 0.0
++            self.column_x: float | None = None
++            self.ends_space = False
++
++        def consume(self, args, op: str) -> tuple[str, bool] | None:
++            if op == "cm":
++                for operand in args:
++                    number(operand)
++                if list(args) != [1, 0, 0, 1, 0, 0]:
++                    raise UnsupportedPdfError
++            elif op == "BT":
++                if args or self.in_text:
++                    raise UnsupportedPdfError
++                self.in_text = True
++                self.x = self.y = None
++                self.shown = False
++            elif op == "ET":
++                if args or not self.in_text:
++                    raise UnsupportedPdfError
++                self.in_text = False
++                self.x = self.y = None
++            elif op == "Tf":
++                if not self.in_text or len(args) != 2 or str(args[0]) not in font_names:
++                    raise UnsupportedPdfError
++                if not isinstance(args[0], pikepdf.Name) or self.shown and self.x is not None:
++                    raise UnsupportedPdfError
++                number(args[1])
++                if not 0 < args[1] <= 1440:
++                    raise UnsupportedPdfError
++                self.font_size = float(args[1])
++            elif op == "TL":
++                if not self.in_text or len(args) != 1:
++                    raise UnsupportedPdfError
++                number(args[0])
++            elif op == "T*":
++                if args or not self.in_text:
++                    raise UnsupportedPdfError
++                # A following show must establish a new explicit text matrix.
++                self.x = self.y = None
++                self.shown = False
++            elif op == "Tm":
++                if not self.in_text or len(args) != 6 or list(args[:4]) != [1, 0, 0, 1]:
++                    raise UnsupportedPdfError
++                for operand in args:
++                    number(operand)
++                self.x, self.y = float(args[4]), float(args[5])
++                self.shown = False
++            elif op in {"Tj", "TJ"}:
++                if (
++                    len(args) != 1
++                    or not self.in_text
++                    or self.x is None
++                    or self.y is None
++                    or self.font_size is None
++                ):
++                    raise UnsupportedPdfError
++                values = args[0] if op == "TJ" else [args[0]]
++                if op == "TJ":
++                    array(values)
++                fragments = []
++                for operand in values:
++                    if isinstance(operand, pikepdf.String):
++                        raw_text = bytes(operand)
++                        if not all(0x20 <= char <= 0x7E for char in raw_text):
++                            raise UnsupportedPdfError
++                        fragments.append(raw_text.decode("ascii"))
++                    elif op != "TJ" or type(operand) is not int or operand != 0:
++                        # Numeric TJ movement can introduce gaps or reorder text.
++                        raise UnsupportedPdfError
++                fragment = "".join(fragments)
++                if not fragment:
++                    return fragment, False
++                size = self.font_size
++                # Helvetica's AFM advance is at most1.015em and its font box
++                # lies within[-.166,-.225,1,.931]em. Round outward and leave
++                # an extra em at the right edge; never promote clipped glyphs.
++                advance_bound = len(fragment) * size * 1.02
++                if self.x < size * 0.2 or self.x + advance_bound + size > self.width:
++                    raise UnsupportedPdfError
++                if self.y < size * 0.25 or self.y + size > self.height:
++                    raise UnsupportedPdfError
++                new_line = not self.shown
++                # Text-matrix origins alone do not prove visible alignment:
++                # whitespace can recreate columns. Only ordinary single word
++                # spaces are supported; leading and repeated spaces, including
++                # across adjacent Tj/TJ fragments, remain unknown layouts.
++                if (
++                    "  " in fragment
++                    or new_line and fragment.startswith(" ")
++                    or not new_line and self.ends_space and fragment.startswith(" ")
++                ):
++                    raise UnsupportedPdfError
++                self.ends_space = fragment.endswith(" ")
++                if new_line:
++                    # Reading order must be a single column, not merely a
++                    # descending paint order alternating between columns.
++                    if self.column_x is not None and self.x != self.column_x:
++                        raise UnsupportedPdfError
++                    self.column_x = self.x
++                if (
++                    new_line
++                    and self.last_y is not None
++                    and self.last_y - self.y < 1.2 * max(size, self.last_size)
++                ):
++                    raise UnsupportedPdfError
++                self.shown = True
++                self.last_y, self.last_size = self.y, size
++                self.x += advance_bound
++                return fragment, new_line
++            else:
++                raise UnsupportedPdfError
++            return None
++
++    layout: TextLayout | None = None
++    continuous_glyphs: list[str] = []
++
++    def visit(value: object, role: str, depth: int = 0) -> None:
++        nonlocal layout, font_names
++        spend()
++        if depth > 24:
++            raise UnsupportedPdfError
++        identifier = value.objgen
++        if identifier != (0, 0):
++            if identifier in active:
++                raise UnsupportedPdfError
++            if identifier in visited:
++                if visited[identifier] != role:
++                    raise UnsupportedPdfError
++                if role != "content":
++                    return
++            active[identifier] = role
++        if role == "catalog":
++            dictionary(value, {"/Type", "/Pages", "/PageMode"}, {"/Type", "/Pages"})
++            name(value.Type, {"/Catalog"})
++            if "/PageMode" in value:
++                name(value.PageMode, {"/UseNone"})
++            visit(value.Pages, "pages", depth + 1)
++        elif role == "pages":
++            dictionary(value, {"/Type", "/Count", "/Kids"}, {"/Type", "/Count", "/Kids"})
++            name(value.Type, {"/Pages"})
++            array(value.Kids)
++            if type(value.Count) is not int or value.Count != len(value.Kids):
++                raise UnsupportedPdfError
++            page_ids = [page.objgen for page in value.Kids]
++            if (0, 0) in page_ids or len(set(page_ids)) != len(page_ids):
++                raise UnsupportedPdfError
++            for page in value.Kids:
++                visit(page, "page", depth + 1)
++        elif role == "page":
++            dictionary(
++                value,
++                {"/Type", "/Parent", "/MediaBox", "/Resources", "/Contents", "/Rotate", "/Trans"},
++                {"/Type", "/Parent", "/MediaBox", "/Resources", "/Contents"},
++            )
++            name(value.Type, {"/Page"})
++            if active.get(value.Parent.objgen) != "pages":
++                raise UnsupportedPdfError
++            array(value.MediaBox, 4)
++            for coordinate in value.MediaBox:
++                number(coordinate)
++            if list(value.MediaBox[:2]) != [0, 0] or not all(
++                0 < edge <= 14400 for edge in value.MediaBox[2:]
++            ):
++                raise UnsupportedPdfError
++            layout = TextLayout(float(value.MediaBox[2]), float(value.MediaBox[3]))
++            if "/Rotate" in value:
++                if type(value.Rotate) is not int or value.Rotate != 0:
++                    raise UnsupportedPdfError
++            if "/Trans" in value:
++                dictionary(value.Trans, set())
++            visit(value.Resources, "resources", depth + 1)
++            font_names = set(value.Resources.Font.keys())
++            contents = value.Contents
++            if isinstance(contents, pikepdf.Array):
++                array(contents)
++                for stream in contents:
++                    visit(stream, "content", depth + 1)
++            else:
++                visit(contents, "content", depth + 1)
++        elif role == "resources":
++            dictionary(value, {"/Font", "/ProcSet"}, {"/Font"})
++            fonts = value.Font
++            dictionary(fonts, set(fonts.keys()))
++            if len(fonts) > 32:
++                raise UnsupportedPdfError
++            if fonts.objgen != (0, 0):
++                if fonts.objgen in visited and visited[fonts.objgen] != "font-map":
++                    raise UnsupportedPdfError
++                visited[fonts.objgen] = "font-map"
++            font_names.update(fonts.keys())
++            for font in fonts.values():
++                visit(font, "font", depth + 1)
++            if "/ProcSet" in value:
++                array(value.ProcSet)
++                for proc in value.ProcSet:
++                    name(proc, {"/PDF", "/Text", "/ImageB", "/ImageC", "/ImageI"})
++        elif role == "font":
++            dictionary(
++                value,
++                {"/Type", "/Subtype", "/BaseFont", "/Encoding", "/Name"},
++                {"/Type", "/Subtype", "/BaseFont"},
++            )
++            name(value.Type, {"/Font"})
++            name(value.Subtype, {"/Type1"})
++            name(value.BaseFont, {"/Helvetica"})
++            if "/Encoding" in value:
++                name(value.Encoding, {"/WinAnsiEncoding", "/MacRomanEncoding", "/StandardEncoding"})
++            if "/Name" in value and not isinstance(value.Name, pikepdf.Name):
++                raise UnsupportedPdfError
++        elif role == "content":
++            if not isinstance(value, pikepdf.Stream):
++                raise UnsupportedPdfError
++            dictionary(value, {"/Length", "/Filter"}, {"/Length"})
++            if "/Filter" in value:
++                filters = value.Filter
++                filters = filters if isinstance(filters, pikepdf.Array) else [filters]
++                if len(filters) > 4:
++                    raise UnsupportedPdfError
++                for filter_name in filters:
++                    name(
++                        filter_name,
++                        {"/FlateDecode", "/ASCII85Decode", "/ASCIIHexDecode", "/RunLengthDecode"},
++                    )
++            decoded = value.read_bytes()
++            if len(decoded) > MAX_PDF_VIEW_BYTES or not decoded.isascii():
++                raise UnsupportedPdfError
++            text.append(decoded.decode("ascii"))
++            if layout is None:
++                raise UnsupportedPdfError
++            for args, operator in pikepdf.parse_content_stream(value):
++                spend()
++                displayed = layout.consume(args, str(operator))
++                if displayed is not None:
++                    fragment, new_line = displayed
++                    text.append(fragment)
++                    if new_line and glyph_text:
++                        glyph_text.append("\n")
++                    glyph_text.append(fragment)
++                    continuous_glyphs.append(fragment)
++        elif role == "info":
++            dictionary(
++                value,
++                {
++                    "/Title",
++                    "/Author",
++                    "/Subject",
++                    "/Keywords",
++                    "/Creator",
++                    "/Producer",
++                    "/CreationDate",
++                    "/ModDate",
++                    "/Trapped",
++                },
++            )
++            for key, item in value.items():
++                if key == "/Trapped":
++                    name(item, {"/True", "/False", "/Unknown"})
++                else:
++                    string(item)
++        else:
++            raise UnsupportedPdfError
++        if identifier != (0, 0):
++            active.pop(identifier)
++            visited[identifier] = role
++
++    with pikepdf.Pdf.open(io.BytesIO(data), attempt_recovery=False) as pdf:
++        if pdf.is_encrypted or len(pdf.objects) > MAX_PDF_OBJECTS or pdf.check_pdf_syntax():
++            raise UnsupportedPdfError
++        if pdf.pdf_version not in {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"}:
++            raise UnsupportedPdfError
++        dictionary(pdf.trailer, {"/Root", "/Info", "/ID", "/Size"}, {"/Root", "/Size"})
++        visit(pdf.Root, "catalog")
++        if "/Info" in pdf.trailer:
++            visit(pdf.trailer.Info, "info")
++        if "/ID" in pdf.trailer:
++            array(pdf.trailer.ID, 2)
++            for identifier in pdf.trailer.ID:
++                if not isinstance(identifier, pikepdf.String):
++                    raise UnsupportedPdfError
++        if set(visited) != {obj.objgen for obj in pdf.objects} or pdf.get_warnings():
++            raise UnsupportedPdfError
++    text.append("".join(glyph_text))
++    text.append("".join(continuous_glyphs))
++    return text
++
++
++def _child() -> None:
++    try:
++        import resource
++
++        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
++        resource.setrlimit(resource.RLIMIT_CPU, (3, 3))
++        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
++        resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
++        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
++        data = sys.stdin.buffer.read(MAX_PDF_BYTES + 1)
++        if len(data) > MAX_PDF_BYTES:
++            raise UnsupportedPdfError
++        text = _decode_passive(data)
++        result = json.dumps(
++            {"sha256": hashlib.sha256(data).hexdigest(), "text": text}, ensure_ascii=True
++        )
++        if len(result.encode()) > MAX_PDF_VIEW_BYTES:
++            raise UnsupportedPdfError
++        sys.stdout.write(result)
++    except Exception:
++        sys.exit(1)
++
++
++def inspect_pdf(data: bytes, *, timeout_seconds: float) -> PdfInspection:
++    if sys.platform != "linux":
++        return PdfInspection(None, "opaque_content")
++    if len(data) > MAX_PDF_BYTES:
++        return PdfInspection(None, "size_limit")
++    if timeout_seconds <= 0:
++        return PdfInspection(None, "runtime_limit")
++    try:
++        result = subprocess.run(
++            [sys.executable, "-I", "-B", str(Path(__file__).resolve()), "--child"],
++            input=data,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.DEVNULL,
++            timeout=min(MAX_PDF_SECONDS, timeout_seconds),
++            env={"LANG": "C.UTF-8"},
++            check=False,
++        )
++        if result.returncode or len(result.stdout) > MAX_PDF_VIEW_BYTES:
++            return PdfInspection(None, "opaque_content")
++        decoded = json.loads(result.stdout)
++        if not isinstance(decoded, dict) or set(decoded) != {"sha256", "text"}:
++            raise ValueError
++        if decoded["sha256"] != hashlib.sha256(data).hexdigest():
++            raise ValueError
++        if not isinstance(decoded["text"], list) or not all(
++            isinstance(item, str) for item in decoded["text"]
++        ):
++            raise ValueError
++        from skillspector.artifacts import binary_instruction_view, decode_text
++
++        raw_view, truncated = binary_instruction_view(decode_text(data))
++        if truncated:
++            return PdfInspection(None, "size_limit")
++        view = json.dumps(
++            {
++                "format": "bounded-passive-pdf-v1",
++                "source_sha256": decoded["sha256"],
++                "text": decoded["text"],
++                "raw_printable": raw_view.text,
++            },
++            ensure_ascii=True,
++            separators=(",", ":"),
++        )
++        if len(view.encode()) > MAX_PDF_VIEW_BYTES:
++            return PdfInspection(None, "size_limit")
++        return PdfInspection(view)
++    except subprocess.TimeoutExpired:
++        return PdfInspection(None, "runtime_limit")
++    except (OSError, ValueError, TypeError, RecursionError):
++        return PdfInspection(None, "opaque_content")
++
++
++if __name__ == "__main__":
++    _child()

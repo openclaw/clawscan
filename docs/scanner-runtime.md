@@ -112,6 +112,20 @@ fixes, not a new ClawScan model-provider framework:
   response and shared deadline ceilings remain separate. Any omitted evidence
   or failed enrichment remains incomplete; version ranges are not treated as
   installed versions. This budget alone does not add PDF structure inspection.
+- On Linux, SkillSpector decodes a bounded passive PDF subset through pinned
+  pikepdf/qpdf in an isolated child process:512KiB input,256 objects,4,096
+  operators,256KiB decoded view,512MiB address space,3 CPU seconds and at most
+  5 wall seconds within the shared deadline. Original bytes stay unchanged;
+  supported text is black, horizontal printable ASCII Helvetica, with identity
+  transforms, descending lines at a shared visible left edge and conservative
+  font-box clipping bounds. Leading or repeated spaces (including split text
+  shows), numeric TJ adjustments, implicit repositioning, color changes and other
+  layouts remain incomplete. Decoded text/streams and original printable strings enter normal analysis
+  with the source SHA256. Unknown/active features, orphan objects, unsupported
+  fonts/operators, path-painted graphics, parser warnings and limits remain
+  incomplete. Text-only reconstruction spans content streams, including repeated
+  stream references. Other host
+  platforms retain unsupported-PDF state; the default Docker runtime is Linux.
 - A.I.G reuses the official OpenAI SDK's Responses streaming API for that exact
   model. A.I.G tools are XML in text, so complete text history is replayed, not
   converted to synthetic OpenAI tools. Reasoning effort and usage are mapped;
