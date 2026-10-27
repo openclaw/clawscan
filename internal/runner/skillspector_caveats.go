@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"path"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -140,53 +139,14 @@ func skillSpectorReferenceCaveatsOnly(record map[string]any) bool {
 		return false
 	}
 	components, ok := record["components"].([]any)
-	total := len(components)
-	if !ok || total == 0 || !skillSpectorCountsEqual(total, accounting.Total, accounting.Scanned, accounting.Fully) || !skillSpectorCountsEqual(0, accounting.Partial, accounting.Uninspected) || accounting.Coverage == nil || *accounting.Coverage != 100 {
+	scopes, scopeOK := skillSpectorCaveatComponentScopes(components, accounting.Exclusions)
+	if !ok || !scopeOK || scopes.coverage == 0 || !skillSpectorCountsEqual(scopes.coverage, accounting.Total, accounting.Scanned, accounting.Fully) || !skillSpectorCountsEqual(0, accounting.Partial, accounting.Uninspected) || accounting.Coverage == nil || *accounting.Coverage != 100 {
 		return false
 	}
-	if accounting.Exclusions == nil || len(accounting.Exclusions) != 0 || accounting.Limitations == nil || len(accounting.Limitations) != 0 || len(accounting.Patterns) != 0 || accounting.Excluded != 0 || len(accounting.Exceptions) == 0 {
+	if accounting.Exclusions == nil || accounting.Limitations == nil || len(accounting.Limitations) != 0 || len(accounting.Patterns) != 0 || accounting.Excluded != 0 || len(accounting.Exceptions) == 0 {
 		return false
 	}
-	lines := make(map[string]int, total)
-	semanticTotal := 0
-	for _, value := range components {
-		component, ok := value.(map[string]any)
-		if !ok || !skillSpectorKnownFields(component, "path type lines executable size_bytes source_url source_identity source_digest") {
-			return false
-		}
-		if component["source_url"] != nil || component["source_identity"] != nil || component["source_digest"] != nil {
-			return false
-		}
-		if kind, ok := component["type"].(string); !ok || kind == "" {
-			return false
-		}
-		if _, ok := component["executable"].(bool); !ok {
-			return false
-		}
-		name, _ := component["path"].(string)
-		lineCount, linesOK := skillSpectorReportCount(component["lines"])
-		_, sizeOK := skillSpectorReportCount(component["size_bytes"])
-		if name == "" || name == "." || name == ".." || strings.HasPrefix(name, "../") || path.IsAbs(name) || path.Clean(name) != name || strings.Contains(name, "\\") || strings.ContainsRune(name, 0) || !linesOK || !sizeOK {
-			return false
-		}
-		if _, duplicate := lines[name]; duplicate {
-			return false
-		}
-		lines[name] = lineCount
-		// The pinned SkillSpector source retains hidden files in its static
-		// inventory but does not submit them to external semantic models.
-		hidden := false
-		for _, segment := range strings.Split(name, "/") {
-			if strings.HasPrefix(segment, ".") {
-				hidden = true
-				break
-			}
-		}
-		if !hidden {
-			semanticTotal++
-		}
-	}
-	if !skillSpectorCaveatAnalyzersComplete(accounting.Analyzers, total, semanticTotal) {
+	if !skillSpectorCaveatAnalyzersComplete(accounting.Analyzers, scopes) {
 		return false
 	}
 	issues, issuesOK := record["issues"].([]any)
@@ -219,7 +179,7 @@ func skillSpectorReferenceCaveatsOnly(record map[string]any) bool {
 			return false
 		}
 	}
-	return skillSpectorReferenceAccountingComplete(accounting, lines)
+	return skillSpectorReferenceAccountingComplete(accounting, scopes.lines)
 }
 
 func skillSpectorKnownFields(record map[string]any, fields string) bool {
@@ -275,7 +235,7 @@ func skillSpectorCaveatSchemaKnown(completeness map[string]any) bool {
 	return true
 }
 
-func skillSpectorCaveatAnalyzersComplete(analyzers []skillSpectorCaveatAnalyzer, total, semanticTotal int) bool {
+func skillSpectorCaveatAnalyzersComplete(analyzers []skillSpectorCaveatAnalyzer, scopes skillSpectorComponentScopes) bool {
 	required := strings.Fields("artifact_integrity behavioral_ast behavioral_taint_tracking bundled_execution_surface mcp_least_privilege mcp_rug_pull mcp_tool_poisoning meta_analyzer semantic_developer_intent semantic_quality_policy semantic_security_discovery static_patterns_agent_snooping static_patterns_anti_refusal static_patterns_data_exfiltration static_patterns_deserialization static_patterns_excessive_agency static_patterns_harmful_content static_patterns_memory_poisoning static_patterns_output_handling static_patterns_privilege_escalation static_patterns_prompt_injection static_patterns_rogue_agent static_patterns_ssrf static_patterns_supply_chain static_patterns_system_prompt_leakage static_patterns_tool_misuse static_yara")
 	remaining := make(map[string]bool, len(required))
 	for _, name := range required {
@@ -287,9 +247,12 @@ func skillSpectorCaveatAnalyzersComplete(analyzers []skillSpectorCaveatAnalyzer,
 		}
 		delete(remaining, analyzer.ID)
 		perFile := analyzer.ID == "artifact_integrity" || analyzer.ID == "static_yara" || strings.HasPrefix(analyzer.ID, "static_patterns_") || strings.HasPrefix(analyzer.ID, "semantic_")
-		expected := total
+		expected := scopes.inventory
+		if strings.HasPrefix(analyzer.ID, "static_patterns_") {
+			expected = scopes.staticPatterns
+		}
 		if strings.HasPrefix(analyzer.ID, "semantic_") {
-			expected = semanticTotal
+			expected = scopes.semantic
 		}
 		if perFile && *analyzer.Planned != expected {
 			return false
