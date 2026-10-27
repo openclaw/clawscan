@@ -473,13 +473,22 @@ index 252134d..02c72c2 100644
 
 
 diff --git a/src/skillspector/nodes/analyzers/osv_client.py b/src/skillspector/nodes/analyzers/osv_client.py
-index 7fc577c..64c006e 100644
+index 7fc577c..e59ce17 100644
 --- a/src/skillspector/nodes/analyzers/osv_client.py
 +++ b/src/skillspector/nodes/analyzers/osv_client.py
+@@ -28,7 +28,7 @@ import json
+ import os
+ import re
+ import time
+-from dataclasses import dataclass
++from dataclasses import asdict, dataclass
+ from typing import Any
+ from urllib.parse import quote
+ 
 @@ -39,6 +39,10 @@ from skillspector.logging_config import get_logger
-
+ 
  logger = get_logger(__name__)
-
+ 
 +_OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 +# Full package queries avoid serial detail-request fanout; this is not a coverage cap.
 +_FULL_QUERY_THRESHOLD = 16
@@ -487,25 +496,96 @@ index 7fc577c..64c006e 100644
  _OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch"
  _OSV_VULN_URL = "https://api.osv.dev/v1/vulns"
  _REQUEST_TIMEOUT: float = 30.0
-@@ -58,10 +62,12 @@ if (env_val := os.environ.get("SKILLSPECTOR_OSV_TIMEOUT")) is not None:
+@@ -58,10 +62,16 @@ if (env_val := os.environ.get("SKILLSPECTOR_OSV_TIMEOUT")) is not None:
  MAX_OSV_PACKAGES = 256
  MAX_OSV_QUERY_BATCHES = 4
  MAX_OSV_QUERIES_PER_BATCH = 64
 -MAX_OSV_DETAIL_REQUESTS = 64
 +MAX_OSV_DETAIL_REQUESTS = 256
  MAX_OSV_RESPONSE_BYTES = 4 * 1024 * 1024
- MAX_OSV_RESULTS = 256
+-MAX_OSV_RESULTS = 256
 -MAX_OSV_VULNS_PER_PACKAGE = 16
++# Evidence retention is distinct from request fanout. A few established packages
++# can exceed 256 advisories. Bound both their count and serialized UTF-8 bytes,
++# including cache hits shared across manifests; keep request/provider caps fixed.
++MAX_OSV_RESULTS = 1_024
++MAX_OSV_RESULT_BYTES = 1024 * 1024
 +# One established package can have hundreds of historical advisories. Inspect
 +# them under the existing aggregate result, response-byte and deadline budgets.
 +MAX_OSV_VULNS_PER_PACKAGE = 256
  MAX_OSV_LIMITATIONS = 16
  MAX_OSV_CACHE_ENTRIES = 4_096
  MAX_OSV_PACKAGE_NAME_CHARS = 256
-@@ -481,6 +487,82 @@ def _request_json_bounded(
+@@ -131,11 +141,13 @@ class OsvQueryBudget:
+     max_detail_requests: int
+     max_response_bytes: int
+     max_results: int
++    max_result_bytes: int
+     packages_seen: int = 0
+     batches_sent: int = 0
+     detail_requests: int = 0
+     response_bytes: int = 0
+     results_retained: int = 0
++    result_bytes_retained: int = 0
+     limitations: list[OsvQueryLimitation] | None = None
+     limitation_generation: int = 0
+     last_limitation: OsvQueryLimitation | None = None
+@@ -157,6 +169,7 @@ class OsvQueryBudget:
+             max_detail_requests=max(0, MAX_OSV_DETAIL_REQUESTS),
+             max_response_bytes=max(0, MAX_OSV_RESPONSE_BYTES),
+             max_results=max(0, MAX_OSV_RESULTS),
++            max_result_bytes=max(0, MAX_OSV_RESULT_BYTES),
+             limitations=[],
+         )
+ 
+@@ -190,6 +203,43 @@ class OsvQueryBudget:
+         )
+ 
+ 
++def _retain_results(results: list[VulnResult], budget: OsvQueryBudget) -> list[VulnResult]:
++    """Charge every retained record, cached or fresh, against aggregate evidence caps."""
++    retained: list[VulnResult] = []
++    for result in results:
++        if budget.remaining_seconds() <= 0:
++            budget.note_runtime_limit()
++            break
++        if budget.results_retained >= budget.max_results:
++            budget.note(
++                OsvQueryLimitation(
++                    reason=LedgerReason.OUTPUT_LIMIT,
++                    observed_records=budget.results_retained + 1,
++                    limit_records=budget.max_results,
++                )
++            )
++            break
++        size = len(
++            json.dumps(asdict(result), ensure_ascii=True, separators=(",", ":")).encode("utf-8")
++        )
++        if budget.result_bytes_retained + size > budget.max_result_bytes:
++            budget.note(
++                OsvQueryLimitation(
++                    reason=LedgerReason.TOTAL_BYTES_LIMIT,
++                    observed_bytes=budget.result_bytes_retained + size,
++                    limit_bytes=budget.max_result_bytes,
++                )
++            )
++            break
++        if budget.remaining_seconds() <= 0:
++            budget.note_runtime_limit()
++            break
++        retained.append(result)
++        budget.results_retained += 1
++        budget.result_bytes_retained += size
++    return retained
++
++
+ def _limitations_since(
+     budget: OsvQueryBudget,
+     *,
+@@ -481,6 +531,81 @@ def _request_json_bounded(
      raise ValueError("OSV response was unavailable")
-
-
+ 
+ 
 +def _fetch_package_details(
 +    vuln_ids: list[str],
 +    query: dict[str, object],
@@ -578,33 +658,35 @@ index 7fc577c..64c006e 100644
 +        )
 +    if results is None:
 +        results = [_fallback_vuln(vuln_id) for vuln_id in vuln_ids[:remaining_results]]
-+    budget.results_retained += len(results)
-+    return results
++    return _retain_results(results, budget)
 +
 +
  def _fetch_vuln_details(
      vuln_ids: list[str],
      *,
-@@ -646,7 +728,17 @@ def query_batch(
+@@ -548,8 +673,10 @@ def _fetch_vuln_details(
+                         )
+                     )
+                     result = _fallback_vuln(vuln_id)
+-            results.append(result)
+-            active_budget.results_retained += 1
++            retained = _retain_results([result], active_budget)
++            results.extend(retained)
++            if not retained:
++                break
+     finally:
+         if owns_client:
+             active_client.close()
+@@ -646,7 +773,7 @@ def query_batch(
          key = _cache_key(name, version, ecosystem)
          cached = _get_cached(key)
          if cached is not None:
 -            all_results[i] = cached
-+            remaining = max(0, active_budget.max_results - active_budget.results_retained)
-+            if len(cached) > remaining:
-+                active_budget.note(
-+                    OsvQueryLimitation(
-+                        reason=LedgerReason.OUTPUT_LIMIT,
-+                        observed_records=active_budget.results_retained + len(cached),
-+                        limit_records=active_budget.max_results,
-+                    )
-+                )
-+            all_results[i] = cached[:remaining]
-+            active_budget.results_retained += len(all_results[i])
++            all_results[i] = _retain_results(cached, active_budget)
          else:
              uncached_indices.append(i)
              uncached_queries.append(_build_query(name, version, ecosystem))
-@@ -775,11 +867,22 @@ def query_batch(
+@@ -775,11 +902,22 @@ def query_batch(
                              continue
                          if vuln_id not in vuln_ids:
                              vuln_ids.append(vuln_id)

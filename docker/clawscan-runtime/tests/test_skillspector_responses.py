@@ -31,6 +31,7 @@ def test_osv_inspects_large_advisory_sets_under_aggregate_caps(monkeypatch, coun
 
     monkeypatch.setattr(osv.httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
     budget = osv.OsvQueryBudget.create(timeout_seconds=30)
+    budget.max_results = 256  # Exercise the caller-selected count ceiling.
     result = osv.query_batch([("generated", "1.0.0")], osv.ECOSYSTEM_PYPI, budget=budget)
     assert len(result[0]) == min(count, 256)
     assert result[0][-1].vuln_id == f"GENERATED-{min(count, 256) - 1}"
