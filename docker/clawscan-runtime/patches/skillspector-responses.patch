@@ -995,9 +995,10 @@ index bb21ad0..d703b4b 100644
  [project.optional-dependencies]
 diff --git a/src/skillspector/markdown_tokens.py b/src/skillspector/markdown_tokens.py
 new file mode 100644
+index 0000000..2ac53a8
 --- /dev/null
 +++ b/src/skillspector/markdown_tokens.py
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,195 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Conservative raw-source ownership for CommonMark inline code delimiters."""
@@ -1018,8 +1019,15 @@ new file mode 100644
 +    Tables, fenced/indented code and raw HTML never grant inline ownership.
 +    """
 +
-+    def __init__(self, content: str, check_runtime: Callable[[], None]):
++    def __init__(
++        self,
++        content: str,
++        check_runtime: Callable[[], None],
++        *,
++        excluded_ranges: tuple[tuple[int, int], ...] = (),
++    ):
 +        self._closers: set[int] = set()
++        self._delimiters: set[int] = set()
 +        check_runtime()
 +        # This optional proof only refines the existing lexical fallback. If
 +        # unavailable, preserve that fallback rather than asserting coverage.
@@ -1037,33 +1045,40 @@ new file mode 100644
 +            source_offsets.append(cursor)
 +            normalized.append("\n" if char == "\r" else char)
 +            cursor += 2 if content.startswith("\r\n", cursor) else 1
++        source_offsets.append(len(content))
 +        content = "".join(normalized)
 +        parser = MarkdownIt("commonmark").enable("table")
 +        # Observe the original document parse, including its reference-link
 +        # environment. Each nested image state has a distinct source object;
 +        # keep strong source references so identities cannot be reused.
-+        records: dict[int, tuple[str, set[int]]] = {}
++        records: dict[int, tuple[str, set[int], set[int]]] = {}
 +
 +        def record_backtick(state, silent):
 +            check_runtime()
 +            before = len(state.tokens)
++            opening_start = state.pos
 +            matched = backtick(state, silent)
 +            if matched and not silent and len(state.tokens) > before:
 +                token = state.tokens[-1]
 +                if token.type == "code_inline":
-+                    _, closers = records.setdefault(id(state.src), (state.src, set()))
++                    _, closers, openers = records.setdefault(
++                        id(state.src), (state.src, set(), set())
++                    )
++                    openers.update(range(opening_start, opening_start + len(token.markup)))
 +                    closers.update(
-+                        i for i in range(state.pos - len(token.markup), state.pos)
++                        i
++                        for i in range(state.pos - len(token.markup), state.pos)
 +                        if state.src[i] == "`"
 +                    )
 +            return matched
 +
 +        parser.inline.ruler.at("backticks", record_backtick)
++
 +        # GFM tables can synthesize many empty cells from very little source.
 +        # Enforce one shared document-wide budget BEFORE block or inline token
 +        # allocation, including nested states and pending-text tokens. Inline
 +        # emphasis/delimiter expansion can amplify source just as tables do.
-+        class OwnershipBudgetExceeded(Exception):
++        class OwnershipBudgetExceededError(Exception):
 +            pass
 +
 +        remaining_tokens = 8192
@@ -1078,7 +1093,7 @@ new file mode 100644
 +                nonlocal remaining_tokens
 +                check_runtime()
 +                if remaining_tokens <= 0:
-+                    raise OwnershipBudgetExceeded
++                    raise OwnershipBudgetExceededError
 +                remaining_tokens -= 1
 +
 +            def bounded_push(*args):
@@ -1102,7 +1117,7 @@ new file mode 100644
 +            # at its nesting limit, including document-wide link definitions.
 +            # Such a partial parse cannot establish any delimiter ownership.
 +            if state.level >= state.md.options.maxNesting:
-+                raise OwnershipBudgetExceeded
++                raise OwnershipBudgetExceededError
 +            install_allocation_budget(state)
 +            return original_tokenize(state, start_line, end_line)
 +
@@ -1113,14 +1128,14 @@ new file mode 100644
 +        def bounded_inline_tokenize(state):
 +            check_runtime()
 +            if state.level >= state.md.options.maxNesting:
-+                raise OwnershipBudgetExceeded
++                raise OwnershipBudgetExceededError
 +            install_allocation_budget(state)
 +            return original_inline_tokenize(state)
 +
 +        def bounded_skip_token(state):
 +            check_runtime()
 +            if state.level >= state.md.options.maxNesting:
-+                raise OwnershipBudgetExceeded
++                raise OwnershipBudgetExceededError
 +            return original_skip_token(state)
 +
 +        # Inline lookahead also skips source silently at the same depth limit.
@@ -1128,7 +1143,7 @@ new file mode 100644
 +        parser.inline.skipToken = bounded_skip_token
 +        try:
 +            blocks = parser.parse(content)
-+        except OwnershipBudgetExceeded:
++        except OwnershipBudgetExceededError:
 +            # Optional delimiter proof is all-or-nothing for allocation and
 +            # nesting cutoffs alike. Never trust a partially parsed document.
 +            return
@@ -1153,6 +1168,13 @@ new file mode 100644
 +            if end_line >= len(starts):
 +                continue
 +            start, end = starts[start_line], starts[end_line]
++            # Preserve the existing shell projection's stricter table
++            # boundaries when the optional canonical parser disagrees.
++            if any(
++                source_offsets[start] < excluded_end and excluded_start < source_offsets[end]
++                for excluded_start, excluded_end in excluded_ranges
++            ):
++                continue
 +            origin = content.find(block.content, start, end)
 +            if origin < 0 or content.find(block.content, origin + 1, end) >= 0:
 +                continue
@@ -1162,34 +1184,41 @@ new file mode 100644
 +            # Only events from this complete inline block can own its raw
 +            # positions; substring-local image label events remain unassigned.
 +            self._closers.update(source_offsets[origin + offset] for offset in record[1])
++            self._delimiters.update(
++                source_offsets[origin + offset] for offset in record[1] | record[2]
++            )
 +
 +    def closes_string(self, offset: int) -> bool:
 +        return offset in self._closers
++
++    def delimiter_offsets(self) -> frozenset[int]:
++        """Return proven inline delimiters, preserving every byte inside them."""
++        return frozenset(self._delimiters)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
-index 3095bc3..dc2b2b1 100644
+index 3095bc3..99a1f54 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
 +++ b/src/skillspector/nodes/analyzers/static_runner.py
-@@ -67,6 +67,7 @@ from skillspector.python_ast import (
-     may_be_python_source,
-     resolve_python_source_classification,
+@@ -50,6 +50,7 @@ from skillspector.inspection_ledger import (
+     ledger_event,
  )
+ from skillspector.logging_config import get_logger
 +from skillspector.markdown_tokens import MarkdownCodeSpanClosers
- from skillspector.python_tokens import PythonStringClosers
- from skillspector.security_reconstruction import (
-     MAX_DECLARED_MARKER_RIGHT_CONTEXT_CHARS,
+ from skillspector.models import (
+     AnalyzerFinding,
+     Finding,
 @@ -2048,7 +2049,7 @@ def _restore_source_lines(
-
-
+ 
+ 
  def _window_string_closer(
 -    python_strings: PythonStringClosers, window_start: int
 +    python_strings: PythonStringClosers | MarkdownCodeSpanClosers, window_start: int
  ) -> Callable[[int], bool]:
      """Answer string-closer queries in one window's source coordinates."""
-
+ 
 @@ -2120,11 +2121,15 @@ def _scan_declared_marker_views(
              )
          return True
-
+ 
 -    # A complete Python module proves which quotes close its string literals.
 -    # The proof covers the whole artifact, so it holds in every window. It is
 -    # computed only when a loose quoted directive header reaches a quote.
@@ -1204,8 +1233,19 @@ index 3095bc3..dc2b2b1 100644
 +        if _infer_file_type(path) == "markdown" and complete_context
 +        else None
      )
-
+ 
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
+@@ -2283,7 +2288,9 @@ def _scan_declared_marker_views(
+                                 marker_view.text,
+                                 check_runtime,
+                                 file_type=_infer_file_type(path),
+-                                complete_context=complete_context,
++                                # Reconstructed command text is executable
++                                # payload, never a complete Markdown document.
++                                complete_context=False,
+                             )
+                         )
+ 
 diff --git a/src/skillspector/security_reconstruction.py b/src/skillspector/security_reconstruction.py
 index 8c8fcc5..1082330 100644
 --- a/src/skillspector/security_reconstruction.py
@@ -1381,9 +1421,10 @@ index 74c304a..4699cbb 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+index c323c84..5db9eca 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-@@ -41,6 +41,7 @@
+@@ -41,6 +41,7 @@ from skillspector.artifacts import (
      normalized_security_view,
      security_text_views,
  )
@@ -1391,7 +1432,37 @@ diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/s
  from skillspector.logging_config import get_logger
  from skillspector.models import AnalyzerFinding, Finding, Location, Severity
  from skillspector.python_ast import ParsedPythonFile, parse_python_source
-@@ -5152,6 +5153,7 @@
+@@ -4847,6 +4848,7 @@ def _markdown_shell_text(
+     table_columns: int | None = None
+     table_minimum_indent = 0
+     table_delimiter_line = -1
++    table_ranges: list[tuple[int, int]] = []
+     offset = 0
+     lines = content.splitlines(keepends=True)
+     for line_index, line in enumerate(lines):
+@@ -4997,6 +4999,7 @@ def _markdown_shell_text(
+                         table_minimum_indent = minimum_indent
+                         table_delimiter_line = line_index + 1
+                 if table_columns is not None:
++                    table_ranges.append((offset, offset + len(line)))
+                     mask_inline_delimiters()
+                     if line_index != table_delimiter_line:
+                         cells = _markdown_table_cells(stripped, prefix, check_runtime)
+@@ -5069,6 +5072,13 @@ def _markdown_shell_text(
+             paragraph_list_indent = 0
+         offset += len(line)
+     mask_inline_delimiters()
++    if complete_context and re.search(r"(?m)^[ \t]*(?:>|[-+*][ \t]|[0-9]{1,9}[.)][ \t])", content):
++        from skillspector.markdown_tokens import MarkdownCodeSpanClosers
++
++        for delimiter in MarkdownCodeSpanClosers(
++            content, check_runtime, excluded_ranges=tuple(table_ranges)
++        ).delimiter_offsets():
++            output[delimiter] = " "
+     projected = "".join(output)
+     if prose_apostrophes:
+         # A prose-looking line can still be inside an earlier shell word, such
+@@ -5152,6 +5162,7 @@ def _has_bounded_parse_exhaustion(
      if file_type == "markdown":
          if complete_context:
              json_strings = validated_json_string_spans(content, check_runtime)
