@@ -41,7 +41,7 @@ RUN git init /tmp/skillspector \
 RUN python -m pip install --no-cache-dir --upgrade pip uv \
     && python -m pip install --no-cache-dir /tmp/skillspector pytest \
       "cisco-ai-skill-scanner==$CISCO_AI_SKILL_SCANNER_VERSION" \
-    && python -m pytest -q /tmp/clawscan-adapter-tests/test_skillspector_responses.py /tmp/clawscan-adapter-tests/test_skillspector_applicability.py /tmp/clawscan-adapter-tests/test_skillspector_accounting.py /tmp/clawscan-adapter-tests/test_skillspector_frontmatter_json.py /tmp/clawscan-adapter-tests/test_skillspector_osv_evidence.py /tmp/clawscan-adapter-tests/test_skillspector_pdf.py \
+    && python -m pytest -q /tmp/clawscan-adapter-tests/test_skillspector_responses.py /tmp/clawscan-adapter-tests/test_skillspector_applicability.py /tmp/clawscan-adapter-tests/test_skillspector_accounting.py /tmp/clawscan-adapter-tests/test_skillspector_frontmatter_json.py /tmp/clawscan-adapter-tests/test_skillspector_osv_evidence.py /tmp/clawscan-adapter-tests/test_skillspector_pdf.py /tmp/clawscan-adapter-tests/test_skillspector_markdown_containers.py \
     && uv tool install /tmp/aig/skill-scan --with pytest \
     && /root/.local/share/uv/tools/aig-skill-scan/bin/python -m pytest -q /tmp/clawscan-adapter-tests/test_aig_responses.py \
     && uv tool install "snyk-agent-scan==$SNYK_AGENT_SCAN_VERSION" \

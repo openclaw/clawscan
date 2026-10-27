@@ -346,3 +346,10 @@ A consumer deliberately running `--sandbox off` may instead install these same
 pinned, patched scanner sources into its host environment and execute the SDK
 contract tests there. In that mode it does not depend on a runtime-image rollout;
 it must not silently fall back to stock pip/uvx scanner packages.
+
+The Markdown shell fallback can use the existing bounded canonical code-span
+proof for container prose. It masks only proven delimiter bytes from a complete
+document, retains all command contents and expansions, and preserves the existing
+stricter raw table-row/cell boundaries when the two parsers disagree. Fenced and
+indented code, raw HTML, uncertain source maps and token/nesting cutoffs grant no
+additional delimiter ownership.
