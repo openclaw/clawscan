@@ -13,6 +13,62 @@ from skillspector.providers.chat_models import UnsupportedControlError
 from skillspector.providers.openai import OpenAIProvider
 
 
+def test_structured_permission_manifest_preserves_every_declaration(tmp_path):
+    from skillspector.nodes.build_context import build_context
+    from skillspector.nodes.meta_analyzer import _format_metadata
+
+    body = """---
+name: generated-permissions
+permissions:
+  scheme: none
+  hosts: [example.invalid]
+  file_read: none
+  file_write: none
+  environment: none
+  secrets: none
+  shell: none
+  nested: {enabled: false, limit: 3}
+---
+# Generated inert documentation
+"""
+    (tmp_path / "SKILL.md").write_text(body)
+    result = build_context({"skill_path": str(tmp_path)})
+    permissions = result["manifest"]["permissions"]
+    assert permissions == {
+        "scheme": "none", "hosts": ["example.invalid"], "file_read": "none",
+        "file_write": "none", "environment": "none", "secrets": "none",
+        "shell": "none", "nested": {"enabled": False, "limit": 3},
+    }
+    assert result["file_cache"]["SKILL.md"] == body
+    assert not any(row.get("reason_code") == "manifest_parse_error" for row in result["inspection_ledger"])
+    rendered = _format_metadata(result["manifest"])
+    assert json.loads(rendered.split("Permissions: ", 1)[1]) == permissions
+
+
+@pytest.mark.parametrize("field", [
+    "permissions: &loop {nested: *loop}",
+    "permissions: {nested: !!set {unsupported: null}}",
+    "permissions: {1: unsupported-key}",
+])
+def test_structured_permissions_reject_cycles_and_unsupported_shapes(tmp_path, field):
+    from skillspector.nodes.build_context import build_context
+
+    (tmp_path / "SKILL.md").write_text(f"---\nname: generated\n{field}\n---\n# Inert\n")
+    result = build_context({"skill_path": str(tmp_path)})
+    assert result["manifest"] == {}
+    assert any(row.get("reason_code") in {"manifest_parse_error", "manifest_parse_limit"} for row in result["inspection_ledger"])
+
+
+def test_structured_permission_projection_keeps_output_budget(tmp_path, monkeypatch):
+    import skillspector.nodes.build_context as context
+
+    monkeypatch.setattr(context, "MAX_MANIFEST_OUTPUT_RECORDS", 5)
+    (tmp_path / "SKILL.md").write_text("---\nname: generated\npermissions: {one: [a, b, c, d, e, f]}\n---\n# Inert\n")
+    result = context.build_context({"skill_path": str(tmp_path)})
+    assert result["manifest"] == {}
+    assert any(row.get("reason_code") == "manifest_parse_limit" for row in result["inspection_ledger"])
+
+
 @pytest.fixture(autouse=True)
 def controls(monkeypatch):
     for name in (
