@@ -1031,3 +1031,127 @@ index 74c304a..4699cbb 100644
 +    assert not results.limitations
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
+diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+--- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
++++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+@@ -41,6 +41,7 @@
+     normalized_security_view,
+     security_text_views,
+ )
++from skillspector.frontmatter_json import frontmatter_json_string_spans
+ from skillspector.logging_config import get_logger
+ from skillspector.models import AnalyzerFinding, Finding, Location, Severity
+ from skillspector.python_ast import ParsedPythonFile, parse_python_source
+@@ -5152,6 +5153,7 @@
+     if file_type == "markdown":
+         if complete_context:
+             json_strings = validated_json_string_spans(content, check_runtime)
++            json_strings.extend(frontmatter_json_string_spans(content, check_runtime))
+             structural_quote_closers = {end - 1 for _, end in json_strings}
+             structural_quote_openers = {start for start, _ in json_strings}
+         content = _markdown_shell_text(
+diff --git a/src/skillspector/frontmatter_json.py b/src/skillspector/frontmatter_json.py
+new file mode 100644
+--- /dev/null
++++ b/src/skillspector/frontmatter_json.py
+@@ -0,0 +1,100 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++
++"""Bounded structural quote ownership for JSON flow values in YAML frontmatter.
++
++This helper only supplies source spans to completeness checks. It constructs no
++YAML values, evaluates no tags and changes neither raw findings nor marker rules.
++"""
++
++from __future__ import annotations
++
++import json
++import re
++from collections.abc import Callable
++
++import yaml
++
++from skillspector.security_reconstruction import (
++    _MAX_JSON_QUOTE_CONTAINER_CHARS,
++    _json_body_after_frontmatter,
++    _json_string_spans,
++)
++
++MAX_FRONTMATTER_JSON_NODES = 4_096
++MAX_FRONTMATTER_JSON_DEPTH = 64
++
++
++def frontmatter_json_string_spans(
++    content: str, check_runtime: Callable[[], None]
++) -> list[tuple[int, int]]:
++    """Return exact quotes inside complete, independently validated JSON values.
++
++    The whole explicitly delimited metadata prefix must parse as a YAML mapping.
++    Only top-level flow collections that also parse as complete strict JSON gain
++    ownership. Block scalars, quoted JSON spellings, YAML-only syntax, aliases
++    with no independent source value, and malformed/over-budget prefixes do not.
++    """
++    body_end = _json_body_after_frontmatter(content, check_runtime)
++    if body_end is None or body_end > _MAX_JSON_QUOTE_CONTAINER_CHARS:
++        return []
++    opening = re.match(r"\A---[ \t]*\r?\n", content)
++    if opening is None:
++        return []
++    # body_end follows a complete closing delimiter line. Exclude that line
++    # when composing YAML; offsets remain relative to the exact original body.
++    closing_start = content.rfind("\n", 0, body_end - 1) + 1
++    body_start = opening.end()
++    body = content[body_start:closing_start]
++
++    class BoundedLoader(yaml.SafeLoader):
++        def __init__(self, source):
++            self.source_nodes = 0
++            self.source_depth = 0
++            super().__init__(source)
++
++        def compose_node(self, parent, index):
++            check_runtime()
++            self.source_nodes += 1
++            self.source_depth += 1
++            try:
++                if (
++                    self.source_nodes > MAX_FRONTMATTER_JSON_NODES
++                    or self.source_depth > MAX_FRONTMATTER_JSON_DEPTH
++                ):
++                    raise ValueError("Frontmatter source budget exceeded")
++                return super().compose_node(parent, index)
++            finally:
++                self.source_depth -= 1
++
++    check_runtime()
++    try:
++        root = yaml.compose(body, Loader=BoundedLoader)
++    except (yaml.YAMLError, RecursionError, ValueError):
++        return []
++    check_runtime()
++    if not isinstance(root, yaml.MappingNode) or root.tag != "tag:yaml.org,2002:map":
++        return []
++    containers: set[tuple[int, int]] = set()
++    spans: list[tuple[int, int]] = []
++
++    def reject_constant(value: str) -> None:
++        raise ValueError("Non-JSON numeric constant")
++
++    for _key, node in root.value:
++        check_runtime()
++        if not isinstance(node, (yaml.MappingNode, yaml.SequenceNode)) or not node.flow_style:
++            continue
++        start = body_start + node.start_mark.index
++        end = body_start + node.end_mark.index
++        if not body_start <= start < end <= closing_start or (start, end) in containers:
++            continue
++        containers.add((start, end))
++        raw = content[start:end]
++        try:
++            json.loads(raw, parse_constant=reject_constant)
++        except (ValueError, RecursionError):
++            continue
++        check_runtime()
++        spans.extend((start + a, start + b) for a, b in _json_string_spans(raw, check_runtime))
++    return sorted(set(spans))
