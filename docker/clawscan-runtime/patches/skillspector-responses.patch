@@ -408,3 +408,45 @@ index 4878677..0079882 100644
 -    { url = "https://files.pythonhosted.org/packages/ef/2f/c5464532e965badff2f4c4c1a3a83f5697f0d7c407ed0cda44aaa99bb451/certifi-2026.6.17-py3-none-any.whl", hash = "sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db", size = 133289, upload-time = "2026-06-17T10:31:06.348Z" },
 +    { url = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1", size = 135082, upload-time = "2026-10-23T11:36:14.763Z" },
  ]
+diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
+index 15b9b4c..06921d5 100644
+--- a/src/skillspector/nodes/build_context.py
++++ b/src/skillspector/nodes/build_context.py
+@@ -2448,7 +2448,14 @@ def _project_manifest(
+         manifest["version"] = _scalar_text(version)
+ 
+     manifest["triggers"] = _string_list(data.get("triggers", []))
+-    manifest["permissions"] = _string_list(data.get("permissions", []))
++    permissions = data.get("permissions", [])
++    # Agent skill manifests also use structured permission declarations. Keep
++    # every key/value under the same projection budgets as parameter metadata.
++    manifest["permissions"] = (
++        _clone_bounded(permissions, depth=0, active=set())
++        if isinstance(permissions, Mapping)
++        else _string_list(permissions)
++    )
+     # `allowed-tools` (Agent Skills standard) — accept list, comma string, or space-separated string.
+     # Separators inside a `Tool(specifier)` scope belong to the scope, so
+     # `Bash(git status:*) Read` stays two grants.
+@@ -2496,7 +2503,7 @@ def _parse_manifest(
+     """Parse SKILL.md or skill.md YAML frontmatter into a manifest dict.
+ 
+     Returns dict with name, description, version, triggers (list), permissions
+-    (list), allowed-tools (list), parameters (list). Returns {} if no file or
++    (list or mapping), allowed-tools (list), parameters (list). Returns {} if no file or
+     parse fails.
+     Parsing is restricted to a bounded byte prefix, including for direct helper
+     callers that do not provide the bundle's already-bounded raw cache.
+diff --git a/src/skillspector/nodes/meta_analyzer.py b/src/skillspector/nodes/meta_analyzer.py
+index 252134d..02c72c2 100644
+--- a/src/skillspector/nodes/meta_analyzer.py
++++ b/src/skillspector/nodes/meta_analyzer.py
+@@ -219,6 +219,8 @@ def _format_metadata(manifest: dict[str, object]) -> str:
+     permissions = manifest.get("permissions")
+     if isinstance(permissions, list) and permissions:
+         parts.append(f"Permissions: {', '.join(str(p) for p in permissions)}")
++    elif isinstance(permissions, dict) and permissions:
++        parts.append(f"Permissions: {json.dumps(permissions, ensure_ascii=False, sort_keys=True)}")
+     return "\n".join(parts) if parts else "No metadata available"
+ 
+ 
