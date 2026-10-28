@@ -5952,10 +5952,10 @@ index 0000000..e9582b5
 +    return ranges, unsupported
 diff --git a/src/skillspector/javascript_native_values.py b/src/skillspector/javascript_native_values.py
 new file mode 100644
-index 0000000..5c2bf9d
+index 0000000..bf658ac
 --- /dev/null
 +++ b/src/skillspector/javascript_native_values.py
-@@ -0,0 +1,806 @@
+@@ -0,0 +1,905 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Bounded native value typing for closed, private validator functions.
@@ -5968,6 +5968,33 @@ index 0000000..5c2bf9d
 +
 +class NativeValidatorValues:
 +    _INTRINSICS = {"Number", "Boolean", "RegExp", "console"}
++    # These forms introduce no implicit user-code dispatch of their own. Their
++    # children are visited separately, and declarations/calls/functions receive
++    # the additional identity/use checks in _closed_source. Unlisted grammar
++    # forms disable this optional proof rather than inheriting a default True.
++    _STRUCTURAL_NODES = {
++        "arguments", "array", "arrow_function", "assignment_expression",
++        "break_statement", "catch_clause", "comment", "continue_statement",
++        "else_clause", "empty_statement", "escape_sequence", "expression_statement",
++        "false", "finally_clause", "for_statement", "formal_parameters",
++        "function_declaration", "hash_bang_line", "identifier", "if_statement",
++        "import_clause", "import_specifier", "import_statement", "lexical_declaration",
++        "named_imports", "namespace_import", "null", "number", "object",
++        "optional_chain", "pair", "parenthesized_expression", "program",
++        "property_identifier", "regex", "regex_flags", "regex_pattern",
++        "return_statement", "sequence_expression", "shorthand_property_identifier",
++        "statement_block", "string", "string_fragment", "template_string",
++        "ternary_expression", "throw_statement", "true", "try_statement",
++        "variable_declarator",
++    }
++    _BINARY_OPERATORS = {
++        "??", "||", "&&", "===", "!==", "==", "!=", "<", ">", "<=", ">=",
++        "-", "*", "/", "%", "+", "**", "<<", ">>", ">>>", "&", "|", "^",
++    }
++    _AUGMENTED_OPERATORS = {
++        "??=", "||=", "&&=", "+=", "-=", "*=", "/=", "%=", "**=",
++        "<<=", ">>=", ">>>=", "&=", "|=", "^=",
++    }
 +
 +    def __init__(
 +        self, *, data, nodes, parents, definition, capability, private_function, reads,
@@ -6338,7 +6365,11 @@ index 0000000..5c2bf9d
 +            if cap == ("ambient", "process.argv.slice"):
 +                return ("array", ("string",))
 +            if cap == ("node:fs/promises", "readFile") and len(args) == 2:
-+                if args[1].type == "string" and self.text(args[1])[1:-1] in {"utf8", "utf-8"}:
++                if (
++                    self.kind(args[0]) == ("string",)
++                    and args[1].type == "string"
++                    and self.text(args[1])[1:-1] in {"utf8", "utf-8"}
++                ):
 +                    return ("string",)
 +            if function is not None and function.type == "member_expression":
 +                return self._method_kind(function, args)
@@ -6544,22 +6575,26 @@ index 0000000..5c2bf9d
 +                continue
 +            if function is not None and self.private_function(function) is not None:
 +                continue
-+            if cap is not None and cap[0] in {"node:fs/promises", "node:path"}:
++            args = self.children(self.field(node, "arguments"))
++            if cap in {("ambient", "console.log"), ("ambient", "console.error")}:
++                # Formatting and object inspection have additional callback
++                # contracts. Only the existing single-scalar output is owned.
++                if len(args) != 1 or not self.primitive(self.kind(args[0]), error=True):
++                    return False
 +                continue
-+            if cap in {
-+                ("ambient", "console.log"),
-+                ("ambient", "console.error"),
-+                ("ambient", "process.exit"),
-+                ("ambient", "Array.isArray"),
-+            }:
++            if cap == ("ambient", "process.exit"):
++                if len(args) > 1 or any(not self.primitive(self.kind(arg)) for arg in args):
++                    return False
++                continue
++            if cap == ("ambient", "Array.isArray"):
++                if len(args) != 1:
++                    return False
 +                continue
 +            if cap == ("ambient", "Math.abs"):
-+                args = self.children(self.field(node, "arguments"))
 +                if len(args) != 1 or not self.primitive(self.kind(args[0])):
 +                    return False
 +                continue
 +            if cap == ("ambient", "JSON.stringify"):
-+                args = self.children(self.field(node, "arguments"))
 +                if len(args) != 1 or not self._serializable(args[0]):
 +                    return False
 +                continue
@@ -6568,15 +6603,33 @@ index 0000000..5c2bf9d
 +        return True
 +
 +    def _operands_are_data(self, node):
-+        """Prove the consumed operands, separately from an operation's result."""
++        """Affirmatively own each semantic form and its implicit dispatch."""
++        if not node.is_named or node.type in self._STRUCTURAL_NODES:
++            return True
 +        operands = []
-+        if node.type in {"template_substitution", "computed_property_name"}:
++        if node.type in {"template_substitution", "computed_property_name", "await_expression"}:
++            # Await assimilates a thenable before its result reaches a scalar
++            # consumer. Known native readFile results have their settled string
++            # kind; unknown objects cannot be admitted through Boolean(await x).
 +            operands = self.children(node)
++            if len(operands) != 1:
++                return False
++        elif node.type == "member_expression":
++            return self._native_member_read(node)
 +        elif node.type == "subscript_expression":
++            if not self._native_member_read(node):
++                return False
 +            operands = [self.field(node, "index")]
 +        elif node.type in {"binary_expression", "augmented_assignment_expression"}:
 +            operator = self.field(node, "operator")
 +            op = self.text(operator) if operator is not None else ""
++            allowed = (
++                self._BINARY_OPERATORS
++                if node.type == "binary_expression"
++                else self._AUGMENTED_OPERATORS
++            )
++            if op not in allowed:
++                return False
 +            # Truthiness, nullish selection and strict identity do not invoke
 +            # an object's conversion hooks. Arithmetic, relational and loose
 +            # equality operations can, even when their result is primitive.
@@ -6585,9 +6638,55 @@ index 0000000..5c2bf9d
 +        elif node.type in {"unary_expression", "update_expression"}:
 +            operator = self.field(node, "operator")
 +            op = self.text(operator) if operator is not None else ""
++            allowed = (
++                {"++", "--"} if node.type == "update_expression"
++                else {"!", "typeof", "void", "delete", "+", "-", "~"}
++            )
++            if op not in allowed:
++                return False
 +            if op in {"+", "-", "~", "++", "--"}:
 +                operands = [self.field(node, "argument")]
++        elif node.type == "for_in_statement":
++            # Async iteration additionally assimilates yielded thenables.
++            # Enumeration/proxy contracts are outside this validator owner.
++            return (
++                any(child.type == "of" for child in node.children)
++                and not any(child.type == "await" for child in node.children)
++                and self._native_iterable(self.field(node, "right"))
++            )
++        elif node.type == "spread_element":
++            owner = self.parent(node)
++            values = self.children(node)
++            return (
++                owner is not None and owner.type == "array" and len(values) == 1
++                and self._native_iterable(values[0])
++            )
++        elif node.type in {"call_expression", "new_expression"}:
++            # Tagged templates are call_expression nodes too, but consume a
++            # template object through a different, unproved invocation contract.
++            arguments = self.field(node, "arguments")
++            return arguments is not None and arguments.type == "arguments"
++        else:
++            return False
 +        return all(self.primitive(self.kind(operand)) for operand in operands)
++
++    def _native_iterable(self, node):
++        kind = self.kind(node)
++        return kind is not None and kind[0] in {"array", "iterator", "string"}
++
++    def _native_member_read(self, node):
++        if self.capability(node) is not None:
++            return True
++        receiver = self.field(node, "object")
++        kind = self.kind(receiver)
++        if self.primitive(kind, error=True) or (
++            kind is not None and kind[0] in {"array", "iterator", "match", "regexp"}
++        ):
++            return True
++        # Property access can invoke an inherited getter even when only the
++        # property's boolean result is observed. Plain-record ownership also
++        # excludes prototypes, accessors, hooks and subsequent member writes.
++        return self._serializable(receiver)
 +
 +    def _serializable(self, initial):
 +        """Bound JSON traversal to immutable plain records and native arrays.
@@ -7119,3 +7218,57 @@ index 0000000..d50f47a
 +        {"components": ["case.cjs"], "file_cache": {"case.cjs": source}}, [tool]
 +    )
 +    assert result["inspection_ledger"][0]["outcome"] == "completed"
+diff --git a/tests/nodes/analyzers/test_native_validator_implicit_dispatch.py b/tests/nodes/analyzers/test_native_validator_implicit_dispatch.py
+new file mode 100644
+index 0000000..5ccfed8
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_implicit_dispatch.py
+@@ -0,0 +1,48 @@
++"""An optional closed proof must account for every implicit JS invocation."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++CASES = {
++    "await_thenable": 'const payload={then:consume,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(await payload)}`);console.log(JSON.stringify(errors));',
++    "await_logical_thenable": 'const payload={then:consume,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(await (payload||1))}`);console.log(JSON.stringify(errors));',
++    "await_private_thenable": 'const payload={then:consume,command:`tou${"ch"} /tmp/marker`};function value(){return payload;}const errors=[];errors.push(`${Boolean(await value())}`);console.log(JSON.stringify(errors));',
++    "inherited_getter": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(payload.value)}`);console.log(JSON.stringify(errors));',
++    "inherited_subscript_getter": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(payload["value"])}`);console.log(JSON.stringify(errors));',
++    "inherited_iterator": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean([...payload])}`);console.log(JSON.stringify(errors));',
++    "unknown_object_spread": 'const payload=carrier;const errors=[];errors.push(`x${Boolean({...payload})}`);console.log(JSON.stringify(errors));',
++    "unknown_array_spread": 'const payload=carrier;const errors=[];errors.push(`x${Boolean([...payload])}`);console.log(JSON.stringify(errors));',
++    "destructuring_getter": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const {value}=payload;const errors=[];errors.push(`${Boolean(value)}`);console.log(JSON.stringify(errors));',
++    "destructuring_iterator": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const [value]=payload;const errors=[];errors.push(`${Boolean(value)}`);console.log(JSON.stringify(errors));',
++    "delegated_generator": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};function* values(){yield* payload;}const errors=[];errors.push(`${Boolean(values().next())}`);console.log(JSON.stringify(errors));',
++    "async_iteration": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];for await(const value of payload)errors.push(`${Boolean(value)}`);console.log(JSON.stringify(errors));',
++    "unknown_tag": 'const errors=[];errors.push(`${Boolean(tag`x${1}`)}`);console.log(JSON.stringify(errors));',
++    "native_tag_shape": 'import {readFile} from "node:fs/promises";const errors=[];errors.push(`${Boolean(readFile`x${1}`)}`);console.log(JSON.stringify(errors));',
++    "proxy_receiver": 'const payload=new Proxy({command:`tou${"ch"} /tmp/marker`},carrier);const errors=[];errors.push(`${Boolean(payload.value)}`);console.log(JSON.stringify(errors));',
++}
++
++
++@pytest.mark.parametrize("source", CASES.values(), ids=CASES)
++def test_unknown_implicit_dispatch_remains_incomplete(source):
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("expression", [
++    '`${await "value"}`',
++    '`${await Number("1")}`',
++    '`${Boolean({value:1}.value)}`',
++    '`${[...["a","b"]].join(",")}`',
++])
++def test_known_native_operands_keep_the_closed_proof(expression):
++    source = f'const errors=[];errors.push({expression});console.log(JSON.stringify(errors));'
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] == "completed"
