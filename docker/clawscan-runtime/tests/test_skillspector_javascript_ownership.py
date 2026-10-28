@@ -1,6 +1,7 @@
 """Native data value uses can prove source ownership; executable strings cannot."""
 
 import pytest
+
 from skillspector.inspection_ledger import LedgerOutcome, LedgerReason
 from skillspector.nodes.analyzers import static_patterns_tool_misuse as tm
 from skillspector.nodes.analyzers import static_runner
@@ -59,7 +60,10 @@ def test_comment_cannot_open_a_shell_word_into_host_code(extension, comment):
 def test_comment_ownership_does_not_grant_template_or_value_ownership(statement):
     row = ledger(OPTIONS + COMMENT + statement + "\n" + TAIL)["inspection_ledger"][0]
     assert row["outcome"] == LedgerOutcome.PARTIAL
-    assert row["reason_code"] == LedgerReason.STATIC_PARSE_LIMIT
+    assert row["reason_code"] in {
+        LedgerReason.STATIC_PARSE_LIMIT,
+        LedgerReason.OPAQUE_CONTENT,
+    }
 
 
 def test_comment_ownership_retains_actual_high_destructive_finding():
@@ -102,6 +106,8 @@ def test_other_language_does_not_get_javascript_comment_ownership():
         "const NativeError = Error; throw new NativeError(`Repeated option ${key}`);",
         "fetch(`${base}/api`);",
         "const endpoint = `${base}/api`; fetch(endpoint);",
+        "let url = `${base}/api`; fetch(url);",
+        "let detail = ''; detail = String.fromCharCode(111, 107); throw new Error(detail);",
         "process.stdout.write(`Result: ${result}\\n`);",
         "const out = process.stdout; const write = out.write; write(`Result: ${result}`);",
         (
@@ -128,9 +134,10 @@ def test_proven_native_data_value_uses_have_complete_real_ledger(statement):
         "function sink(run) { Object.assign(process.stdout, {write: run}); process.stdout.write(`result ${key}`); }",
         "function fetch(value) { return value; } fetch(`${base}/api`);",
         "const url = `${base}/api`; fetch(url); other(url);",
+        "let url = `${base}/api`; fetch(url); execute(url);",
+        "let detail = ''; detail = String.fromCharCode(114, 109); obj.run(detail);",
         "export const url = `${base}/api`;",
         "function result() { return `${base}/api`; }",
-        "let url = `${base}/api`; fetch(url);",
         "const url = tag`${base}/api`; fetch(url);",
         'import {open} from "untrusted-fs"; open(`${file}.tmp`);',
         'import * as fs from "node:fs"; fs.open(`${file}.tmp`);',
@@ -149,7 +156,10 @@ def test_proven_native_data_value_uses_have_complete_real_ledger(statement):
 def test_unknown_mutable_or_escaping_capabilities_keep_partial_coverage(statement):
     row = ledger(OPTIONS + COMMENT + statement + "\n" + TAIL)["inspection_ledger"][0]
     assert row["outcome"] == LedgerOutcome.PARTIAL
-    assert row["reason_code"] == LedgerReason.STATIC_PARSE_LIMIT
+    assert row["reason_code"] in {
+        LedgerReason.STATIC_PARSE_LIMIT,
+        LedgerReason.OPAQUE_CONTENT,
+    }
 
 
 def test_native_data_ownership_keeps_raw_high_finding_and_original_line():
@@ -195,7 +205,7 @@ def test_shared_runtime_deadline_propagates():
 
     owner = JavaScriptSourceOwnership(OPTIONS + COMMENT + TAIL, stopped)
     with pytest.raises(TimeoutError, match="test deadline"):
-        owner.is_code(0)
+        owner.unsupported_values()
 
 
 def test_native_parse_deadline_keeps_conservative_result(monkeypatch):
@@ -213,5 +223,129 @@ def test_ownership_does_not_change_process_warning_filters():
 
     before = list(warnings.filters)
     owner = JavaScriptSourceOwnership(OPTIONS + COMMENT + TAIL, lambda: None)
-    owner.is_code(0)
+    owner.unsupported_values()
     assert warnings.filters == before
+
+
+def closure_ledger(statement):
+    path = "scripts/helper.mjs"
+    source = "throw new Error(`Repeated option ${key}`);\n" + statement + "\n" + TAIL
+    return static_runner.run_static_patterns_with_ledger(
+        {"components": [path], "file_cache": {path: source}}, [tm]
+    )["inspection_ledger"][0]
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        'const parts=["r","m"]; const p=Array.prototype; p.join=run; throw new Error(`value ${parts.join("")}`);',
+        'const parts=["r","m"]; const p=Object.getPrototypeOf([]); p.join=run; throw new Error(`value ${parts.join("")}`);',
+        'const parts=["r","m"]; Array["prototype"].join=run; throw new Error(`value ${parts.join("")}`);',
+        r'const parts=["r","m"]; Array["proto\u0074ype"].join=run; throw new Error(`value ${parts.join("")}`);',
+        "function message(){const record={text:`${cmd}${flags} /`};return record;} obj.run(message());",
+        "function message(){const record={};record.text=`${cmd}${flags} /`;return record;} obj.run(message());",
+        "function message(){return `${cmd}${flags} /`;} fetch(message()); obj.run(message());",
+        "export function message(){return `${cmd}${flags} /`;} fetch(message());",
+        'export let value=""; value=`${cmd}${flags} /`; fetch(value);',
+        'function f(){if(flag){const target={};} target.join=run;} const parts=["r","m"]; throw new Error(`value ${parts.join("")}`);',
+        'function record(){return {};} record=run; const target=record(); target.join=run; const parts=["r","m"]; throw new Error(`value ${parts.join("")}`);',
+    ],
+)
+def test_native_or_private_values_cannot_escape_to_unknown_code(statement):
+    row = closure_ledger(statement)
+    assert row["outcome"] == "partial"
+    assert row["reason_code"] == "opaque_content"
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "function message(){const record={text:`Result ${value}`};return record;} process.stdout.write(JSON.stringify(message()));",
+        "function message(){const record={};record.text=`Result ${value}`;return record;} process.stdout.write(JSON.stringify(message()));",
+        'const values=["one","two"]; throw new Error(`Options: ${values.join(", ")}`);',
+    ],
+)
+def test_private_source_values_have_only_proven_native_data_uses(statement):
+    assert closure_ledger(statement)["outcome"] == "completed"
+
+
+_EXECUTABLE_BOUNDARIES = [
+    "function f({Error}) {throw new Error(`${command}${flags} /`);}",
+    "function f(source) {({Error}=source); throw new Error(`${command}${flags} /`);}",
+    "var {Error}=source; throw new Error(`${command}${flags} /`);",
+    'const cmd=["rm", " -r", "f /home/"].join(""); ({run:exec}).run(cmd);',
+    "const cmd=String.fromCharCode(114,109,32,45,114,102,32,47); obj.run(cmd);",
+    'const cp=process.getBuiltinModule("child_process"); cp.execSync(process.argv.slice(2).join(" "));',
+    "function f({fetch}, tool, flags) {fetch(`${tool}${flags} /`);}",
+    "function f(run, tool, flags) {this.fetch=run; fetch(`${tool}${flags} /`);}",
+    r"function f(\u0066etch, tool, flags) {fetch(`${tool}${flags} /`);}",
+    'const parts=process.argv.slice(2); process.getBuiltinModule("child_process").exec(parts.join(" "));',
+    r"function f(run, cmd, flags) {const f\u0065tch=run; fetch(`${cmd}${flags} /`);}",
+]
+
+
+@pytest.mark.parametrize("statement", _EXECUTABLE_BOUNDARIES)
+@pytest.mark.parametrize("tail", ["", TAIL], ids=["short", "long"])
+@pytest.mark.parametrize(
+    "imports",
+    [
+        "",
+        'import {readFile} from "node:fs/promises";\n',
+        'import {plugin} from "unsupported-module";\n',
+        'import plugin from "unsupported-module";\n',
+        'import * as plugin from "unsupported-module";\n',
+    ],
+)
+def test_executable_constructions_keep_partial_coverage_across_import_boundaries(
+    statement, tail, imports
+):
+    source = (
+        imports
+        + "throw new Error(`Repeated option ${key}`);\n"
+        + statement
+        + "\n"
+        + tail
+    )
+    row = ledger(source)["inspection_ledger"][0]
+    assert row["outcome"] == LedgerOutcome.PARTIAL
+    assert row["reason_code"] in {
+        LedgerReason.OPAQUE_CONTENT,
+        LedgerReason.STATIC_PARSE_LIMIT,
+    }
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import plugin from "unsupported-module"; export const metadata = `version ${version}`;',
+        'import plugin from "unsupported-module"; export const metadata = plugin.describe("package");',
+        'import * as plugin from "unsupported-module"; const metadata = `version ${version}`;',
+        'import {plugin} from "unsupported-module"; function metadata() {return `version ${version}`;}',
+    ],
+)
+def test_unsupported_imports_do_not_make_unobserved_metadata_newly_opaque(source):
+    from skillspector.javascript_source import JavaScriptSourceOwnership
+
+    owner = JavaScriptSourceOwnership(source, lambda: None)
+    assert owner.unsupported_values() == ()
+    if "`" in source:
+        assert owner.data_literal(source.index("`")) is None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import plugin from "unsupported-module"; export const metadata = `version ${plugin.version()}`;',
+        'import plugin from "unsupported-module"; const metadata = plugin.create("metadata");',
+        'import plugin from "unsupported-module"; // )`\nexport const metadata = "value";',
+    ],
+)
+def test_unsupported_import_fallback_never_grants_comment_or_literal_ownership(source):
+    from skillspector.javascript_source import JavaScriptSourceOwnership
+
+    owner = JavaScriptSourceOwnership(source, lambda: None)
+    assert owner.unsupported_values() == ()
+    assert all(
+        owner.comment(index) is None and owner.data_literal(index) is None
+        for index in range(len(source))
+    )
