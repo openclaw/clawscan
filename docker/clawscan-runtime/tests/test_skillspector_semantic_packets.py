@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import pytest
+
 import skillspector.llm_analyzer_base as base
 from skillspector.inspection_ledger import LedgerOutcome, LedgerReason
 from skillspector.llm_analyzer_base import (
@@ -165,3 +166,48 @@ def test_actual_request_uses_the_packet_response_contract(monkeypatch, asynchron
         returned, findings = analyzer._invoke_batch(batch, analyzer.build_prompt(batch))
     assert returned is batch and findings == []
     assert seen == [("generated-model", SemanticPacketResult)]
+
+
+def test_overlapping_native_chunks_preserve_one_original_finding_origin():
+    from skillspector.inspection_ledger import finalize_ledger
+    from skillspector.llm_analyzer_base import LLMAnalysisResult
+
+    analyzer = planner()
+    files = {"overlap.md": "short\n" * 60 + "x" * 400_000 + "\n", "other.md": "ordinary\n"}
+    batches = analyzer.get_batches(list(files), files)
+    original_chunks = base.chunk_file_by_lines(
+        files["overlap.md"], analyzer._input_budget - base.estimate_tokens(analyzer.base_prompt)
+    )
+    members = [member for batch in batches for member in batch.members or (batch,)]
+    assert [(m.content, m.start_line, m.end_line) for m in members if m.file_path == "overlap.md"] == original_chunks
+    assert original_chunks[0][1:] == (1, 60)
+    assert original_chunks[1][1:] == (11, 60)
+    outcome = BatchExecutionResult()
+    reported = False
+    findings = []
+    for batch in batches:
+        if batch.members:
+            results = []
+            for index, member in enumerate(batch.members):
+                emitted = []
+                if not reported and member.file_path == "overlap.md":
+                    emitted = [LLMFinding(rule_id="PI1", message="Generated", severity="HIGH", start_line=20)]
+                    reported = True
+                results.append(SemanticSourceResult(source_id=str(index), findings=emitted))
+            response = SemanticPacketResult(sources=results)
+        else:
+            emitted = []
+            if not reported and batch.file_path == "overlap.md":
+                emitted = [LLMFinding(rule_id="PI1", message="Generated", severity="HIGH", start_line=20)]
+                reported = True
+            response = LLMAnalysisResult(findings=emitted)
+        parsed = analyzer.parse_response(response, batch)
+        findings.extend(parsed)
+        outcome.successful.append((batch, parsed))
+    assert len(findings) == 1
+    events, status = ledger_events_for_batches("generated", outcome)
+    completeness, _ = finalize_ledger(
+        {"components": list(files), "findings": findings, "inspection_ledger": events, "analyzer_status_events": [status]}
+    )
+    assert not [e for e in completeness["ledger_exceptions"] if e["reason_code"] == LedgerReason.FINDING_ACCOUNTING_ERROR]
+    assert sum(findings[0].finding_id in e["emitted_finding_ids"] for e in events) == 1

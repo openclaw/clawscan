@@ -2617,7 +2617,7 @@ index 2876b5e..10bc72b 100644
          check_runtime()
      raw = SecurityTextView("raw", text)
 diff --git a/src/skillspector/llm_analyzer_base.py b/src/skillspector/llm_analyzer_base.py
-index 470f6d3..54a758f 100644
+index 470f6d3..b810c50 100644
 --- a/src/skillspector/llm_analyzer_base.py
 +++ b/src/skillspector/llm_analyzer_base.py
 @@ -28,6 +28,7 @@ to ``None`` for raw-string mode.
@@ -2720,7 +2720,7 @@ index 470f6d3..54a758f 100644
          self._timeout = timeout
          self._dynamic_timeout = callable(timeout)
          self._input_budget = get_max_input_tokens(model)
-@@ -1131,7 +1175,58 @@ class LLMAnalyzerBase:
+@@ -1131,7 +1175,73 @@ class LLMAnalyzerBase:
                          )
                      )
 
@@ -2755,6 +2755,21 @@ index 470f6d3..54a758f 100644
 +
 +        for source in sources:
 +            self._require_time_remaining()
++            # Ledger projection selects packet findings by file and line range.
++            # Overlapping chunks therefore need separate request identities.
++            if any(
++                member.file_path == source.file_path
++                and (
++                    member.end_line is None
++                    or source.end_line is None
++                    or (
++                        member.start_line <= source.end_line
++                        and source.start_line <= member.end_line
++                    )
++                )
++                for member in pending
++            ):
++                flush()
 +            candidate = [*pending, source]
 +            if (
 +                len(candidate) <= 16
@@ -2780,7 +2795,7 @@ index 470f6d3..54a758f 100644
 
      # -- Prompt / parse -----------------------------------------------------
 
-@@ -1142,6 +1237,26 @@ class LLMAnalyzerBase:
+@@ -1142,6 +1252,26 @@ class LLMAnalyzerBase:
          so the LLM can reference exact line numbers in its findings.
          Override in subclasses that need a custom prompt layout.
          """
@@ -2807,7 +2822,7 @@ index 470f6d3..54a758f 100644
          numbered = number_lines(batch.content, batch.start_line)
          return append_output_language_instruction(
              BASE_ANALYSIS_PROMPT.format(
-@@ -1158,6 +1273,26 @@ class LLMAnalyzerBase:
+@@ -1158,6 +1288,26 @@ class LLMAnalyzerBase:
          via :meth:`LLMFinding.to_finding`.  Override in subclasses that use a
          different ``response_schema`` or raw-string mode.
          """
@@ -2834,7 +2849,7 @@ index 470f6d3..54a758f 100644
          if isinstance(response, LLMAnalysisResult):
              return [f.to_finding(batch.file_path) for f in response.findings]
          raise NotImplementedError(
-@@ -1166,6 +1301,9 @@ class LLMAnalyzerBase:
+@@ -1166,6 +1316,9 @@ class LLMAnalyzerBase:
 
      # -- Run loop -----------------------------------------------------------
 
@@ -2844,7 +2859,7 @@ index 470f6d3..54a758f 100644
      def _invoke_batch(self, batch: Batch, prompt: str) -> tuple[Batch, list]:
          """Invoke and parse one batch synchronously."""
          logger.debug(
-@@ -1175,6 +1313,8 @@ class LLMAnalyzerBase:
+@@ -1175,6 +1328,8 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
@@ -2853,7 +2868,7 @@ index 470f6d3..54a758f 100644
          if structured_llm:
              try:
                  response = _invoke_with_usage(structured_llm, prompt, self._usage_collector)
-@@ -1264,6 +1404,8 @@ class LLMAnalyzerBase:
+@@ -1264,6 +1419,8 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
