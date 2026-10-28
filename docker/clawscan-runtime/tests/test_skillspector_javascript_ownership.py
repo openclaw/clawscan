@@ -302,6 +302,7 @@ _EXECUTABLE_BOUNDARIES = [
     'function unused(){const write=process.stdout.write;} function install(run){this.write=run; write(String.fromCharCode(114,109,32,45,114,102,32,47,104,111,109,101,47));} install(process.getBuiltinModule("child_process").execSync);',
     "for (const fetch of [obj.run]) fetch(`${cmd}${flags} /`);",
     "function unused(){const write=process.stdout.write;} write(`${cmd}${flags} /`);",
+    "if(true){function fetch(value){obj.run(value);}} fetch(`${cmd}${flags} /`);",
 ]
 
 

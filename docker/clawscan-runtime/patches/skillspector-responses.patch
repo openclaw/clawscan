@@ -2546,10 +2546,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..ef09c37
+index 0000000..97d3dfc
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1368 @@
+@@ -0,0 +1,1379 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -2891,6 +2891,17 @@ index 0000000..ef09c37
 +            name = text(node)
 +            defs = lexical_definitions(node)
 +            if name in _GLOBAL_CAPABILITIES and not defs and not unsafe_native:
++                for definition in definitions[name]:
++                    owner = parent(definition)
++                    if (
++                        owner is not None
++                        and owner.type == "function_declaration"
++                        and binding_scope(definition) != function_scope(owner)
++                        and function_scope(owner) == function_scope(node)
++                    ):
++                        # Sloppy-script Annex B may also create an enclosing
++                        # var binding for a block function declaration.
++                        return None
 +                return ("ambient", name)
 +            if len(defs) != 1:
 +                return None
