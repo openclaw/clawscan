@@ -1,9 +1,9 @@
 ARG SHFMT_VERSION=v3.14.1
-FROM golang:1.27.3 AS bash-parser
+FROM golang:1.27.3@sha256:6f1acc898d064a4e9d5773ee574a9af6a9b786306939ac14d7fd806bf62046db AS bash-parser
 ARG SHFMT_VERSION
 RUN CGO_ENABLED=0 GOBIN=/out go install "mvdan.cc/sh/v3/cmd/shfmt@${SHFMT_VERSION}"
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f
 ARG SHFMT_VERSION
 
 ARG SKILLSPECTOR_REF=95a52d89fa16f608f0b18ccee76b0918ea4b7eef
@@ -49,7 +49,7 @@ RUN git init /tmp/skillspector \
 RUN python -m pip install --no-cache-dir --upgrade pip uv \
     && python -m pip install --no-cache-dir /tmp/skillspector pytest \
       "cisco-ai-skill-scanner==$CISCO_AI_SKILL_SCANNER_VERSION" \
-    && python -m pytest -q /tmp/clawscan-adapter-tests/test_skillspector_responses.py /tmp/clawscan-adapter-tests/test_skillspector_applicability.py /tmp/clawscan-adapter-tests/test_skillspector_accounting.py /tmp/clawscan-adapter-tests/test_skillspector_frontmatter_json.py /tmp/clawscan-adapter-tests/test_skillspector_osv_evidence.py /tmp/clawscan-adapter-tests/test_skillspector_pdf.py /tmp/clawscan-adapter-tests/test_skillspector_markdown_containers.py /tmp/clawscan-adapter-tests/test_skillspector_semantic_packets.py /tmp/clawscan-adapter-tests/test_skillspector_meta_packets.py /tmp/clawscan-adapter-tests/test_skillspector_security_view_cache.py /tmp/clawscan-adapter-tests/test_skillspector_ledger_capacity.py /tmp/clawscan-adapter-tests/test_skillspector_table_markers.py /tmp/clawscan-adapter-tests/test_skillspector_fence_boundaries.py /tmp/clawscan-adapter-tests/test_skillspector_csv_markers.py /tmp/clawscan-adapter-tests/test_skillspector_shell_source.py /tmp/clawscan-adapter-tests/test_skillspector_javascript_ownership.py \
+    && python -m pytest -q /tmp/clawscan-adapter-tests/test_skillspector_responses.py /tmp/clawscan-adapter-tests/test_skillspector_applicability.py /tmp/clawscan-adapter-tests/test_skillspector_accounting.py /tmp/clawscan-adapter-tests/test_skillspector_frontmatter_json.py /tmp/clawscan-adapter-tests/test_skillspector_osv_evidence.py /tmp/clawscan-adapter-tests/test_skillspector_pdf.py /tmp/clawscan-adapter-tests/test_skillspector_markdown_containers.py /tmp/clawscan-adapter-tests/test_skillspector_semantic_packets.py /tmp/clawscan-adapter-tests/test_skillspector_meta_packets.py /tmp/clawscan-adapter-tests/test_skillspector_security_view_cache.py /tmp/clawscan-adapter-tests/test_skillspector_ledger_capacity.py /tmp/clawscan-adapter-tests/test_skillspector_table_markers.py /tmp/clawscan-adapter-tests/test_skillspector_fence_boundaries.py /tmp/clawscan-adapter-tests/test_skillspector_csv_markers.py /tmp/clawscan-adapter-tests/test_skillspector_packed_views.py /tmp/clawscan-adapter-tests/test_skillspector_lazy_closers.py /tmp/clawscan-adapter-tests/test_skillspector_bounded_packing.py /tmp/clawscan-adapter-tests/test_skillspector_shell_source.py /tmp/clawscan-adapter-tests/test_skillspector_javascript_ownership.py \
     && uv tool install /tmp/aig/skill-scan --with pytest \
     && /root/.local/share/uv/tools/aig-skill-scan/bin/python -m pytest -q /tmp/clawscan-adapter-tests/test_aig_responses.py \
     && uv tool install "snyk-agent-scan==$SNYK_AGENT_SCAN_VERSION" \
