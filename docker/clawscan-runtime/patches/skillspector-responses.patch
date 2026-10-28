@@ -2924,7 +2924,7 @@ index 2876b5e..49f726d 100644
          check_runtime()
      raw = SecurityTextView("raw", text)
 diff --git a/src/skillspector/llm_analyzer_base.py b/src/skillspector/llm_analyzer_base.py
-index 470f6d3..620af5f 100644
+index 470f6d3..4801c9e 100644
 --- a/src/skillspector/llm_analyzer_base.py
 +++ b/src/skillspector/llm_analyzer_base.py
 @@ -28,6 +28,7 @@ to ``None`` for raw-string mode.
@@ -3027,7 +3027,7 @@ index 470f6d3..620af5f 100644
          self._timeout = timeout
          self._dynamic_timeout = callable(timeout)
          self._input_budget = get_max_input_tokens(model)
-@@ -1131,7 +1175,142 @@ class LLMAnalyzerBase:
+@@ -1131,7 +1175,145 @@ class LLMAnalyzerBase:
                          )
                      )
 
@@ -3117,19 +3117,20 @@ index 470f6d3..620af5f 100644
 +
 +        packets: list[tuple[int, Batch]] = []
 +
-+        def flush(indexes: list[int]) -> None:
++        def flush(indexes: list[int]) -> bool:
 +            if len(indexes) == 1:
 +                packets.append((indexes[0], sources[indexes[0]]))
-+                return
++                return True
 +            candidate = packet(indexes)
 +            self._require_time_remaining()
 +            # Predictions only choose placement. The actual serialized prompt
 +            # always enforces the byte limit, even for a future nonadditive
-+            # subclass. A disagreement cannot omit, trim or overpack a source.
++            # subclass. An overflow invalidates the whole packing plan so a
++            # split bin cannot reorder chunks relative to dependent packets.
 +            if len(self.build_prompt(candidate, **prompt_kwargs).encode()) <= byte_limit:
 +                packets.append((indexes[0], candidate))
-+            else:
-+                packets.extend((index, sources[index]) for index in indexes)
++                return True
++            return False
 +
 +        pending: list[list[int]] = []
 +        last_packet_start: dict[str, int] = {}
@@ -3162,16 +3163,18 @@ index 470f6d3..620af5f 100644
 +                # At most sixteen unfinished packets and sixteen sources in
 +                # each. Source order breaks ties; the oldest bin retires first.
 +                if len(pending) >= 16:
-+                    flush(pending.pop(0))
++                    if not flush(pending.pop(0)):
++                        return list(sources)
 +                pending.append([index])
 +                last_packet_start[source.file_path] = index
 +        for indexes in pending:
-+            flush(indexes)
++            if not flush(indexes):
++                return list(sources)
 +        return [batch for _, batch in sorted(packets, key=lambda item: item[0])]
 
      # -- Prompt / parse -----------------------------------------------------
 
-@@ -1142,6 +1321,26 @@ class LLMAnalyzerBase:
+@@ -1142,6 +1324,26 @@ class LLMAnalyzerBase:
          so the LLM can reference exact line numbers in its findings.
          Override in subclasses that need a custom prompt layout.
          """
@@ -3198,7 +3201,7 @@ index 470f6d3..620af5f 100644
          numbered = number_lines(batch.content, batch.start_line)
          return append_output_language_instruction(
              BASE_ANALYSIS_PROMPT.format(
-@@ -1158,6 +1357,26 @@ class LLMAnalyzerBase:
+@@ -1158,6 +1360,26 @@ class LLMAnalyzerBase:
          via :meth:`LLMFinding.to_finding`.  Override in subclasses that use a
          different ``response_schema`` or raw-string mode.
          """
@@ -3225,7 +3228,7 @@ index 470f6d3..620af5f 100644
          if isinstance(response, LLMAnalysisResult):
              return [f.to_finding(batch.file_path) for f in response.findings]
          raise NotImplementedError(
-@@ -1166,6 +1385,9 @@ class LLMAnalyzerBase:
+@@ -1166,6 +1388,9 @@ class LLMAnalyzerBase:
 
      # -- Run loop -----------------------------------------------------------
 
@@ -3235,7 +3238,7 @@ index 470f6d3..620af5f 100644
      def _invoke_batch(self, batch: Batch, prompt: str) -> tuple[Batch, list]:
          """Invoke and parse one batch synchronously."""
          logger.debug(
-@@ -1175,6 +1397,8 @@ class LLMAnalyzerBase:
+@@ -1175,6 +1400,8 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
@@ -3244,7 +3247,7 @@ index 470f6d3..620af5f 100644
          if structured_llm:
              try:
                  response = _invoke_with_usage(structured_llm, prompt, self._usage_collector)
-@@ -1264,6 +1488,8 @@ class LLMAnalyzerBase:
+@@ -1264,6 +1491,8 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()

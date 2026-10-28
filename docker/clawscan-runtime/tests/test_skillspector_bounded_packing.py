@@ -47,6 +47,24 @@ def test_actual_serialization_guards_an_unexpected_nonadditive_prompt_builder():
     assert all(not p.members or len(prompt(p).encode()) <= a._input_budget for p in result)
 
 
+def test_overflow_fallback_preserves_same_file_order_across_dependent_bins():
+    sources = [Batch(file_path=path, content='x' * size, start_line=start, end_line=end)
+               for path, size, start, end in [
+                   ('first.md', 600, 1, 1), ('second.md', 600, 1, 1),
+                   ('same.md', 400, 1, 5), ('same.md', 400, 6, 10),
+               ]]
+
+    def prompt(packet, **kwargs):
+        group = members(packet)
+        paths = {s.file_path for s in group}
+        penalty = 2000 if {'first.md', 'same.md'} <= paths else 0
+        return 'x' * (sum(len(s.content) for s in group) + penalty)
+
+    result = analyzer(prompt)._pack_semantic_sources(sources)
+    assert [m.start_line for p in result for m in members(p) if m.file_path == 'same.md'] == [1, 6]
+    assert result == sources
+
+
 def test_overlapping_same_source_units_never_share_request_identity():
     sources = [Batch(file_path='same.md', content='x' * 100, start_line=start, end_line=end)
                for start, end in [(1, 5), (4, 9), (10, 15)]]
