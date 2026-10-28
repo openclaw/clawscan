@@ -3,6 +3,7 @@
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import time
 
@@ -151,11 +152,32 @@ def test_parser_timeout_reaps_the_actual_helper(monkeypatch, tmp_path):
         "#!/bin/sh\nprintf '%s\\n' $$ > " + shlex.quote(str(pid_file)) + "\nexec /bin/sleep 60\n"
     )
     executable.chmod(0o700)
+    real_popen = subprocess.Popen
+    helper_ready_at = []
+
+    def start_ready_helper(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        # Fresh executable startup can exceed the deliberately short parser
+        # deadline on macOS. Start that deadline only after the real helper
+        # has identified itself, so this test actually exercises reaping.
+        ready_deadline = time.monotonic() + 5
+        while time.monotonic() < ready_deadline:
+            if pid_file.exists() and pid_file.read_text().strip() == str(process.pid):
+                helper_ready_at.append(time.monotonic())
+                return process
+            if process.poll() is not None:
+                break
+            time.sleep(0.01)
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        pytest.fail("Timeout-test helper did not become ready")
+
+    monkeypatch.setattr(shell_source.subprocess, "Popen", start_ready_helper)
     monkeypatch.setattr(shell_source.shutil, "which", lambda _: str(executable))
     monkeypatch.setattr(shell_source, "PARSER_SECONDS", 0.1)
-    started = time.monotonic()
     assert shell_source.ShellSourceOwnership("true\n", lambda: None).command_starts is None
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - helper_ready_at[0] < 2
     pid = int(pid_file.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
