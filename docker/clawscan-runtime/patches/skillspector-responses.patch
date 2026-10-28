@@ -3296,10 +3296,10 @@ diff --git a/src/skillspector/inspection_ledger.py b/src/skillspector/inspection
  class LedgerOutcome(StrEnum):
 diff --git a/src/skillspector/shell_source.py b/src/skillspector/shell_source.py
 new file mode 100644
-index 0000000..920acab
+index 0000000..8631930
 --- /dev/null
 +++ b/src/skillspector/shell_source.py
-@@ -0,0 +1,275 @@
+@@ -0,0 +1,277 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Optional, bounded source ownership from the canonical Bash syntax parser.
@@ -3490,7 +3490,9 @@ index 0000000..920acab
 +                if not isinstance(node, dict):
 +                    continue
 +                kind = node.get("Type")
-+                if isinstance(node.get("Name"), dict) and isinstance(node.get("Value"), dict):
++                if (
++                    isinstance(node.get("Name"), dict) or node.get("Naked") is True
++                ) and isinstance(node.get("Value"), dict):
 +                    value = node["Value"]
 +                    if "Parts" in value:
 +                        assignments.append((offset(value["Pos"]), offset(value["End"])))

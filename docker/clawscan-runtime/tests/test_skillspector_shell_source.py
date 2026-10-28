@@ -7,7 +7,6 @@ import subprocess
 import time
 
 import pytest
-
 from skillspector import shell_source
 from skillspector.inspection_ledger import LedgerOutcome
 from skillspector.nodes.analyzers import static_patterns_tool_misuse as tm
@@ -86,6 +85,18 @@ def test_comparison_parameter_assignments_retain_secondary_evaluation(canonical_
     assert not ownership.is_noncommand_start(opener)
     result = ledger(content)
     assert result["inspection_ledger"][0]["outcome"] is not LedgerOutcome.COMPLETED
+
+
+@pytest.mark.parametrize("declaration", ["declare -i", "typeset -i", "local -i"])
+def test_quoted_declaration_values_do_not_gain_quote_ownership(canonical_parser, declaration):
+    content = (
+        declaration + ' "number=$(printf \'%s\' "$PAYLOAD")"\n'
+        + "# padding\n" * 1000 + "true\n"
+    )
+    ownership = shell_source.ShellSourceOwnership(content, lambda: None)
+    outer_closing_quote = content.index(')"') + 1
+    assert not ownership.is_noncommand_start(outer_closing_quote)
+    assert ledger(content)["inspection_ledger"][0]["outcome"] is not LedgerOutcome.COMPLETED
 
 
 def test_unavailable_parser_retains_existing_lexical_limit(monkeypatch):
