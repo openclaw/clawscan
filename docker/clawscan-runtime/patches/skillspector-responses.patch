@@ -2546,10 +2546,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..a6a42a6
+index 0000000..ef09c37
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1318 @@
+@@ -0,0 +1,1368 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -2724,6 +2724,11 @@ index 0000000..a6a42a6
 +        if node.type == "variable_declarator":
 +            for name in bindings(field(node, "name")):
 +                definitions[text(name)].append(name)
++        if node.type == "for_in_statement" and any(
++            c.type in {"const", "let", "var"} for c in node.children
++        ):
++            for name in bindings(field(node, "left")):
++                definitions[text(name)].append(name)
 +        if node.type in {
 +            "function_declaration",
 +            "generator_function_declaration",
@@ -2762,7 +2767,7 @@ index 0000000..a6a42a6
 +                        return None
 +                    definitions[text(local)].append(local)
 +                    if supported:
-+                        imported[text(local)] = (module, text(original))
++                        imported[local.id] = (module, text(original))
 +                elif child.type in {"namespace_import", "import_clause"}:
 +                    local_names = [c for c in child.named_children if c.type == "identifier"]
 +                    if local_names and not opaque_only:
@@ -2770,10 +2775,108 @@ index 0000000..a6a42a6
 +                    for local in local_names:
 +                        definitions[text(local)].append(local)
 +                        if supported:
-+                            imported[text(local)] = (module, "")
++                            imported[local.id] = (module, "")
 +                    stack.extend(c for c in child.named_children if c.type != "identifier")
 +                elif child.type != "string":
 +                    stack.extend(child.named_children)
++
++    scope_cache = {}
++    definition_cache = {}
++
++    def function_scope(initial):
++        if initial.id in scope_cache:
++            return scope_cache[initial.id]
++        node = parent(initial)
++        while node is not None and node.type not in {
++            "program",
++            "function_declaration",
++            "function_expression",
++            "arrow_function",
++            "generator_function_declaration",
++            "generator_function",
++            "method_definition",
++        }:
++            step()
++            node = parent(node)
++        scope_cache[initial.id] = node
++        return node
++
++    lexical_scopes = {
++        "program",
++        "statement_block",
++        "switch_body",
++        "catch_clause",
++        "for_statement",
++        "for_in_statement",
++        "function_declaration",
++        "function_expression",
++        "arrow_function",
++        "generator_function_declaration",
++        "generator_function",
++        "method_definition",
++    }
++    binding_scope_cache = {}
++
++    def binding_scope(definition):
++        if definition.id in binding_scope_cache:
++            return binding_scope_cache[definition.id]
++        owner = parent(definition)
++        while owner is not None and owner.type in {
++            "object_pattern",
++            "array_pattern",
++            "pair_pattern",
++            "assignment_pattern",
++            "object_assignment_pattern",
++            "rest_pattern",
++        }:
++            owner = parent(owner)
++        if owner is not None and owner.type == "formal_parameters":
++            result = function_scope(definition)
++        elif owner is not None and owner.type == "catch_clause":
++            result = owner
++        elif (
++            owner is not None
++            and owner.type == "for_in_statement"
++            and any(c.type == "var" for c in owner.children)
++        ):
++            result = function_scope(definition)
++        elif (
++            owner is not None
++            and owner.type == "variable_declarator"
++            and parent(owner).type != "lexical_declaration"
++        ):
++            result = function_scope(definition)
++        else:
++            # Function declarations bind in their surrounding block, unlike
++            # parameters and named function expressions.
++            cursor = (
++                parent(owner)
++                if owner is not None and owner.type == "function_declaration"
++                else owner
++            )
++            while cursor is not None and cursor.type not in lexical_scopes:
++                step()
++                cursor = parent(cursor)
++            result = cursor
++        binding_scope_cache[definition.id] = result
++        return result
++
++    def lexical_definitions(reference):
++        cursor = parent(reference)
++        while cursor is not None:
++            step()
++            if cursor.type in lexical_scopes:
++                matches = [n for n in definitions[text(reference)] if binding_scope(n) == cursor]
++                if matches:
++                    return matches
++            cursor = parent(cursor)
++        return []
++
++    def data_definition(reference):
++        if reference.id not in definition_cache:
++            matches = lexical_definitions(reference)
++            definition_cache[reference.id] = matches[0] if len(matches) == 1 else None
++        return definition_cache[reference.id]
 +
 +    def capability(node, visiting=frozenset()):
 +        step()
@@ -2786,13 +2889,13 @@ index 0000000..a6a42a6
 +            "shorthand_property_identifier_pattern",
 +        }:
 +            name = text(node)
-+            defs = definitions[name]
++            defs = lexical_definitions(node)
 +            if name in _GLOBAL_CAPABILITIES and not defs and not unsafe_native:
 +                return ("ambient", name)
 +            if len(defs) != 1:
 +                return None
-+            if name in imported:
-+                return imported[name] if not unsafe_native else None
++            if defs[0].id in imported:
++                return imported[defs[0].id] if not unsafe_native else None
 +            owner = parent(defs[0])
 +            if (
 +                owner is not None
@@ -2895,6 +2998,7 @@ index 0000000..a6a42a6
 +            "assignment_expression",
 +            "augmented_assignment_expression",
 +            "update_expression",
++            "for_in_statement",
 +        }:
 +            target = field(node, "left") or field(node, "argument")
 +            if target_mutates_capability(target):
@@ -2952,97 +3056,6 @@ index 0000000..a6a42a6
 +                        if not opaque_only:
 +                            return None
 +
-+    scope_cache = {}
-+    definition_cache = {}
-+
-+    def function_scope(initial):
-+        if initial.id in scope_cache:
-+            return scope_cache[initial.id]
-+        node = parent(initial)
-+        while node is not None and node.type not in {
-+            "program",
-+            "function_declaration",
-+            "function_expression",
-+            "arrow_function",
-+            "generator_function_declaration",
-+            "generator_function",
-+            "method_definition",
-+        }:
-+            step()
-+            node = parent(node)
-+        scope_cache[initial.id] = node
-+        return node
-+
-+    lexical_scopes = {
-+        "program",
-+        "statement_block",
-+        "switch_body",
-+        "catch_clause",
-+        "for_statement",
-+        "for_in_statement",
-+        "function_declaration",
-+        "function_expression",
-+        "arrow_function",
-+        "generator_function_declaration",
-+        "generator_function",
-+        "method_definition",
-+    }
-+    binding_scope_cache = {}
-+
-+    def binding_scope(definition):
-+        if definition.id in binding_scope_cache:
-+            return binding_scope_cache[definition.id]
-+        owner = parent(definition)
-+        while owner is not None and owner.type in {
-+            "object_pattern",
-+            "array_pattern",
-+            "pair_pattern",
-+            "assignment_pattern",
-+            "object_assignment_pattern",
-+            "rest_pattern",
-+        }:
-+            owner = parent(owner)
-+        if owner is not None and owner.type == "formal_parameters":
-+            result = function_scope(definition)
-+        elif owner is not None and owner.type == "catch_clause":
-+            result = owner
-+        elif (
-+            owner is not None
-+            and owner.type == "variable_declarator"
-+            and parent(owner).type != "lexical_declaration"
-+        ):
-+            result = function_scope(definition)
-+        else:
-+            # Function declarations bind in their surrounding block, unlike
-+            # parameters and named function expressions.
-+            cursor = (
-+                parent(owner)
-+                if owner is not None and owner.type == "function_declaration"
-+                else owner
-+            )
-+            while cursor is not None and cursor.type not in lexical_scopes:
-+                step()
-+                cursor = parent(cursor)
-+            result = cursor
-+        binding_scope_cache[definition.id] = result
-+        return result
-+
-+    def data_definition(reference):
-+        if reference.id in definition_cache:
-+            return definition_cache[reference.id]
-+        cursor = parent(reference)
-+        result = None
-+        while cursor is not None:
-+            step()
-+            if cursor.type in lexical_scopes:
-+                matches = [n for n in definitions[text(reference)] if binding_scope(n) == cursor]
-+                if matches:
-+                    result = matches[0] if len(matches) == 1 else None
-+                    break
-+            cursor = parent(cursor)
-+        definition_cache[reference.id] = result
-+        return result
-+
 +    def local_function(function):
 +        if function is None or function.type != "identifier":
 +            return None
@@ -3088,7 +3101,11 @@ index 0000000..a6a42a6
 +            return fresh_record(initial.named_children[0], visiting)
 +        if initial.type == "identifier":
 +            definition = data_definition(initial)
-+            if definition is not None and parent(definition).type == "variable_declarator":
++            if (
++                definition is not None
++                and parent(definition).type == "variable_declarator"
++                and const_declaration(parent(definition))
++            ):
 +                return fresh_record(field(parent(definition), "value"), visiting)
 +        if initial.type == "call_expression":
 +            function = local_function(field(initial, "function"))
@@ -3159,6 +3176,16 @@ index 0000000..a6a42a6
 +                continue
 +            if p.type == "variable_declarator" and field(p, "value") == node:
 +                name = field(p, "name")
++                if (
++                    name is not None
++                    and name.type in {"object_pattern", "array_pattern"}
++                    and opaque_only
++                ):
++                    # This grants no field ownership; retain observed reads of
++                    # every binding the initializer may populate.
++                    for binding in bindings(name):
++                        pending.extend(value_reads(binding))
++                    continue
 +                if name is None or name.type != "identifier" or data_definition(name) != name:
 +                    if opaque_only:
 +                        continue
@@ -3325,6 +3352,7 @@ index 0000000..a6a42a6
 +                and function_node.type == "identifier"
 +                and text(function_node) in {"Number", "Boolean"}
 +                and not definitions[text(function_node)]
++                and not unsafe_native
 +            ):
 +                continue
 +            if cap == ("ambient", "URL") and call.type == "new_expression" and index in {0, 1}:
@@ -3388,6 +3416,8 @@ index 0000000..a6a42a6
 +        return True
 +
 +    def native_collection_method(function, *, predicates_only=False):
++        if unsafe_native:
++            return False
 +        if function is None or function.type != "member_expression":
 +            return False
 +        receiver, member = field(function, "object"), field(function, "property")
@@ -3670,6 +3700,25 @@ index 0000000..a6a42a6
 +                function = field(node, "function")
 +                cap = capability(function)
 +                arguments = field(node, "arguments")
++                if function is not None and function.type == "identifier":
++                    definition = data_definition(function)
++                    owner = parent(definition) if definition is not None else None
++                    if (
++                        owner is not None
++                        and owner.type == "variable_declarator"
++                        and const_declaration(owner)
++                    ):
++                        producer = field(owner, "value")
++                        if producer is not None and producer.type in {
++                            "arrow_function",
++                            "function_expression",
++                        }:
++                            body = field(producer, "body")
++                            if body is not None and body.type != "statement_block":
++                                pending.append(body)
++                            else:
++                                for returned in function_returns(producer):
++                                    pending.extend(returned.named_children)
 +                if cap in {
 +                    ("ambient", "String.fromCharCode"),
 +                    ("ambient", "String.fromCodePoint"),
@@ -3774,6 +3823,7 @@ index 0000000..a6a42a6
 +            "assignment_expression",
 +            "augmented_assignment_expression",
 +            "update_expression",
++            "for_in_statement",
 +        }:
 +            target = field(node, "left") or field(node, "argument")
 +            for binding in bindings(target, assignment=True):

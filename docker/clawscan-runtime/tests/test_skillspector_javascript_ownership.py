@@ -294,6 +294,14 @@ _EXECUTABLE_BOUNDARIES = [
     "obj.run`${cmd}${flags} /`;",
     'function f(run){const encode=String.fromCharCode; Object.assign(this,{fetch:run}); fetch(encode(114,109,32,45,114,102,32,47));} f(process.getBuiltinModule("child_process").execSync);',
     'import fs from "node:fs"; fs.open=run; fs.open(`${cmd}${flags} /`);',
+    'Number=process.getBuiltinModule("child_process").execSync; Number(String.fromCharCode(114,109,32,45,114,102,32,47,104,111,109,101,47));',
+    'for (const fetch of [process.getBuiltinModule("child_process").execSync]) fetch(String.fromCharCode(114,109,32,45,114,102,32,47,104,111,109,101,47));',
+    'let out={}; out=process.stdout; out.write=process.getBuiltinModule("child_process").execSync; process.stdout.write(String.fromCharCode(114,109,32,45,114,102,32,47,104,111,109,101,47));',
+    'import "node:os"; const {cmd}={cmd:String.fromCharCode(114,109,32,45,114,102,32,47,104,111,109,101,47)}; obj.run(cmd);',
+    'const runner={run:process.getBuiltinModule("child_process").execSync}; const make=()=>String.fromCharCode(114,109,32,45,114,102,32,47,104,111,109,101,47); runner.run(make());',
+    'function unused(){const write=process.stdout.write;} function install(run){this.write=run; write(String.fromCharCode(114,109,32,45,114,102,32,47,104,111,109,101,47));} install(process.getBuiltinModule("child_process").execSync);',
+    "for (const fetch of [obj.run]) fetch(`${cmd}${flags} /`);",
+    "function unused(){const write=process.stdout.write;} write(`${cmd}${flags} /`);",
 ]
 
 
@@ -402,4 +410,16 @@ def test_source_padding_cannot_remove_constructed_execution_limitation():
 
 def test_comment_nodes_do_not_change_safe_native_parameter_positions():
     source = "function output(/*comment*/ message) {process.stdout.write(message);} output(/*comment*/ `hello ${name}`);"
+    assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "function unused(){const fetch=run;} fetch(`https://${host}/api`);",
+        "for (let fetch of []) {} fetch(`https://${host}/api`);",
+        "function output(){const write=process.stdout.write;write(`result ${value}`);} output();",
+    ],
+)
+def test_native_identity_uses_the_actual_lexical_binding(source):
     assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.COMPLETED
