@@ -5952,10 +5952,10 @@ index 0000000..e9582b5
 +    return ranges, unsupported
 diff --git a/src/skillspector/javascript_native_values.py b/src/skillspector/javascript_native_values.py
 new file mode 100644
-index 0000000..bf658ac
+index 0000000..fc14d5b
 --- /dev/null
 +++ b/src/skillspector/javascript_native_values.py
-@@ -0,0 +1,905 @@
+@@ -0,0 +1,909 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Bounded native value typing for closed, private validator functions.
@@ -6363,7 +6363,11 @@ index 0000000..bf658ac
 +            if cap == ("ambient", "Math.abs") and len(args) == 1:
 +                return ("number",) if self.primitive(self.kind(args[0])) else None
 +            if cap == ("ambient", "process.argv.slice"):
-+                return ("array", ("string",))
++                # Native array slice converts both bounds to numbers. Its
++                # string-array result cannot discharge an unknown valueOf.
++                if len(args) <= 2 and all(self.primitive(self.kind(arg)) for arg in args):
++                    return ("array", ("string",))
++                return None
 +            if cap == ("node:fs/promises", "readFile") and len(args) == 2:
 +                if (
 +                    self.kind(args[0]) == ("string",)
@@ -7268,6 +7272,41 @@ index 0000000..5ccfed8
 +])
 +def test_known_native_operands_keep_the_closed_proof(expression):
 +    source = f'const errors=[];errors.push({expression});console.log(JSON.stringify(errors));'
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] == "completed"
+diff --git a/tests/nodes/analyzers/test_native_validator_native_calls.py b/tests/nodes/analyzers/test_native_validator_native_calls.py
+new file mode 100644
+index 0000000..a459937
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_native_calls.py
+@@ -0,0 +1,29 @@
++"""Native result typing requires the complete consumed argument contract."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++
++@pytest.mark.parametrize("bounds", ["offset", "0,offset", "offset,offset"])
++def test_argv_slice_does_not_invoke_unproved_bound_conversion(bounds):
++    source = (
++        'const offset={valueOf:consume};'
++        f'console.log(`x${{process.argv.slice({bounds}).join(",")}}`);'
++    )
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("bounds", ["", "2", "1,3", '"1",null'])
++def test_argv_slice_scalar_bounds_preserve_native_result_identity(bounds):
++    source = f'console.log(`x${{process.argv.slice({bounds}).join(",")}}`);'
 +    report = static_runner.run_static_patterns_with_ledger(
 +        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
 +    )
