@@ -4236,10 +4236,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..1069306
+index 0000000..e9582b5
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1657 @@
+@@ -0,0 +1,1710 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -4315,6 +4315,7 @@ index 0000000..1069306
 +    imported = {}
 +    remaining = MAX_PROOF_STEPS
 +    unsupported = []
++    native_values = None
 +    computed_storage_roots = set()
 +    error_handler_active = False
 +    error_handler_result = None
@@ -4556,15 +4557,22 @@ index 0000000..1069306
 +        binding_scope_cache[definition.id] = result
 +        return result
 +
++    lexical_definition_cache = {}
++
 +    def lexical_definitions(reference):
++        if reference.id in lexical_definition_cache:
++            step()
++            return lexical_definition_cache[reference.id]
 +        cursor = parent(reference)
 +        while cursor is not None:
 +            step()
 +            if cursor.type in lexical_scopes:
 +                matches = [n for n in definitions[text(reference)] if binding_scope(n) == cursor]
 +                if matches:
++                    lexical_definition_cache[reference.id] = matches
 +                    return matches
 +            cursor = parent(cursor)
++        lexical_definition_cache[reference.id] = []
 +        return []
 +
 +    def data_definition(reference):
@@ -4582,6 +4590,28 @@ index 0000000..1069306
 +            cursor = parent(cursor)
 +        return False
 +
++    def ambient_intrinsic(node, names):
++        """Resolve ambient names with the same lexical and Annex B boundary."""
++        step()
++        if node is None or node.type not in {
++            "identifier", "shorthand_property_identifier", "shorthand_property_identifier_pattern"
++        }:
++            return None
++        name = text(node)
++        if name not in names or lexical_definitions(node) or unsafe_native:
++            return None
++        for definition in definitions[name]:
++            step()
++            owner = parent(definition)
++            if (
++                owner is not None
++                and owner.type == "function_declaration"
++                and binding_scope(definition) != function_scope(owner)
++                and scope_encloses(function_scope(owner), node)
++            ):
++                return None
++        return ("ambient", name)
++
 +    def capability(node, visiting=frozenset()):
 +        step()
 +        if node is None or node.id in visiting or len(visiting) > 128:
@@ -4594,19 +4624,8 @@ index 0000000..1069306
 +        }:
 +            name = text(node)
 +            defs = lexical_definitions(node)
-+            if name in _GLOBAL_CAPABILITIES and not defs and not unsafe_native:
-+                for definition in definitions[name]:
-+                    owner = parent(definition)
-+                    if (
-+                        owner is not None
-+                        and owner.type == "function_declaration"
-+                        and binding_scope(definition) != function_scope(owner)
-+                        and scope_encloses(function_scope(owner), node)
-+                    ):
-+                        # Sloppy-script Annex B may also create an enclosing
-+                        # var binding for a block function declaration.
-+                        return None
-+                return ("ambient", name)
++            if name in _GLOBAL_CAPABILITIES and not defs:
++                return ambient_intrinsic(node, _GLOBAL_CAPABILITIES)
 +            if len(defs) != 1:
 +                return None
 +            if defs[0].id in imported:
@@ -4933,7 +4952,7 @@ index 0000000..1069306
 +            and data_definition(argument) == definition
 +        )
 +
-+    def is_data(initial):
++    def is_data(initial, *, boundary=None):
 +        # In opaque-only mode a True result also includes unobserved escapes.
 +        # Those preserve legacy accounting and never grant syntax ownership.
 +        pending = [initial]
@@ -4944,6 +4963,10 @@ index 0000000..1069306
 +            if node.id in visited:
 +                continue
 +            visited.add(node.id)
++            if boundary is not None and node == boundary:
++                # The owner separately proves the synchronous callback result
++                # type. Every parameter read must reach this boundary safely.
++                continue
 +            p = parent(node)
 +            if p is None:
 +                if opaque_only:
@@ -5063,6 +5086,8 @@ index 0000000..1069306
 +                    and outer.type == "call_expression"
 +                    and field(outer, "function") == p
 +                ):
++                    if native_values is not None and native_values.storage(p) is not None:
++                        continue
 +                    if not (native_collection_method(p) or guarded_string_slice(p)):
 +                        # A result edge says nothing about receiver use inside
 +                        # map/reduce callbacks or an unproved method body.
@@ -5177,6 +5202,16 @@ index 0000000..1069306
 +                continue
 +            if cap == ("ambient", "fetch") and index == 1:
 +                continue
++            if native_values is not None:
++                storage = native_values.storage(field(call, "function"))
++                if storage is not None:
++                    pending.extend(value_reads(storage))
++                    continue
++                argument_use = native_values.argument_use(call, index)
++                if argument_use is not None:
++                    if argument_use == "result":
++                        pending.append(call)
++                    continue
 +            if native_collection_method(field(call, "function"), predicates_only=True):
 +                continue
 +            function = local_function(field(call, "function"))
@@ -5245,6 +5280,8 @@ index 0000000..1069306
 +    def native_collection_method(function, *, predicates_only=False):
 +        if unsafe_native:
 +            return False
++        if not predicates_only and native_values is not None and native_values.method(function):
++            return True
 +        if function is None or function.type != "member_expression":
 +            return False
 +        receiver, member = field(function, "object"), field(function, "property")
@@ -5839,6 +5876,22 @@ index 0000000..1069306
 +                if not opaque_only:
 +                    return None
 +
++    if not opaque_only and not unsafe_native:
++        from skillspector.javascript_native_values import NativeValidatorValues
++
++        native_values = NativeValidatorValues(
++            data=data,
++            nodes=nodes,
++            parents=parents,
++            definition=data_definition,
++            capability=capability,
++            private_function=local_function,
++            reads=value_reads,
++            bindings=bindings,
++            ambient_intrinsic=ambient_intrinsic,
++            step=step,
++        )
++        native_values.verify_callback_uses(is_data)
 +    literals = []
 +    for node in nodes:
 +        step()
@@ -5897,3 +5950,1377 @@ index 0000000..1069306
 +        if node.type == "string" and is_data(node):
 +            ranges.append((node.start_byte, node.end_byte))
 +    return ranges, unsupported
+diff --git a/src/skillspector/javascript_native_values.py b/src/skillspector/javascript_native_values.py
+new file mode 100644
+index 0000000..fc14d5b
+--- /dev/null
++++ b/src/skillspector/javascript_native_values.py
+@@ -0,0 +1,909 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""Bounded native value typing for closed, private validator functions.
++
++This supplies use/type evidence to the existing value graph. It grants no source
++ranges itself. Unknown calls, deferred functions, exports and mutable identities
++disable the optional proof rather than dropping an authored construction.
++"""
++
++
++class NativeValidatorValues:
++    _INTRINSICS = {"Number", "Boolean", "RegExp", "console"}
++    # These forms introduce no implicit user-code dispatch of their own. Their
++    # children are visited separately, and declarations/calls/functions receive
++    # the additional identity/use checks in _closed_source. Unlisted grammar
++    # forms disable this optional proof rather than inheriting a default True.
++    _STRUCTURAL_NODES = {
++        "arguments", "array", "arrow_function", "assignment_expression",
++        "break_statement", "catch_clause", "comment", "continue_statement",
++        "else_clause", "empty_statement", "escape_sequence", "expression_statement",
++        "false", "finally_clause", "for_statement", "formal_parameters",
++        "function_declaration", "hash_bang_line", "identifier", "if_statement",
++        "import_clause", "import_specifier", "import_statement", "lexical_declaration",
++        "named_imports", "namespace_import", "null", "number", "object",
++        "optional_chain", "pair", "parenthesized_expression", "program",
++        "property_identifier", "regex", "regex_flags", "regex_pattern",
++        "return_statement", "sequence_expression", "shorthand_property_identifier",
++        "statement_block", "string", "string_fragment", "template_string",
++        "ternary_expression", "throw_statement", "true", "try_statement",
++        "variable_declarator",
++    }
++    _BINARY_OPERATORS = {
++        "??", "||", "&&", "===", "!==", "==", "!=", "<", ">", "<=", ">=",
++        "-", "*", "/", "%", "+", "**", "<<", ">>", ">>>", "&", "|", "^",
++    }
++    _AUGMENTED_OPERATORS = {
++        "??=", "||=", "&&=", "+=", "-=", "*=", "/=", "%=", "**=",
++        "<<=", ">>=", ">>>=", "&=", "|=", "^=",
++    }
++
++    def __init__(
++        self, *, data, nodes, parents, definition, capability, private_function, reads,
++        bindings, ambient_intrinsic, step
++    ):
++        self.data = data
++        self.nodes = nodes
++        self.parents = parents
++        self.definition = definition
++        self._existing_capability = capability
++        self.private_function = private_function
++        self.reads = reads
++        self.bindings = bindings
++        self.ambient_intrinsic = ambient_intrinsic
++        self.step = step
++        self._cache = {}
++        self._active = set()
++        self._writes = {}
++        self._callback_cache = {}
++        self._callback_active = set()
++        self._storage_values = None
++        self._data_use = None
++        for node in nodes:
++            step()
++            if node.type not in {
++                "assignment_expression",
++                "augmented_assignment_expression",
++                "update_expression",
++                "for_in_statement",
++            }:
++                continue
++            target = self.field(node, "left") or self.field(node, "argument")
++            if node.type == "for_in_statement" and any(
++                child.type in {"const", "let", "var"} for child in node.children
++            ):
++                continue
++            for binding_target in bindings(target, assignment=True):
++                if binding_target.type in {"identifier", "shorthand_property_identifier_pattern"}:
++                    binding = definition(binding_target)
++                    if binding is not None:
++                        self._writes.setdefault(binding.id, []).append(node)
++        self.closed = False
++        self.closed = self._closed_source()
++
++    def capability(self, node, visiting=frozenset()):
++        if node is None or node.id in visiting or len(visiting) >= 64:
++            return None
++        self.step()
++        existing = self._existing_capability(node)
++        if existing is not None:
++            return existing
++        visiting = visiting | {node.id}
++        if node.type == "identifier":
++            definition = self.definition(node)
++            if definition is None:
++                return self.ambient_intrinsic(node, self._INTRINSICS)
++            if self._writes.get(definition.id):
++                return None
++            value = self.const_value(definition)
++            return self.capability(value, visiting) if value is not None else None
++        if node.type == "member_expression":
++            base = self.capability(self.field(node, "object"), visiting)
++            member = self.field(node, "property")
++            if base is not None and member is not None and member.type == "property_identifier":
++                if base[0] == "ambient" and base[1].split(".")[0] in self._INTRINSICS:
++                    return ("ambient", base[1] + "." + self.text(member))
++                if base == ("ambient", "process") and self.text(member) == "exit":
++                    return ("ambient", "process.exit")
++        return None
++
++    def text(self, node):
++        return self.data[node.start_byte : node.end_byte].decode("utf-8")
++
++    def parent(self, node):
++        return self.parents.get(node.id)
++
++    @staticmethod
++    def field(node, name):
++        return node.child_by_field_name(name) if node is not None else None
++
++    @staticmethod
++    def children(node):
++        return [c for c in node.named_children if c.type != "comment"] if node is not None else []
++
++    def const_value(self, definition):
++        owner = self.parent(definition)
++        declaration = self.parent(owner) if owner is not None else None
++        if owner is None or owner.type != "variable_declarator" or declaration is None:
++            return None
++        if declaration.type != "lexical_declaration" or not self.text(declaration).startswith(
++            "const"
++        ):
++            return None
++        return self.field(owner, "value")
++
++    def kind(self, node):
++        if node is None:
++            return None
++        self.step()
++        if node.id in self._cache:
++            return self._cache[node.id]
++        if node.id in self._active or len(self._active) >= 64:
++            return None
++        self._active.add(node.id)
++        try:
++            value = self._kind(node)
++            self._cache[node.id] = value
++            return value
++        finally:
++            self._active.remove(node.id)
++
++    def _same_kind(self, left, right):
++        # Cached kinds form a DAG. Neither nested tuple equality nor tuple
++        # hashing charges the caller's budget or reuses a shared subgraph.
++        pending = [(left, right)]
++        visited = set()
++        while pending:
++            self.step()
++            left, right = pending.pop()
++            if left is right:
++                continue
++            if not isinstance(left, tuple) or not isinstance(right, tuple):
++                if left != right:
++                    return False
++                continue
++            if len(left) != len(right):
++                return False
++            pair = (id(left), id(right))
++            if pair in visited:
++                continue
++            visited.add(pair)
++            pending.extend(zip(left, right, strict=True))
++        return True
++
++    def primitive(self, kind, *, error=False):
++        allowed = (
++            {"string", "number", "boolean", "null", "error"}
++            if error
++            else {"string", "number", "boolean", "null"}
++        )
++        pending = [kind]
++        visited = set()
++        while pending:
++            self.step()
++            value = pending.pop()
++            if value is None:
++                return False
++            if id(value) in visited:
++                continue
++            visited.add(id(value))
++            if value[0] == "either":
++                pending.extend(value[1:])
++            elif value[0] not in allowed:
++                return False
++        return True
++
++    def _kind(self, node):
++        t = node.type
++        if t in {"string", "template_string"}:
++            return ("string",)
++        if t == "number":
++            return ("number",)
++        if t in {"true", "false"}:
++            return ("boolean",)
++        if t == "null":
++            return ("null",)
++        if t == "regex":
++            return ("regexp",)
++        if t in {"parenthesized_expression", "await_expression"}:
++            children = self.children(node)
++            return self.kind(children[0]) if len(children) == 1 else None
++        if t in {"identifier", "shorthand_property_identifier"}:
++            definition = self.definition(node)
++            if definition is None:
++                return None
++            writes = self._writes.get(definition.id, [])
++            if writes:
++                owner = self.parent(definition)
++                declaration = self.parent(owner) if owner is not None else None
++                if (
++                    owner is None
++                    or owner.type != "variable_declarator"
++                    or declaration is None
++                    or not self.text(declaration).startswith("let")
++                    or self.kind(self.field(owner, "value")) != ("number",)
++                ):
++                    return None
++                for write in writes:
++                    self.step()
++                    op = self.field(write, "operator")
++                    if (
++                        write.type == "update_expression"
++                        and op is not None
++                        and self.text(op) in {"++", "--"}
++                    ):
++                        continue
++                    if (
++                        write.type == "augmented_assignment_expression"
++                        and op is not None
++                        and self.text(op) in {"+=", "-="}
++                        and self.kind(self.field(write, "right")) == ("number",)
++                    ):
++                        continue
++                    return None
++                return ("number",)
++            value = self.const_value(definition)
++            if value is not None:
++                return self.kind(value)
++            owner = self.parent(definition)
++            if owner is not None and owner.type == "for_in_statement":
++                if not any(c.type == "const" for c in owner.children):
++                    return None
++                collection = self.kind(self.field(owner, "right"))
++                return (
++                    collection[1] if collection is not None and collection[0] == "array" else None
++                )
++            if owner is not None and owner.type == "catch_clause":
++                return ("error",)
++            function = (
++                self.parent(owner)
++                if owner is not None and owner.type == "formal_parameters"
++                else owner
++            )
++            if function is None:
++                return None
++            if function.type == "arrow_function":
++                return self._callback_parameter(function, definition)
++            if function.type != "function_declaration":
++                return None
++            name = self.field(function, "name")
++            if name is None or self.private_function(name) != function:
++                return None
++            parameters = self.children(self.field(function, "parameters"))
++            if definition not in parameters:
++                return None
++            index = parameters.index(definition)
++            kinds = []
++            for reference in self.reads(name):
++                self.step()
++                call = self.parent(reference)
++                arguments = self.children(self.field(call, "arguments"))
++                if any(a.type == "spread_element" for a in arguments) or index >= len(arguments):
++                    return None
++                kinds.append(self.kind(arguments[index]))
++            return (
++                kinds[0]
++                if kinds
++                and kinds[0] is not None
++                and all(self._same_kind(k, kinds[0]) for k in kinds)
++                else None
++            )
++        if t == "array":
++            kinds = []
++            for child in self.children(node):
++                if child.type == "spread_element":
++                    values = self.children(child)
++                    kind = self.kind(values[0]) if len(values) == 1 else None
++                    if kind is None or kind[0] not in {"array", "iterator"}:
++                        return None
++                    kinds.append(kind[1])
++                else:
++                    kinds.append(self.kind(child))
++            if not kinds:
++                return ("array", None)
++            return (
++                ("array", kinds[0])
++                if kinds[0] is not None and all(self._same_kind(k, kinds[0]) for k in kinds)
++                else None
++            )
++        if t == "binary_expression":
++            left, right = (self.kind(self.field(node, side)) for side in ("left", "right"))
++            operator = self.field(node, "operator")
++            op = self.text(operator) if operator is not None else ""
++            if op in {"??", "||", "&&"} and left is not None and right is not None:
++                return left if self._same_kind(left, right) else ("either", left, right)
++            if op in {"-", "*", "/", "%", "+"} and left == ("number",) and right == ("number",):
++                return ("number",)
++            if op in {"===", "!==", "==", "!=", "<", ">", "<=", ">="}:
++                return ("boolean",)
++            return None
++        if t == "ternary_expression":
++            left = self.kind(self.field(node, "consequence"))
++            right = self.kind(self.field(node, "alternative"))
++            return left if left is not None and self._same_kind(left, right) else None
++        if t == "unary_expression":
++            operator = self.field(node, "operator")
++            if operator is not None and self.text(operator) == "!":
++                return ("boolean",)
++            if (
++                operator is not None
++                and self.text(operator) in {"+", "-"}
++                and self.kind(self.field(node, "argument")) == ("number",)
++            ):
++                return ("number",)
++            return None
++        if t in {"member_expression", "subscript_expression"}:
++            receiver = self.kind(self.field(node, "object"))
++            member = self.field(node, "property") or self.field(node, "index")
++            if self.capability(node) == ("ambient", "process.argv"):
++                return ("array", ("string",))
++            if receiver is None or member is None:
++                return None
++            if t == "member_expression":
++                name = self.text(member)
++                if name == "length" and receiver[0] in {"array", "string", "match"}:
++                    return ("number",)
++                if name == "index" and receiver[0] == "match":
++                    return ("number",)
++                if name == "message" and receiver == ("error",):
++                    return ("string",)
++                return None
++            if receiver[0] == "array":
++                return receiver[1] if self.kind(member) == ("number",) else None
++            if receiver[0] in {"match", "string"}:
++                return ("string",) if self.kind(member) == ("number",) else None
++            return None
++        if t in {"call_expression", "new_expression"}:
++            function = self.field(node, "constructor" if t == "new_expression" else "function")
++            cap = self.capability(function)
++            args = self.children(self.field(node, "arguments"))
++            if any(a.type == "spread_element" for a in args):
++                return None
++            if t == "new_expression":
++                if cap == ("ambient", "RegExp") and len(args) in {1, 2}:
++                    return ("regexp",) if all(self.kind(a) == ("string",) for a in args) else None
++                return None
++            private = self.private_function(function) if function is not None else None
++            if private is not None:
++                kinds = []
++                for candidate in self.nodes:
++                    self.step()
++                    if candidate.type != "return_statement":
++                        continue
++                    owner = self.parent(candidate)
++                    while owner is not None and owner.type not in {
++                        "function_declaration",
++                        "arrow_function",
++                        "function_expression",
++                    }:
++                        self.step()
++                        owner = self.parent(owner)
++                    if owner == private:
++                        values = self.children(candidate)
++                        kinds.append(self.kind(values[0]) if len(values) == 1 else None)
++                return (
++                    kinds[0]
++                    if kinds
++                    and kinds[0] is not None
++                    and all(self._same_kind(k, kinds[0]) for k in kinds)
++                    else None
++                )
++            if cap in {("ambient", "Number"), ("ambient", "Boolean")} and len(args) == 1:
++                if cap[1] == "Number" and not self.primitive(self.kind(args[0])):
++                    return None
++                return ("number" if cap[1] == "Number" else "boolean",)
++            if (
++                cap == ("ambient", "String")
++                and len(args) == 1
++                and self.primitive(self.kind(args[0]), error=True)
++            ):
++                return ("string",)
++            if cap == ("ambient", "JSON.stringify") and len(args) == 1:
++                return ("string",)
++            if cap == ("node:path", "basename") and len(args) == 1:
++                return ("string",) if self.kind(args[0]) == ("string",) else None
++            if cap == ("ambient", "Math.abs") and len(args) == 1:
++                return ("number",) if self.primitive(self.kind(args[0])) else None
++            if cap == ("ambient", "process.argv.slice"):
++                # Native array slice converts both bounds to numbers. Its
++                # string-array result cannot discharge an unknown valueOf.
++                if len(args) <= 2 and all(self.primitive(self.kind(arg)) for arg in args):
++                    return ("array", ("string",))
++                return None
++            if cap == ("node:fs/promises", "readFile") and len(args) == 2:
++                if (
++                    self.kind(args[0]) == ("string",)
++                    and args[1].type == "string"
++                    and self.text(args[1])[1:-1] in {"utf8", "utf-8"}
++                ):
++                    return ("string",)
++            if function is not None and function.type == "member_expression":
++                return self._method_kind(function, args)
++        return None
++
++    def _callback_parameter(self, function, definition):
++        arguments = self.parent(function)
++        call = self.parent(arguments) if arguments is not None else None
++        method = self.field(call, "function")
++        if (
++            arguments is None
++            or arguments.type != "arguments"
++            or self.children(arguments)[:1] != [function]
++        ):
++            return None
++        if method is None or method.type != "member_expression":
++            return None
++        name = self.field(method, "property")
++        if name is None or self.text(name) not in {"map", "filter"}:
++            return None
++        parameters = self.children(self.field(function, "parameters"))
++        parameter = self.field(function, "parameter")
++        if parameter is not None:
++            parameters.append(parameter)
++        body = self.field(function, "body")
++        if (
++            parameters != [definition]
++            or definition.type != "identifier"
++            or body is None
++            or body.type == "statement_block"
++        ):
++            return None
++        if any(c.type == "async" for c in function.children):
++            return None
++        receiver = self.kind(self.field(method, "object"))
++        return receiver[1] if receiver is not None and receiver[0] == "array" else None
++
++    def _method_kind(self, function, args):
++        receiver = self.kind(self.field(function, "object"))
++        member = self.field(function, "property")
++        if receiver is None or member is None:
++            return None
++        name = self.text(member)
++        if receiver[0] == "regexp" and name in {"test", "exec"} and len(args) == 1:
++            if self.kind(args[0]) == ("string",):
++                return ("boolean",) if name == "test" else ("match",)
++        if receiver == ("number",) and name == "toFixed" and len(args) <= 1:
++            if all(self.kind(a) == ("number",) for a in args):
++                return ("string",)
++        if receiver == ("string",):
++            if (
++                name in {"match", "matchAll"}
++                and len(args) == 1
++                and self.kind(args[0]) == ("regexp",)
++            ):
++                return ("match",) if name == "match" else ("iterator", ("match",))
++            if name in {"trim", "toLowerCase"} and not args:
++                return ("string",)
++            if name == "slice" and all(self.kind(a) == ("number",) for a in args):
++                return ("string",)
++            if (
++                name == "split"
++                and len(args) == 1
++                and self.kind(args[0]) in (("regexp",), ("string",))
++            ):
++                return ("array", ("string",))
++            if (
++                name in {"includes", "startsWith"}
++                and len(args) == 1
++                and self.kind(args[0]) == ("string",)
++            ):
++                return ("boolean",)
++        if receiver[0] == "array":
++            if name == "join" and len(args) <= 1 and self.primitive(receiver[1]):
++                if all(self.kind(a) == ("string",) for a in args):
++                    return ("string",)
++            if name in {"map", "filter"} and len(args) == 1 and args[0].type == "arrow_function":
++                body = self.field(args[0], "body")
++                result = self.kind(body)
++                if self.primitive(result):
++                    return ("array", result) if name == "map" else receiver
++            if (
++                name == "find"
++                and len(args) == 1
++                and self.capability(args[0]) == ("ambient", "Boolean")
++            ):
++                return receiver[1] if self.primitive(receiver[1]) else None
++            if name == "push" and self._storage_definition(function) is not None:
++                return ("number",)
++        return None
++
++    def _storage_definition(self, function):
++        receiver = self.field(function, "object")
++        member = self.field(function, "property")
++        if (
++            receiver is None
++            or receiver.type != "identifier"
++            or member is None
++            or self.text(member) != "push"
++        ):
++            return None
++        definition = self.definition(receiver)
++        value = self.const_value(definition) if definition is not None else None
++        return (
++            definition
++            if value is not None and value.type == "array" and not self.children(value)
++            else None
++        )
++
++    def _closed_source(self):
++        for node in self.nodes:
++            self.step()
++            if not self._operands_are_data(node):
++                return False
++            if node.type in {
++                "assignment_expression",
++                "augmented_assignment_expression",
++                "update_expression",
++                "for_in_statement",
++            }:
++                target = self.field(node, "left") or self.field(node, "argument")
++                for binding_target in self.bindings(target, assignment=True):
++                    # Fresh records can acquire serialization/coercion hooks
++                    # through ordinary field writes and aliases as well.
++                    if binding_target.type in {"member_expression", "subscript_expression"}:
++                        return False
++                    if (
++                        binding_target.type in {"identifier", "shorthand_property_identifier_pattern"}
++                        and self.definition(binding_target) is None
++                    ):
++                        return False
++            cap = self.capability(node)
++            if cap is not None and self._existing_capability(node) is None:
++                owner = self.parent(node)
++                if owner is None:
++                    return False
++                alias = (
++                    owner.type == "variable_declarator"
++                    and self.field(owner, "value") == node
++                    and self.const_value(self.field(owner, "name")) is not None
++                )
++                receiver = owner.type == "member_expression" and self.field(owner, "object") == node
++                invoked = owner.type in {"call_expression", "new_expression"} and (
++                    self.field(owner, "function") == node
++                    or self.field(owner, "constructor") == node
++                )
++                callback = False
++                if (
++                    cap == ("ambient", "Boolean")
++                    and owner.type == "arguments"
++                    and self.children(owner) == [node]
++                ):
++                    call = self.parent(owner)
++                    function = self.field(call, "function")
++                    member = self.field(function, "property")
++                    callback = (
++                        function is not None
++                        and function.type == "member_expression"
++                        and member is not None
++                        and self.text(member) == "find"
++                    )
++                if not (alias or receiver or invoked or callback):
++                    return False
++            if node.type in {
++                "export_statement",
++                "class",
++                "class_declaration",
++                "method_definition",
++                "field_definition",
++                "function_expression",
++                "generator_function",
++                "generator_function_declaration",
++            }:
++                return False
++            if node.type == "function_declaration":
++                name = self.field(node, "name")
++                if (
++                    name is None
++                    or self.private_function(name) != node
++                    or any(c.type == "async" for c in node.children)
++                ):
++                    return False
++            if node.type == "arrow_function":
++                parameter = self.field(node, "parameter")
++                parameters = self.children(self.field(node, "parameters"))
++                if parameter is not None:
++                    parameters.append(parameter)
++                if len(parameters) != 1 or self._callback_parameter(node, parameters[0]) is None:
++                    return False
++            if node.type == "throw_statement":
++                values = self.children(node)
++                if len(values) != 1 or not self.primitive(self.kind(values[0]), error=True):
++                    return False
++            if node.type not in {"call_expression", "new_expression"}:
++                continue
++            function = self.field(
++                node, "constructor" if node.type == "new_expression" else "function"
++            )
++            cap = self.capability(function)
++            if node.type == "new_expression":
++                if cap != ("ambient", "RegExp") or self.kind(node) != ("regexp",):
++                    return False
++                continue
++            if function is not None and self.private_function(function) is not None:
++                continue
++            args = self.children(self.field(node, "arguments"))
++            if cap in {("ambient", "console.log"), ("ambient", "console.error")}:
++                # Formatting and object inspection have additional callback
++                # contracts. Only the existing single-scalar output is owned.
++                if len(args) != 1 or not self.primitive(self.kind(args[0]), error=True):
++                    return False
++                continue
++            if cap == ("ambient", "process.exit"):
++                if len(args) > 1 or any(not self.primitive(self.kind(arg)) for arg in args):
++                    return False
++                continue
++            if cap == ("ambient", "Array.isArray"):
++                if len(args) != 1:
++                    return False
++                continue
++            if cap == ("ambient", "Math.abs"):
++                if len(args) != 1 or not self.primitive(self.kind(args[0])):
++                    return False
++                continue
++            if cap == ("ambient", "JSON.stringify"):
++                if len(args) != 1 or not self._serializable(args[0]):
++                    return False
++                continue
++            if self.kind(node) is None:
++                return False
++        return True
++
++    def _operands_are_data(self, node):
++        """Affirmatively own each semantic form and its implicit dispatch."""
++        if not node.is_named or node.type in self._STRUCTURAL_NODES:
++            return True
++        operands = []
++        if node.type in {"template_substitution", "computed_property_name", "await_expression"}:
++            # Await assimilates a thenable before its result reaches a scalar
++            # consumer. Known native readFile results have their settled string
++            # kind; unknown objects cannot be admitted through Boolean(await x).
++            operands = self.children(node)
++            if len(operands) != 1:
++                return False
++        elif node.type == "member_expression":
++            return self._native_member_read(node)
++        elif node.type == "subscript_expression":
++            if not self._native_member_read(node):
++                return False
++            operands = [self.field(node, "index")]
++        elif node.type in {"binary_expression", "augmented_assignment_expression"}:
++            operator = self.field(node, "operator")
++            op = self.text(operator) if operator is not None else ""
++            allowed = (
++                self._BINARY_OPERATORS
++                if node.type == "binary_expression"
++                else self._AUGMENTED_OPERATORS
++            )
++            if op not in allowed:
++                return False
++            # Truthiness, nullish selection and strict identity do not invoke
++            # an object's conversion hooks. Arithmetic, relational and loose
++            # equality operations can, even when their result is primitive.
++            if op not in {"??", "||", "&&", "===", "!==", "??=", "||=", "&&="}:
++                operands = [self.field(node, side) for side in ("left", "right")]
++        elif node.type in {"unary_expression", "update_expression"}:
++            operator = self.field(node, "operator")
++            op = self.text(operator) if operator is not None else ""
++            allowed = (
++                {"++", "--"} if node.type == "update_expression"
++                else {"!", "typeof", "void", "delete", "+", "-", "~"}
++            )
++            if op not in allowed:
++                return False
++            if op in {"+", "-", "~", "++", "--"}:
++                operands = [self.field(node, "argument")]
++        elif node.type == "for_in_statement":
++            # Async iteration additionally assimilates yielded thenables.
++            # Enumeration/proxy contracts are outside this validator owner.
++            return (
++                any(child.type == "of" for child in node.children)
++                and not any(child.type == "await" for child in node.children)
++                and self._native_iterable(self.field(node, "right"))
++            )
++        elif node.type == "spread_element":
++            owner = self.parent(node)
++            values = self.children(node)
++            return (
++                owner is not None and owner.type == "array" and len(values) == 1
++                and self._native_iterable(values[0])
++            )
++        elif node.type in {"call_expression", "new_expression"}:
++            # Tagged templates are call_expression nodes too, but consume a
++            # template object through a different, unproved invocation contract.
++            arguments = self.field(node, "arguments")
++            return arguments is not None and arguments.type == "arguments"
++        else:
++            return False
++        return all(self.primitive(self.kind(operand)) for operand in operands)
++
++    def _native_iterable(self, node):
++        kind = self.kind(node)
++        return kind is not None and kind[0] in {"array", "iterator", "string"}
++
++    def _native_member_read(self, node):
++        if self.capability(node) is not None:
++            return True
++        receiver = self.field(node, "object")
++        kind = self.kind(receiver)
++        if self.primitive(kind, error=True) or (
++            kind is not None and kind[0] in {"array", "iterator", "match", "regexp"}
++        ):
++            return True
++        # Property access can invoke an inherited getter even when only the
++        # property's boolean result is observed. Plain-record ownership also
++        # excludes prototypes, accessors, hooks and subsequent member writes.
++        return self._serializable(receiver)
++
++    def _serializable(self, initial):
++        """Bound JSON traversal to immutable plain records and native arrays.
++
++        JSON.stringify may execute toJSON/accessors while visiting its input.
++        A string result alone therefore supplies no operand-effect evidence.
++        Member writes are excluded by the closed-source proof; empty private
++        arrays additionally include every value stored by their native push.
++        """
++        if self._storage_values is None:
++            self._storage_values = {}
++            for candidate in self.nodes:
++                self.step()
++                if candidate.type == "call_expression":
++                    definition = self._storage_definition(self.field(candidate, "function"))
++                    if definition is not None:
++                        self._storage_values.setdefault(definition.id, []).extend(
++                            self.children(self.field(candidate, "arguments"))
++                        )
++        pending = [initial]
++        visited = set()
++        while pending:
++            self.step()
++            node = pending.pop()
++            if node is None:
++                return False
++            if node.id in visited:
++                continue
++            visited.add(node.id)
++            kind = self.kind(node)
++            if self.primitive(kind):
++                continue
++            if node.type in {"parenthesized_expression", "await_expression"}:
++                values = self.children(node)
++                if len(values) != 1:
++                    return False
++                pending.extend(values)
++            elif node.type in {"identifier", "shorthand_property_identifier"}:
++                definition = self.definition(node)
++                if definition is None or self._writes.get(definition.id):
++                    return False
++                value = self.const_value(definition)
++                if value is None:
++                    return False
++                pending.append(value)
++                pending.extend(self._storage_values.get(definition.id, []))
++            elif node.type == "object":
++                for child in self.children(node):
++                    self.step()
++                    if child.type == "shorthand_property_identifier":
++                        pending.append(child)
++                    elif child.type == "pair":
++                        key = self.field(child, "key")
++                        if (
++                            key is None
++                            or key.type not in {"property_identifier", "string", "number"}
++                            or "\\" in self.text(key)
++                            or self.text(key).strip("\"'") in {"__proto__", "toJSON"}
++                        ):
++                            return False
++                        pending.append(self.field(child, "value"))
++                    else:
++                        return False
++            elif node.type == "array":
++                values = self.children(node)
++                if any(value.type == "spread_element" for value in values):
++                    return False
++                pending.extend(values)
++            elif kind is not None and kind[0] == "array" and self.primitive(kind[1]):
++                continue
++            elif node.type == "call_expression":
++                function = self.private_function(self.field(node, "function"))
++                if function is None:
++                    return False
++                returns = []
++                for candidate in self.nodes:
++                    self.step()
++                    if candidate.type != "return_statement":
++                        continue
++                    owner = self.parent(candidate)
++                    while owner is not None and owner.type not in {
++                        "function_declaration", "arrow_function", "function_expression"
++                    }:
++                        self.step()
++                        owner = self.parent(owner)
++                    if owner == function:
++                        values = self.children(candidate)
++                        if len(values) != 1:
++                            return False
++                        returns.extend(values)
++                if not returns:
++                    return False
++                pending.extend(returns)
++            else:
++                return False
++        return True
++
++    def verify_callback_uses(self, data_use):
++        """Close the effect proof after the value owner is available to its graph."""
++        self._data_use = data_use
++        if self.closed:
++            for node in self.nodes:
++                self.step()
++                if node.type == "arrow_function" and not self._callback_uses_are_data(node):
++                    self.closed = False
++                    return
++
++    def _callback_uses_are_data(self, callback):
++        self.step()
++        if callback.id in self._callback_cache:
++            return self._callback_cache[callback.id]
++        if callback.id in self._callback_active or self._data_use is None:
++            return False
++        self._callback_active.add(callback.id)
++        try:
++            parameters = self.children(self.field(callback, "parameters"))
++            parameter = self.field(callback, "parameter")
++            if parameter is not None:
++                parameters.append(parameter)
++            result = False
++            if len(parameters) == 1 and not self._writes.get(parameters[0].id):
++                body = self.field(callback, "body")
++                result = body is not None and all(
++                    self._data_use(read, boundary=body) for read in self.reads(parameters[0])
++                )
++            self._callback_cache[callback.id] = result
++            return result
++        finally:
++            self._callback_active.remove(callback.id)
++
++    def method(self, function):
++        if not self.closed or function is None or function.type != "member_expression":
++            return False
++        call = self.parent(function)
++        if call is None or call.type != "call_expression" or self.kind(call) is None:
++            return False
++        member = self.field(function, "property")
++        if member is not None and self.text(member) in {"map", "filter"}:
++            arguments = self.children(self.field(call, "arguments"))
++            return len(arguments) == 1 and self._callback_uses_are_data(arguments[0])
++        return True
++
++    def storage(self, function):
++        return self._storage_definition(function) if self.closed and function is not None else None
++
++    def argument_use(self, call, index):
++        """Distinguish terminal output from native results retaining input data."""
++        if not self.closed:
++            return None
++        function = self.field(call, "constructor" if call.type == "new_expression" else "function")
++        cap = self.capability(function)
++        args = self.children(self.field(call, "arguments"))
++        if function is not None and function.type == "member_expression":
++            receiver = self.kind(self.field(function, "object"))
++            member = self.field(function, "property")
++            # These exact typed native methods consume their arguments as
++            # scalar data. Storage and callback methods need their own use
++            # graph, so a primitive result alone never admits their inputs.
++            scalar_method = receiver is not None and (
++                receiver[0] in {"string", "number", "regexp"}
++                or (receiver[0] == "array" and member is not None and self.text(member) == "join")
++            )
++            if scalar_method and 0 <= index < len(args):
++                return "result" if self._method_kind(function, args) is not None else None
++        if index != 0:
++            return None
++        if cap == ("ambient", "RegExp"):
++            return "result" if self.kind(call) == ("regexp",) else None
++        if args and self.primitive(self.kind(args[0]), error=True):
++            if cap == ("ambient", "String"):
++                return "result"
++            if cap in {("ambient", "console.log"), ("ambient", "console.error")}:
++                return "terminal"
++        return None
+diff --git a/tests/nodes/analyzers/test_native_validator_values.py b/tests/nodes/analyzers/test_native_validator_values.py
+new file mode 100644
+index 0000000..21b02cb
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_values.py
+@@ -0,0 +1,118 @@
++"""Closed validator data flow must not admit executable callback values."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool, static_runner
++
++
++VALIDATOR = r'''
++import { readFile } from "node:fs/promises";
++function validate(md) {
++  const errors = [];
++  for (const n of ["A", "B"]) {
++    if (!new RegExp(`^${n}`, "m").test(md)) errors.push(`Missing ${n}`);
++  }
++  const matches = [...md.matchAll(/(\d+)/g)];
++  const numbers = matches.map((m) => Number(m[1]));
++  const extra = matches.filter((m) => !/^1/.test(m[1]));
++  errors.push(`Numbers ${numbers.join(",")}; extra ${extra.map((m) => m[1]).join(",")}`);
++  function check(heads, label) {
++    for (let i = 0; i < heads.length; i += 1) {
++      errors.push(`${label}: ${heads[i][1].match(/\d+/)?.[0] ?? "?"}`);
++    }
++  }
++  check(matches, "headings");
++  const start = Number(matches[0]?.[1]);
++  const end = Number(matches[1]?.[1]);
++  errors.push(`Duration ${(end - start).toFixed(3)}`);
++  return { errors };
++}
++try {
++  const files = process.argv.slice(2);
++  const md = await readFile(files[0], "utf8");
++  const result = validate(md);
++  console.log(JSON.stringify(result));
++} catch (error) {
++  console.log(JSON.stringify({ errors: [String(error?.message ?? error)] }));
++}
++'''
++
++
++def inspect(source):
++    result = static_runner.run_static_patterns_with_ledger(
++        {"components": ["validator.mjs"], "file_cache": {"validator.mjs": source}}, [tool]
++    )
++    return result["inspection_ledger"][0], result["findings"]
++
++
++def test_closed_native_validator_completes_with_original_template_bytes():
++    event, _ = inspect(VALIDATOR)
++    assert event["outcome"] == "completed"
++
++
++@pytest.mark.parametrize("addition", [
++    'console.log = (text) => eval(text);',
++    'RegExp = class { constructor(text) { eval(text); } test() { return true; } };',
++    'Array.prototype.join = function () { eval(this[0]); };',
++    'Number.prototype.toFixed = function (text) { eval(text); };',
++    'String = (value) => eval(value);',
++    'Object.defineProperty(Array.prototype, "push", { value: eval });',
++])
++def test_changed_native_identity_remains_incomplete(addition):
++    event, findings = inspect(addition + "\n" + VALIDATOR)
++    assert event["outcome"] != "completed" or any(
++        f.severity in {"HIGH", "CRITICAL"} for f in findings
++    )
++
++
++@pytest.mark.parametrize("use", [
++    "unknown(errors)",
++    "unknownAlias(errors)",
++    "exec(errors[0])",
++    "setTimeout(() => exec(errors[0]), 0)",
++])
++def test_private_array_cannot_escape_to_unproved_calls(use):
++    source = VALIDATOR.replace("return { errors };", use + "; return { errors };")
++    event, findings = inspect(source)
++    assert event["outcome"] != "completed" or any(
++        f.severity in {"HIGH", "CRITICAL"} for f in findings
++    )
++
++
++@pytest.mark.parametrize("prefix", [
++    'const console = { log: eval };',
++    'const RegExp = class { constructor(text) { eval(text); } test() {} };',
++    'const Number = eval;',
++    'const String = eval;',
++])
++def test_shadowed_native_names_do_not_grant_ownership(prefix):
++    event, _ = inspect(prefix + "\n" + VALIDATOR)
++    assert event["outcome"] != "completed"
++
++
++@pytest.mark.parametrize("statement", [
++    'new Number(`value ${input}`);',
++    'new Boolean(`value ${input}`);',
++    'new String(`value ${input}`);',
++    'new validate(`value ${input}`);',
++])
++def test_unproved_constructors_keep_their_own_template_incomplete(statement):
++    source = VALIDATOR + "\n" + statement
++    start = len(VALIDATOR)
++    spans = JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++    assert any(a >= start for a, _ in spans)
++
++
++@pytest.mark.parametrize("statement", [
++    'const cp=process.getBuiltinModule("child_process"); cp.execSync(String.fromCharCode(114,109,32,45,114,102,32,47));',
++    'const cp=process.getBuiltinModule("child_process"); const words=["r","m -rf /"]; cp.execSync(words.map((x)=>x).join(""));',
++    'const cp=process.getBuiltinModule("child_process"); const words=["r","m -rf /"]; cp.execSync(words.join(""));',
++    'function hidden(value) { return value; } const alias=hidden; unknown(alias(`r${"m"} -rf /`));',
++    'const cp=process.getBuiltinModule("child_process"); let alias=console.log; alias=cp.execSync; alias(`r${"m"} -rf /`);',
++])
++def test_actual_executable_construction_remains_individually_opaque(statement):
++    source = VALIDATOR + "\n" + statement
++    start = len(VALIDATOR)
++    spans = JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++    assert any(a >= start for a, _ in spans)
+diff --git a/tests/nodes/analyzers/test_native_validator_identity_effects.py b/tests/nodes/analyzers/test_native_validator_identity_effects.py
+new file mode 100644
+index 0000000..1d07a25
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_identity_effects.py
+@@ -0,0 +1,31 @@
++"""Owner admission must prove identities and every callback input use."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++CASES = {
++    "global_escape": 'leaked = new RegExp(`con${"sole"}.log(1)`).source;',
++    "global_pattern_escape": '({value: leaked} = {value: new RegExp(`con${"sole"}.log(1)`).source});',
++    "intrinsic_shorthand_write": '({RegExp} = {RegExp: Worker}); new RegExp(`data:text/javascript,postMessage(${"42"})`);',
++    "intrinsic_nested_write": '([{RegExp}] = [{RegExp: Worker}]); new RegExp(`data:text/javascript,postMessage(${"42"})`);',
++    "intrinsic_default_write": '({RegExp = Worker} = {}); new RegExp(`data:text/javascript,postMessage(${"42"})`);',
++    "annex_b_constructor": 'const captured=[]; {function RegExp(value){captured.push(value);}} new RegExp(`x${1}`);',
++    "callback_file_content": 'import {writeFile} from "node:fs/promises"; const commands=[`tou${"ch"} /tmp/marker`]; console.log(commands.map(command=>Number(writeFile("startup.sh",command))).join(","));',
++    "filter_file_content": 'import {writeFile} from "node:fs/promises"; const commands=[`tou${"ch"} /tmp/marker`]; console.log(commands.filter(command=>Boolean(writeFile("startup.sh",command))).join(","));',
++    "callback_parameter_write": 'const commands=[`tou${"ch"} /tmp/marker`]; console.log(commands.map(command=>Number(command="changed")).join(","));',
++    "callback_string_transfer": 'import {writeFile} from "node:fs/promises"; const commands=[`tou${"ch"} /tmp/marker`]; console.log(commands.map(command=>Number(writeFile("startup.sh",String(command)))).join(","));',
++    "callback_regexp_transfer": 'import {writeFile} from "node:fs/promises"; const commands=[`tou${"ch"} /tmp/marker`]; console.log(commands.map(command=>Number(writeFile("startup.sh",new RegExp(command).source))).join(","));',
++    "local_regexp_transfer": 'import {writeFile} from "node:fs/promises"; const source=new RegExp(`tou${"ch"} /tmp/marker`).source; writeFile("startup.sh",source);',
++}
++
++
++@pytest.mark.parametrize("source", CASES.values(), ids=CASES)
++def test_unknown_identity_escape_or_callback_input_remains_incomplete(source):
++    result = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.cjs"], "file_cache": {"case.cjs": source}}, [tool]
++    )
++    assert result["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
+diff --git a/tests/nodes/analyzers/test_native_validator_type_budget.py b/tests/nodes/analyzers/test_native_validator_type_budget.py
+new file mode 100644
+index 0000000..7289747
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_type_budget.py
+@@ -0,0 +1,98 @@
++"""Small shared type graphs must remain inside the scanner's runtime budget."""
++
++import json
++import subprocess
++import sys
++
++import pytest
++
++from skillspector.javascript_native_values import NativeValidatorValues
++
++
++@pytest.mark.parametrize("error", [False, True])
++def test_primitive_union_visits_check_the_runtime_budget(error):
++    class DeadlineError(Exception):
++        pass
++
++    remaining = 5
++
++    def step():
++        nonlocal remaining
++        remaining -= 1
++        if remaining < 0:
++            raise DeadlineError
++
++    owner = NativeValidatorValues(
++        data=b"",
++        nodes=[],
++        parents={},
++        definition=lambda _: None,
++        capability=lambda _: None,
++        private_function=lambda _: None,
++        reads=lambda _: [],
++        bindings=lambda _, **kwargs: [],
++        ambient_intrinsic=lambda *_: None,
++        step=step,
++    )
++    kind = ("string",)
++    for _ in range(8):
++        kind = ("either", kind, kind)
++    with pytest.raises(DeadlineError):
++        owner.primitive(kind, error=error)
++
++
++@pytest.mark.parametrize("operation", ["primitive", "equality"])
++def test_shared_source_value_graph_does_not_expand_exponentially(operation):
++    # Run the real source owner in a child: an uncharged recursive traversal
++    # must fail this test without pinning the entire test or scanner process.
++    script = r"""
++import json,sys
++from skillspector.javascript_source import JavaScriptSourceOwnership
++if sys.argv[1] == "primitive":
++    lines = ['const a0=`x${1}`, b0=1;']
++    for i in range(1, 29):
++        lines.append(f'const a{i}=a{i-1}||b{i-1}; const b{i}=b{i-1}||a{i-1};')
++    lines.append('console.log(String(a28));')
++else:
++    lines = ['const a0=`x${1}`, b0=1, c0=`y${2}`, d0=2;']
++    for i in range(1, 28):
++        lines.append(f'const a{i}=a{i-1}||b{i-1}, b{i}=b{i-1}||a{i-1};')
++        lines.append(f'const c{i}=c{i-1}||d{i-1}, d{i}=d{i-1}||c{i-1};')
++    lines.append('console.log(String(a27||c27));')
++source='\n'.join(lines)
++checks=0
++def check():
++    global checks
++    checks += 1
++owner=JavaScriptSourceOwnership(source,check)
++incomplete=owner.analysis_incomplete()
++unsupported=owner.unsupported_values()
++print(json.dumps({'incomplete':incomplete,'unsupported':len(unsupported),'checks':checks}))
++"""
++    result = subprocess.run(
++        [sys.executable, "-c", script, operation],
++        check=True,
++        capture_output=True,
++        text=True,
++        timeout=3,
++    )
++    report = json.loads(result.stdout)
++    assert report["checks"] > 0
++
++
++@pytest.mark.parametrize("count, exhausted", [(160, False), (200, True)])
++def test_repeated_lexical_lookups_preserve_unknown_call_evidence(count, exhausted):
++    from skillspector.javascript_source import JavaScriptSourceOwnership
++
++    source = 'import {helper} from "./unknown.mjs";\n' + "\n".join(
++        f'function fn{i}(value){{ const text=`x${{value}}`; return helper(String(text)); }}'
++        for i in range(count)
++    )
++    owner = JavaScriptSourceOwnership(source, lambda: None)
++    assert owner.analysis_incomplete() is exhausted
++    spans = owner.unsupported_values()
++    if exhausted:
++        assert not spans
++    else:
++        assert len(spans) == count
++        assert all(source[start:end] == "`x${value}`" for start, end in spans)
+diff --git a/tests/nodes/analyzers/test_native_validator_coercion.py b/tests/nodes/analyzers/test_native_validator_coercion.py
+new file mode 100644
+index 0000000..d50f47a
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_coercion.py
+@@ -0,0 +1,86 @@
++"""Primitive results do not prove the effects of implicit operand conversion."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++CASES = {
++    "template_to_string": ('toString', '`${payload}`'),
++    "number_value_of": ('valueOf', '`${Number(payload)}`'),
++    "number_alias": ('valueOf', '`${convert(payload)}`'),
++    "string_to_string": ('toString', '`${String(payload)}`'),
++    "regexp_pattern": ('toString', '`${new RegExp(payload).test("x")}`'),
++    "regexp_flags": ('toString', '`${new RegExp("x",payload).test("x")}`'),
++    "json_record": ('toJSON', 'JSON.stringify(payload)'),
++    "json_nested_record": ('toJSON', 'JSON.stringify({nested:payload})'),
++    "json_array": ('toJSON', 'JSON.stringify([payload])'),
++    "comparison": ('valueOf', '`${payload < 1}`'),
++    "abstract_equality": ('valueOf', '`${payload == 1}`'),
++    "addition": ('valueOf', '`${payload + 1}`'),
++    "subtraction": ('valueOf', '`${payload - 1}`'),
++    "unary_number": ('valueOf', '`${+payload}`'),
++    "unary_complement": ('valueOf', '`${~payload}`'),
++    "computed_key": ('toString', '`${({})[payload]}`'),
++    "computed_record_key": ('toString', 'JSON.stringify({[payload]:1})'),
++    "search_argument": ('toString', '`${"x".includes(payload)}`'),
++    "join_element": ('toString', '`${[payload].join(",")}`'),
++    "math_argument": ('valueOf', '`${Math.abs(payload)}`'),
++}
++
++
++def source_for(hook, expression):
++    return (
++        ('const convert=Number;' if 'convert(payload)' in expression else '')
++        +         f'const payload={{{hook}:consume,command:`tou${{"ch"}} /tmp/marker`}};'
++        'const errors=[];'
++        f'errors.push({expression});console.log(JSON.stringify(errors));'
++    )
++
++
++@pytest.mark.parametrize("case", CASES, ids=CASES)
++def test_implicit_callback_operand_remains_individually_incomplete(case):
++    source = source_for(*CASES[case])
++    result = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.cjs"], "file_cache": {"case.cjs": source}}, [tool]
++    )
++    assert result["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("mutation", [
++    'payload.toJSON=consume;',
++    'const alias=payload;alias.toJSON=consume;',
++    'payload["toJSON"]=consume;',
++])
++def test_serialization_does_not_trust_mutated_fresh_records(mutation):
++    source = (
++        'const payload={command:`tou${"ch"} /tmp/marker`};' + mutation
++        + 'const errors=[];errors.push(JSON.stringify(payload));console.log(JSON.stringify(errors));'
++    )
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("expression", [
++    '`${Number("1")}`',
++    '`${String(1)}`',
++    '`${1 < 2}`',
++    '`${1 == "1"}`',
++    '`${1 + 2}`',
++    '`${+1}`',
++    '`${Math.abs(-1)}`',
++    'JSON.stringify({nested:[{value:`x${1}`}],ok:true})',
++    '`${Boolean(payload)}`',
++    '`${payload === payload}`',
++    '`${!payload}`',
++])
++def test_proved_scalar_and_plain_serialization_operands_complete(expression):
++    source = (
++        'const payload={valueOf:consume};const errors=[];'
++        f'errors.push({expression});console.log(JSON.stringify(errors));'
++    )
++    result = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.cjs"], "file_cache": {"case.cjs": source}}, [tool]
++    )
++    assert result["inspection_ledger"][0]["outcome"] == "completed"
+diff --git a/tests/nodes/analyzers/test_native_validator_implicit_dispatch.py b/tests/nodes/analyzers/test_native_validator_implicit_dispatch.py
+new file mode 100644
+index 0000000..5ccfed8
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_implicit_dispatch.py
+@@ -0,0 +1,48 @@
++"""An optional closed proof must account for every implicit JS invocation."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++CASES = {
++    "await_thenable": 'const payload={then:consume,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(await payload)}`);console.log(JSON.stringify(errors));',
++    "await_logical_thenable": 'const payload={then:consume,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(await (payload||1))}`);console.log(JSON.stringify(errors));',
++    "await_private_thenable": 'const payload={then:consume,command:`tou${"ch"} /tmp/marker`};function value(){return payload;}const errors=[];errors.push(`${Boolean(await value())}`);console.log(JSON.stringify(errors));',
++    "inherited_getter": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(payload.value)}`);console.log(JSON.stringify(errors));',
++    "inherited_subscript_getter": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean(payload["value"])}`);console.log(JSON.stringify(errors));',
++    "inherited_iterator": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];errors.push(`${Boolean([...payload])}`);console.log(JSON.stringify(errors));',
++    "unknown_object_spread": 'const payload=carrier;const errors=[];errors.push(`x${Boolean({...payload})}`);console.log(JSON.stringify(errors));',
++    "unknown_array_spread": 'const payload=carrier;const errors=[];errors.push(`x${Boolean([...payload])}`);console.log(JSON.stringify(errors));',
++    "destructuring_getter": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const {value}=payload;const errors=[];errors.push(`${Boolean(value)}`);console.log(JSON.stringify(errors));',
++    "destructuring_iterator": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const [value]=payload;const errors=[];errors.push(`${Boolean(value)}`);console.log(JSON.stringify(errors));',
++    "delegated_generator": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};function* values(){yield* payload;}const errors=[];errors.push(`${Boolean(values().next())}`);console.log(JSON.stringify(errors));',
++    "async_iteration": 'const payload={__proto__:carrier,command:`tou${"ch"} /tmp/marker`};const errors=[];for await(const value of payload)errors.push(`${Boolean(value)}`);console.log(JSON.stringify(errors));',
++    "unknown_tag": 'const errors=[];errors.push(`${Boolean(tag`x${1}`)}`);console.log(JSON.stringify(errors));',
++    "native_tag_shape": 'import {readFile} from "node:fs/promises";const errors=[];errors.push(`${Boolean(readFile`x${1}`)}`);console.log(JSON.stringify(errors));',
++    "proxy_receiver": 'const payload=new Proxy({command:`tou${"ch"} /tmp/marker`},carrier);const errors=[];errors.push(`${Boolean(payload.value)}`);console.log(JSON.stringify(errors));',
++}
++
++
++@pytest.mark.parametrize("source", CASES.values(), ids=CASES)
++def test_unknown_implicit_dispatch_remains_incomplete(source):
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("expression", [
++    '`${await "value"}`',
++    '`${await Number("1")}`',
++    '`${Boolean({value:1}.value)}`',
++    '`${[...["a","b"]].join(",")}`',
++])
++def test_known_native_operands_keep_the_closed_proof(expression):
++    source = f'const errors=[];errors.push({expression});console.log(JSON.stringify(errors));'
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] == "completed"
+diff --git a/tests/nodes/analyzers/test_native_validator_native_calls.py b/tests/nodes/analyzers/test_native_validator_native_calls.py
+new file mode 100644
+index 0000000..51b348c
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_native_calls.py
+@@ -0,0 +1,42 @@
++"""Native result typing requires the complete consumed argument contract."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++
++@pytest.mark.parametrize("bounds", ["offset", "0,offset", "offset,offset"])
++def test_argv_slice_does_not_invoke_unproved_bound_conversion(bounds):
++    source = (
++        'const offset={valueOf:consume};'
++        f'console.log(`x${{process.argv.slice({bounds}).join(",")}}`);'
++    )
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("receiver", ["process.argv", "args"])
++def test_unknown_bound_cannot_invalidate_a_later_console_identity(receiver):
++    source = ('const args=process.argv;' if receiver == "args" else "") + (
++        'const offset={valueOf:consume};'
++        f'{receiver}.slice(offset);console.log(`tou${{"ch"}} /tmp/marker`);'
++    )
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("bounds", ["", "2", "1,3", '"1",null'])
++def test_argv_slice_scalar_bounds_preserve_native_result_identity(bounds):
++    source = f'console.log(`x${{process.argv.slice({bounds}).join(",")}}`);'
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] == "completed"
