@@ -2982,10 +2982,145 @@ index e9097ad..2e3e0e9 100644
      size_findings = _size_coverage_findings(
          state,
 diff --git a/src/skillspector/state.py b/src/skillspector/state.py
-index 9b0b37e..7987b6a 100644
 --- a/src/skillspector/state.py
 +++ b/src/skillspector/state.py
-@@ -273,6 +273,7 @@ class SkillspectorState(TypedDict, total=False):
+@@ -17,6 +17,7 @@
+
+ from __future__ import annotations
+
++import json
+ import math
+ import operator
+ import os
+@@ -29,6 +30,7 @@
+ from skillspector.artifacts import ArtifactRecord, BundleReference
+ from skillspector.inference_usage import InferenceUsageRecord
+ from skillspector.inspection_ledger import (
++    MAX_INSPECTION_LEDGER_BYTES,
+     MAX_INSPECTION_LEDGER_EVENTS,
+     AnalysisCompleteness,
+     AnalyzerStatusEvent,
+@@ -186,48 +188,89 @@
+     return merged
+
+
++def _ledger_event_bytes(event: InspectionLedgerEvent) -> int:
++    # ASCII JSON also accounts safely for non-ASCII and surrogate-escaped paths.
++    return len(json.dumps(event, ensure_ascii=True, separators=(",", ":")))
++
++
+ def merge_inspection_ledger(
+     existing: list[InspectionLedgerEvent],
+     updates: list[InspectionLedgerEvent],
+ ) -> list[InspectionLedgerEvent]:
+-    """Concatenate ledger rows under one workflow-wide deterministic ceiling."""
++    """Retain terminal evidence under independent workflow row and byte bounds."""
+     limit = max(1, MAX_INSPECTION_LEDGER_EVENTS)
+-    if existing and existing[-1].get("phase") == "ledger_output":
+-        prior = existing[-1]
++    byte_limit = max(1024, MAX_INSPECTION_LEDGER_BYTES)
++    prior = existing[-1] if existing and existing[-1].get("phase") == "ledger_output" else None
++    retained = existing[:-1] if prior else existing
++    sizes = [_ledger_event_bytes(event) for event in retained]
++    update_sizes = [_ledger_event_bytes(event) for event in updates]
++    observed_records = len(retained) + len(updates)
++    observed_bytes = 2 + sum(sizes) + sum(update_sizes) + max(0, observed_records - 1)
++    if prior:
+         try:
+-            prior_observed = int(prior.get("observed_records", len(existing)))
++            observed_records = max(
++                len(existing), int(prior.get("observed_records", len(existing)))
++            ) + len(updates)
+         except (TypeError, ValueError):
+-            prior_observed = len(existing)
+-        observed = max(len(existing), prior_observed) + len(updates)
+-        return [
+-            *existing[:-1][: limit - 1],
+-            ledger_event(
++            observed_records = len(existing) + len(updates)
++        try:
++            retained_array_bytes = 2 + sum(sizes) + max(0, len(sizes) - 1)
++            observed_bytes = (
++                max(retained_array_bytes, int(prior.get("observed_bytes", retained_array_bytes)))
++                + sum(update_sizes)
++                + len(update_sizes)
++            )
++        except (TypeError, ValueError):
++            pass
++        # Once evidence was omitted, later producers cannot repair the missing
++        # prefix or resume retention as though the workflow had been complete.
++        combined = list(retained)
++    else:
++        combined = [*retained, *updates]
++        sizes.extend(update_sizes)
++        if len(combined) <= limit and observed_bytes <= byte_limit:
++            return combined
++
++    count = min(len(combined), limit - 1)
++    retained_bytes = sum(sizes[:count])
++    while True:
++        path = (
++            str(combined[count].get("path", "SKILL.md"))
++            if count < len(combined)
++            else str(prior.get("path", "SKILL.md"))
++            if prior
++            else "SKILL.md"
++        )
++        marker = ledger_event(
++            outcome=LedgerOutcome.PARTIAL,
++            record_type=LedgerRecordType.SYSTEM,
++            phase="ledger_output",
++            path=path,
++            reason=LedgerReason.OUTPUT_LIMIT,
++            observed_records=observed_records,
++            limit_records=limit,
++            observed_bytes=observed_bytes,
++            limit_bytes=byte_limit,
++        )
++        marker_bytes = _ledger_event_bytes(marker)
++        if count == 0 and marker_bytes + 2 > byte_limit:
++            marker = ledger_event(
+                 outcome=LedgerOutcome.PARTIAL,
+                 record_type=LedgerRecordType.SYSTEM,
+                 phase="ledger_output",
+-                path=str(prior.get("path", "SKILL.md")),
++                path="SKILL.md",
+                 reason=LedgerReason.OUTPUT_LIMIT,
+-                observed_records=observed,
++                observed_records=observed_records,
+                 limit_records=limit,
+-            ),
+-        ]
+-
+-    combined = [*existing, *updates]
+-    if len(combined) <= limit:
+-        return combined
+-    overflow = combined[limit - 1]
+-    return [
+-        *combined[: limit - 1],
+-        ledger_event(
+-            outcome=LedgerOutcome.PARTIAL,
+-            record_type=LedgerRecordType.SYSTEM,
+-            phase="ledger_output",
+-            path=str(overflow.get("path", "SKILL.md")),
+-            reason=LedgerReason.OUTPUT_LIMIT,
+-            observed_records=len(combined),
+-            limit_records=limit,
+-        ),
+-    ]
++                observed_bytes=observed_bytes,
++                limit_bytes=byte_limit,
++            )
++            marker_bytes = _ledger_event_bytes(marker)
++        # One comma separates each retained row from the following row or marker.
++        if 2 + retained_bytes + marker_bytes + count <= byte_limit:
++            return [*combined[:count], marker]
++        count -= 1
++        retained_bytes -= sizes[count]
+
+
+ class SkillspectorState(TypedDict, total=False):
+@@ -273,6 +316,7 @@
      ast_cache: dict[str, str]
      # Key for the process-local parsed-AST cache.  The ASTs themselves stay
      # outside state because they are not checkpoint-serializable.
@@ -2993,3 +3128,23 @@ index 9b0b37e..7987b6a 100644
      python_ast_cache_key: str | None
      manifest: dict[str, object]
      previous_manifest: dict[str, object] | None
+diff --git a/src/skillspector/inspection_ledger.py b/src/skillspector/inspection_ledger.py
+--- a/src/skillspector/inspection_ledger.py
++++ b/src/skillspector/inspection_ledger.py
+@@ -13,11 +13,15 @@
+
+ from typing_extensions import TypedDict
+
+ logger = logging.getLogger(__name__)
+
+-MAX_INSPECTION_LEDGER_EVENTS: Final = 10_000
++# A file is visited by many independent analyzers. Keep their terminal evidence
++# under a byte budget as well as a hard row ceiling; a discovery-sized row cap
++# otherwise truncates ordinary multi-analyzer bundles before they can reconcile.
++MAX_INSPECTION_LEDGER_EVENTS: Final = 100_000
++MAX_INSPECTION_LEDGER_BYTES: Final = 16 * 1024 * 1024
+ MAX_FINDING_OUTPUT_RECORDS: Final = 10_000
+ MAX_EFFECTIVE_FINDINGS: Final = MAX_FINDING_OUTPUT_RECORDS
+
+
+ class LedgerOutcome(StrEnum):
