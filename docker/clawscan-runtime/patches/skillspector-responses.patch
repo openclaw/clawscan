@@ -1366,10 +1366,10 @@ index bb21ad0..5ecb182 100644
  [project.optional-dependencies]
 diff --git a/src/skillspector/markdown_tokens.py b/src/skillspector/markdown_tokens.py
 new file mode 100644
-index 0000000..b5aae63
+index 0000000..f44bf75
 --- /dev/null
 +++ b/src/skillspector/markdown_tokens.py
-@@ -0,0 +1,403 @@
+@@ -0,0 +1,424 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Conservative raw-source ownership for CommonMark inline syntax and prose."""
@@ -1395,7 +1395,9 @@ index 0000000..b5aae63
 +_CODE_EXPANSION_RE = re.compile(r"[$`\\]")
 +_CODE_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 +_CODE_POSSESSIVE_RE = re.compile(r"'s(?![\w'/])", re.IGNORECASE)
-+_CONTAINER_PREFIX_RE = re.compile(r"(?:[ \t]*+(?:>[ \t]?|[-+*][ \t]++|[0-9]{1,9}[.)][ \t]++))*+[ \t]*+")
++_CONTAINER_PREFIX_RE = re.compile(
++    r"(?:[ \t]*+(?:>[ \t]?|[-+*][ \t]++|[0-9]{1,9}[.)][ \t]++))*+[ \t]*+"
++)
 +
 +
 +def _inline_source_offsets(content, block, starts, check_runtime):
@@ -1533,10 +1535,12 @@ index 0000000..b5aae63
 +        excluded_ranges: tuple[tuple[int, int], ...] = (),
 +        include_tables: bool = False,
 +        collect_prose: bool = False,
++        collect_code: bool = False,
 +    ):
 +        self._closers: set[int] = set()
 +        self._delimiters: set[int] = set()
 +        self._prose_apostrophes: set[int] = set()
++        self._inline_code_bodies: list[tuple[int, int]] = []
 +        check_runtime()
 +        # This optional proof only refines the existing lexical fallback. If
 +        # unavailable, preserve that fallback rather than asserting coverage.
@@ -1581,10 +1585,11 @@ index 0000000..b5aae63
 +                        for i in range(state.pos - len(token.markup), state.pos)
 +                        if state.src[i] == "`"
 +                    )
++                    if collect_prose or collect_code:
++                        code_ranges.setdefault(id(state.src), []).append((opening_start, state.pos))
 +                    if collect_prose:
 +                        if _CODE_WORD_RE.fullmatch(token.content):
 +                            suffixes.add(state.pos)
-+                        code_ranges.setdefault(id(state.src), []).append((opening_start, state.pos))
 +            return matched
 +
 +        parser.inline.ruler.at("backticks", record_backtick)
@@ -1756,6 +1761,18 @@ index 0000000..b5aae63
 +                            self._prose_apostrophes.add(source_offsets[normalized_offset])
 +            if record is None or origin is None:
 +                continue
++            if collect_code:
++                for code_start, code_end in code_ranges.get(id(block.content), ()):
++                    width = 0
++                    while block.content[code_start + width] == "`":
++                        check_runtime()
++                        width += 1
++                    self._inline_code_bodies.append(
++                        (
++                            source_offsets[origin + code_start + width],
++                            source_offsets[origin + code_end - width],
++                        )
++                    )
 +            # Only events from this complete inline block can own its raw
 +            # positions; substring-local image label events remain unassigned.
 +            self._closers.update(source_offsets[origin + offset] for offset in record[1])
@@ -1773,6 +1790,10 @@ index 0000000..b5aae63
 +    def prose_apostrophe_offsets(self) -> frozenset[int]:
 +        """Return exact text-node punctuation; callers retain shell-word precedence."""
 +        return frozenset(self._prose_apostrophes)
++
++    def inline_code_bodies(self) -> tuple[tuple[int, int], ...]:
++        """Return exact raw bodies of complete canonical inline code spans."""
++        return tuple(self._inline_code_bodies)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
 index 3095bc3..d7c25ac 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
@@ -2080,25 +2101,61 @@ index 3095bc3..d7c25ac 100644
                          fully_scanned_aggregate_overflow = bool(
                              resource_limit is LedgerReason.OUTPUT_LIMIT
 diff --git a/src/skillspector/security_reconstruction.py b/src/skillspector/security_reconstruction.py
-index 8c8fcc5..1082330 100644
+index 8c8fcc5..a088fb0 100644
 --- a/src/skillspector/security_reconstruction.py
 +++ b/src/skillspector/security_reconstruction.py
-@@ -757,12 +757,12 @@ def _view_string_closer(
+@@ -722,6 +722,35 @@ def validated_json_string_spans(
+     return spans
+ 
+ 
++def validated_inline_json_string_spans(
++    text: str, check_runtime: Callable[[], None]
++) -> list[tuple[int, int]]:
++    """Grant quote ownership only to complete JSON in canonical inline code.
++
++    The raw body is validated without Markdown's whitespace normalization.
++    Invalid, oversized or unmapped bodies retain the conservative fallback.
++    """
++    from skillspector.markdown_tokens import MarkdownCodeSpanClosers
++
++    def reject_constant(value: str) -> None:
++        raise ValueError("Non-JSON numeric constant")
++
++    spans: list[tuple[int, int]] = []
++    ownership = MarkdownCodeSpanClosers(text, check_runtime, include_tables=True, collect_code=True)
++    for start, end in ownership.inline_code_bodies():
++        check_runtime()
++        if end - start > _MAX_JSON_QUOTE_CONTAINER_CHARS:
++            continue
++        body = text[start:end]
++        try:
++            json.loads(body, parse_constant=reject_constant)
++        except (ValueError, RecursionError):
++            continue
++        check_runtime()
++        spans.extend((start + a, start + b) for a, b in _json_string_spans(body, check_runtime))
++    return spans
++
++
+ def validated_json_string_closers(text: str, check_runtime: Callable[[], None] | None) -> set[int]:
+     """Return exact closing-quote offsets owned by complete JSON values."""
+     return {end - 1 for _, end in validated_json_string_spans(text, check_runtime)}
+@@ -757,12 +786,12 @@ def _view_string_closer(
  ) -> Callable[[int], bool]:
      """Map a source-offset string-closer test onto ``view`` character indexes.
-
+ 
 -    A derived view keeps the source offset of every character, so only an ASCII
 -    quote that maps onto a proven closing delimiter is that delimiter.
 +    A derived view keeps the source offset of every character, so only a quote
 +    or backtick that maps onto a proven closing delimiter is that delimiter.
      """
-
+ 
      def closes_owned_string(index: int) -> bool:
 -        return view.text[index] in "'\"" and validated_string_closer(view.source_offset(index))
 +        return view.text[index] in "'\"`" and validated_string_closer(view.source_offset(index))
-
+ 
      return closes_owned_string
-
+ 
 diff --git a/tests/unit/test_osv_client.py b/tests/unit/test_osv_client.py
 index 74c304a..b8bc498 100644
 --- a/tests/unit/test_osv_client.py
@@ -2264,10 +2321,10 @@ index 74c304a..b8bc498 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-index c323c84..f7b61e1 100644
+index c323c84..6904a53 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-@@ -41,6 +41,8 @@ from skillspector.artifacts import (
+@@ -41,13 +41,19 @@ from skillspector.artifacts import (
      normalized_security_view,
      security_text_views,
  )
@@ -2276,15 +2333,19 @@ index c323c84..f7b61e1 100644
  from skillspector.logging_config import get_logger
  from skillspector.models import AnalyzerFinding, Finding, Location, Severity
  from skillspector.python_ast import ParsedPythonFile, parse_python_source
-@@ -48,6 +50,7 @@ from skillspector.python_tokens import PythonLiteralSpans
+ from skillspector.python_tokens import PythonLiteralSpans
  from skillspector.python_tokens import python_literal_spans as _python_literal_spans
  from skillspector.python_tokens import python_string_body as _python_string_body
- from skillspector.security_reconstruction import validated_json_string_spans
+-from skillspector.security_reconstruction import validated_json_string_spans
++from skillspector.security_reconstruction import (
++    validated_inline_json_string_spans,
++    validated_json_string_spans,
++)
 +from skillspector.shell_source import ShellSourceOwnership
  from skillspector.state import AnalyzerNodeResponse, SkillspectorState
  
  from . import static_runner
-@@ -2026,6 +2029,8 @@ def _has_shell_command_word_exhaustion(
+@@ -2026,6 +2032,8 @@ def _has_shell_command_word_exhaustion(
      structural_quote_closers: set[int] | None = None,
      structural_quote_openers: set[int] | None = None,
      python_source: _PythonSourceOwnership | None = None,
@@ -2293,7 +2354,7 @@ index c323c84..f7b61e1 100644
      perl_eval_blocks: bool = False,
      _command_string_depth: int = 0,
  ) -> bool:
-@@ -2049,6 +2054,10 @@ def _has_shell_command_word_exhaustion(
+@@ -2049,6 +2057,10 @@ def _has_shell_command_word_exhaustion(
      for candidate in _SHELL_COMMAND_WORD_START_RE.finditer(content):
          check_runtime()
          start = candidate.start()
@@ -2304,7 +2365,7 @@ index c323c84..f7b61e1 100644
          if start in owned_word_positions:
              continue
          if structural_quote_closers is not None and start in structural_quote_closers:
-@@ -2115,6 +2124,10 @@ def _has_shell_command_word_exhaustion(
+@@ -2115,6 +2127,10 @@ def _has_shell_command_word_exhaustion(
                  # Likewise, a host string or comment token owns its bytes: a
                  # shell quote it opens cannot continue into later host code.
                  unresolved_end = min(unresolved_end, python_source.word_end(start))
@@ -2315,7 +2376,7 @@ index c323c84..f7b61e1 100644
              if unresolved_end - start > _SHELL_COMMAND_WORD_CHARS:
                  return True
              continue
-@@ -2168,6 +2181,8 @@ def _has_shell_command_word_exhaustion(
+@@ -2168,6 +2184,8 @@ def _has_shell_command_word_exhaustion(
              )
          ):
              comment = python_source.comment(start) if python_source is not None else None
@@ -2324,7 +2385,7 @@ index c323c84..f7b61e1 100644
              if comment is None:
                  # Host code after a Python string's closing quote is not shell
                  # text, so a command in the string takes operands only from
-@@ -2182,7 +2197,7 @@ def _has_shell_command_word_exhaustion(
+@@ -2182,7 +2200,7 @@ def _has_shell_command_word_exhaustion(
                  if value is None or _has_runtime_command_operand_exhaustion(*value, check_runtime):
                      return True
                  continue
@@ -2333,7 +2394,7 @@ index c323c84..f7b61e1 100644
              # named in it can take operands only from the same comment, never
              # from later host code. Recheck that comment as standalone shell
              # text.
-@@ -2199,6 +2214,7 @@ def _has_shell_command_word_exhaustion(
+@@ -2199,6 +2217,7 @@ def _has_shell_command_word_exhaustion(
          check_runtime,
          perl_eval_blocks=perl_eval_blocks,
          python_source=python_source,
@@ -2341,7 +2402,7 @@ index c323c84..f7b61e1 100644
      ):
          if command_string is None or _command_string_depth >= 8:
              return True
-@@ -2247,9 +2263,15 @@ def _shell_command_strings(
+@@ -2247,9 +2266,15 @@ def _shell_command_strings(
      *,
      perl_eval_blocks: bool = False,
      python_source: _PythonSourceOwnership | None = None,
@@ -2358,7 +2419,7 @@ index c323c84..f7b61e1 100644
          check_runtime()
          recognized, command_string = _command_string_from_clause(
              content,
-@@ -4847,10 +4869,22 @@ def _markdown_shell_text(
+@@ -4847,10 +4872,22 @@ def _markdown_shell_text(
      table_columns: int | None = None
      table_minimum_indent = 0
      table_delimiter_line = -1
@@ -2381,7 +2442,7 @@ index c323c84..f7b61e1 100644
          stripped = line.rstrip(LINE_BREAK_CHARS)
          leading = stripped.lstrip(" \t")
          indentation = len(stripped[: len(stripped) - len(leading)].expandtabs(4))
-@@ -4921,6 +4955,13 @@ def _markdown_shell_text(
+@@ -4921,6 +4958,13 @@ def _markdown_shell_text(
              if (html_end and html_end in leading.lower()) or (not html_end and not leading):
                  html_end = None
          elif fence is not None:
@@ -2395,7 +2456,7 @@ index c323c84..f7b61e1 100644
              fence_body = stripped.lstrip(" \t")
              closing_fence = MARKDOWN_FENCE_CLOSE.fullmatch(fence_body)
              if (
-@@ -4997,6 +5038,7 @@ def _markdown_shell_text(
+@@ -4997,6 +5041,7 @@ def _markdown_shell_text(
                          table_minimum_indent = minimum_indent
                          table_delimiter_line = line_index + 1
                  if table_columns is not None:
@@ -2403,7 +2464,7 @@ index c323c84..f7b61e1 100644
                      mask_inline_delimiters()
                      if line_index != table_delimiter_line:
                          cells = _markdown_table_cells(stripped, prefix, check_runtime)
-@@ -5033,13 +5075,7 @@ def _markdown_shell_text(
+@@ -5033,13 +5078,7 @@ def _markdown_shell_text(
                          and not heading
                          and "'" in leading
                          and _MARKDOWN_PROSE_SHELL_SYNTAX_RE.search(leading) is None
@@ -2418,7 +2479,7 @@ index c323c84..f7b61e1 100644
                      ):
                          # In the prose reading, a prose line owns every
                          # possessive and contraction in it. Every quote on the
-@@ -5069,6 +5105,26 @@ def _markdown_shell_text(
+@@ -5069,6 +5108,29 @@ def _markdown_shell_text(
              paragraph_list_indent = 0
          offset += len(line)
      mask_inline_delimiters()
@@ -2426,8 +2487,11 @@ index c323c84..f7b61e1 100644
 +        from skillspector.markdown_tokens import MarkdownCodeSpanClosers
 +
 +        for apostrophe in MarkdownCodeSpanClosers(
-+            content, check_runtime, excluded_ranges=tuple(fence_ranges),
-+            include_tables=True, collect_prose=True,
++            content,
++            check_runtime,
++            excluded_ranges=tuple(fence_ranges),
++            include_tables=True,
++            collect_prose=True,
 +        ).prose_apostrophe_offsets():
 +            check_runtime()
 +            # A canonical Markdown block can begin inside a continued shell
@@ -2445,7 +2509,7 @@ index c323c84..f7b61e1 100644
      projected = "".join(output)
      if prose_apostrophes:
          # A prose-looking line can still be inside an earlier shell word, such
-@@ -5105,6 +5161,21 @@ def _markdown_shell_text(
+@@ -5105,6 +5167,21 @@ def _markdown_shell_text(
      return projected
  
  
@@ -2467,7 +2531,7 @@ index c323c84..f7b61e1 100644
  def has_bounded_parse_exhaustion(
      content: str,
      check_runtime: Callable[[], None],
-@@ -5143,15 +5214,26 @@ def _has_bounded_parse_exhaustion(
+@@ -5143,15 +5220,27 @@ def _has_bounded_parse_exhaustion(
      structural_quote_openers = None
      json_strings: list[tuple[int, int]] = []
      python_source = None
@@ -2490,11 +2554,12 @@ index c323c84..f7b61e1 100644
      if file_type == "markdown":
          if complete_context:
              json_strings = validated_json_string_spans(content, check_runtime)
++            json_strings.extend(validated_inline_json_string_spans(content, check_runtime))
 +            json_strings.extend(frontmatter_json_string_spans(content, check_runtime))
              structural_quote_closers = {end - 1 for _, end in json_strings}
              structural_quote_openers = {start for start, _ in json_strings}
          content = _markdown_shell_text(
-@@ -5168,6 +5250,8 @@ def _has_bounded_parse_exhaustion(
+@@ -5168,6 +5257,8 @@ def _has_bounded_parse_exhaustion(
          structural_quote_closers=structural_quote_closers,
          structural_quote_openers=structural_quote_openers,
          python_source=python_source,
@@ -8068,3 +8133,100 @@ index 0000000..8a96468
 +    raw = wave_bytes(rate=1024, payload=b"\x00" * 6)
 +    assert raw.decode("utf-8")
 +    assert "passive_binary" not in metadata(tmp_path, raw)
+diff --git a/tests/nodes/analyzers/test_markdown_value_boundaries.py b/tests/nodes/analyzers/test_markdown_value_boundaries.py
+new file mode 100644
+index 0000000..709384e
+--- /dev/null
++++ b/tests/nodes/analyzers/test_markdown_value_boundaries.py
+@@ -0,0 +1,91 @@
++"""Local literal ownership never spends a shell budget on later prose."""
++
++import pytest
++
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++TAIL = "\n\n" + "An ordinary observation.\n" * 180
++
++
++def inspect(source):
++    return static_runner.run_static_patterns_with_ledger(
++        {"components": ["guide.md"], "file_cache": {"guide.md": source}}, [tool]
++    )
++
++
++@pytest.mark.parametrize("newline", ["\n", "\r\n"])
++@pytest.mark.parametrize(
++    "container", ["Use {code}.", "- Use {code}.", "> Use {code}.", "| Example |\n|---|\n| {code} |"]
++)
++def test_complete_inline_json_has_structural_quote_ownership(newline, container):
++    source = (container.format(code='`{"event": "ok", "reason": "ordinary"}`') + TAIL).replace(
++        "\n", newline
++    )
++    result = inspect(source)
++    assert result["inspection_ledger"][0]["outcome"] == "completed"
++    assert result["findings"] == []
++
++
++@pytest.mark.parametrize(
++    "source",
++    [
++        'Use `{"event": "ok"`.',
++        "Use `quickFlags()``.",
++        "```sh\n`/api/${id}\n```",
++        'Use `{"event": NaN}`.',
++        'Use `{"event": "ok"} trailing`.',
++    ],
++)
++def test_unproven_or_incomplete_local_ownership_stays_partial(source):
++    result = inspect(source + TAIL)
++    assert result["inspection_ledger"][0]["outcome"] == "partial"
++
++
++@pytest.mark.parametrize("before", [False, True])
++@pytest.mark.parametrize(
++    "source",
++    [
++        'Use `{"event": "ok"}`.\n',
++    ],
++)
++def test_local_ownership_preserves_independent_destructive_command_locations(source, before):
++    command = "rm -rf /\n"
++    content = command + source + TAIL if before else source + TAIL + command
++    result = inspect(content)
++    findings = [f for f in result["findings"] if f.rule_id == "TM1"]
++    assert findings
++    expected_line = content[: content.index(command)].count("\n") + 1
++    assert any(f.start_line == expected_line for f in findings)
++
++
++@pytest.mark.parametrize(
++    "source",
++    [
++        'Use `{"event": "$(resolve_tool) -rf /"}`.\n',
++        "```sh\n`echo /api/${id}; $(resolve_tool) -rf /`\n```\n",
++        "```sh\n`echo /api/${id}` -rf /\n```\n",
++        "```sh\n`echo /api/${id}; " + "r" * 4097 + "`\n```\n",
++    ],
++)
++def test_executable_nested_or_outer_commands_keep_uncertainty(source):
++    result = inspect(source + TAIL)
++    assert result["inspection_ledger"][0]["outcome"] != "completed" or any(
++        f.rule_id == "TM1" for f in result["findings"]
++    )
++
++
++@pytest.mark.parametrize(
++    "prefix,suffix",
++    [
++        ('bash -c "\n', '\n"'),
++        ("$CMD \\\n", ""),
++        ("r'\n", "'m -rf /"),
++    ],
++)
++def test_inline_json_does_not_terminate_existing_shell_execution(prefix, suffix):
++    source = prefix + 'Use `{"event": "$(resolve_tool) -rf /"}`.' + suffix + TAIL
++    result = inspect(source)
++    assert result["inspection_ledger"][0]["outcome"] != "completed" or any(
++        f.rule_id == "TM1" for f in result["findings"]
++    )
