@@ -389,7 +389,7 @@ diff --git a/tests/nodes/test_report_occurrence_columns.py b/tests/nodes/test_re
          ("second.py", "finding-second", "second_context\nsubprocess.run(command)"),
      ]
 diff --git a/uv.lock b/uv.lock
-index 4878677..e9d1833 100644
+index 4878677..362af86 100644
 --- a/uv.lock
 +++ b/uv.lock
 @@ -228,11 +228,11 @@ filecache = [
@@ -597,7 +597,7 @@ index 4878677..e9d1833 100644
  [[package]]
  name = "pkginfo"
  version = "1.12.1.2"
-@@ -2738,8 +2914,10 @@ dependencies = [
+@@ -2738,13 +2914,17 @@ dependencies = [
      { name = "langchain-openai" },
      { name = "langgraph" },
      { name = "langsmith" },
@@ -608,7 +608,14 @@ index 4878677..e9d1833 100644
      { name = "pydantic" },
      { name = "pywhatwgurl" },
      { name = "pyyaml" },
-@@ -2784,10 +2962,12 @@ requires-dist = [
+     { name = "regex" },
+     { name = "rich" },
++    { name = "tree-sitter" },
++    { name = "tree-sitter-javascript" },
+     { name = "typer" },
+     { name = "yara-python" },
+ ]
+@@ -2784,10 +2964,12 @@ requires-dist = [
      { name = "langgraph", specifier = ">=1.0.10" },
      { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'langgraph-dev'", specifier = ">=0.4.14" },
      { name = "langsmith", specifier = ">=0.7.30" },
@@ -621,6 +628,68 @@ index 4878677..e9d1833 100644
      { name = "poetry", marker = "extra == 'dev'", specifier = ">=2.3.0" },
      { name = "pydantic", specifier = ">=2.12.0" },
      { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.0" },
+@@ -2800,6 +2982,8 @@ requires-dist = [
+     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
+     { name = "skillspector", extras = ["langgraph-dev"], marker = "extra == 'dev'" },
+     { name = "skillspector", extras = ["mcp"], marker = "extra == 'dev'" },
++    { name = "tree-sitter", specifier = "==0.25.2" },
++    { name = "tree-sitter-javascript", specifier = "==0.25.0" },
+     { name = "twine", marker = "extra == 'dev'", specifier = ">=6.2.0" },
+     { name = "typer", specifier = ">=0.23.0,<0.24" },
+     { name = "yara-python", specifier = ">=4.5.0" },
+@@ -2927,6 +3111,51 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/d8/8e/bb97bb0c71802080bfc8952937d174e49cfc50de5c951dd47b2496f0dcdb/tqdm-4.68.3-py3-none-any.whl", hash = "sha256:39832cc2def2789a6f29df83f172db7416cea70052c0907a57801c5f2fdccb03", size = 78337, upload-time = "2026-06-17T07:36:50.132Z" },
+ ]
+-
++
++[[package]]
++name = "tree-sitter"
++version = "0.25.2"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/66/7c/0350cfc47faadc0d3cf7d8237a4e34032b3014ddf4a12ded9933e1648b55/tree-sitter-0.25.2.tar.gz", hash = "sha256:fe43c158555da46723b28b52e058ad444195afd1db3ca7720c59a254544e9c20", size = 177961, upload-time = "2025-09-25T17:37:59.751Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/3c/9e/20c2a00a862f1c2897a436b17edb774e831b22218083b459d0d081c9db33/tree_sitter-0.25.2-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:ddabfff809ffc983fc9963455ba1cecc90295803e06e140a4c83e94c1fa3d960", size = 146941, upload-time = "2025-09-25T17:37:34.813Z" },
++    { url = "https://files.pythonhosted.org/packages/ef/04/8512e2062e652a1016e840ce36ba1cc33258b0dcc4e500d8089b4054afec/tree_sitter-0.25.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c0c0ab5f94938a23fe81928a21cc0fac44143133ccc4eb7eeb1b92f84748331c", size = 137699, upload-time = "2025-09-25T17:37:36.349Z" },
++    { url = "https://files.pythonhosted.org/packages/47/8a/d48c0414db19307b0fb3bb10d76a3a0cbe275bb293f145ee7fba2abd668e/tree_sitter-0.25.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dd12d80d91d4114ca097626eb82714618dcdfacd6a5e0955216c6485c350ef99", size = 607125, upload-time = "2025-09-25T17:37:37.725Z" },
++    { url = "https://files.pythonhosted.org/packages/39/d1/b95f545e9fc5001b8a78636ef942a4e4e536580caa6a99e73dd0a02e87aa/tree_sitter-0.25.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b43a9e4c89d4d0839de27cd4d6902d33396de700e9ff4c5ab7631f277a85ead9", size = 635418, upload-time = "2025-09-25T17:37:38.922Z" },
++    { url = "https://files.pythonhosted.org/packages/de/4d/b734bde3fb6f3513a010fa91f1f2875442cdc0382d6a949005cd84563d8f/tree_sitter-0.25.2-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:fbb1706407c0e451c4f8cc016fec27d72d4b211fdd3173320b1ada7a6c74c3ac", size = 631250, upload-time = "2025-09-25T17:37:40.039Z" },
++    { url = "https://files.pythonhosted.org/packages/46/f2/5f654994f36d10c64d50a192239599fcae46677491c8dd53e7579c35a3e3/tree_sitter-0.25.2-cp312-cp312-win_amd64.whl", hash = "sha256:6d0302550bbe4620a5dc7649517c4409d74ef18558276ce758419cf09e578897", size = 127156, upload-time = "2025-09-25T17:37:41.132Z" },
++    { url = "https://files.pythonhosted.org/packages/67/23/148c468d410efcf0a9535272d81c258d840c27b34781d625f1f627e2e27d/tree_sitter-0.25.2-cp312-cp312-win_arm64.whl", hash = "sha256:0c8b6682cac77e37cfe5cf7ec388844957f48b7bd8d6321d0ca2d852994e10d5", size = 113984, upload-time = "2025-09-25T17:37:42.074Z" },
++    { url = "https://files.pythonhosted.org/packages/8c/67/67492014ce32729b63d7ef318a19f9cfedd855d677de5773476caf771e96/tree_sitter-0.25.2-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:0628671f0de69bb279558ef6b640bcfc97864fe0026d840f872728a86cd6b6cd", size = 146926, upload-time = "2025-09-25T17:37:43.041Z" },
++    { url = "https://files.pythonhosted.org/packages/4e/9c/a278b15e6b263e86c5e301c82a60923fa7c59d44f78d7a110a89a413e640/tree_sitter-0.25.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:f5ddcd3e291a749b62521f71fc953f66f5fd9743973fd6dd962b092773569601", size = 137712, upload-time = "2025-09-25T17:37:44.039Z" },
++    { url = "https://files.pythonhosted.org/packages/54/9a/423bba15d2bf6473ba67846ba5244b988cd97a4b1ea2b146822162256794/tree_sitter-0.25.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:bd88fbb0f6c3a0f28f0a68d72df88e9755cf5215bae146f5a1bdc8362b772053", size = 607873, upload-time = "2025-09-25T17:37:45.477Z" },
++    { url = "https://files.pythonhosted.org/packages/ed/4c/b430d2cb43f8badfb3a3fa9d6cd7c8247698187b5674008c9d67b2a90c8e/tree_sitter-0.25.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b878e296e63661c8e124177cc3084b041ba3f5936b43076d57c487822426f614", size = 636313, upload-time = "2025-09-25T17:37:46.68Z" },
++    { url = "https://files.pythonhosted.org/packages/9d/27/5f97098dbba807331d666a0997662e82d066e84b17d92efab575d283822f/tree_sitter-0.25.2-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:d77605e0d353ba3fe5627e5490f0fbfe44141bafa4478d88ef7954a61a848dae", size = 631370, upload-time = "2025-09-25T17:37:47.993Z" },
++    { url = "https://files.pythonhosted.org/packages/d4/3c/87caaed663fabc35e18dc704cd0e9800a0ee2f22bd18b9cbe7c10799895d/tree_sitter-0.25.2-cp313-cp313-win_amd64.whl", hash = "sha256:463c032bd02052d934daa5f45d183e0521ceb783c2548501cf034b0beba92c9b", size = 127157, upload-time = "2025-09-25T17:37:48.967Z" },
++    { url = "https://files.pythonhosted.org/packages/d5/23/f8467b408b7988aff4ea40946a4bd1a2c1a73d17156a9d039bbaff1e2ceb/tree_sitter-0.25.2-cp313-cp313-win_arm64.whl", hash = "sha256:b3f63a1796886249bd22c559a5944d64d05d43f2be72961624278eff0dcc5cb8", size = 113975, upload-time = "2025-09-25T17:37:49.922Z" },
++    { url = "https://files.pythonhosted.org/packages/07/e3/d9526ba71dfbbe4eba5e51d89432b4b333a49a1e70712aa5590cd22fc74f/tree_sitter-0.25.2-cp314-cp314-macosx_10_13_x86_64.whl", hash = "sha256:65d3c931013ea798b502782acab986bbf47ba2c452610ab0776cf4a8ef150fc0", size = 146776, upload-time = "2025-09-25T17:37:50.898Z" },
++    { url = "https://files.pythonhosted.org/packages/42/97/4bd4ad97f85a23011dd8a535534bb1035c4e0bac1234d58f438e15cff51f/tree_sitter-0.25.2-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:bda059af9d621918efb813b22fb06b3fe00c3e94079c6143fcb2c565eb44cb87", size = 137732, upload-time = "2025-09-25T17:37:51.877Z" },
++    { url = "https://files.pythonhosted.org/packages/b6/19/1e968aa0b1b567988ed522f836498a6a9529a74aab15f09dd9ac1e41f505/tree_sitter-0.25.2-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:eac4e8e4c7060c75f395feec46421eb61212cb73998dbe004b7384724f3682ab", size = 609456, upload-time = "2025-09-25T17:37:52.925Z" },
++    { url = "https://files.pythonhosted.org/packages/48/b6/cf08f4f20f4c9094006ef8828555484e842fc468827ad6e56011ab668dbd/tree_sitter-0.25.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:260586381b23be33b6191a07cea3d44ecbd6c01aa4c6b027a0439145fcbc3358", size = 636772, upload-time = "2025-09-25T17:37:54.647Z" },
++    { url = "https://files.pythonhosted.org/packages/57/e2/d42d55bf56360987c32bc7b16adb06744e425670b823fb8a5786a1cea991/tree_sitter-0.25.2-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:7d2ee1acbacebe50ba0f85fff1bc05e65d877958f00880f49f9b2af38dce1af0", size = 631522, upload-time = "2025-09-25T17:37:55.833Z" },
++    { url = "https://files.pythonhosted.org/packages/03/87/af9604ebe275a9345d88c3ace0cf2a1341aa3f8ef49dd9fc11662132df8a/tree_sitter-0.25.2-cp314-cp314-win_amd64.whl", hash = "sha256:4973b718fcadfb04e59e746abfbb0288694159c6aeecd2add59320c03368c721", size = 130864, upload-time = "2025-09-25T17:37:57.453Z" },
++    { url = "https://files.pythonhosted.org/packages/a6/6e/e64621037357acb83d912276ffd30a859ef117f9c680f2e3cb955f47c680/tree_sitter-0.25.2-cp314-cp314-win_arm64.whl", hash = "sha256:b8d4429954a3beb3e844e2872610d2a4800ba4eb42bb1990c6a4b1949b18459f", size = 117470, upload-time = "2025-09-25T17:37:58.431Z" },
++]
++
++[[package]]
++name = "tree-sitter-javascript"
++version = "0.25.0"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/59/e0/e63103c72a9d3dfd89a31e02e660263ad84b7438e5f44ee82e443e65bbde/tree_sitter_javascript-0.25.0.tar.gz", hash = "sha256:329b5414874f0588a98f1c291f1b28138286617aa907746ffe55adfdcf963f38", size = 132338, upload-time = "2025-09-01T07:13:44.792Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/2c/df/5106ac250cd03661ebc3cc75da6b3d9f6800a3606393a0122eca58038104/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:b70f887fb269d6e58c349d683f59fa647140c410cfe2bee44a883b20ec92e3dc", size = 64052, upload-time = "2025-09-01T07:13:36.865Z" },
++    { url = "https://files.pythonhosted.org/packages/b1/8f/6b4b2bc90d8ab3955856ce852cc9d1e82c81d7ab9646385f0e75ffd5b5d3/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:8264a996b8845cfce06965152a013b5d9cbb7d199bc3503e12b5682e62bb1de1", size = 66440, upload-time = "2025-09-01T07:13:37.962Z" },
++    { url = "https://files.pythonhosted.org/packages/5f/c4/7da74ecdcd8a398f88bd003a87c65403b5fe0e958cdd43fbd5fd4a398fcf/tree_sitter_javascript-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:9dc04ba91fc8583344e57c1f1ed5b2c97ecaaf47480011b92fbeab8dda96db75", size = 99728, upload-time = "2025-09-01T07:13:38.755Z" },
++    { url = "https://files.pythonhosted.org/packages/96/c8/97da3af4796495e46421e9344738addb3602fa6426ea695be3fcbadbee37/tree_sitter_javascript-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:199d09985190852e0912da2b8d26c932159be314bc04952cf917ed0e4c633e6b", size = 106072, upload-time = "2025-09-01T07:13:39.798Z" },
++    { url = "https://files.pythonhosted.org/packages/13/be/c964e8130be08cc9bd6627d845f0e4460945b158429d39510953bbcb8fcc/tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:dfcf789064c58dc13c0a4edb550acacfc6f0f280577f1e7a00de3e89fc7f8ddc", size = 104388, upload-time = "2025-09-01T07:13:40.866Z" },
++    { url = "https://files.pythonhosted.org/packages/ee/89/9b773dee0f8961d1bb8d7baf0a204ab587618df19897c1ef260916f318ec/tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:1b852d3aee8a36186dbcc32c798b11b4869f9b5041743b63b65c2ef793db7a54", size = 98377, upload-time = "2025-09-01T07:13:41.838Z" },
++    { url = "https://files.pythonhosted.org/packages/3b/dc/d90cb1790f8cec9b4878d278ad9faf7c8f893189ce0f855304fd704fc274/tree_sitter_javascript-0.25.0-cp310-abi3-win_amd64.whl", hash = "sha256:e5ed840f5bd4a3f0272e441d19429b26eedc257abe5574c8546da6b556865e3c", size = 62975, upload-time = "2025-09-01T07:13:42.828Z" },
++    { url = "https://files.pythonhosted.org/packages/2e/1f/f9eba1038b7d4394410f3c0a6ec2122b590cd7acb03f196e52fa57ebbe72/tree_sitter_javascript-0.25.0-cp310-abi3-win_arm64.whl", hash = "sha256:622a69d677aa7f6ee2931d8c77c981a33f0ebb6d275aa9d43d3397c879a9bb0b", size = 61668, upload-time = "2025-09-01T07:13:43.803Z" },
++]
++
+ [[package]]
+ name = "trove-classifiers"
+ version = "2026.6.1.19"
 diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
 index 15b9b4c..1dc6e88 100644
 --- a/src/skillspector/nodes/build_context.py
@@ -974,18 +1043,20 @@ index 7fc577c..e59ce17 100644
                      if active_budget.limitation_generation == package_generation:
                          _put_cache(_cache_key(name, version, ecosystem), vuln_details)
 diff --git a/pyproject.toml b/pyproject.toml
-index bb21ad0..d703b4b 100644
+index bb21ad0..5ecb182 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
-@@ -33,6 +33,7 @@ dependencies = [
+@@ -33,6 +33,9 @@ dependencies = [
      # Typer <0.24 uses click>=8.0.0; 0.24+ requires click>=8.2.1 which conflicts with semgrep (click 8.1.x)
      "typer>=0.23.0,<0.24",
      "rich>=14.3.0",
 +    "markdown-it-py==4.2.0",
++    "tree-sitter==0.25.2",
++    "tree-sitter-javascript==0.25.0",
      "httpx>=0.28.0",
      "pywhatwgurl==0.1.1",
      "regex==2026.5.9",
-@@ -49,6 +50,7 @@ dependencies = [
+@@ -49,6 +52,7 @@ dependencies = [
      "langsmith>=0.7.30",
      "yara-python>=4.5.0",
      "google-auth[requests]>=2.53.0",
@@ -1195,7 +1266,7 @@ index 0000000..2ac53a8
 +        """Return proven inline delimiters, preserving every byte inside them."""
 +        return frozenset(self._delimiters)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
-index 3095bc3..13cdca4 100644
+index 3095bc3..890e828 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
 +++ b/src/skillspector/nodes/analyzers/static_runner.py
 @@ -50,6 +50,7 @@ from skillspector.inspection_ledger import (
@@ -1214,7 +1285,16 @@ index 3095bc3..13cdca4 100644
  from skillspector.python_ast import (
      MAX_PYTHON_AST_SOURCE_CHARS,
      ParsedPythonFile,
-@@ -2048,7 +2050,7 @@ def _restore_source_lines(
+@@ -109,6 +111,8 @@ FILE_TYPES: dict[str, str] = {
+     ".toml": "toml",
+     ".txt": "text",
+     ".js": "javascript",
++    ".mjs": "javascript",
++    ".cjs": "javascript",
+     ".ts": "typescript",
+     ".rb": "ruby",
+     ".pl": "perl",
+@@ -2048,7 +2052,7 @@ def _restore_source_lines(
  
  
  def _window_string_closer(
@@ -1223,7 +1303,7 @@ index 3095bc3..13cdca4 100644
  ) -> Callable[[int], bool]:
      """Answer string-closer queries in one window's source coordinates."""
  
-@@ -2120,11 +2122,15 @@ def _scan_declared_marker_views(
+@@ -2120,11 +2124,15 @@ def _scan_declared_marker_views(
              )
          return True
  
@@ -1243,7 +1323,7 @@ index 3095bc3..13cdca4 100644
      )
  
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
-@@ -2283,7 +2289,9 @@ def _scan_declared_marker_views(
+@@ -2283,7 +2291,9 @@ def _scan_declared_marker_views(
                                  marker_view.text,
                                  check_runtime,
                                  file_type=_infer_file_type(path),
@@ -1254,7 +1334,7 @@ index 3095bc3..13cdca4 100644
                              )
                          )
  
-@@ -2314,9 +2322,41 @@ def _scan_all_views_detailed(
+@@ -2314,9 +2324,58 @@ def _scan_all_views_detailed(
      python_source: bool | None = None,
      readable_binary: bool = False,
      _oms_projected: bool = False,
@@ -1271,13 +1351,24 @@ index 3095bc3..13cdca4 100644
 +            "_pdf_projected": True,
 +        }
 +        raw_findings, raw_reason, raw_metrics = _scan_all_views_detailed(
-+            path, content, pattern_modules, python_ast_cache_key,
-+            python_ast=python_ast, python_source=python_source,
-+            readable_binary=readable_binary, _oms_projected=_oms_projected, **common,
++            path,
++            content,
++            pattern_modules,
++            python_ast_cache_key,
++            python_ast=python_ast,
++            python_source=python_source,
++            readable_binary=readable_binary,
++            _oms_projected=_oms_projected,
++            **common,
 +        )
 +        decoded_findings, decoded_reason, decoded_metrics = _scan_all_views_detailed(
-+            path, decoded_pdf, pattern_modules, None,
-+            python_source=False, _oms_projected=True, **common,
++            path,
++            decoded_pdf,
++            pattern_modules,
++            None,
++            python_source=False,
++            _oms_projected=True,
++            **common,
 +        )
 +        for finding in decoded_findings:
 +            # Locations identify the derived PDF carrier rather than pretending
@@ -1289,10 +1380,16 @@ index 3095bc3..13cdca4 100644
 +            )
 +        combined = _deduplicate_view_findings([*raw_findings, *decoded_findings])
 +        if len(combined) > max_findings:
-+            return combined[:max_findings], LedgerReason.OUTPUT_LIMIT, {
-+                "observed_findings": len(combined), "limit_findings": max_findings
-+            }
-+        return combined, raw_reason or decoded_reason, raw_metrics if raw_reason else decoded_metrics
++            return (
++                combined[:max_findings],
++                LedgerReason.OUTPUT_LIMIT,
++                {"observed_findings": len(combined), "limit_findings": max_findings},
++            )
++        return (
++            combined,
++            raw_reason or decoded_reason,
++            raw_metrics if raw_reason else decoded_metrics,
++        )
      if readable_binary:
          modules = [
              module
@@ -1471,18 +1568,67 @@ index 74c304a..4699cbb 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-index c323c84..5db9eca 100644
+index c323c84..408a19e 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-@@ -41,6 +41,7 @@ from skillspector.artifacts import (
+@@ -41,6 +41,8 @@ from skillspector.artifacts import (
      normalized_security_view,
      security_text_views,
  )
 +from skillspector.frontmatter_json import frontmatter_json_string_spans
++from skillspector.javascript_source import JavaScriptSourceOwnership
  from skillspector.logging_config import get_logger
  from skillspector.models import AnalyzerFinding, Finding, Location, Severity
  from skillspector.python_ast import ParsedPythonFile, parse_python_source
-@@ -4847,6 +4848,7 @@ def _markdown_shell_text(
+@@ -2026,6 +2028,7 @@ def _has_shell_command_word_exhaustion(
+     structural_quote_closers: set[int] | None = None,
+     structural_quote_openers: set[int] | None = None,
+     python_source: _PythonSourceOwnership | None = None,
++    javascript_source: JavaScriptSourceOwnership | None = None,
+     perl_eval_blocks: bool = False,
+     _command_string_depth: int = 0,
+ ) -> bool:
+@@ -2049,6 +2052,10 @@ def _has_shell_command_word_exhaustion(
+     for candidate in _SHELL_COMMAND_WORD_START_RE.finditer(content):
+         check_runtime()
+         start = candidate.start()
++        if javascript_source is not None and (
++            javascript_source.is_code(start) or javascript_source.data_literal(start) is not None
++        ):
++            continue
+         if start in owned_word_positions:
+             continue
+         if structural_quote_closers is not None and start in structural_quote_closers:
+@@ -2115,6 +2122,10 @@ def _has_shell_command_word_exhaustion(
+                 # Likewise, a host string or comment token owns its bytes: a
+                 # shell quote it opens cannot continue into later host code.
+                 unresolved_end = min(unresolved_end, python_source.word_end(start))
++            if unresolved_end - start > _SHELL_COMMAND_WORD_CHARS and javascript_source is not None:
++                comment = javascript_source.comment(start)
++                if comment is not None:
++                    unresolved_end = min(unresolved_end, comment[1])
+             if unresolved_end - start > _SHELL_COMMAND_WORD_CHARS:
+                 return True
+             continue
+@@ -2168,6 +2179,8 @@ def _has_shell_command_word_exhaustion(
+             )
+         ):
+             comment = python_source.comment(start) if python_source is not None else None
++            if comment is None and javascript_source is not None:
++                comment = javascript_source.comment(start)
+             if comment is None:
+                 # Host code after a Python string's closing quote is not shell
+                 # text, so a command in the string takes operands only from
+@@ -2182,7 +2195,7 @@ def _has_shell_command_word_exhaustion(
+                 if value is None or _has_runtime_command_operand_exhaustion(*value, check_runtime):
+                     return True
+                 continue
+-            # A Python comment is prose that no shell receives, so a command
++            # A host comment is prose that no shell receives, so a command
+             # named in it can take operands only from the same comment, never
+             # from later host code. Recheck that comment as standalone shell
+             # text.
+@@ -4847,6 +4860,7 @@ def _markdown_shell_text(
      table_columns: int | None = None
      table_minimum_indent = 0
      table_delimiter_line = -1
@@ -1490,7 +1636,7 @@ index c323c84..5db9eca 100644
      offset = 0
      lines = content.splitlines(keepends=True)
      for line_index, line in enumerate(lines):
-@@ -4997,6 +4999,7 @@ def _markdown_shell_text(
+@@ -4997,6 +5011,7 @@ def _markdown_shell_text(
                          table_minimum_indent = minimum_indent
                          table_delimiter_line = line_index + 1
                  if table_columns is not None:
@@ -1498,7 +1644,7 @@ index c323c84..5db9eca 100644
                      mask_inline_delimiters()
                      if line_index != table_delimiter_line:
                          cells = _markdown_table_cells(stripped, prefix, check_runtime)
-@@ -5069,6 +5072,13 @@ def _markdown_shell_text(
+@@ -5069,6 +5084,13 @@ def _markdown_shell_text(
              paragraph_list_indent = 0
          offset += len(line)
      mask_inline_delimiters()
@@ -1512,7 +1658,19 @@ index c323c84..5db9eca 100644
      projected = "".join(output)
      if prose_apostrophes:
          # A prose-looking line can still be inside an earlier shell word, such
-@@ -5152,6 +5162,7 @@ def _has_bounded_parse_exhaustion(
+@@ -5143,15 +5165,19 @@ def _has_bounded_parse_exhaustion(
+     structural_quote_openers = None
+     json_strings: list[tuple[int, int]] = []
+     python_source = None
++    javascript_source = None
+     if file_type == "perl" and complete_context:
+         content = _perl_literal_print_shell_text(content, check_runtime)
+     if file_type == "python" and complete_context:
+         # Only a complete module can prove Python token ownership. A fragment
+         # may begin inside a string and would invert code and literal bytes.
+         python_source = _PythonSourceOwnership(content, check_runtime)
++    if file_type == "javascript" and complete_context:
++        javascript_source = JavaScriptSourceOwnership(content, check_runtime)
      if file_type == "markdown":
          if complete_context:
              json_strings = validated_json_string_spans(content, check_runtime)
@@ -1520,6 +1678,14 @@ index c323c84..5db9eca 100644
              structural_quote_closers = {end - 1 for _, end in json_strings}
              structural_quote_openers = {start for start, _ in json_strings}
          content = _markdown_shell_text(
+@@ -5168,6 +5194,7 @@ def _has_bounded_parse_exhaustion(
+         structural_quote_closers=structural_quote_closers,
+         structural_quote_openers=structural_quote_openers,
+         python_source=python_source,
++        javascript_source=javascript_source,
+         perl_eval_blocks=file_type == "perl",
+     ):
+         return True
 diff --git a/src/skillspector/frontmatter_json.py b/src/skillspector/frontmatter_json.py
 new file mode 100644
 --- /dev/null
@@ -2134,3 +2300,653 @@ index 0000000..f8a8c3e
 +
 +if __name__ == "__main__":
 +    _child()
+diff --git a/src/skillspector/javascript_source.py b/src/skillspector/javascript_source.py
+new file mode 100644
+index 0000000..d1488b9
+--- /dev/null
++++ b/src/skillspector/javascript_source.py
+@@ -0,0 +1,152 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""Bounded syntax ownership after a closed JavaScript value/use proof.
++
++Unresolved constructed values grant no ownership. Proven data literal syntax
++and comments cannot consume later host code as shell operands. Findings always
++inspect the original source, including every interpolation expression.
++"""
++
++from __future__ import annotations
++
++import re
++from bisect import bisect_right
++from collections.abc import Callable
++
++from skillspector.javascript_values import OwnershipBudgetExceededError, data_literal_ranges
++
++MAX_SOURCE_BYTES = 262_144
++MAX_NODES = 100_000
++MAX_DEPTH = 256
++PARSE_TIMEOUT_MICROS = 100_000
++_JAVASCRIPT_SHEBANG = re.compile(
++    r"#![ \t]*+(?:\S*/)?(?:env[ \t]++(?:-\S*[ \t]++)*(?:\S*/)?)?"
++    r"(?:node|nodejs|bun|deno)(?=[ \t\r\n]|$)"
++)
++
++
++class JavaScriptSourceOwnership:
++    def __init__(self, content: str, check_runtime: Callable[[], None]):
++        self._content = content
++        self._check_runtime = check_runtime
++        self._spans: tuple[tuple[int, ...], tuple[int, ...]] | None = None
++        self._literals: tuple[tuple[int, ...], tuple[int, ...]] | None = None
++        self._noncode: tuple[tuple[int, ...], tuple[int, ...]] | None = None
++        self._computed = False
++
++    def _compute(self):
++        if not self._computed:
++            result = _source_spans(self._content, self._check_runtime)
++            if result is not None:
++                self._spans, self._literals, self._noncode = result
++            self._computed = True
++
++    def _owner(self, spans, position):
++        if spans is None:
++            return None
++        starts, ends = spans
++        index = bisect_right(starts, position) - 1
++        if index >= 0 and position < ends[index]:
++            return starts[index], ends[index]
++        return None
++
++    def comment(self, position: int) -> tuple[int, int] | None:
++        self._compute()
++        return self._owner(self._spans, position)
++
++    def data_literal(self, position: int) -> tuple[int, int] | None:
++        self._compute()
++        return self._owner(self._literals, position)
++
++    def is_code(self, position: int) -> bool:
++        self._compute()
++        return self._noncode is not None and self._owner(self._noncode, position) is None
++
++
++def _source_spans(
++    content: str, check_runtime: Callable[[], None]
++) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
++    if len(content) > MAX_SOURCE_BYTES or (
++        content.startswith("#!") and _JAVASCRIPT_SHEBANG.match(content) is None
++    ):
++        return None
++    check_runtime()
++    try:
++        data = content.encode("utf-8")
++    except UnicodeError:
++        return None
++    if len(data) > MAX_SOURCE_BYTES:
++        return None
++    try:
++        import tree_sitter_javascript
++        from tree_sitter import Language, Parser
++    except ImportError:
++        return None
++    # The pinned binding supports this deprecated native deadline. Leave the
++    # caller's warning filters untouched; concurrent analyzers own their parser.
++    # Strict warning-as-error settings conservatively prove no ownership.
++    try:
++        parser = Parser(
++            Language(tree_sitter_javascript.language()), timeout_micros=PARSE_TIMEOUT_MICROS
++        )
++        tree = parser.parse(data)
++    except (ValueError, RuntimeError, DeprecationWarning):
++        return None
++    check_runtime()
++    if tree is None or tree.root_node.has_error:
++        return None
++    pending = [(tree.root_node, 0, None)]
++    comments: list[tuple[int, int]] = []
++    nodes, parents = [], {}
++    count = 0
++    while pending:
++        node, depth, owner = pending.pop()
++        nodes.append(node)
++        parents[node.id] = owner
++        count += 1
++        if count > MAX_NODES or depth > MAX_DEPTH:
++            return None
++        if count % 128 == 0:
++            check_runtime()
++        if node.type == "comment":
++            start, end = node.start_byte, node.end_byte
++            raw = data[start:end]
++            if not (raw.startswith(b"//") or (raw.startswith(b"/*") and raw.endswith(b"*/"))):
++                return None
++            comments.append((start, end))
++        pending.extend((child, depth + 1, node) for child in node.children)
++    try:
++        literals = data_literal_ranges(data, nodes, parents, check_runtime)
++    except OwnershipBudgetExceededError:
++        return None
++    if literals is None:
++        return None
++    noncode = list(comments)
++    for node in nodes:
++        if node.type in {"string", "regex"}:
++            noncode.append((node.start_byte, node.end_byte))
++        if node.type == "template_string":
++            cursor = node.start_byte
++            for child in node.children:
++                if child.type == "template_substitution":
++                    expression = child.named_children[0]
++                    noncode.append((cursor, expression.start_byte))
++                    cursor = expression.end_byte
++            noncode.append((cursor, node.end_byte))
++    # Tree-sitter offsets count UTF-8 bytes. Decode disjoint ranges only once
++    # to preserve exact character offsets without repeated prefix decoding.
++    result = []
++    for ranges in (comments, literals, noncode):
++        starts, ends = [], []
++        byte_cursor = char_cursor = 0
++        for start, end in sorted(ranges):
++            check_runtime()
++            if start < byte_cursor:
++                return None
++            char_cursor += len(data[byte_cursor:start].decode("utf-8"))
++            starts.append(char_cursor)
++            char_cursor += len(data[start:end].decode("utf-8"))
++            ends.append(char_cursor)
++            byte_cursor = end
++        result.append((tuple(starts), tuple(ends)))
++    return tuple(result)
+diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
+new file mode 100644
+index 0000000..3deb18d
+--- /dev/null
++++ b/src/skillspector/javascript_values.py
+@@ -0,0 +1,486 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""A deliberately small, closed value/use proof for JavaScript data strings.
++
++Native filesystem paths, fetch URLs, stream writes, and directly thrown Error
++messages do not interpret strings as shell source. A spelling alone proves
++nothing: imports, immutable aliases, every local value use, and ambient-name
++shadowing are checked against the complete parsed module. Unsupported value
++flows grant no ownership for the artifact.
++"""
++
++from collections import defaultdict
++
++_GLOBAL_CAPABILITIES = {"Error", "fetch", "process", "JSON"}
++_FORBIDDEN_GLOBALS = {
++    "globalThis",
++    "global",
++    "window",
++    "self",
++    "Reflect",
++    "eval",
++    "Function",
++    "require",
++}
++_NATIVE_MODULES = {
++    "node:fs",
++    "node:fs/promises",
++    "node:path",
++    "node:crypto",
++    "node:stream",
++    "node:stream/promises",
++}
++_FS_PATH_ARGUMENTS = {
++    "createWriteStream": {0},
++    "readFile": {0},
++    "open": {0},
++    "rename": {0, 1},
++    "rm": {0},
++    "mkdir": {0},
++    "stat": {0},
++}
++MAX_PROOF_STEPS = 100_000
++
++
++class OwnershipBudgetExceededError(Exception):
++    pass
++
++
++def data_literal_ranges(data, nodes, parents, check_runtime):
++    """Return exact syntax/data ranges, or None when any constructed value escapes."""
++    definitions = defaultdict(list)
++    references = defaultdict(list)
++    imported = {}
++    remaining = MAX_PROOF_STEPS
++
++    def step():
++        nonlocal remaining
++        remaining -= 1
++        if remaining < 0:
++            raise OwnershipBudgetExceededError
++        check_runtime()
++
++    def text(node):
++        return data[node.start_byte : node.end_byte].decode("utf-8")
++
++    def parent(node):
++        return parents.get(node.id)
++
++    def field(node, name):
++        return node.child_by_field_name(name)
++
++    def const_declaration(node):
++        p = parent(node)
++        return (
++            p is not None
++            and p.type == "lexical_declaration"
++            and data[p.start_byte : p.start_byte + 5] == b"const"
++        )
++
++    for node in nodes:
++        step()
++        if node.type == "with_statement":
++            return None
++        if node.type in {"identifier", "shorthand_property_identifier"}:
++            references[text(node)].append(node)
++        if node.type in {"variable_declarator", "function_declaration", "class_declaration"}:
++            name = field(node, "name")
++            if name is not None and name.type == "identifier":
++                definitions[text(name)].append(name)
++        if node.type in {"formal_parameters", "catch_clause"}:
++            target = field(node, "parameter") if node.type == "catch_clause" else node
++            if target is not None:
++                stack = [target]
++                while stack:
++                    child = stack.pop()
++                    if child.type == "identifier":
++                        definitions[text(child)].append(child)
++                    stack.extend(child.named_children)
++        if node.type == "arrow_function":
++            name = field(node, "parameter")
++            if name is not None and name.type == "identifier":
++                definitions[text(name)].append(name)
++        if node.type == "import_statement":
++            source = field(node, "source")
++            module = text(source)[1:-1] if source is not None else ""
++            if module not in _NATIVE_MODULES or "\\" in module:
++                return None
++            stack = list(node.named_children)
++            while stack:
++                child = stack.pop()
++                if child.type == "import_specifier":
++                    original = field(child, "name")
++                    local = field(child, "alias") or original
++                    if original is None or local is None:
++                        return None
++                    definitions[text(local)].append(local)
++                    imported[text(local)] = (module, text(original))
++                elif child.type in {"namespace_import", "import_clause"}:
++                    # Default and namespace objects are mutable or ambiguous in
++                    # this first slice. Named ESM imports have stable identity.
++                    if any(c.type == "identifier" for c in child.named_children):
++                        return None
++                    stack.extend(child.named_children)
++                elif child.type != "string":
++                    stack.extend(child.named_children)
++
++    def capability(node, visiting=frozenset()):
++        step()
++        if node is None or node.id in visiting or len(visiting) > 128:
++            return None
++        visiting = visiting | {node.id}
++        if node.type in {"identifier", "shorthand_property_identifier"}:
++            name = text(node)
++            defs = definitions[name]
++            if name in _GLOBAL_CAPABILITIES and not defs:
++                return ("ambient", name)
++            if len(defs) != 1:
++                return None
++            if name in imported:
++                return imported[name]
++            owner = parent(defs[0])
++            if (
++                owner is not None
++                and owner.type == "variable_declarator"
++                and const_declaration(owner)
++            ):
++                return capability(field(owner, "value"), visiting)
++            return None
++        if node.type == "member_expression":
++            base = capability(field(node, "object"), visiting)
++            member = field(node, "property")
++            if base is not None and member is not None and member.type == "property_identifier":
++                result = (base[0], base[1] + "." + text(member))
++                if (
++                    base[0] == "ambient"
++                    and base[1].startswith("process")
++                    and result[1]
++                    not in {
++                        "process.stdout",
++                        "process.stderr",
++                        "process.stdout.write",
++                        "process.stderr.write",
++                        "process.exitCode",
++                    }
++                ):
++                    return None
++                return result
++        if node.type == "parenthesized_expression" and len(node.named_children) == 1:
++            return capability(node.named_children[0], visiting)
++        return None
++
++    def target_mutates_capability(initial):
++        pending = [initial]
++        while pending:
++            step()
++            node = pending.pop()
++            if node is None:
++                continue
++            cap = capability(node)
++            if cap not in {None, ("ambient", "process.exitCode")}:
++                return True
++            if (
++                node.type == "subscript_expression"
++                and capability(field(node, "object")) is not None
++            ):
++                return True
++            if node.type in {
++                "object_pattern",
++                "array_pattern",
++                "pair_pattern",
++                "parenthesized_expression",
++            }:
++                pending.extend(node.named_children)
++            if (
++                node.type == "identifier"
++                and text(node) in {"String", "Number", "Boolean", "setTimeout", "clearTimeout"}
++                and not definitions[text(node)]
++            ):
++                return True
++        return False
++
++    # Ambient constructors can be shadowed or replaced; reflective global
++    # access and escaping aliases cannot establish the required native binding.
++    for node in nodes:
++        step()
++        if node.type == "identifier" and text(node) in _FORBIDDEN_GLOBALS:
++            return None
++        if node.type == "member_expression":
++            member = field(node, "property")
++            if member is not None and text(member) in {"constructor", "call", "apply", "bind"}:
++                return None
++        cap = capability(node)
++        if cap is not None:
++            p = parent(node)
++            if p is None:
++                return None
++            native_binding = p.type == "import_specifier"
++            const_alias = p.type == "variable_declarator" and const_declaration(p)
++            member_receiver = p.type == "member_expression" and field(p, "object") == node
++            invoked = p.type in {"call_expression", "new_expression"} and (
++                field(p, "function") == node or field(p, "constructor") == node
++            )
++            exit_status = (
++                cap == ("ambient", "process.exitCode")
++                and p.type == "assignment_expression"
++                and field(p, "left") == node
++            )
++            if not (native_binding or const_alias or member_receiver or invoked or exit_status):
++                return None
++        if node.type in {
++            "assignment_expression",
++            "augmented_assignment_expression",
++            "update_expression",
++        }:
++            target = field(node, "left") or field(node, "argument")
++            if target_mutates_capability(target):
++                return None
++        if node.type == "call_expression":
++            function = field(node, "function")
++            if function is None:
++                return None
++            if function.type in {"subscript_expression", "import"}:
++                return None
++            if function.type == "identifier":
++                name = text(function)
++                defs = definitions[name]
++                local_function = len(defs) == 1 and parent(defs[0]).type == "function_declaration"
++                native = capability(function)
++                # Unbound execution APIs and aliases are never assumed data
++                # sinks. Supported host primitives below take no source code.
++                ambient = not defs and name in {"String", "Number", "Boolean", "clearTimeout"}
++                if not defs and name == "setTimeout":
++                    arguments = field(node, "arguments")
++                    ambient = (
++                        arguments is not None
++                        and bool(arguments.named_children)
++                        and arguments.named_children[0].type
++                        in {"arrow_function", "function_expression"}
++                    )
++                if not local_function and native is None and not ambient:
++                    return None
++            if function.type == "member_expression":
++                member = field(function, "property")
++                if member is not None and text(member) in {
++                    "constructor",
++                    "call",
++                    "apply",
++                    "bind",
++                    "defineProperty",
++                    "setPrototypeOf",
++                }:
++                    return None
++                if member is not None and text(member) == "assign":
++                    args = field(node, "arguments")
++                    if (
++                        args is None
++                        or not args.named_children
++                        or capability(args.named_children[0]) is not None
++                    ):
++                        return None
++
++    def is_data(initial):
++        pending = [initial]
++        visited = set()
++        while pending:
++            step()
++            node = pending.pop()
++            if node.id in visited:
++                continue
++            visited.add(node.id)
++            p = parent(node)
++            if p is None:
++                return False
++            if p.type in {
++                "parenthesized_expression",
++                "binary_expression",
++                "ternary_expression",
++                "sequence_expression",
++                "template_substitution",
++                "template_string",
++            }:
++                pending.append(p)
++                continue
++            if (
++                p.type == "variable_declarator"
++                and field(p, "value") == node
++                and const_declaration(p)
++            ):
++                name = field(p, "name")
++                if name is None or name.type != "identifier" or len(definitions[text(name)]) != 1:
++                    return False
++                declaration = parent(p)
++                if (
++                    parent(declaration) is not None
++                    and parent(declaration).type == "export_statement"
++                ):
++                    return False
++                uses = [n for n in references[text(name)] if n.id != name.id]
++                if not uses:
++                    return False
++                pending.extend(uses)
++                continue
++            if p.type != "arguments":
++                return False
++            call = parent(p)
++            if call is None or call.type not in {"call_expression", "new_expression"}:
++                return False
++            arguments = p.named_children
++            try:
++                index = arguments.index(node)
++            except ValueError:
++                return False
++            cap = capability(
++                field(call, "constructor" if call.type == "new_expression" else "function")
++            )
++            if cap == ("ambient", "Error") and call.type == "new_expression" and index == 0:
++                outer = parent(call)
++                if outer is not None and outer.type == "throw_statement":
++                    continue
++                return False
++            if (
++                cap
++                in {
++                    ("ambient", "fetch"),
++                    ("ambient", "process.stdout.write"),
++                    ("ambient", "process.stderr.write"),
++                }
++                and index == 0
++            ):
++                continue
++            if (
++                cap is not None
++                and cap[0] in {"node:fs", "node:fs/promises"}
++                and index in _FS_PATH_ARGUMENTS.get(cap[1], set())
++            ):
++                continue
++            if (
++                cap is not None
++                and cap[0] == "node:path"
++                and cap[1] in {"join", "resolve", "dirname", "basename"}
++            ):
++                pending.append(call)
++                continue
++            return False
++        return True
++
++    def native_array_method(function):
++        if function.type != "member_expression":
++            return False
++        receiver, member = field(function, "object"), field(function, "property")
++        if (
++            receiver is None
++            or receiver.type != "identifier"
++            or member is None
++            or text(member) != "join"
++        ):
++            return False
++        name = text(receiver)
++        if len(definitions[name]) != 1:
++            return False
++        declaration = parent(definitions[name][0])
++        if (
++            declaration is None
++            or declaration.type != "variable_declarator"
++            or not const_declaration(declaration)
++        ):
++            return False
++        value = field(declaration, "value")
++        if value is None or value.type != "array":
++            return False
++        for reference in references[name]:
++            step()
++            if reference.id == definitions[name][0].id:
++                continue
++            owner = parent(reference)
++            if (
++                owner is None
++                or owner.type != "member_expression"
++                or field(owner, "object") != reference
++            ):
++                return False
++            method, call = field(owner, "property"), parent(owner)
++            if method is None or text(method) not in {"join", "includes", "indexOf", "lastIndexOf"}:
++                return False
++            if call is None or call.type != "call_expression" or field(call, "function") != owner:
++                return False
++        return True
++
++    def field_calls_are_data(initial):
++        pending = [initial]
++        while pending:
++            step()
++            node = pending.pop()
++            if node.type == "new_expression":
++                return False
++            if node.type == "call_expression":
++                function = field(node, "function")
++                cap = capability(function)
++                native = cap is not None and cap[0] in _NATIVE_MODULES
++                intrinsic_json = cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")}
++                primitive = (
++                    function is not None
++                    and function.type == "identifier"
++                    and text(function) in {"String", "Number", "Boolean"}
++                    and not definitions[text(function)]
++                )
++                if not (native or intrinsic_json or primitive or native_array_method(function)):
++                    return False
++            pending.extend(node.named_children)
++        return True
++
++    def contains_string(initial):
++        pending, seen = [initial], set()
++        while pending:
++            step()
++            node = pending.pop()
++            if node.id in seen:
++                continue
++            seen.add(node.id)
++            if node.type in {"string", "template_string"}:
++                return True
++            if node.type == "identifier" and len(definitions[text(node)]) == 1:
++                owner = parent(definitions[text(node)][0])
++                if owner is not None and owner.type == "variable_declarator":
++                    value = field(owner, "value")
++                    if value is not None:
++                        pending.append(value)
++            pending.extend(node.named_children)
++        return False
++
++    literals = []
++    for node in nodes:
++        if node.type == "template_string":
++            if not is_data(node):
++                return None
++            for child in node.children:
++                if child.type == "template_substitution" and not field_calls_are_data(child):
++                    return None
++            literals.append(node)
++        if node.type in {"binary_expression", "augmented_assignment_expression"}:
++            operator = field(node, "operator")
++            if (
++                operator is not None
++                and text(operator) in {"+", "+="}
++                and contains_string(node)
++                and not is_data(node)
++            ):
++                return None
++    # Mark syntax and quasi text, retaining the exact bytes of interpolation
++    # expressions. Nested source strings still have their own proven uses.
++    ranges = []
++    for node in nodes:
++        if node.type == "string" and is_data(node):
++            ranges.append((node.start_byte, node.end_byte))
++    for node in literals:
++        cursor = node.start_byte
++        for child in node.children:
++            if child.type == "template_substitution":
++                expressions = child.named_children
++                if len(expressions) != 1:
++                    return None
++                expression = expressions[0]
++                ranges.append((cursor, expression.start_byte))
++                cursor = expression.end_byte
++        ranges.append((cursor, node.end_byte))
++    return ranges
