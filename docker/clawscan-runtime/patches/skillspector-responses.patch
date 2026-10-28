@@ -7278,10 +7278,10 @@ index 0000000..5ccfed8
 +    assert report["inspection_ledger"][0]["outcome"] == "completed"
 diff --git a/tests/nodes/analyzers/test_native_validator_native_calls.py b/tests/nodes/analyzers/test_native_validator_native_calls.py
 new file mode 100644
-index 0000000..a459937
+index 0000000..51b348c
 --- /dev/null
 +++ b/tests/nodes/analyzers/test_native_validator_native_calls.py
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,42 @@
 +"""Native result typing requires the complete consumed argument contract."""
 +
 +import pytest
@@ -7296,6 +7296,19 @@ index 0000000..a459937
 +    source = (
 +        'const offset={valueOf:consume};'
 +        f'console.log(`x${{process.argv.slice({bounds}).join(",")}}`);'
++    )
++    report = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
++    )
++    assert report["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("receiver", ["process.argv", "args"])
++def test_unknown_bound_cannot_invalidate_a_later_console_identity(receiver):
++    source = ('const args=process.argv;' if receiver == "args" else "") + (
++        'const offset={valueOf:consume};'
++        f'{receiver}.slice(offset);console.log(`tou${{"ch"}} /tmp/marker`);'
 +    )
 +    report = static_runner.run_static_patterns_with_ledger(
 +        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
