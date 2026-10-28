@@ -310,6 +310,16 @@ _EXECUTABLE_BOUNDARIES = [
     "function* fetch(value){obj.run(value);} fetch(`${cmd}${flags} /`).next();",
     "const test={[Symbol.hasInstance](value){obj.run(value);return false;}}; Boolean(`${cmd}${flags} /` instanceof test);",
     "const test=new Proxy({},{has(target,value){obj.run(value);return false;}}); Boolean(`${cmd}${flags} /` in test);",
+    "function output(value){process.stdout.write(value);obj.run(arguments[0]);} output(`${cmd}${flags} /`);",
+    "function output(value){process.stdout.write(value);(()=>obj.run(arguments[0]))();} output(`${cmd}${flags} /`);",
+    "try{throw new Error(`${cmd}${flags} /`);}catch(error){obj.run(error.message);}",
+    "async function read(){throw new Error(`${cmd}${flags} /`);} read().catch(error=>obj.run(error.message));",
+    "async function read(){throw new Error(`${cmd}${flags} /`);} obj.take(read());",
+    "function read(){try{throw new Error(`${cmd}${flags} /`);}catch(error){return error.message;}} obj.run(read());",
+    'const record={}; record["__proto__"]=new Proxy({},{set:(target,key,value)=>{obj.run(value);return true;}}); const message=`${cmd}${flags} /`; if(typeof message===\'string\') record.text=message.slice(0,300); process.stdout.write(JSON.stringify(record));',
+    'const record={}; const alias=record; alias[key]=new Proxy({},{set:(target,key,value)=>{obj.run(value);return true;}}); record.text=`${cmd}${flags} /`; process.stdout.write(JSON.stringify(record));',
+    "const test={[Symbol.hasInstance](value){obj.run(value);return false;}}; Boolean(String.fromCharCode(114,109,32,45,114,102,32,47) instanceof test);",
+    "const test=new Proxy({},{has(target,value){obj.run(value);return false;}}); Boolean(String.fromCharCode(114,109,32,45,114,102,32,47) in test);",
 ]
 
 
@@ -455,3 +465,34 @@ def test_string_guard_never_proves_unrelated_or_executable_uses(statement):
     row = ledger(statement)["inspection_ledger"][0]
     assert row["outcome"] == LedgerOutcome.PARTIAL
     assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT
+
+
+def test_computed_writes_do_not_invalidate_an_unrelated_fresh_record():
+    source = (
+        "const args={}; args[key]=external; const message={}; "
+        "message.text=`result ${value}`; process.stdout.write(JSON.stringify(message));"
+    )
+    assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.COMPLETED
+
+
+def test_native_error_handlers_may_only_rethrow_or_use_proven_output():
+    source = (
+        "async function read(){throw new Error(`result ${value}`);} "
+        "async function main(){await read().catch(error=>{throw error;});} "
+        "main().catch(error=>{process.stderr.write(error.message);});"
+    )
+    assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    [
+        "const handler=error=>process.stderr.write(error.message); read().catch(handler);",
+        "function log(process){read().catch(error=>process.stderr.write(error.message));} log(fake);",
+        "const saved=read().catch(error=>{throw error;}); obj.take(saved);",
+        "new Promise(resolve=>{read();});",
+    ],
+)
+def test_error_handler_aliases_shadowing_and_promise_escapes_remain_partial(consumer):
+    source = "async function read(){throw new Error(`${cmd}${flags} /`);} " + consumer
+    assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.PARTIAL

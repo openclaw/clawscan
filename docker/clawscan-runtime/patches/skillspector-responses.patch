@@ -4068,10 +4068,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..2b9658b
+index 0000000..10a4994
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1470 @@
+@@ -0,0 +1,1629 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -4147,6 +4147,10 @@ index 0000000..2b9658b
 +    imported = {}
 +    remaining = MAX_PROOF_STEPS
 +    unsupported = []
++    computed_storage_roots = set()
++    error_handler_active = False
++    error_handler_result = None
++    error_binding_ids = set()
 +    unsafe_native = any(
 +        n.type == "with_statement"
 +        or (n.type == "method_definition" and any(c.type in {"get", "set"} for c in n.children))
@@ -4605,6 +4609,11 @@ index 0000000..2b9658b
 +        definition = data_definition(function)
 +        if definition is None or parent(definition).type != "function_declaration":
 +            return None
++        function = parent(definition)
++        if any(scope_encloses(function, reference) for reference in references["arguments"]):
++            # Named parameters do not cover aliases through the arguments
++            # object, including reads captured by nested arrow functions.
++            return None
 +        for reference in references[text(definition)]:
 +            step()
 +            if reference.id == definition.id or data_definition(reference) != definition:
@@ -4621,27 +4630,27 @@ index 0000000..2b9658b
 +    def function_returns(function):
 +        return [n for n in nodes if n.type == "return_statement" and function_scope(n) == function]
 +
-+    def fresh_record(initial, visiting=frozenset()):
++    def fresh_record_roots(initial, visiting=frozenset()):
 +        step()
 +        if initial is None or initial.id in visiting or len(visiting) > 128:
-+            return False
++            return set()
 +        visiting = visiting | {initial.id}
 +        if initial.type == "object":
 +            for child in initial.named_children:
 +                if child.type not in {"pair", "shorthand_property_identifier", "comment"}:
 +                    # Accessors and spreads do not prove ordinary data storage;
 +                    # assigning a field can invoke a setter.
-+                    return False
++                    return set()
 +                if child.type == "pair":
 +                    key = field(child, "key")
 +                    if key is None or "\\" in text(key) or text(key).strip("\"'") == "__proto__":
-+                        return False
-+            return True
++                        return set()
++            return {initial.id}
 +        if (
 +            initial.type in {"await_expression", "parenthesized_expression"}
 +            and len(initial.named_children) == 1
 +        ):
-+            return fresh_record(initial.named_children[0], visiting)
++            return fresh_record_roots(initial.named_children[0], visiting)
 +        if initial.type == "identifier":
 +            definition = data_definition(initial)
 +            if (
@@ -4649,16 +4658,20 @@ index 0000000..2b9658b
 +                and parent(definition).type == "variable_declarator"
 +                and const_declaration(parent(definition))
 +            ):
-+                return fresh_record(field(parent(definition), "value"), visiting)
++                return fresh_record_roots(field(parent(definition), "value"), visiting)
 +        if initial.type == "call_expression":
 +            function = local_function(field(initial, "function"))
 +            if function is not None:
 +                returns = function_returns(function)
-+                return bool(returns) and all(
-+                    len(r.named_children) == 1 and fresh_record(r.named_children[0], visiting)
++                roots = [
++                    fresh_record_roots(r.named_children[0], visiting)
++                    if len(r.named_children) == 1
++                    else set()
 +                    for r in returns
-+                )
-+        return False
++                ]
++                if roots and all(roots):
++                    return set().union(*roots)
++        return set()
 +
 +    def value_reads(name):
 +        reads = []
@@ -4856,7 +4869,8 @@ index 0000000..2b9658b
 +                    if (
 +                        receiver is None
 +                        or receiver.type != "identifier"
-+                        or not fresh_record(receiver)
++                        or bool(fresh_record_roots(receiver) & computed_storage_roots)
++                        or not fresh_record_roots(receiver)
 +                    ):
 +                        return False
 +                    definition = data_definition(receiver)
@@ -4899,6 +4913,19 @@ index 0000000..2b9658b
 +                operator = field(p, "operator")
 +                if operator is not None and text(operator) in {"!", "typeof", "void"}:
 +                    continue
++            if p.type in {"if_statement", "while_statement", "do_statement", "for_statement"}:
++                if field(p, "condition") == node:
++                    continue
++            if (
++                p.type == "throw_statement"
++                and error_handler_active
++                and node.type == "identifier"
++                and data_definition(node) is not None
++                and data_definition(node).id in error_binding_ids
++            ):
++                # Preserve only the same Error object. Every possible local
++                # handler read is still checked by the outer overapproximation.
++                continue
 +            if p.type == "return_statement":
 +                function = function_scope(p)
 +                name = field(function, "name") if function is not None else None
@@ -5004,6 +5031,18 @@ index 0000000..2b9658b
 +            if cap == ("ambient", "Error") and call.type == "new_expression" and index == 0:
 +                outer = parent(call)
 +                if outer is not None and outer.type == "throw_statement":
++                    scope = function_scope(outer)
++                    if scope is not None and scope.type != "program":
++                        name = field(scope, "name")
++                        if (
++                            scope.type != "function_declaration"
++                            or name is None
++                            or local_function(name) != scope
++                            or parent(scope).type == "export_statement"
++                        ):
++                            return False
++                    if not error_consumers_are_data():
++                        return False
 +                    continue
 +                if opaque_only:
 +                    continue
@@ -5202,8 +5241,6 @@ index 0000000..2b9658b
 +                    ">",
 +                    "<=",
 +                    ">=",
-+                    "in",
-+                    "instanceof",
 +                }:
 +                    return True
 +                if operator is not None and text(operator) in {"&&", "||", "??"}:
@@ -5222,6 +5259,121 @@ index 0000000..2b9658b
 +            ):
 +                return True
 +            return False
++
++    def error_consumers_are_data():
++        """Overapproximate handlers; never predict an exception's call path."""
++        nonlocal error_handler_active, error_handler_result
++        if error_handler_result is not None:
++            return error_handler_result
++        if error_handler_active:
++            # Rethrowing into another native Error does not discharge any
++            # handler read: the outer pass still proves every handler binding.
++            return True
++        handlers, callbacks = [], set()
++        for node in nodes:
++            step()
++            if node.type == "export_statement":
++                error_handler_result = False
++                return False
++            if node.type == "catch_clause":
++                parameter = field(node, "parameter")
++                if parameter is not None:
++                    if parameter.type != "identifier":
++                        error_handler_result = False
++                        return False
++                    handlers.append(parameter)
++            if node.type != "member_expression":
++                continue
++            member = field(node, "property")
++            if member is None:
++                continue
++            name = text(member)
++            if name in {
++                "then", "finally", "allSettled", "any", "race", "reject",
++                "on", "once", "addListener", "prependListener", "addEventListener",
++                "setUncaughtExceptionCaptureCallback",
++            }:
++                error_handler_result = False
++                return False
++            if name != "catch":
++                continue
++            call = parent(node)
++            if call is None or call.type != "call_expression" or field(call, "function") != node:
++                error_handler_result = False
++                return False
++            arguments = field(call, "arguments")
++            args = semantic_children(arguments) if arguments is not None else []
++            if len(args) != 1 or args[0].type not in {"arrow_function", "function_expression"}:
++                error_handler_result = False
++                return False
++            callback = args[0]
++            callbacks.add(callback.id)
++            if any(scope_encloses(callback, ref) for ref in references["arguments"]):
++                error_handler_result = False
++                return False
++            parameters = field(callback, "parameters")
++            parameter = field(callback, "parameter")
++            params = semantic_children(parameters) if parameters is not None else []
++            if parameter is not None:
++                params.append(parameter)
++            if len(params) > 1 or any(p.type != "identifier" for p in params):
++                error_handler_result = False
++                return False
++            handlers.extend(params)
++        # This is a source-admission boundary, not an exception call graph.
++        # Private declarations may call each other directly. Async results must
++        # be awaited or have an immediately consumed, proved catch handler;
++        # callbacks and exported promises may otherwise conceal Error escapes.
++        for function in nodes:
++            if function.type != "function_declaration":
++                continue
++            name = field(function, "name")
++            if name is None or local_function(name) != function:
++                error_handler_result = False
++                return False
++            asynchronous = any(child.type == "async" for child in function.children)
++            for reference in value_reads(name):
++                call = parent(reference)
++                caller = function_scope(call)
++                if caller is not None and (
++                    caller.type not in {"program", "function_declaration"}
++                    and caller.id not in callbacks
++                ):
++                    error_handler_result = False
++                    return False
++                if not asynchronous:
++                    continue
++                consumer = parent(call)
++                if consumer is not None and consumer.type == "await_expression":
++                    continue
++                if consumer is not None and consumer.type == "member_expression":
++                    method = field(consumer, "property")
++                    outer = parent(consumer)
++                    if (
++                        method is not None
++                        and text(method) == "catch"
++                        and outer is not None
++                        and outer.type == "call_expression"
++                        and field(outer, "function") == consumer
++                    ):
++                        consumer = parent(outer)
++                        if consumer is not None and consumer.type in {
++                            "await_expression", "expression_statement"
++                        }:
++                            continue
++                error_handler_result = False
++                return False
++        error_binding_ids.update(parameter.id for parameter in handlers)
++        error_handler_active = True
++        try:
++            error_handler_result = all(
++                is_data(reference)
++                for parameter in handlers
++                for reference in value_reads(parameter)
++            )
++        finally:
++            error_handler_active = False
++        return error_handler_result
 +
 +    def known_nonstring_result(node):
 +        function = field(node, "function")
@@ -5452,6 +5604,13 @@ index 0000000..2b9658b
 +            target = field(node, "left") or field(node, "argument")
 +            for binding in bindings(target, assignment=True):
 +                if binding.type in {"member_expression", "subscript_expression"}:
++                    if binding.type == "subscript_expression":
++                        # A computed write may replace the record's prototype.
++                        # Keep aliases/factory instances conservative without
++                        # invalidating unrelated records in the same source.
++                        computed_storage_roots.update(
++                            fresh_record_roots(field(binding, "object"))
++                        )
 +                    if capability(binding) == ("ambient", "process.exitCode"):
 +                        continue
 +                    receiver = field(binding, "object")
@@ -5462,7 +5621,7 @@ index 0000000..2b9658b
 +                        and member is not None
 +                        and text(member).strip("\"'") in _GLOBAL_CAPABILITIES
 +                    )
-+                    if not fresh_record(receiver):
++                    if not fresh_record_roots(receiver):
 +                        if replaces_global or receiver is None or receiver.type != "this":
 +                            unsafe_native = True
 +                        if not opaque_only:
@@ -5479,7 +5638,7 @@ index 0000000..2b9658b
 +            native_error = target.type == "new_expression" and capability(
 +                field(target, "constructor")
 +            ) == ("ambient", "Error")
-+            if not native_error and not fresh_record(target):
++            if not native_error and not fresh_record_roots(target):
 +                unsafe_native = True
 +                if not opaque_only:
 +                    return None
