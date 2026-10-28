@@ -1532,7 +1532,7 @@ new file mode 100644
 +        """Return proven inline delimiters, preserving every byte inside them."""
 +        return frozenset(self._delimiters)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
-index 3095bc3..8ba1cd5 100644
+index 3095bc3..7b1b2a9 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
 +++ b/src/skillspector/nodes/analyzers/static_runner.py
 @@ -36,11 +36,14 @@ from typing import cast
@@ -1566,14 +1566,20 @@ index 3095bc3..8ba1cd5 100644
  from skillspector.python_ast import (
      MAX_PYTHON_AST_SOURCE_CHARS,
      ParsedPythonFile,
-@@ -2048,7 +2053,7 @@ def _restore_source_lines(
+@@ -2048,12 +2053,12 @@ def _restore_source_lines(
 
 
  def _window_string_closer(
 -    python_strings: PythonStringClosers, window_start: int
-+    python_strings: PythonStringClosers | MarkdownCodeSpanClosers | CSVStringClosers, window_start: int
++    source_closer: Callable[[int], bool], window_start: int
  ) -> Callable[[int], bool]:
      """Answer string-closer queries in one window's source coordinates."""
+
+     def closes_string(offset: int) -> bool:
+-        return python_strings.closes_string(window_start + offset)
++        return source_closer(window_start + offset)
+
+     return closes_string
 
 @@ -2071,6 +2076,7 @@ def _scan_declared_marker_views(
      defer_projected_output_limit: bool,
@@ -1583,29 +1589,47 @@ index 3095bc3..8ba1cd5 100644
  ) -> tuple[list[Finding], bool, bool, _StaticResourceLimitError | None]:
      """Reconstruct marker payloads with directive-relative context windows."""
      findings: list[Finding] = []
-@@ -2120,11 +2126,17 @@ def _scan_declared_marker_views(
+@@ -2120,12 +2126,34 @@ def _scan_declared_marker_views(
              )
          return True
 
 -    # A complete Python module proves which quotes close its string literals.
 -    # The proof covers the whole artifact, so it holds in every window. It is
 -    # computed only when a loose quoted directive header reaches a quote.
+-    python_strings = (
+-        PythonStringClosers(content, check_runtime) if _infer_file_type(path) == "python" else None
 +    # Whole-artifact parsing proves literal closing delimiters before windowing.
 +    # A Markdown closer is syntax, not the next marker's opening backtick. The
 +    # code-span body remains available to every analyzer and explicit directive.
-     python_strings = (
--        PythonStringClosers(content, check_runtime) if _infer_file_type(path) == "python" else None
-+        PythonStringClosers(content, check_runtime)
++    native_parser = (
++        PythonStringClosers
 +        if _infer_file_type(path) == "python"
-+        else MarkdownCodeSpanClosers(content, check_runtime, include_tables=True)
++        else MarkdownCodeSpanClosers
 +        if _infer_file_type(path) == "markdown" and complete_context
-+        else CSVStringClosers(content, check_runtime)
++        else CSVStringClosers
 +        if path.casefold().endswith(".csv") and complete_context
 +        else None
      )
++    native_strings: PythonStringClosers | MarkdownCodeSpanClosers | CSVStringClosers | None = None
++
++    def closes_native_string(offset: int) -> bool:
++        nonlocal native_strings
++        check_runtime()
++        if native_strings is None:
++            # Most artifacts never ask whether a fallback quote is syntax.
++            # Defer the same complete-artifact proof until that first query;
++            # reuse it across every window and derived view in this caller.
++            assert native_parser is not None
++            native_strings = (
++                native_parser(content, check_runtime, include_tables=True)
++                if native_parser is MarkdownCodeSpanClosers
++                else native_parser(content, check_runtime)
++            )
++        return native_strings.closes_string(offset)
 
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
-@@ -2148,6 +2160,7 @@ def _scan_declared_marker_views(
+         check_runtime()
+@@ -2148,6 +2176,7 @@ def _scan_declared_marker_views(
              for full_view in security_text_views(
                  context_prefix + raw_window,
                  check_runtime=check_runtime,
@@ -1613,7 +1637,18 @@ index 3095bc3..8ba1cd5 100644
              )
          )
          across_security_views = len(full_views) > 1
-@@ -2283,7 +2296,9 @@ def _scan_declared_marker_views(
+@@ -2156,8 +2185,8 @@ def _scan_declared_marker_views(
+         # never occurs for Python, but it would not map onto module offsets.
+         string_closer = (
+             None
+-            if python_strings is None or context_prefix
+-            else _window_string_closer(python_strings, raw_start)
++            if native_parser is None or context_prefix
++            else _window_string_closer(closes_native_string, raw_start)
+         )
+         for full_view in full_views:
+             full_view_limited = False
+@@ -2283,7 +2312,9 @@ def _scan_declared_marker_views(
                                  marker_view.text,
                                  check_runtime,
                                  file_type=_infer_file_type(path),
@@ -1624,7 +1659,7 @@ index 3095bc3..8ba1cd5 100644
                              )
                          )
 
-@@ -2314,9 +2329,43 @@ def _scan_all_views_detailed(
+@@ -2314,9 +2345,43 @@ def _scan_all_views_detailed(
      python_source: bool | None = None,
      readable_binary: bool = False,
      _oms_projected: bool = False,
@@ -1668,7 +1703,7 @@ index 3095bc3..8ba1cd5 100644
      if readable_binary:
          modules = [
              module
-@@ -2340,6 +2389,7 @@ def _scan_all_views_detailed(
+@@ -2340,6 +2405,7 @@ def _scan_all_views_detailed(
              timeout_seconds=timeout_seconds,
              started_at=started_at,
              python_source=False,
@@ -1676,7 +1711,7 @@ index 3095bc3..8ba1cd5 100644
          )
          findings = [
              finding
-@@ -2390,6 +2440,7 @@ def _scan_all_views_detailed(
+@@ -2390,6 +2456,7 @@ def _scan_all_views_detailed(
              # This view is derived JSON metadata, not a Python execution surface.
              python_source=False,
              _oms_projected=True,
@@ -1684,7 +1719,7 @@ index 3095bc3..8ba1cd5 100644
          )
          for finding in findings:
              finding.start_line = finding.end_line = 1
-@@ -2578,6 +2629,7 @@ def _scan_all_views_detailed(
+@@ -2578,6 +2645,7 @@ def _scan_all_views_detailed(
                  defer_projected_output_limit=coalesce is not None,
                  complete_context=whole_artifact_window,
                  prepared_analyses=prepared_analyses,
@@ -1692,7 +1727,7 @@ index 3095bc3..8ba1cd5 100644
              )
              bounded_parse_limited = bounded_parse_limited or marker_bounded_parse_limited
          except _StaticResourceLimitError as exc:
-@@ -2712,6 +2764,7 @@ def _scan_all_views_detailed(
+@@ -2712,6 +2780,7 @@ def _scan_all_views_detailed(
                  full_views = security_text_views(
                      context_prefix + raw_window,
                      check_runtime=finding_budget.check_runtime,
@@ -1700,7 +1735,7 @@ index 3095bc3..8ba1cd5 100644
                  )
              except _StaticResourceLimitError as exc:
                  return (
-@@ -2887,6 +2940,7 @@ def _scan_all_views_detailed(
+@@ -2887,6 +2956,7 @@ def _scan_all_views_detailed(
                      for full_view in security_text_views(
                          projection.text,
                          check_runtime=finding_budget.check_runtime,
@@ -1708,7 +1743,7 @@ index 3095bc3..8ba1cd5 100644
                      ):
                          named_view = SecurityTextView(
                              f"{projection.name}-{full_view.name}",
-@@ -2951,6 +3005,7 @@ def _scan_all_views_detailed(
+@@ -2951,6 +3021,7 @@ def _scan_all_views_detailed(
                  full_views = security_text_views(
                      continuity.view.text,
                      check_runtime=finding_budget.check_runtime,
@@ -1716,7 +1751,7 @@ index 3095bc3..8ba1cd5 100644
                  )
                  across_security_views = len(full_views) > 1
                  for full_view in full_views:
-@@ -3262,6 +3317,7 @@ def run_static_patterns(
+@@ -3262,6 +3333,7 @@ def run_static_patterns(
              python_ast=python_ast,
              python_source=python_source,
              readable_binary=path in readable_binary_paths,
@@ -1724,7 +1759,7 @@ index 3095bc3..8ba1cd5 100644
          )
          runtime_limit = MAX_STATIC_ANALYSIS_SECONDS_PER_ARTIFACT
          if shared_remaining is not None:
-@@ -3467,6 +3523,7 @@ def run_static_patterns_with_ledger(
+@@ -3467,6 +3539,7 @@ def run_static_patterns_with_ledger(
                              python_ast=python_ast,
                              python_source=python_source,
                              readable_binary=bool(artifact.get("readable_binary")),
@@ -2596,15 +2631,16 @@ index 0000000..f8a8c3e
 +if __name__ == "__main__":
 +    _child()
 diff --git a/src/skillspector/artifacts.py b/src/skillspector/artifacts.py
-index 2876b5e..10bc72b 100644
+index 2876b5e..49f726d 100644
 --- a/src/skillspector/artifacts.py
 +++ b/src/skillspector/artifacts.py
-@@ -12,14 +12,18 @@ that was inspected.
+@@ -12,14 +12,19 @@ that was inspected.
  from __future__ import annotations
 
  import re
 +import sys
  import unicodedata
++import zlib
  from array import array
 +from collections import OrderedDict
  from collections.abc import Callable, Iterator
@@ -2619,10 +2655,20 @@ index 2876b5e..10bc72b 100644
 
  from typing_extensions import TypedDict
 
-@@ -136,6 +140,123 @@ class SecurityTextView:
+@@ -136,6 +141,183 @@ class SecurityTextView:
          return bool(self.reconstructed_source_spans(derived_start, derived_end))
 
 
++@dataclass(frozen=True)
++class _PackedSecurityTextView:
++    """Private immutable snapshot; callers still receive native offset arrays."""
++
++    view: SecurityTextView
++    typecode: str
++    count: int
++    offsets: bytes
++
++
 +class SecurityTextViewCache:
 +    """Per-scan, byte-and-entry bounded reuse of deterministic text projections.
 +
@@ -2635,24 +2681,73 @@ index 2876b5e..10bc72b 100644
 +        self.max_bytes = max(0, max_bytes)
 +        self.max_entries = max(0, max_entries)
 +        self.retained_bytes = 0
-+        self._entries: OrderedDict[str, tuple[tuple[SecurityTextView, ...], int]] = OrderedDict()
++        self._entries: OrderedDict[
++            str, tuple[tuple[SecurityTextView | _PackedSecurityTextView, ...], int]
++        ] = OrderedDict()
 +        self._lock = RLock()
 +
 +    @staticmethod
 +    def _copy(
-+        views: tuple[SecurityTextView, ...], source_text: str | None = None
++        views: tuple[SecurityTextView | _PackedSecurityTextView, ...],
++        source_text: str | None = None,
 +    ) -> tuple[SecurityTextView, ...]:
-+        return tuple(
-+            replace(view, source_offsets=array(view.source_offsets.typecode, view.source_offsets))
-+            if view.source_offsets is not None
-+            else replace(view, text=source_text)
-+            if view.name == "raw" and source_text is not None
-+            else view
-+            for view in views
-+        )
++        result = []
++        for snapshot in views:
++            if isinstance(snapshot, _PackedSecurityTextView):
++                offsets = array(snapshot.typecode)
++                shuffled = zlib.decompress(snapshot.offsets)
++                offsets.frombytes(shuffled)
++                width = offsets.itemsize
++                if len(offsets) != snapshot.count:
++                    raise ValueError("Invalid private security-view offset snapshot")
++                buffer = memoryview(offsets).cast("B")
++                for lane in range(width):
++                    buffer[lane::width] = shuffled[
++                        lane * snapshot.count : (lane + 1) * snapshot.count
++                    ]
++                result.append(replace(snapshot.view, source_offsets=offsets))
++            elif snapshot.source_offsets is not None:
++                result.append(
++                    replace(
++                        snapshot,
++                        source_offsets=array(snapshot.source_offsets.typecode, snapshot.source_offsets),
++                    )
++                )
++            elif snapshot.name == "raw" and source_text is not None:
++                result.append(replace(snapshot, text=source_text))
++            else:
++                result.append(snapshot)
++        return tuple(result)
++
++    @classmethod
++    def _snapshot(
++        cls, views: tuple[SecurityTextView, ...]
++    ) -> tuple[SecurityTextView | _PackedSecurityTextView, ...]:
++        result: list[SecurityTextView | _PackedSecurityTextView] = []
++        for view in views:
++            offsets = view.source_offsets
++            if offsets is not None and len(offsets) * offsets.itemsize >= 4096:
++                raw = offsets.tobytes()
++                # Adjacent native integers share high bytes. Group byte lanes
++                # only in retention so the public offset representation stays
++                # unchanged, including its typecode and native byte order.
++                shuffled = b"".join(raw[lane::offsets.itemsize] for lane in range(offsets.itemsize))
++                packed = _PackedSecurityTextView(
++                    replace(view, source_offsets=None),
++                    offsets.typecode,
++                    len(offsets),
++                    zlib.compress(shuffled, 1),
++                )
++                if cls._charge("", (packed,)) < cls._charge("", (view,)):
++                    result.append(packed)
++                    continue
++            result.extend(cls._copy((view,)))
++        return tuple(result)
 +
 +    @staticmethod
-+    def _charge(text: str, views: tuple[SecurityTextView, ...]) -> int:
++    def _charge(
++        text: str, views: tuple[SecurityTextView | _PackedSecurityTextView, ...]
++    ) -> int:
 +        seen: set[int] = set()
 +
 +        def size(value: object) -> int:
@@ -2691,7 +2786,8 @@ index 2876b5e..10bc72b 100644
 +                result = self._copy(entry[0], text)
 +            else:
 +                result = security_text_views(text, check_runtime)
-+                charge = self._charge(text, result)
++                snapshot = self._snapshot(result) if self.max_entries and self.max_bytes else ()
++                charge = self._charge(text, snapshot)
 +                if self.max_entries and charge <= self.max_bytes:
 +                    while self._entries and (
 +                        len(self._entries) >= self.max_entries
@@ -2699,7 +2795,7 @@ index 2876b5e..10bc72b 100644
 +                    ):
 +                        _, (_, removed) = self._entries.popitem(last=False)
 +                        self.retained_bytes -= removed
-+                    self._entries[text] = (self._copy(result), charge)
++                    self._entries[text] = (snapshot, charge)
 +                    self.retained_bytes += charge
 +            if check_runtime is not None:
 +                check_runtime()
@@ -2743,7 +2839,7 @@ index 2876b5e..10bc72b 100644
  @dataclass(frozen=True)
  class _ObfuscatedInstructionMatch:
      """One context-bound instruction action reconstructed from source text."""
-@@ -2343,8 +2464,12 @@ def _has_derived_security_view(text: str) -> bool:
+@@ -2343,8 +2525,12 @@ def _has_derived_security_view(text: str) -> bool:
  def security_text_views(
      text: str,
      check_runtime: Callable[[], None] | None = None,
