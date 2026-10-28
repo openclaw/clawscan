@@ -1343,19 +1343,99 @@ index bb21ad0..5ecb182 100644
  [project.optional-dependencies]
 diff --git a/src/skillspector/markdown_tokens.py b/src/skillspector/markdown_tokens.py
 new file mode 100644
+index 0000000..b5aae63
 --- /dev/null
 +++ b/src/skillspector/markdown_tokens.py
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,403 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
-+"""Conservative raw-source ownership for CommonMark inline code delimiters."""
++"""Conservative raw-source ownership for CommonMark inline syntax and prose."""
 +
++import re
 +from array import array
 +from collections.abc import Callable
 +
 +from markdown_it import MarkdownIt
 +from markdown_it.rules_inline.backticks import backtick
++from markdown_it.rules_inline.text import text as inline_text
 +from markdown_it.token import Token
++
++_WORD_APOSTROPHE_RE = re.compile(
++    r"(?<![\w'/.~-])[A-Za-z][A-Za-z0-9_]*+(?P<apostrophe>')(?:s|t|d|m|re|ve|ll)(?![\w'/])",
++    re.IGNORECASE,
++)
++_PLURAL_APOSTROPHE_RE = re.compile(
++    r"(?<![\w'/.~-])[A-Za-z][A-Za-z0-9_]*s(?P<apostrophe>')(?=[ \t]+[A-Za-z])",
++    re.IGNORECASE,
++)
++_PROSE_SHELL_SYNTAX_RE = re.compile(r"[$`\\\"]")
++_CODE_EXPANSION_RE = re.compile(r"[$`\\]")
++_CODE_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
++_CODE_POSSESSIVE_RE = re.compile(r"'s(?![\w'/])", re.IGNORECASE)
++_CONTAINER_PREFIX_RE = re.compile(r"(?:[ \t]*+(?:>[ \t]?|[-+*][ \t]++|[0-9]{1,9}[.)][ \t]++))*+[ \t]*+")
++
++
++def _inline_source_offsets(content, block, starts, check_runtime):
++    """Map canonical paragraph lines only when every source character agrees."""
++    start_line, end_line = block.map
++    parts = block.content.split("\n")
++    if len(parts) != end_line - start_line:
++        return None
++    offsets = array("I")
++    for index, part in enumerate(parts):
++        check_runtime()
++        start, end = starts[start_line + index], starts[start_line + index + 1]
++        line = content[start:end].removesuffix("\n")
++        origin = line.find(part)
++        if (
++            not part
++            or origin < 0
++            or line.find(part, origin + 1) >= 0
++            or _CONTAINER_PREFIX_RE.fullmatch(line[:origin]) is None
++            or line[origin + len(part) :].strip(" \t")
++        ):
++            return None
++        offsets.extend(range(start + origin, start + origin + len(part)))
++        if index + 1 < len(parts):
++            offsets.append(end - 1)
++    return offsets
++
++
++def _prose_apostrophes(source, text_positions, code_record, code_ranges, check_runtime):
++    """Prove punctuation in canonical text after composing inline delimiters."""
++    projected = list(source)
++    suffix_bases = set()
++    if code_record is not None:
++        for start, end in code_ranges:
++            check_runtime()
++            opening_end = start
++            while opening_end < end and source[opening_end] == "`":
++                check_runtime()
++                opening_end += 1
++            width = opening_end - start
++            # Code content stays raw in finding production and the caller's
++            # shell-word precedence pass. Expansions and escapes cannot lend
++            # their context to punctuation in a neighboring text node.
++            if _CODE_EXPANSION_RE.search(source, opening_end, end - width):
++                return set()
++            projected[start:end] = " " * (end - start)
++        suffix_bases = code_record[3]
++    projected = "".join(projected)
++    if _PROSE_SHELL_SYNTAX_RE.search(projected):
++        return set()
++    candidates = {match.start("apostrophe") for match in _WORD_APOSTROPHE_RE.finditer(projected)}
++    candidates.update(
++        match.start("apostrophe") for match in _PLURAL_APOSTROPHE_RE.finditer(projected)
++    )
++    candidates.update(
++        match.start()
++        for match in _CODE_POSSESSIVE_RE.finditer(projected)
++        if match.start() in suffix_bases
++    )
++    candidates.intersection_update(text_positions)
++    # Every remaining text quote must be prose punctuation. Code content stays
++    # available to the caller's shell parser before any punctuation is masked.
++    return candidates if len(candidates) == projected.count("'") else set()
 +
 +
 +def _table_inline_origins(
@@ -1418,6 +1498,8 @@ new file mode 100644
 +    delimiters, uncertain mappings and oversized documents grant no ownership.
 +    Optional table ownership maps every canonical cell verbatim and in source order.
 +    Fenced/indented code and raw HTML never grant inline ownership.
++    Optional prose ownership composes canonical text and code nodes without
++    removing code content. Its positions still require shell-word precedence.
 +    """
 +
 +    def __init__(
@@ -1427,9 +1509,11 @@ new file mode 100644
 +        *,
 +        excluded_ranges: tuple[tuple[int, int], ...] = (),
 +        include_tables: bool = False,
++        collect_prose: bool = False,
 +    ):
 +        self._closers: set[int] = set()
 +        self._delimiters: set[int] = set()
++        self._prose_apostrophes: set[int] = set()
 +        check_runtime()
 +        # This optional proof only refines the existing lexical fallback. If
 +        # unavailable, preserve that fallback rather than asserting coverage.
@@ -1453,7 +1537,9 @@ new file mode 100644
 +        # Observe the original document parse, including its reference-link
 +        # environment. Each nested image state has a distinct source object;
 +        # keep strong source references so identities cannot be reused.
-+        records: dict[int, tuple[str, set[int], set[int]]] = {}
++        records: dict[int, tuple[str, set[int], set[int], set[int]]] = {}
++        code_ranges: dict[int, list[tuple[int, int]]] = {}
++        text_records: dict[int, tuple[str, set[int]]] = {}
 +
 +        def record_backtick(state, silent):
 +            check_runtime()
@@ -1463,8 +1549,8 @@ new file mode 100644
 +            if matched and not silent and len(state.tokens) > before:
 +                token = state.tokens[-1]
 +                if token.type == "code_inline":
-+                    _, closers, openers = records.setdefault(
-+                        id(state.src), (state.src, set(), set())
++                    _, closers, openers, suffixes = records.setdefault(
++                        id(state.src), (state.src, set(), set(), set())
 +                    )
 +                    openers.update(range(opening_start, opening_start + len(token.markup)))
 +                    closers.update(
@@ -1472,9 +1558,30 @@ new file mode 100644
 +                        for i in range(state.pos - len(token.markup), state.pos)
 +                        if state.src[i] == "`"
 +                    )
++                    if collect_prose:
++                        if _CODE_WORD_RE.fullmatch(token.content):
++                            suffixes.add(state.pos)
++                        code_ranges.setdefault(id(state.src), []).append((opening_start, state.pos))
 +            return matched
 +
 +        parser.inline.ruler.at("backticks", record_backtick)
++
++        if collect_prose:
++
++            def record_text(state, silent):
++                check_runtime()
++                start = state.pos
++                matched = inline_text(state, silent)
++                if matched and not silent:
++                    _, positions = text_records.setdefault(id(state.src), (state.src, set()))
++                    for offset in range(start, state.pos):
++                        if (offset - start) % 4096 == 0:
++                            check_runtime()
++                        if state.src[offset] == "'":
++                            positions.add(offset)
++                return matched
++
++            parser.inline.ruler.at("text", record_text)
 +
 +        # GFM tables can synthesize many empty cells from very little source.
 +        # Enforce one shared document-wide budget BEFORE block or inline token
@@ -1557,8 +1664,13 @@ new file mode 100644
 +            _table_inline_origins(content, blocks, starts, check_runtime) if include_tables else {}
 +        )
 +        table_depth = 0
-+        for block in blocks:
++        quote_depth = 0
++        for block_index, block in enumerate(blocks):
 +            check_runtime()
++            if block.type == "blockquote_open":
++                quote_depth += 1
++            elif block.type == "blockquote_close":
++                quote_depth -= 1
 +            if block.type == "table_open":
 +                table_depth += 1
 +            elif block.type == "table_close":
@@ -1585,9 +1697,41 @@ new file mode 100644
 +            else:
 +                origin = content.find(block.content, start, end)
 +                if origin < 0 or content.find(block.content, origin + 1, end) >= 0:
-+                    continue
++                    origin = None
 +            record = records.get(id(block.content))
-+            if record is None or record[0] is not block.content:
++            if record is not None and record[0] is not block.content:
++                record = None
++            text_record = text_records.get(id(block.content))
++            if (
++                collect_prose
++                and not quote_depth
++                and text_record is not None
++                and text_record[0] is block.content
++                and (
++                    table_depth
++                    or block_index
++                    and blocks[block_index - 1].type in {"paragraph_open", "heading_open"}
++                )
++                and not any(child.type == "html_inline" for child in block.children or ())
++            ):
++                mapping = (
++                    range(origin, origin + len(block.content))
++                    if origin is not None
++                    else _inline_source_offsets(content, block, starts, check_runtime)
++                )
++                if mapping is not None:
++                    for offset in _prose_apostrophes(
++                        block.content,
++                        text_record[1],
++                        record,
++                        code_ranges.get(id(block.content), ()),
++                        check_runtime,
++                    ):
++                        check_runtime()
++                        normalized_offset = mapping[offset]
++                        if content[normalized_offset] == block.content[offset] == "'":
++                            self._prose_apostrophes.add(source_offsets[normalized_offset])
++            if record is None or origin is None:
 +                continue
 +            # Only events from this complete inline block can own its raw
 +            # positions; substring-local image label events remain unassigned.
@@ -1602,6 +1746,10 @@ new file mode 100644
 +    def delimiter_offsets(self) -> frozenset[int]:
 +        """Return proven inline delimiters, preserving every byte inside them."""
 +        return frozenset(self._delimiters)
++
++    def prose_apostrophe_offsets(self) -> frozenset[int]:
++        """Return exact text-node punctuation; callers retain shell-word precedence."""
++        return frozenset(self._prose_apostrophes)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
 index 3095bc3..d7c25ac 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
@@ -2093,7 +2241,7 @@ index 74c304a..b8bc498 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-index c323c84..e0bced5 100644
+index c323c84..f7b61e1 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 @@ -41,6 +41,8 @@ from skillspector.artifacts import (
@@ -2111,8 +2259,7 @@ index c323c84..e0bced5 100644
  from skillspector.security_reconstruction import validated_json_string_spans
 +from skillspector.shell_source import ShellSourceOwnership
  from skillspector.state import AnalyzerNodeResponse, SkillspectorState
--
-+
+ 
  from . import static_runner
 @@ -2026,6 +2029,8 @@ def _has_shell_command_word_exhaustion(
      structural_quote_closers: set[int] | None = None,
@@ -2188,7 +2335,7 @@ index c323c84..e0bced5 100644
          check_runtime()
          recognized, command_string = _command_string_from_clause(
              content,
-@@ -4847,6 +4869,8 @@ def _markdown_shell_text(
+@@ -4847,10 +4869,22 @@ def _markdown_shell_text(
      table_columns: int | None = None
      table_minimum_indent = 0
      table_delimiter_line = -1
@@ -2196,8 +2343,22 @@ index c323c84..e0bced5 100644
 +    fence_ranges: list[tuple[int, int]] = []
      offset = 0
      lines = content.splitlines(keepends=True)
++    line_starts: list[int] = []
++    starts_shell_line: list[bool] = []
      for line_index, line in enumerate(lines):
-@@ -4921,6 +4945,13 @@ def _markdown_shell_text(
+         check_runtime()
++        line_starts.append(offset)
++        starts_shell_line.append(
++            line_index == 0
++            or (
++                lines[line_index - 1].endswith("\n")
++                and not lines[line_index - 1].rstrip("\r\n").endswith("\\")
++            )
++        )
+         stripped = line.rstrip(LINE_BREAK_CHARS)
+         leading = stripped.lstrip(" \t")
+         indentation = len(stripped[: len(stripped) - len(leading)].expandtabs(4))
+@@ -4921,6 +4955,13 @@ def _markdown_shell_text(
              if (html_end and html_end in leading.lower()) or (not html_end and not leading):
                  html_end = None
          elif fence is not None:
@@ -2211,7 +2372,7 @@ index c323c84..e0bced5 100644
              fence_body = stripped.lstrip(" \t")
              closing_fence = MARKDOWN_FENCE_CLOSE.fullmatch(fence_body)
              if (
-@@ -4997,6 +5028,7 @@ def _markdown_shell_text(
+@@ -4997,6 +5038,7 @@ def _markdown_shell_text(
                          table_minimum_indent = minimum_indent
                          table_delimiter_line = line_index + 1
                  if table_columns is not None:
@@ -2219,10 +2380,38 @@ index c323c84..e0bced5 100644
                      mask_inline_delimiters()
                      if line_index != table_delimiter_line:
                          cells = _markdown_table_cells(stripped, prefix, check_runtime)
-@@ -5069,6 +5101,13 @@ def _markdown_shell_text(
+@@ -5033,13 +5075,7 @@ def _markdown_shell_text(
+                         and not heading
+                         and "'" in leading
+                         and _MARKDOWN_PROSE_SHELL_SYNTAX_RE.search(leading) is None
+-                        and (
+-                            line_index == 0
+-                            or (
+-                                lines[line_index - 1].endswith("\n")
+-                                and not lines[line_index - 1].rstrip("\r\n").endswith("\\")
+-                            )
+-                        )
++                        and starts_shell_line[line_index]
+                     ):
+                         # In the prose reading, a prose line owns every
+                         # possessive and contraction in it. Every quote on the
+@@ -5069,6 +5105,26 @@ def _markdown_shell_text(
              paragraph_list_indent = 0
          offset += len(line)
      mask_inline_delimiters()
++    if word_apostrophes and complete_context and "'" in content:
++        from skillspector.markdown_tokens import MarkdownCodeSpanClosers
++
++        for apostrophe in MarkdownCodeSpanClosers(
++            content, check_runtime, excluded_ranges=tuple(fence_ranges),
++            include_tables=True, collect_prose=True,
++        ).prose_apostrophe_offsets():
++            check_runtime()
++            # A canonical Markdown block can begin inside a continued shell
++            # invocation. Apply the same raw-line guard as the lexical path;
++            # rendering boundaries cannot end the preceding command's operand.
++            if starts_shell_line[bisect_right(line_starts, apostrophe) - 1]:
++                prose_apostrophes.add(apostrophe)
 +    if complete_context and re.search(r"(?m)^[ \t]*(?:>|[-+*][ \t]|[0-9]{1,9}[.)][ \t])", content):
 +        from skillspector.markdown_tokens import MarkdownCodeSpanClosers
 +
@@ -2233,12 +2422,10 @@ index c323c84..e0bced5 100644
      projected = "".join(output)
      if prose_apostrophes:
          # A prose-looking line can still be inside an earlier shell word, such
-@@ -5105,6 +5144,21 @@ def _markdown_shell_text(
+@@ -5105,6 +5161,21 @@ def _markdown_shell_text(
      return projected
--
-+
--
-+
+ 
+ 
 +def has_opaque_constructed_values(
 +    content: str,
 +    check_runtime: Callable[[], None],
@@ -2257,7 +2444,7 @@ index c323c84..e0bced5 100644
  def has_bounded_parse_exhaustion(
      content: str,
      check_runtime: Callable[[], None],
-@@ -5143,15 +5197,26 @@ def _has_bounded_parse_exhaustion(
+@@ -5143,15 +5214,26 @@ def _has_bounded_parse_exhaustion(
      structural_quote_openers = None
      json_strings: list[tuple[int, int]] = []
      python_source = None
@@ -2284,7 +2471,7 @@ index c323c84..e0bced5 100644
              structural_quote_closers = {end - 1 for _, end in json_strings}
              structural_quote_openers = {start for start, _ in json_strings}
          content = _markdown_shell_text(
-@@ -5168,6 +5233,8 @@ def _has_bounded_parse_exhaustion(
+@@ -5168,6 +5250,8 @@ def _has_bounded_parse_exhaustion(
          structural_quote_closers=structural_quote_closers,
          structural_quote_openers=structural_quote_openers,
          python_source=python_source,
@@ -7324,3 +7511,153 @@ index 0000000..51b348c
 +        {"components": ["case.mjs"], "file_cache": {"case.mjs": source}}, [tool]
 +    )
 +    assert report["inspection_ledger"][0]["outcome"] == "completed"
+diff --git a/tests/nodes/analyzers/test_markdown_prose_composition.py b/tests/nodes/analyzers/test_markdown_prose_composition.py
+new file mode 100644
+index 0000000..6d72c32
+--- /dev/null
++++ b/tests/nodes/analyzers/test_markdown_prose_composition.py
+@@ -0,0 +1,144 @@
++"""Canonical prose punctuation composes with inline code, cells and lists."""
++
++import pytest
++
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++TAIL = "".join(f"Observation {i}: the interface displays an ordinary result.\n" for i in range(100))
++PROSE = [
++    "Observe `last_response`'s completed result.\n\n",
++    '| Goal | Meaning |\n|---|---|\n| "Match colors" | Observe `color_image` and the route\'s palette fields. |\n\n',
++    "- **Hook / pull:** Observe the enemy's neck at `target height`\n"
++    "  then follow `the next pose` without moving the canvas.\n\n",
++    "Observe v3's `mode=\"pro\"` result and the routes' response.\n\n",
++    "## Observe Fiore's guards\n\n",
++]
++
++
++def inspect(source):
++    return static_runner.run_static_patterns_with_ledger(
++        {"components": ["guide.md"], "file_cache": {"guide.md": source}}, [tool]
++    )
++
++
++@pytest.mark.parametrize("prose", PROSE)
++@pytest.mark.parametrize("newline", ["\n", "\r\n"])
++def test_composed_prose_completes_without_changing_source_offsets(prose, newline):
++    source = ("# Résumé — 比較\n\n" + prose + TAIL).replace("\n", newline)
++    lexical = tool._markdown_shell_text(source, lambda: None)
++    composed = tool._markdown_shell_text(source, lambda: None, word_apostrophes=True)
++    assert len(composed) == len(source)
++    changed = [i for i, (a, b) in enumerate(zip(lexical, composed, strict=True)) if a != b]
++    assert changed
++    assert all(source[i] == "'" and composed[i] == " " for i in changed)
++    report = inspect(source)
++    assert report["inspection_ledger"][0]["outcome"] == "completed"
++    assert report["findings"] == []
++
++
++@pytest.mark.parametrize("prose", PROSE)
++def test_lone_cr_keeps_exact_canonical_origins_without_granting_shell_line_break(prose):
++    from skillspector.markdown_tokens import MarkdownCodeSpanClosers
++
++    source = ("# Résumé — 比較\n\n" + prose + TAIL).replace("\n", "\r")
++    offsets = MarkdownCodeSpanClosers(
++        source, lambda: None, include_tables=True, collect_prose=True
++    ).prose_apostrophe_offsets()
++    assert offsets
++    assert all(source[i] == "'" for i in offsets)
++    projected = tool._markdown_shell_text(source, lambda: None, word_apostrophes=True)
++    assert all(projected[i] == "'" for i in offsets)
++
++
++@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r", "\u2028"])
++@pytest.mark.parametrize("marker", ["- ", "1. ", "## "])
++@pytest.mark.parametrize("continuation", ["$CMD \\", "$CMD \\\n\\"])
++def test_continued_shell_invocation_retains_prose_operands(newline, marker, continuation):
++    source = (
++        continuation + "\n" + marker + "Observe the route's `field`.\n"
++        "the routes' response -rf /home/victim\n"
++    ).replace("\n", newline)
++    projected = tool._markdown_shell_text(source, lambda: None, word_apostrophes=True)
++    apostrophe = source.index("route's") + len("route")
++    assert projected[apostrophe] == "'"
++    # A shell heading is a comment, so its apostrophe does not open an operand.
++    # List markers do not supply that ownership: retain the complete quoted span.
++    if marker != "## ":
++        assert projected[source.index("routes'") + len("routes")] == "'"
++        report = inspect(source)
++        assert report["inspection_ledger"][0]["outcome"] != "completed" or any(
++            f.rule_id == "TM1" for f in report["findings"]
++        )
++
++
++@pytest.mark.parametrize("prose", PROSE)
++@pytest.mark.parametrize("before", [False, True])
++def test_composed_prose_retains_original_threat_locations(prose, before):
++    command = "rm -rf /\n"
++    source = command + prose + TAIL if before else prose + TAIL + "\n" + command
++    report = inspect(source)
++    threats = [f for f in report["findings"] if f.rule_id == "TM1"]
++    assert threats
++    expected = source[: source.index(command)].count("\n") + 1
++    assert any(f.start_line == expected for f in threats)
++
++
++@pytest.mark.parametrize(
++    "source",
++    [
++        "```sh\nObserve the route's `field`.\n```\n\n",
++        "    Observe the route's `field`.\n\n",
++        "<pre>\nObserve the route's `field`.\n</pre>\n\n",
++        "> Observe the route's `field`.\n\n",
++        "Observe <span>the route's</span> `field`.\n\n",
++        "Observe the route\\'s `field`.\n\n",
++        "Observe the route's \\`field\\`.\n\n",
++        "Observe the route's ``field ` inner``.\n\n",
++        "| Goal | Meaning |\n|---|---|\n| escaped\\|cell | Observe the route's `field`. |\n\n",
++        "## Observe $CMD and the route's `field`\n\n",
++    ],
++)
++def test_ambiguous_and_nonprose_contexts_keep_their_apostrophe(source):
++    source += TAIL
++    projected = tool._markdown_shell_text(source, lambda: None, word_apostrophes=True)
++    apostrophe = source.index("route") + len("route")
++    if source[apostrophe] == "\\":
++        apostrophe += 1
++    assert projected[apostrophe] == "'"
++
++
++@pytest.mark.parametrize(
++    "source",
++    [
++        "$CMD Observe the route's `field`.\nnext' -rf /\n\n",
++        'bash -c "\n$CMD -rf /\nObserve the route\'s `field`.\n"\n\n',
++        "$(\nObserve the route's `field`.\n') -rf /\n\n",
++        "r'\nObserve the route's `field`.\n'm -rf /\n\n",
++        "Observe `\"unclosed` before the route's `field`.\n\n",
++    ],
++)
++def test_existing_shell_words_keep_precedence_over_prose_ownership(source):
++    source += TAIL
++    projected = tool._markdown_shell_text(source, lambda: None, word_apostrophes=True)
++    apostrophe = source.index("route's") + len("route")
++    assert projected[apostrophe] == "'"
++    report = inspect(source)
++    assert report["inspection_ledger"][0]["outcome"] != "completed" or any(
++        f.rule_id == "TM1" for f in report["findings"]
++    )
++
++
++@pytest.mark.parametrize("prose", PROSE)
++def test_composition_needs_complete_markdown_context(prose):
++    source = prose + TAIL
++    fragment = tool._markdown_shell_text(
++        source, lambda: None, word_apostrophes=True, complete_context=False
++    )
++    assert all(fragment[i] == "'" for i, char in enumerate(source) if char == "'")
++    # In a shell, a heading beginning with '#' is already a complete comment.
++    if not prose.startswith("#"):
++        assert tool.has_bounded_parse_exhaustion(source, lambda: None, file_type="shell")
++        assert tool.has_bounded_parse_exhaustion(
++            source, lambda: None, file_type="markdown", complete_context=False
++        )
