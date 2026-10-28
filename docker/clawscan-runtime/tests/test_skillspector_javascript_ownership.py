@@ -496,3 +496,30 @@ def test_native_error_handlers_may_only_rethrow_or_use_proven_output():
 def test_error_handler_aliases_shadowing_and_promise_escapes_remain_partial(consumer):
     source = "async function read(){throw new Error(`${cmd}${flags} /`);} " + consumer
     assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.PARTIAL
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    [
+        "obj.take(fetch(url).catch(()=>fail()));",
+        "obj.catch(()=>fail());",
+        "fetch(url).catch(function handler(){obj.save(handler);fail();});",
+        "async function read(){} obj.take(read().catch(()=>fail()));",
+        "async function read(){} read().catch(function handler(){obj.save(handler);fail();});",
+        "function read(){return obj;} read().catch(()=>fail());",
+    ],
+)
+@pytest.mark.parametrize("tail", ["", "\n" + TAIL], ids=["short", "long"])
+def test_error_callback_boundaries_cannot_hide_authored_error_escapes(consumer, tail):
+    from skillspector.javascript_source import JavaScriptSourceOwnership
+
+    source = "function fail(){throw new Error(`${cmd}${flags} /`);} " + consumer + tail
+    owner = JavaScriptSourceOwnership(source, lambda: None)
+    assert owner.data_literal(source.index("`")) is None
+    assert any(
+        source[start:end] == "`${cmd}${flags} /`"
+        for start, end in owner.unsupported_values()
+    )
+    row = ledger(source)["inspection_ledger"][0]
+    assert row["outcome"] == LedgerOutcome.PARTIAL
+    assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT
