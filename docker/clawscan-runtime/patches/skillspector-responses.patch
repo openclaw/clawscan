@@ -6778,10 +6778,10 @@ index 0000000..1d07a25
 +    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
 diff --git a/tests/nodes/analyzers/test_native_validator_type_budget.py b/tests/nodes/analyzers/test_native_validator_type_budget.py
 new file mode 100644
-index 0000000..aa0712b
+index 0000000..c1ccb0a
 --- /dev/null
 +++ b/tests/nodes/analyzers/test_native_validator_type_budget.py
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,80 @@
 +"""Small shared type graphs must remain inside the scanner's runtime budget."""
 +
 +import json
@@ -6814,6 +6814,8 @@ index 0000000..aa0712b
 +        capability=lambda _: None,
 +        private_function=lambda _: None,
 +        reads=lambda _: [],
++        bindings=lambda _, **kwargs: [],
++        ambient_intrinsic=lambda *_: None,
 +        step=step,
 +    )
 +    kind = ("string",)

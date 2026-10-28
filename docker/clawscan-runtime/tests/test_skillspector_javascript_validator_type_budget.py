@@ -30,6 +30,8 @@ def test_primitive_union_visits_check_the_runtime_budget(error):
         capability=lambda _: None,
         private_function=lambda _: None,
         reads=lambda _: [],
+        bindings=lambda _, **kwargs: [],
+        ambient_intrinsic=lambda *_: None,
         step=step,
     )
     kind = ("string",)
