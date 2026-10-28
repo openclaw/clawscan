@@ -1911,7 +1911,7 @@ index 74c304a..b8bc498 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-index c323c84..49e4a5f 100644
+index c323c84..de65a73 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 @@ -41,6 +41,7 @@ from skillspector.artifacts import (
@@ -1922,7 +1922,58 @@ index c323c84..49e4a5f 100644
  from skillspector.logging_config import get_logger
  from skillspector.models import AnalyzerFinding, Finding, Location, Severity
  from skillspector.python_ast import ParsedPythonFile, parse_python_source
-@@ -4847,6 +4848,8 @@ def _markdown_shell_text(
+@@ -48,6 +49,7 @@ from skillspector.python_tokens import PythonLiteralSpans
+ from skillspector.python_tokens import python_literal_spans as _python_literal_spans
+ from skillspector.python_tokens import python_string_body as _python_string_body
+ from skillspector.security_reconstruction import validated_json_string_spans
++from skillspector.shell_source import ShellSourceOwnership
+ from skillspector.state import AnalyzerNodeResponse, SkillspectorState
+-
++
+ from . import static_runner
+@@ -2026,6 +2028,7 @@ def _has_shell_command_word_exhaustion(
+     structural_quote_closers: set[int] | None = None,
+     structural_quote_openers: set[int] | None = None,
+     python_source: _PythonSourceOwnership | None = None,
++    shell_source: ShellSourceOwnership | None = None,
+     perl_eval_blocks: bool = False,
+     _command_string_depth: int = 0,
+ ) -> bool:
+@@ -2049,6 +2052,8 @@ def _has_shell_command_word_exhaustion(
+     for candidate in _SHELL_COMMAND_WORD_START_RE.finditer(content):
+         check_runtime()
+         start = candidate.start()
++        if shell_source is not None and shell_source.is_noncommand_start(start):
++            continue
+         if start in owned_word_positions:
+             continue
+         if structural_quote_closers is not None and start in structural_quote_closers:
+@@ -2199,6 +2204,7 @@ def _has_shell_command_word_exhaustion(
+         check_runtime,
+         perl_eval_blocks=perl_eval_blocks,
+         python_source=python_source,
++        shell_source=shell_source,
+     ):
+         if command_string is None or _command_string_depth >= 8:
+             return True
+@@ -2247,9 +2253,15 @@ def _shell_command_strings(
+     *,
+     perl_eval_blocks: bool = False,
+     python_source: _PythonSourceOwnership | None = None,
++    shell_source: ShellSourceOwnership | None = None,
+ ) -> Iterator[str | None]:
+     """Yield bounded strings reparsed by ``eval`` or a shell ``-c`` wrapper."""
+-    for clause_start in _shell_clause_starts(content, check_runtime):
++    clause_starts = (
++        sorted(set(shell_source.command_starts).union(_shell_clause_starts(content, check_runtime)))
++        if shell_source is not None and shell_source.command_starts is not None
++        else _shell_clause_starts(content, check_runtime)
++    )
++    for clause_start in clause_starts:
+         check_runtime()
+         recognized, command_string = _command_string_from_clause(
+             content,
+@@ -4847,6 +4859,8 @@ def _markdown_shell_text(
      table_columns: int | None = None
      table_minimum_indent = 0
      table_delimiter_line = -1
@@ -1931,7 +1982,7 @@ index c323c84..49e4a5f 100644
      offset = 0
      lines = content.splitlines(keepends=True)
      for line_index, line in enumerate(lines):
-@@ -4921,6 +4924,13 @@ def _markdown_shell_text(
+@@ -4921,6 +4935,13 @@ def _markdown_shell_text(
              if (html_end and html_end in leading.lower()) or (not html_end and not leading):
                  html_end = None
          elif fence is not None:
@@ -1945,7 +1996,7 @@ index c323c84..49e4a5f 100644
              fence_body = stripped.lstrip(" \t")
              closing_fence = MARKDOWN_FENCE_CLOSE.fullmatch(fence_body)
              if (
-@@ -4997,6 +5007,7 @@ def _markdown_shell_text(
+@@ -4997,6 +5018,7 @@ def _markdown_shell_text(
                          table_minimum_indent = minimum_indent
                          table_delimiter_line = line_index + 1
                  if table_columns is not None:
@@ -1953,7 +2004,7 @@ index c323c84..49e4a5f 100644
                      mask_inline_delimiters()
                      if line_index != table_delimiter_line:
                          cells = _markdown_table_cells(stripped, prefix, check_runtime)
-@@ -5069,6 +5080,13 @@ def _markdown_shell_text(
+@@ -5069,6 +5091,13 @@ def _markdown_shell_text(
              paragraph_list_indent = 0
          offset += len(line)
      mask_inline_delimiters()
@@ -1967,7 +2018,19 @@ index c323c84..49e4a5f 100644
      projected = "".join(output)
      if prose_apostrophes:
          # A prose-looking line can still be inside an earlier shell word, such
-@@ -5152,6 +5170,7 @@ def _has_bounded_parse_exhaustion(
+@@ -5143,6 +5172,11 @@ def _has_bounded_parse_exhaustion(
+     structural_quote_openers = None
+     json_strings: list[tuple[int, int]] = []
+     python_source = None
++    shell_source = None
++    if file_type == "shell" and complete_context:
++        shell_source = ShellSourceOwnership(content, check_runtime)
++        if shell_source.has_opaque_assignment:
++            return True
+     if file_type == "perl" and complete_context:
+         content = _perl_literal_print_shell_text(content, check_runtime)
+     if file_type == "python" and complete_context:
+@@ -5152,6 +5186,7 @@ def _has_bounded_parse_exhaustion(
      if file_type == "markdown":
          if complete_context:
              json_strings = validated_json_string_spans(content, check_runtime)
@@ -1975,6 +2038,14 @@ index c323c84..49e4a5f 100644
              structural_quote_closers = {end - 1 for _, end in json_strings}
              structural_quote_openers = {start for start, _ in json_strings}
          content = _markdown_shell_text(
+@@ -5168,6 +5203,7 @@ def _has_bounded_parse_exhaustion(
+         structural_quote_closers=structural_quote_closers,
+         structural_quote_openers=structural_quote_openers,
+         python_source=python_source,
++        shell_source=shell_source,
+         perl_eval_blocks=file_type == "perl",
+     ):
+         return True
 diff --git a/src/skillspector/frontmatter_json.py b/src/skillspector/frontmatter_json.py
 new file mode 100644
 --- /dev/null
@@ -3223,3 +3294,284 @@ diff --git a/src/skillspector/inspection_ledger.py b/src/skillspector/inspection
 
 
  class LedgerOutcome(StrEnum):
+diff --git a/src/skillspector/shell_source.py b/src/skillspector/shell_source.py
+new file mode 100644
+index 0000000..920acab
+--- /dev/null
++++ b/src/skillspector/shell_source.py
+@@ -0,0 +1,275 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""Optional, bounded source ownership from the canonical Bash syntax parser.
++
++This grants no safety verdict. It distinguishes actual comments, closing quotes,
++string-test operands and command starts from unrelated lexical candidates. Raw
++finding extraction is unchanged, and decoded command strings get no ownership.
++"""
++
++import json
++import os
++import selectors
++import shutil
++import signal
++import subprocess
++import tempfile
++import time
++from array import array
++from bisect import bisect_right
++from collections.abc import Callable
++
++MAX_SOURCE_BYTES = 65_536
++MAX_AST_BYTES = 8 * 1024 * 1024
++MAX_AST_NODES = 100_000
++MAX_AST_DEPTH = 128
++PARSER_SECONDS = 0.5
++
++
++def _intervals(ranges: list[tuple[int, int]]) -> tuple[list[int], list[int]]:
++    merged: list[tuple[int, int]] = []
++    for start, end in sorted(ranges):
++        if merged and start <= merged[-1][1]:
++            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
++        else:
++            merged.append((start, end))
++    return [start for start, _ in merged], [end for _, end in merged]
++
++
++def _contains(intervals: tuple[list[int], list[int]], offset: int) -> bool:
++    starts, ends = intervals
++    index = bisect_right(starts, offset) - 1
++    return index >= 0 and offset < ends[index]
++
++
++def _parse(source: bytes, check_runtime: Callable[[], None]) -> dict | None:
++    executable = shutil.which("shfmt")
++    if executable is None or not os.path.isabs(executable) or os.name != "posix":
++        return None
++    # A regular unlinked input descriptor avoids a pipe writer blocking behind
++    # the parser's output. No source, environment credential or diagnostic is
++    # placed in process arguments or retained in a named file.
++    with tempfile.TemporaryFile() as stdin:
++        stdin.write(source)
++        stdin.seek(0)
++        with subprocess.Popen(
++            [executable, "-ln", "bash", "--to-json"],
++            stdin=stdin,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.DEVNULL,
++            env={},
++            start_new_session=True,
++        ) as process:
++            output = bytearray()
++            deadline = time.monotonic() + PARSER_SECONDS
++            try:
++                assert process.stdout is not None
++                with selectors.DefaultSelector() as selector:
++                    selector.register(process.stdout, selectors.EVENT_READ)
++                    while selector.get_map():
++                        check_runtime()
++                        remaining = deadline - time.monotonic()
++                        if remaining <= 0:
++                            return None
++                        for key, _ in selector.select(min(remaining, 0.01)):
++                            chunk = os.read(key.fd, 65_536)
++                            if not chunk:
++                                selector.unregister(key.fileobj)
++                            else:
++                                output.extend(chunk)
++                                if len(output) > MAX_AST_BYTES:
++                                    return None
++                if process.wait(timeout=max(0.001, deadline - time.monotonic())) != 0:
++                    return None
++                check_runtime()
++                result = json.loads(output)
++                return result if isinstance(result, dict) and result.get("Type") == "File" else None
++            finally:
++                if process.poll() is None:
++                    try:
++                        os.killpg(process.pid, signal.SIGKILL)
++                    except ProcessLookupError:
++                        pass
++                    process.wait()
++
++
++class ShellSourceOwnership:
++    """All-or-nothing source coordinates; unavailable proofs retain the lexer."""
++
++    def __init__(self, content: str, check_runtime: Callable[[], None]):
++        self.command_starts: tuple[int, ...] | None = None
++        self.has_opaque_assignment = False
++        self._ownership_allowed = False
++        self._closers: set[int] = set()
++        self._comments = ([], [])
++        self._tests = ([], [])
++        self._bodies = ([], [])
++        check_runtime()
++        runtime_failed = False
++        caller_check = check_runtime
++
++        def checked_runtime():
++            nonlocal runtime_failed
++            try:
++                caller_check()
++            except Exception:
++                runtime_failed = True
++                raise
++
++        check_runtime = checked_runtime
++        try:
++            source = content.encode("utf-8", errors="strict")
++            if len(source) > MAX_SOURCE_BYTES:
++                return
++            tree = _parse(source, check_runtime)
++            if tree is None:
++                return
++            char_offsets = array("i", [-1]) * (len(source) + 1)
++            cursor = 0
++            for index, character in enumerate(content):
++                if index % 4096 == 0:
++                    check_runtime()
++                char_offsets[cursor] = index
++                cursor += len(character.encode("utf-8"))
++            char_offsets[cursor] = len(content)
++
++            def offset(position: dict) -> int:
++                raw = position["Offset"]
++                if type(raw) is not int or not 0 <= raw <= len(source) or char_offsets[raw] < 0:
++                    raise ValueError("Invalid source coordinate")
++                return char_offsets[raw]
++
++            def literal_word(word: dict) -> str | None:
++                parts = word.get("Parts", [])
++                if len(parts) != 1 or parts[0].get("Type") != "Lit":
++                    return None
++                start, end = offset(word["Pos"]), offset(word["End"])
++                value = content[start:end]
++                return value if value == parts[0].get("Value") and "\\" not in value else None
++
++            def can_change_parsing(arguments: list[dict]) -> bool:
++                index = 0
++                for _ in range(32):
++                    if index >= len(arguments):
++                        return False
++                    name = literal_word(arguments[index])
++                    if name is None:
++                        return True
++                    if name not in {"command", "builtin"}:
++                        return name in {"eval", "alias", "source", ".", "shopt"}
++                    index += 1
++                    if (
++                        name == "command"
++                        and index < len(arguments)
++                        and literal_word(arguments[index]) in {"-v", "-V"}
++                    ):
++                        return False
++                    while index < len(arguments) and literal_word(arguments[index]) in (
++                        {"--", "-p"} if name == "command" else {"--"}
++                    ):
++                        index += 1
++                return True
++
++            closers: set[int] = set()
++            comments, tests, bodies, assignments, commands = [], [], [], [], set()
++            pending = [(tree, 0)]
++            count = 0
++            ownership_allowed = True
++            opaque_assignment = False
++            while pending:
++                check_runtime()
++                node, depth = pending.pop()
++                count += 1
++                if count > MAX_AST_NODES or depth > MAX_AST_DEPTH:
++                    return
++                if isinstance(node, list):
++                    pending.extend((item, depth + 1) for item in node)
++                    continue
++                if not isinstance(node, dict):
++                    continue
++                kind = node.get("Type")
++                if isinstance(node.get("Name"), dict) and isinstance(node.get("Value"), dict):
++                    value = node["Value"]
++                    if "Parts" in value:
++                        assignments.append((offset(value["Pos"]), offset(value["End"])))
++                if kind in {"DblQuoted", "SglQuoted"}:
++                    closing = offset(node["Right"])
++                    quote = '"' if kind == "DblQuoted" else "'"
++                    if closing >= len(content) or content[closing] != quote:
++                        return
++                    closers.add(closing)
++                if "Hash" in node and "Text" in node:
++                    start, end = offset(node["Pos"]), offset(node["End"])
++                    if not start < end or content[start] != "#":
++                        return
++                    comments.append((start, end))
++                if kind == "CallExpr":
++                    # Dynamic names and eval/alias/source can change how later
++                    # source is read. Retain only additive command candidates.
++                    if can_change_parsing(node.get("Args", [])):
++                        ownership_allowed = False
++                    commands.add(offset(node["Pos"]))
++                if (kind == "BinaryTest" and node.get("Op") in {"=", "==", "!=", "=~"}) or (
++                    kind == "UnaryTest" and node.get("Op") in {"-n", "-z"}
++                ):
++                    tests.append((offset(node["Pos"]), offset(node["End"])))
++                if kind == "CmdSubst":
++                    left = offset(node["Left"])
++                    opening = "`" if node.get("Backquotes") else "$("
++                    if content[left : left + len(opening)] != opening:
++                        return
++                    start = left + len(opening)
++                    bodies.append((start, offset(node["Right"])))
++                if kind == "ParamExp" and node.get("Exp", {}).get("Op") in {"=", ":="}:
++                    # Parameter assignment may invoke arithmetic evaluation
++                    # through target attributes. No local value/attribute flow
++                    # proof is available; report incomplete independently of
++                    # whitespace and the lexer's command-candidate positions.
++                    opaque_assignment = True
++                if kind in {"ArithmExp", "ProcSubst"} or (
++                    kind == "ParamExp"
++                    and (
++                        any(key in node for key in ("Index", "Slice", "Excl"))
++                        or node.get("Exp", {}).get("Op") in {"=", ":="}
++                    )
++                ):
++                    # Arithmetic, indirect and assignment parameter forms can
++                    # interpret variable contents as source. Assignment to an
++                    # integer/nameref target can evaluate the generated value
++                    # even when this expansion sits in a string comparison.
++                    bodies.append((offset(node["Pos"]), offset(node["End"])))
++                pending.extend((value, depth + 1) for value in node.values())
++            assigned_values = _intervals(assignments)
++            executing_bodies = _intervals(bodies)
++            # Do not refine construction of assigned values: later consumers
++            # may interpret them as source. Nested executable substitutions
++            # retain their own independent lexical boundaries.
++            self._closers = {
++                closing
++                for closing in closers
++                if not _contains(assigned_values, closing) or _contains(executing_bodies, closing)
++            }
++            self._comments = _intervals(comments)
++            self._tests = _intervals(tests)
++            self._bodies = executing_bodies
++            self.command_starts = tuple(sorted(commands))
++            self.has_opaque_assignment = opaque_assignment
++            self._ownership_allowed = ownership_allowed
++        except (
++            OSError,
++            ValueError,
++            TypeError,
++            KeyError,
++            RecursionError,
++            subprocess.SubprocessError,
++        ):
++            if runtime_failed:
++                raise
++            return
++
++    def is_noncommand_start(self, offset: int) -> bool:
++        return self._ownership_allowed and (
++            offset in self._closers
++            or _contains(self._comments, offset)
++            or (_contains(self._tests, offset) and not _contains(self._bodies, offset))
++        )
