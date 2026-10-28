@@ -78,3 +78,21 @@ print(json.dumps({'incomplete':incomplete,'unsupported':len(unsupported),'checks
     )
     report = json.loads(result.stdout)
     assert report["checks"] > 0
+
+
+@pytest.mark.parametrize("count, exhausted", [(160, False), (200, True)])
+def test_repeated_lexical_lookups_preserve_unknown_call_evidence(count, exhausted):
+    from skillspector.javascript_source import JavaScriptSourceOwnership
+
+    source = 'import {helper} from "./unknown.mjs";\n' + "\n".join(
+        f'function fn{i}(value){{ const text=`x${{value}}`; return helper(String(text)); }}'
+        for i in range(count)
+    )
+    owner = JavaScriptSourceOwnership(source, lambda: None)
+    assert owner.analysis_incomplete() is exhausted
+    spans = owner.unsupported_values()
+    if exhausted:
+        assert not spans
+    else:
+        assert len(spans) == count
+        assert all(source[start:end] == "`x${value}`" for start, end in spans)

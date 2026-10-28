@@ -4236,10 +4236,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..bd1aeef
+index 0000000..e9582b5
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1703 @@
+@@ -0,0 +1,1710 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -4557,15 +4557,22 @@ index 0000000..bd1aeef
 +        binding_scope_cache[definition.id] = result
 +        return result
 +
++    lexical_definition_cache = {}
++
 +    def lexical_definitions(reference):
++        if reference.id in lexical_definition_cache:
++            step()
++            return lexical_definition_cache[reference.id]
 +        cursor = parent(reference)
 +        while cursor is not None:
 +            step()
 +            if cursor.type in lexical_scopes:
 +                matches = [n for n in definitions[text(reference)] if binding_scope(n) == cursor]
 +                if matches:
++                    lexical_definition_cache[reference.id] = matches
 +                    return matches
 +            cursor = parent(cursor)
++        lexical_definition_cache[reference.id] = []
 +        return []
 +
 +    def data_definition(reference):
@@ -5945,10 +5952,10 @@ index 0000000..bd1aeef
 +    return ranges, unsupported
 diff --git a/src/skillspector/javascript_native_values.py b/src/skillspector/javascript_native_values.py
 new file mode 100644
-index 0000000..e484048
+index 0000000..5c2bf9d
 --- /dev/null
 +++ b/src/skillspector/javascript_native_values.py
-@@ -0,0 +1,666 @@
+@@ -0,0 +1,806 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Bounded native value typing for closed, private validator functions.
@@ -5981,6 +5988,7 @@ index 0000000..e484048
 +        self._writes = {}
 +        self._callback_cache = {}
 +        self._callback_active = set()
++        self._storage_values = None
 +        self._data_use = None
 +        for node in nodes:
 +            step()
@@ -6312,6 +6320,8 @@ index 0000000..e484048
 +                    else None
 +                )
 +            if cap in {("ambient", "Number"), ("ambient", "Boolean")} and len(args) == 1:
++                if cap[1] == "Number" and not self.primitive(self.kind(args[0])):
++                    return None
 +                return ("number" if cap[1] == "Number" else "boolean",)
 +            if (
 +                cap == ("ambient", "String")
@@ -6321,6 +6331,10 @@ index 0000000..e484048
 +                return ("string",)
 +            if cap == ("ambient", "JSON.stringify") and len(args) == 1:
 +                return ("string",)
++            if cap == ("node:path", "basename") and len(args) == 1:
++                return ("string",) if self.kind(args[0]) == ("string",) else None
++            if cap == ("ambient", "Math.abs") and len(args) == 1:
++                return ("number",) if self.primitive(self.kind(args[0])) else None
 +            if cap == ("ambient", "process.argv.slice"):
 +                return ("array", ("string",))
 +            if cap == ("node:fs/promises", "readFile") and len(args) == 2:
@@ -6437,6 +6451,8 @@ index 0000000..e484048
 +    def _closed_source(self):
 +        for node in self.nodes:
 +            self.step()
++            if not self._operands_are_data(node):
++                return False
 +            if node.type in {
 +                "assignment_expression",
 +                "augmented_assignment_expression",
@@ -6445,6 +6461,10 @@ index 0000000..e484048
 +            }:
 +                target = self.field(node, "left") or self.field(node, "argument")
 +                for binding_target in self.bindings(target, assignment=True):
++                    # Fresh records can acquire serialization/coercion hooks
++                    # through ordinary field writes and aliases as well.
++                    if binding_target.type in {"member_expression", "subscript_expression"}:
++                        return False
 +                    if (
 +                        binding_target.type in {"identifier", "shorthand_property_identifier_pattern"}
 +                        and self.definition(binding_target) is None
@@ -6531,10 +6551,137 @@ index 0000000..e484048
 +                ("ambient", "console.error"),
 +                ("ambient", "process.exit"),
 +                ("ambient", "Array.isArray"),
-+                ("ambient", "Math.abs"),
 +            }:
 +                continue
++            if cap == ("ambient", "Math.abs"):
++                args = self.children(self.field(node, "arguments"))
++                if len(args) != 1 or not self.primitive(self.kind(args[0])):
++                    return False
++                continue
++            if cap == ("ambient", "JSON.stringify"):
++                args = self.children(self.field(node, "arguments"))
++                if len(args) != 1 or not self._serializable(args[0]):
++                    return False
++                continue
 +            if self.kind(node) is None:
++                return False
++        return True
++
++    def _operands_are_data(self, node):
++        """Prove the consumed operands, separately from an operation's result."""
++        operands = []
++        if node.type in {"template_substitution", "computed_property_name"}:
++            operands = self.children(node)
++        elif node.type == "subscript_expression":
++            operands = [self.field(node, "index")]
++        elif node.type in {"binary_expression", "augmented_assignment_expression"}:
++            operator = self.field(node, "operator")
++            op = self.text(operator) if operator is not None else ""
++            # Truthiness, nullish selection and strict identity do not invoke
++            # an object's conversion hooks. Arithmetic, relational and loose
++            # equality operations can, even when their result is primitive.
++            if op not in {"??", "||", "&&", "===", "!==", "??=", "||=", "&&="}:
++                operands = [self.field(node, side) for side in ("left", "right")]
++        elif node.type in {"unary_expression", "update_expression"}:
++            operator = self.field(node, "operator")
++            op = self.text(operator) if operator is not None else ""
++            if op in {"+", "-", "~", "++", "--"}:
++                operands = [self.field(node, "argument")]
++        return all(self.primitive(self.kind(operand)) for operand in operands)
++
++    def _serializable(self, initial):
++        """Bound JSON traversal to immutable plain records and native arrays.
++
++        JSON.stringify may execute toJSON/accessors while visiting its input.
++        A string result alone therefore supplies no operand-effect evidence.
++        Member writes are excluded by the closed-source proof; empty private
++        arrays additionally include every value stored by their native push.
++        """
++        if self._storage_values is None:
++            self._storage_values = {}
++            for candidate in self.nodes:
++                self.step()
++                if candidate.type == "call_expression":
++                    definition = self._storage_definition(self.field(candidate, "function"))
++                    if definition is not None:
++                        self._storage_values.setdefault(definition.id, []).extend(
++                            self.children(self.field(candidate, "arguments"))
++                        )
++        pending = [initial]
++        visited = set()
++        while pending:
++            self.step()
++            node = pending.pop()
++            if node is None:
++                return False
++            if node.id in visited:
++                continue
++            visited.add(node.id)
++            kind = self.kind(node)
++            if self.primitive(kind):
++                continue
++            if node.type in {"parenthesized_expression", "await_expression"}:
++                values = self.children(node)
++                if len(values) != 1:
++                    return False
++                pending.extend(values)
++            elif node.type in {"identifier", "shorthand_property_identifier"}:
++                definition = self.definition(node)
++                if definition is None or self._writes.get(definition.id):
++                    return False
++                value = self.const_value(definition)
++                if value is None:
++                    return False
++                pending.append(value)
++                pending.extend(self._storage_values.get(definition.id, []))
++            elif node.type == "object":
++                for child in self.children(node):
++                    self.step()
++                    if child.type == "shorthand_property_identifier":
++                        pending.append(child)
++                    elif child.type == "pair":
++                        key = self.field(child, "key")
++                        if (
++                            key is None
++                            or key.type not in {"property_identifier", "string", "number"}
++                            or "\\" in self.text(key)
++                            or self.text(key).strip("\"'") in {"__proto__", "toJSON"}
++                        ):
++                            return False
++                        pending.append(self.field(child, "value"))
++                    else:
++                        return False
++            elif node.type == "array":
++                values = self.children(node)
++                if any(value.type == "spread_element" for value in values):
++                    return False
++                pending.extend(values)
++            elif kind is not None and kind[0] == "array" and self.primitive(kind[1]):
++                continue
++            elif node.type == "call_expression":
++                function = self.private_function(self.field(node, "function"))
++                if function is None:
++                    return False
++                returns = []
++                for candidate in self.nodes:
++                    self.step()
++                    if candidate.type != "return_statement":
++                        continue
++                    owner = self.parent(candidate)
++                    while owner is not None and owner.type not in {
++                        "function_declaration", "arrow_function", "function_expression"
++                    }:
++                        self.step()
++                        owner = self.parent(owner)
++                    if owner == function:
++                        values = self.children(candidate)
++                        if len(values) != 1:
++                            return False
++                        returns.extend(values)
++                if not returns:
++                    return False
++                pending.extend(returns)
++            else:
 +                return False
 +        return True
 +
@@ -6778,10 +6925,10 @@ index 0000000..1d07a25
 +    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
 diff --git a/tests/nodes/analyzers/test_native_validator_type_budget.py b/tests/nodes/analyzers/test_native_validator_type_budget.py
 new file mode 100644
-index 0000000..c1ccb0a
+index 0000000..7289747
 --- /dev/null
 +++ b/tests/nodes/analyzers/test_native_validator_type_budget.py
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,98 @@
 +"""Small shared type graphs must remain inside the scanner's runtime budget."""
 +
 +import json
@@ -6862,3 +7009,113 @@ index 0000000..c1ccb0a
 +    )
 +    report = json.loads(result.stdout)
 +    assert report["checks"] > 0
++
++
++@pytest.mark.parametrize("count, exhausted", [(160, False), (200, True)])
++def test_repeated_lexical_lookups_preserve_unknown_call_evidence(count, exhausted):
++    from skillspector.javascript_source import JavaScriptSourceOwnership
++
++    source = 'import {helper} from "./unknown.mjs";\n' + "\n".join(
++        f'function fn{i}(value){{ const text=`x${{value}}`; return helper(String(text)); }}'
++        for i in range(count)
++    )
++    owner = JavaScriptSourceOwnership(source, lambda: None)
++    assert owner.analysis_incomplete() is exhausted
++    spans = owner.unsupported_values()
++    if exhausted:
++        assert not spans
++    else:
++        assert len(spans) == count
++        assert all(source[start:end] == "`x${value}`" for start, end in spans)
+diff --git a/tests/nodes/analyzers/test_native_validator_coercion.py b/tests/nodes/analyzers/test_native_validator_coercion.py
+new file mode 100644
+index 0000000..d50f47a
+--- /dev/null
++++ b/tests/nodes/analyzers/test_native_validator_coercion.py
+@@ -0,0 +1,86 @@
++"""Primitive results do not prove the effects of implicit operand conversion."""
++
++import pytest
++
++from skillspector.javascript_source import JavaScriptSourceOwnership
++from skillspector.nodes.analyzers import static_patterns_tool_misuse as tool
++from skillspector.nodes.analyzers import static_runner
++
++CASES = {
++    "template_to_string": ('toString', '`${payload}`'),
++    "number_value_of": ('valueOf', '`${Number(payload)}`'),
++    "number_alias": ('valueOf', '`${convert(payload)}`'),
++    "string_to_string": ('toString', '`${String(payload)}`'),
++    "regexp_pattern": ('toString', '`${new RegExp(payload).test("x")}`'),
++    "regexp_flags": ('toString', '`${new RegExp("x",payload).test("x")}`'),
++    "json_record": ('toJSON', 'JSON.stringify(payload)'),
++    "json_nested_record": ('toJSON', 'JSON.stringify({nested:payload})'),
++    "json_array": ('toJSON', 'JSON.stringify([payload])'),
++    "comparison": ('valueOf', '`${payload < 1}`'),
++    "abstract_equality": ('valueOf', '`${payload == 1}`'),
++    "addition": ('valueOf', '`${payload + 1}`'),
++    "subtraction": ('valueOf', '`${payload - 1}`'),
++    "unary_number": ('valueOf', '`${+payload}`'),
++    "unary_complement": ('valueOf', '`${~payload}`'),
++    "computed_key": ('toString', '`${({})[payload]}`'),
++    "computed_record_key": ('toString', 'JSON.stringify({[payload]:1})'),
++    "search_argument": ('toString', '`${"x".includes(payload)}`'),
++    "join_element": ('toString', '`${[payload].join(",")}`'),
++    "math_argument": ('valueOf', '`${Math.abs(payload)}`'),
++}
++
++
++def source_for(hook, expression):
++    return (
++        ('const convert=Number;' if 'convert(payload)' in expression else '')
++        +         f'const payload={{{hook}:consume,command:`tou${{"ch"}} /tmp/marker`}};'
++        'const errors=[];'
++        f'errors.push({expression});console.log(JSON.stringify(errors));'
++    )
++
++
++@pytest.mark.parametrize("case", CASES, ids=CASES)
++def test_implicit_callback_operand_remains_individually_incomplete(case):
++    source = source_for(*CASES[case])
++    result = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.cjs"], "file_cache": {"case.cjs": source}}, [tool]
++    )
++    assert result["inspection_ledger"][0]["outcome"] != "completed"
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("mutation", [
++    'payload.toJSON=consume;',
++    'const alias=payload;alias.toJSON=consume;',
++    'payload["toJSON"]=consume;',
++])
++def test_serialization_does_not_trust_mutated_fresh_records(mutation):
++    source = (
++        'const payload={command:`tou${"ch"} /tmp/marker`};' + mutation
++        + 'const errors=[];errors.push(JSON.stringify(payload));console.log(JSON.stringify(errors));'
++    )
++    assert JavaScriptSourceOwnership(source, lambda: None).unsupported_values()
++
++
++@pytest.mark.parametrize("expression", [
++    '`${Number("1")}`',
++    '`${String(1)}`',
++    '`${1 < 2}`',
++    '`${1 == "1"}`',
++    '`${1 + 2}`',
++    '`${+1}`',
++    '`${Math.abs(-1)}`',
++    'JSON.stringify({nested:[{value:`x${1}`}],ok:true})',
++    '`${Boolean(payload)}`',
++    '`${payload === payload}`',
++    '`${!payload}`',
++])
++def test_proved_scalar_and_plain_serialization_operands_complete(expression):
++    source = (
++        'const payload={valueOf:consume};const errors=[];'
++        f'errors.push({expression});console.log(JSON.stringify(errors));'
++    )
++    result = static_runner.run_static_patterns_with_ledger(
++        {"components": ["case.cjs"], "file_cache": {"case.cjs": source}}, [tool]
++    )
++    assert result["inspection_ledger"][0]["outcome"] == "completed"
