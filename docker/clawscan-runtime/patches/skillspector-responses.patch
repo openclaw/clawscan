@@ -393,7 +393,7 @@ diff --git a/tests/nodes/test_report_occurrence_columns.py b/tests/nodes/test_re
          ("second.py", "finding-second", "second_context\nsubprocess.run(command)"),
      ]
 diff --git a/uv.lock b/uv.lock
-index 4878677..e9d1833 100644
+index 4878677..362af86 100644
 --- a/uv.lock
 +++ b/uv.lock
 @@ -228,11 +228,11 @@ filecache = [
@@ -601,7 +601,7 @@ index 4878677..e9d1833 100644
  [[package]]
  name = "pkginfo"
  version = "1.12.1.2"
-@@ -2738,8 +2914,10 @@ dependencies = [
+@@ -2738,13 +2914,17 @@ dependencies = [
      { name = "langchain-openai" },
      { name = "langgraph" },
      { name = "langsmith" },
@@ -612,7 +612,14 @@ index 4878677..e9d1833 100644
      { name = "pydantic" },
      { name = "pywhatwgurl" },
      { name = "pyyaml" },
-@@ -2784,10 +2962,12 @@ requires-dist = [
+     { name = "regex" },
+     { name = "rich" },
++    { name = "tree-sitter" },
++    { name = "tree-sitter-javascript" },
+     { name = "typer" },
+     { name = "yara-python" },
+ ]
+@@ -2784,10 +2964,12 @@ requires-dist = [
      { name = "langgraph", specifier = ">=1.0.10" },
      { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'langgraph-dev'", specifier = ">=0.4.14" },
      { name = "langsmith", specifier = ">=0.7.30" },
@@ -625,6 +632,68 @@ index 4878677..e9d1833 100644
      { name = "poetry", marker = "extra == 'dev'", specifier = ">=2.3.0" },
      { name = "pydantic", specifier = ">=2.12.0" },
      { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.0" },
+@@ -2800,6 +2982,8 @@ requires-dist = [
+     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
+     { name = "skillspector", extras = ["langgraph-dev"], marker = "extra == 'dev'" },
+     { name = "skillspector", extras = ["mcp"], marker = "extra == 'dev'" },
++    { name = "tree-sitter", specifier = "==0.25.2" },
++    { name = "tree-sitter-javascript", specifier = "==0.25.0" },
+     { name = "twine", marker = "extra == 'dev'", specifier = ">=6.2.0" },
+     { name = "typer", specifier = ">=0.23.0,<0.24" },
+     { name = "yara-python", specifier = ">=4.5.0" },
+@@ -2927,6 +3111,51 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/d8/8e/bb97bb0c71802080bfc8952937d174e49cfc50de5c951dd47b2496f0dcdb/tqdm-4.68.3-py3-none-any.whl", hash = "sha256:39832cc2def2789a6f29df83f172db7416cea70052c0907a57801c5f2fdccb03", size = 78337, upload-time = "2026-06-17T07:36:50.132Z" },
+ ]
+-
++
++[[package]]
++name = "tree-sitter"
++version = "0.25.2"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/66/7c/0350cfc47faadc0d3cf7d8237a4e34032b3014ddf4a12ded9933e1648b55/tree-sitter-0.25.2.tar.gz", hash = "sha256:fe43c158555da46723b28b52e058ad444195afd1db3ca7720c59a254544e9c20", size = 177961, upload-time = "2025-09-25T17:37:59.751Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/3c/9e/20c2a00a862f1c2897a436b17edb774e831b22218083b459d0d081c9db33/tree_sitter-0.25.2-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:ddabfff809ffc983fc9963455ba1cecc90295803e06e140a4c83e94c1fa3d960", size = 146941, upload-time = "2025-09-25T17:37:34.813Z" },
++    { url = "https://files.pythonhosted.org/packages/ef/04/8512e2062e652a1016e840ce36ba1cc33258b0dcc4e500d8089b4054afec/tree_sitter-0.25.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c0c0ab5f94938a23fe81928a21cc0fac44143133ccc4eb7eeb1b92f84748331c", size = 137699, upload-time = "2025-09-25T17:37:36.349Z" },
++    { url = "https://files.pythonhosted.org/packages/47/8a/d48c0414db19307b0fb3bb10d76a3a0cbe275bb293f145ee7fba2abd668e/tree_sitter-0.25.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dd12d80d91d4114ca097626eb82714618dcdfacd6a5e0955216c6485c350ef99", size = 607125, upload-time = "2025-09-25T17:37:37.725Z" },
++    { url = "https://files.pythonhosted.org/packages/39/d1/b95f545e9fc5001b8a78636ef942a4e4e536580caa6a99e73dd0a02e87aa/tree_sitter-0.25.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b43a9e4c89d4d0839de27cd4d6902d33396de700e9ff4c5ab7631f277a85ead9", size = 635418, upload-time = "2025-09-25T17:37:38.922Z" },
++    { url = "https://files.pythonhosted.org/packages/de/4d/b734bde3fb6f3513a010fa91f1f2875442cdc0382d6a949005cd84563d8f/tree_sitter-0.25.2-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:fbb1706407c0e451c4f8cc016fec27d72d4b211fdd3173320b1ada7a6c74c3ac", size = 631250, upload-time = "2025-09-25T17:37:40.039Z" },
++    { url = "https://files.pythonhosted.org/packages/46/f2/5f654994f36d10c64d50a192239599fcae46677491c8dd53e7579c35a3e3/tree_sitter-0.25.2-cp312-cp312-win_amd64.whl", hash = "sha256:6d0302550bbe4620a5dc7649517c4409d74ef18558276ce758419cf09e578897", size = 127156, upload-time = "2025-09-25T17:37:41.132Z" },
++    { url = "https://files.pythonhosted.org/packages/67/23/148c468d410efcf0a9535272d81c258d840c27b34781d625f1f627e2e27d/tree_sitter-0.25.2-cp312-cp312-win_arm64.whl", hash = "sha256:0c8b6682cac77e37cfe5cf7ec388844957f48b7bd8d6321d0ca2d852994e10d5", size = 113984, upload-time = "2025-09-25T17:37:42.074Z" },
++    { url = "https://files.pythonhosted.org/packages/8c/67/67492014ce32729b63d7ef318a19f9cfedd855d677de5773476caf771e96/tree_sitter-0.25.2-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:0628671f0de69bb279558ef6b640bcfc97864fe0026d840f872728a86cd6b6cd", size = 146926, upload-time = "2025-09-25T17:37:43.041Z" },
++    { url = "https://files.pythonhosted.org/packages/4e/9c/a278b15e6b263e86c5e301c82a60923fa7c59d44f78d7a110a89a413e640/tree_sitter-0.25.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:f5ddcd3e291a749b62521f71fc953f66f5fd9743973fd6dd962b092773569601", size = 137712, upload-time = "2025-09-25T17:37:44.039Z" },
++    { url = "https://files.pythonhosted.org/packages/54/9a/423bba15d2bf6473ba67846ba5244b988cd97a4b1ea2b146822162256794/tree_sitter-0.25.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:bd88fbb0f6c3a0f28f0a68d72df88e9755cf5215bae146f5a1bdc8362b772053", size = 607873, upload-time = "2025-09-25T17:37:45.477Z" },
++    { url = "https://files.pythonhosted.org/packages/ed/4c/b430d2cb43f8badfb3a3fa9d6cd7c8247698187b5674008c9d67b2a90c8e/tree_sitter-0.25.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b878e296e63661c8e124177cc3084b041ba3f5936b43076d57c487822426f614", size = 636313, upload-time = "2025-09-25T17:37:46.68Z" },
++    { url = "https://files.pythonhosted.org/packages/9d/27/5f97098dbba807331d666a0997662e82d066e84b17d92efab575d283822f/tree_sitter-0.25.2-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:d77605e0d353ba3fe5627e5490f0fbfe44141bafa4478d88ef7954a61a848dae", size = 631370, upload-time = "2025-09-25T17:37:47.993Z" },
++    { url = "https://files.pythonhosted.org/packages/d4/3c/87caaed663fabc35e18dc704cd0e9800a0ee2f22bd18b9cbe7c10799895d/tree_sitter-0.25.2-cp313-cp313-win_amd64.whl", hash = "sha256:463c032bd02052d934daa5f45d183e0521ceb783c2548501cf034b0beba92c9b", size = 127157, upload-time = "2025-09-25T17:37:48.967Z" },
++    { url = "https://files.pythonhosted.org/packages/d5/23/f8467b408b7988aff4ea40946a4bd1a2c1a73d17156a9d039bbaff1e2ceb/tree_sitter-0.25.2-cp313-cp313-win_arm64.whl", hash = "sha256:b3f63a1796886249bd22c559a5944d64d05d43f2be72961624278eff0dcc5cb8", size = 113975, upload-time = "2025-09-25T17:37:49.922Z" },
++    { url = "https://files.pythonhosted.org/packages/07/e3/d9526ba71dfbbe4eba5e51d89432b4b333a49a1e70712aa5590cd22fc74f/tree_sitter-0.25.2-cp314-cp314-macosx_10_13_x86_64.whl", hash = "sha256:65d3c931013ea798b502782acab986bbf47ba2c452610ab0776cf4a8ef150fc0", size = 146776, upload-time = "2025-09-25T17:37:50.898Z" },
++    { url = "https://files.pythonhosted.org/packages/42/97/4bd4ad97f85a23011dd8a535534bb1035c4e0bac1234d58f438e15cff51f/tree_sitter-0.25.2-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:bda059af9d621918efb813b22fb06b3fe00c3e94079c6143fcb2c565eb44cb87", size = 137732, upload-time = "2025-09-25T17:37:51.877Z" },
++    { url = "https://files.pythonhosted.org/packages/b6/19/1e968aa0b1b567988ed522f836498a6a9529a74aab15f09dd9ac1e41f505/tree_sitter-0.25.2-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:eac4e8e4c7060c75f395feec46421eb61212cb73998dbe004b7384724f3682ab", size = 609456, upload-time = "2025-09-25T17:37:52.925Z" },
++    { url = "https://files.pythonhosted.org/packages/48/b6/cf08f4f20f4c9094006ef8828555484e842fc468827ad6e56011ab668dbd/tree_sitter-0.25.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:260586381b23be33b6191a07cea3d44ecbd6c01aa4c6b027a0439145fcbc3358", size = 636772, upload-time = "2025-09-25T17:37:54.647Z" },
++    { url = "https://files.pythonhosted.org/packages/57/e2/d42d55bf56360987c32bc7b16adb06744e425670b823fb8a5786a1cea991/tree_sitter-0.25.2-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:7d2ee1acbacebe50ba0f85fff1bc05e65d877958f00880f49f9b2af38dce1af0", size = 631522, upload-time = "2025-09-25T17:37:55.833Z" },
++    { url = "https://files.pythonhosted.org/packages/03/87/af9604ebe275a9345d88c3ace0cf2a1341aa3f8ef49dd9fc11662132df8a/tree_sitter-0.25.2-cp314-cp314-win_amd64.whl", hash = "sha256:4973b718fcadfb04e59e746abfbb0288694159c6aeecd2add59320c03368c721", size = 130864, upload-time = "2025-09-25T17:37:57.453Z" },
++    { url = "https://files.pythonhosted.org/packages/a6/6e/e64621037357acb83d912276ffd30a859ef117f9c680f2e3cb955f47c680/tree_sitter-0.25.2-cp314-cp314-win_arm64.whl", hash = "sha256:b8d4429954a3beb3e844e2872610d2a4800ba4eb42bb1990c6a4b1949b18459f", size = 117470, upload-time = "2025-09-25T17:37:58.431Z" },
++]
++
++[[package]]
++name = "tree-sitter-javascript"
++version = "0.25.0"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/59/e0/e63103c72a9d3dfd89a31e02e660263ad84b7438e5f44ee82e443e65bbde/tree_sitter_javascript-0.25.0.tar.gz", hash = "sha256:329b5414874f0588a98f1c291f1b28138286617aa907746ffe55adfdcf963f38", size = 132338, upload-time = "2025-09-01T07:13:44.792Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/2c/df/5106ac250cd03661ebc3cc75da6b3d9f6800a3606393a0122eca58038104/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:b70f887fb269d6e58c349d683f59fa647140c410cfe2bee44a883b20ec92e3dc", size = 64052, upload-time = "2025-09-01T07:13:36.865Z" },
++    { url = "https://files.pythonhosted.org/packages/b1/8f/6b4b2bc90d8ab3955856ce852cc9d1e82c81d7ab9646385f0e75ffd5b5d3/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:8264a996b8845cfce06965152a013b5d9cbb7d199bc3503e12b5682e62bb1de1", size = 66440, upload-time = "2025-09-01T07:13:37.962Z" },
++    { url = "https://files.pythonhosted.org/packages/5f/c4/7da74ecdcd8a398f88bd003a87c65403b5fe0e958cdd43fbd5fd4a398fcf/tree_sitter_javascript-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:9dc04ba91fc8583344e57c1f1ed5b2c97ecaaf47480011b92fbeab8dda96db75", size = 99728, upload-time = "2025-09-01T07:13:38.755Z" },
++    { url = "https://files.pythonhosted.org/packages/96/c8/97da3af4796495e46421e9344738addb3602fa6426ea695be3fcbadbee37/tree_sitter_javascript-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:199d09985190852e0912da2b8d26c932159be314bc04952cf917ed0e4c633e6b", size = 106072, upload-time = "2025-09-01T07:13:39.798Z" },
++    { url = "https://files.pythonhosted.org/packages/13/be/c964e8130be08cc9bd6627d845f0e4460945b158429d39510953bbcb8fcc/tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:dfcf789064c58dc13c0a4edb550acacfc6f0f280577f1e7a00de3e89fc7f8ddc", size = 104388, upload-time = "2025-09-01T07:13:40.866Z" },
++    { url = "https://files.pythonhosted.org/packages/ee/89/9b773dee0f8961d1bb8d7baf0a204ab587618df19897c1ef260916f318ec/tree_sitter_javascript-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:1b852d3aee8a36186dbcc32c798b11b4869f9b5041743b63b65c2ef793db7a54", size = 98377, upload-time = "2025-09-01T07:13:41.838Z" },
++    { url = "https://files.pythonhosted.org/packages/3b/dc/d90cb1790f8cec9b4878d278ad9faf7c8f893189ce0f855304fd704fc274/tree_sitter_javascript-0.25.0-cp310-abi3-win_amd64.whl", hash = "sha256:e5ed840f5bd4a3f0272e441d19429b26eedc257abe5574c8546da6b556865e3c", size = 62975, upload-time = "2025-09-01T07:13:42.828Z" },
++    { url = "https://files.pythonhosted.org/packages/2e/1f/f9eba1038b7d4394410f3c0a6ec2122b590cd7acb03f196e52fa57ebbe72/tree_sitter_javascript-0.25.0-cp310-abi3-win_arm64.whl", hash = "sha256:622a69d677aa7f6ee2931d8c77c981a33f0ebb6d275aa9d43d3397c879a9bb0b", size = 61668, upload-time = "2025-09-01T07:13:43.803Z" },
++]
++
+ [[package]]
+ name = "trove-classifiers"
+ version = "2026.6.1.19"
 diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
 index 15b9b4c..5a4be87 100644
 --- a/src/skillspector/nodes/build_context.py
@@ -1251,18 +1320,20 @@ index 7fc577c..c620345 100644
                      if active_budget.limitation_generation == package_generation:
                          _put_cache(_cache_key(name, version, ecosystem), vuln_details)
 diff --git a/pyproject.toml b/pyproject.toml
-index bb21ad0..d703b4b 100644
+index bb21ad0..5ecb182 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
-@@ -33,6 +33,7 @@ dependencies = [
+@@ -33,6 +33,9 @@ dependencies = [
      # Typer <0.24 uses click>=8.0.0; 0.24+ requires click>=8.2.1 which conflicts with semgrep (click 8.1.x)
      "typer>=0.23.0,<0.24",
      "rich>=14.3.0",
 +    "markdown-it-py==4.2.0",
++    "tree-sitter==0.25.2",
++    "tree-sitter-javascript==0.25.0",
      "httpx>=0.28.0",
      "pywhatwgurl==0.1.1",
      "regex==2026.5.9",
-@@ -49,6 +50,7 @@ dependencies = [
+@@ -49,6 +52,7 @@ dependencies = [
      "langsmith>=0.7.30",
      "yara-python>=4.5.0",
      "google-auth[requests]>=2.53.0",
@@ -1532,7 +1603,7 @@ new file mode 100644
 +        """Return proven inline delimiters, preserving every byte inside them."""
 +        return frozenset(self._delimiters)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
-index 3095bc3..7b1b2a9 100644
+index 3095bc3..d7c25ac 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
 +++ b/src/skillspector/nodes/analyzers/static_runner.py
 @@ -36,11 +36,14 @@ from typing import cast
@@ -1566,7 +1637,16 @@ index 3095bc3..7b1b2a9 100644
  from skillspector.python_ast import (
      MAX_PYTHON_AST_SOURCE_CHARS,
      ParsedPythonFile,
-@@ -2048,12 +2053,12 @@ def _restore_source_lines(
+@@ -109,6 +114,8 @@ FILE_TYPES: dict[str, str] = {
+     ".toml": "toml",
+     ".txt": "text",
+     ".js": "javascript",
++    ".mjs": "javascript",
++    ".cjs": "javascript",
+     ".ts": "typescript",
+     ".rb": "ruby",
+     ".pl": "perl",
+@@ -2048,12 +2055,12 @@ def _restore_source_lines(
 
 
  def _window_string_closer(
@@ -1581,7 +1661,7 @@ index 3095bc3..7b1b2a9 100644
 
      return closes_string
 
-@@ -2071,6 +2076,7 @@ def _scan_declared_marker_views(
+@@ -2071,6 +2078,7 @@ def _scan_declared_marker_views(
      defer_projected_output_limit: bool,
      complete_context: bool,
      prepared_analyses: Mapping[int, object] | None = None,
@@ -1589,7 +1669,7 @@ index 3095bc3..7b1b2a9 100644
  ) -> tuple[list[Finding], bool, bool, _StaticResourceLimitError | None]:
      """Reconstruct marker payloads with directive-relative context windows."""
      findings: list[Finding] = []
-@@ -2120,12 +2126,34 @@ def _scan_declared_marker_views(
+@@ -2120,12 +2128,34 @@ def _scan_declared_marker_views(
              )
          return True
 
@@ -1629,7 +1709,7 @@ index 3095bc3..7b1b2a9 100644
 
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
          check_runtime()
-@@ -2148,6 +2176,7 @@ def _scan_declared_marker_views(
+@@ -2148,6 +2178,7 @@ def _scan_declared_marker_views(
              for full_view in security_text_views(
                  context_prefix + raw_window,
                  check_runtime=check_runtime,
@@ -1637,7 +1717,7 @@ index 3095bc3..7b1b2a9 100644
              )
          )
          across_security_views = len(full_views) > 1
-@@ -2156,8 +2185,8 @@ def _scan_declared_marker_views(
+@@ -2156,8 +2187,8 @@ def _scan_declared_marker_views(
          # never occurs for Python, but it would not map onto module offsets.
          string_closer = (
              None
@@ -1648,7 +1728,7 @@ index 3095bc3..7b1b2a9 100644
          )
          for full_view in full_views:
              full_view_limited = False
-@@ -2283,7 +2312,9 @@ def _scan_declared_marker_views(
+@@ -2283,7 +2314,9 @@ def _scan_declared_marker_views(
                                  marker_view.text,
                                  check_runtime,
                                  file_type=_infer_file_type(path),
@@ -1659,7 +1739,7 @@ index 3095bc3..7b1b2a9 100644
                              )
                          )
 
-@@ -2314,9 +2345,43 @@ def _scan_all_views_detailed(
+@@ -2314,9 +2347,43 @@ def _scan_all_views_detailed(
      python_source: bool | None = None,
      readable_binary: bool = False,
      _oms_projected: bool = False,
@@ -1703,7 +1783,7 @@ index 3095bc3..7b1b2a9 100644
      if readable_binary:
          modules = [
              module
-@@ -2340,6 +2405,7 @@ def _scan_all_views_detailed(
+@@ -2340,6 +2407,7 @@ def _scan_all_views_detailed(
              timeout_seconds=timeout_seconds,
              started_at=started_at,
              python_source=False,
@@ -1711,7 +1791,7 @@ index 3095bc3..7b1b2a9 100644
          )
          findings = [
              finding
-@@ -2390,6 +2456,7 @@ def _scan_all_views_detailed(
+@@ -2390,6 +2458,7 @@ def _scan_all_views_detailed(
              # This view is derived JSON metadata, not a Python execution surface.
              python_source=False,
              _oms_projected=True,
@@ -1719,7 +1799,15 @@ index 3095bc3..7b1b2a9 100644
          )
          for finding in findings:
              finding.start_line = finding.end_line = 1
-@@ -2578,6 +2645,7 @@ def _scan_all_views_detailed(
+@@ -2445,6 +2514,7 @@ def _scan_all_views_detailed(
+     )
+     modules_for_windows = lexical_modules or ([] if ast_modules else pattern_modules)
+     bounded_parse_limited = False
++    opaque_constructed_values = False
+     marker_owned_starts: tuple[int, ...] = ()
+     marker_raw_starts: tuple[int, ...] = ()
+     raw_owned_starts: tuple[int, ...] = ()
+@@ -2578,6 +2648,7 @@ def _scan_all_views_detailed(
                  defer_projected_output_limit=coalesce is not None,
                  complete_context=whole_artifact_window,
                  prepared_analyses=prepared_analyses,
@@ -1727,7 +1815,25 @@ index 3095bc3..7b1b2a9 100644
              )
              bounded_parse_limited = bounded_parse_limited or marker_bounded_parse_limited
          except _StaticResourceLimitError as exc:
-@@ -2712,6 +2780,7 @@ def _scan_all_views_detailed(
+@@ -2610,6 +2681,17 @@ def _scan_all_views_detailed(
+         # first so any concrete reconstructed evidence survives a deadline.
+         try:
+             for module in modules_for_windows:
++                opaque_hook = getattr(module, "has_opaque_constructed_values", None)
++                if callable(opaque_hook):
++                    finding_budget.check_runtime()
++                    opaque_constructed_values = opaque_constructed_values or bool(
++                        opaque_hook(
++                            content,
++                            finding_budget.check_runtime,
++                            file_type=_infer_file_type(path),
++                            complete_context=True,
++                        )
++                    )
+                 exhaustion_hook = getattr(module, "has_bounded_parse_exhaustion", None)
+                 if callable(exhaustion_hook):
+                     finding_budget.check_runtime()
+@@ -2712,6 +2794,7 @@ def _scan_all_views_detailed(
                  full_views = security_text_views(
                      context_prefix + raw_window,
                      check_runtime=finding_budget.check_runtime,
@@ -1735,7 +1841,33 @@ index 3095bc3..7b1b2a9 100644
                  )
              except _StaticResourceLimitError as exc:
                  return (
-@@ -2887,6 +2956,7 @@ def _scan_all_views_detailed(
+@@ -2734,13 +2817,24 @@ def _scan_all_views_detailed(
+                             "has_bounded_parse_exhaustion",
+                             None,
+                         )
+-                        if callable(exhaustion_hook) and full_view.name != "raw":
++                        if full_view.name != "raw":
+                             finding_budget.check_runtime()
+                             module_file_type = _effective_module_file_type(
+                                 path,
+                                 module,
+                                 python_source=python_source,
+                             )
++                            opaque_hook = getattr(module, "has_opaque_constructed_values", None)
++                            if callable(opaque_hook):
++                                opaque_constructed_values = opaque_constructed_values or bool(
++                                    opaque_hook(
++                                        full_view.text,
++                                        finding_budget.check_runtime,
++                                        file_type=module_file_type,
++                                        complete_context=whole_artifact_window,
++                                    )
++                                )
++                        if callable(exhaustion_hook) and full_view.name != "raw":
+                             bounded_parse_limited = bounded_parse_limited or bool(
+                                 exhaustion_hook(
+                                     full_view.text,
+@@ -2887,6 +2981,7 @@ def _scan_all_views_detailed(
                      for full_view in security_text_views(
                          projection.text,
                          check_runtime=finding_budget.check_runtime,
@@ -1743,7 +1875,7 @@ index 3095bc3..7b1b2a9 100644
                      ):
                          named_view = SecurityTextView(
                              f"{projection.name}-{full_view.name}",
-@@ -2951,6 +3021,7 @@ def _scan_all_views_detailed(
+@@ -2951,6 +3046,7 @@ def _scan_all_views_detailed(
                  full_views = security_text_views(
                      continuity.view.text,
                      check_runtime=finding_budget.check_runtime,
@@ -1751,7 +1883,16 @@ index 3095bc3..7b1b2a9 100644
                  )
                  across_security_views = len(full_views) > 1
                  for full_view in full_views:
-@@ -3262,6 +3333,7 @@ def run_static_patterns(
+@@ -3055,6 +3151,8 @@ def _scan_all_views_detailed(
+         (
+             LedgerReason.SYNTAX_ERROR
+             if python_syntax_error
++            else LedgerReason.OPAQUE_CONTENT
++            if opaque_constructed_values
+             else LedgerReason.STATIC_PARSE_LIMIT
+             if bounded_parse_limited
+             else LedgerReason.OBFUSCATED_INSTRUCTION_TEXT
+@@ -3262,6 +3360,7 @@ def run_static_patterns(
              python_ast=python_ast,
              python_source=python_source,
              readable_binary=path in readable_binary_paths,
@@ -1759,7 +1900,7 @@ index 3095bc3..7b1b2a9 100644
          )
          runtime_limit = MAX_STATIC_ANALYSIS_SECONDS_PER_ARTIFACT
          if shared_remaining is not None:
-@@ -3467,6 +3539,7 @@ def run_static_patterns_with_ledger(
+@@ -3467,6 +3566,7 @@ def run_static_patterns_with_ledger(
                              python_ast=python_ast,
                              python_source=python_source,
                              readable_binary=bool(artifact.get("readable_binary")),
@@ -1952,18 +2093,19 @@ index 74c304a..b8bc498 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-index c323c84..de65a73 100644
+index c323c84..e0bced5 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-@@ -41,6 +41,7 @@ from skillspector.artifacts import (
+@@ -41,6 +41,8 @@ from skillspector.artifacts import (
      normalized_security_view,
      security_text_views,
  )
 +from skillspector.frontmatter_json import frontmatter_json_string_spans
++from skillspector.javascript_source import JavaScriptSourceOwnership
  from skillspector.logging_config import get_logger
  from skillspector.models import AnalyzerFinding, Finding, Location, Severity
  from skillspector.python_ast import ParsedPythonFile, parse_python_source
-@@ -48,6 +49,7 @@ from skillspector.python_tokens import PythonLiteralSpans
+@@ -48,6 +50,7 @@ from skillspector.python_tokens import PythonLiteralSpans
  from skillspector.python_tokens import python_literal_spans as _python_literal_spans
  from skillspector.python_tokens import python_string_body as _python_string_body
  from skillspector.security_reconstruction import validated_json_string_spans
@@ -1972,24 +2114,56 @@ index c323c84..de65a73 100644
 -
 +
  from . import static_runner
-@@ -2026,6 +2028,7 @@ def _has_shell_command_word_exhaustion(
+@@ -2026,6 +2029,8 @@ def _has_shell_command_word_exhaustion(
      structural_quote_closers: set[int] | None = None,
      structural_quote_openers: set[int] | None = None,
      python_source: _PythonSourceOwnership | None = None,
++    javascript_source: JavaScriptSourceOwnership | None = None,
 +    shell_source: ShellSourceOwnership | None = None,
      perl_eval_blocks: bool = False,
      _command_string_depth: int = 0,
  ) -> bool:
-@@ -2049,6 +2052,8 @@ def _has_shell_command_word_exhaustion(
+@@ -2049,6 +2054,10 @@ def _has_shell_command_word_exhaustion(
      for candidate in _SHELL_COMMAND_WORD_START_RE.finditer(content):
          check_runtime()
          start = candidate.start()
++        if javascript_source is not None and javascript_source.data_literal(start) is not None:
++            continue
 +        if shell_source is not None and shell_source.is_noncommand_start(start):
 +            continue
          if start in owned_word_positions:
              continue
          if structural_quote_closers is not None and start in structural_quote_closers:
-@@ -2199,6 +2204,7 @@ def _has_shell_command_word_exhaustion(
+@@ -2115,6 +2124,10 @@ def _has_shell_command_word_exhaustion(
+                 # Likewise, a host string or comment token owns its bytes: a
+                 # shell quote it opens cannot continue into later host code.
+                 unresolved_end = min(unresolved_end, python_source.word_end(start))
++            if unresolved_end - start > _SHELL_COMMAND_WORD_CHARS and javascript_source is not None:
++                comment = javascript_source.comment(start)
++                if comment is not None:
++                    unresolved_end = min(unresolved_end, comment[1])
+             if unresolved_end - start > _SHELL_COMMAND_WORD_CHARS:
+                 return True
+             continue
+@@ -2168,6 +2181,8 @@ def _has_shell_command_word_exhaustion(
+             )
+         ):
+             comment = python_source.comment(start) if python_source is not None else None
++            if comment is None and javascript_source is not None:
++                comment = javascript_source.comment(start)
+             if comment is None:
+                 # Host code after a Python string's closing quote is not shell
+                 # text, so a command in the string takes operands only from
+@@ -2182,7 +2197,7 @@ def _has_shell_command_word_exhaustion(
+                 if value is None or _has_runtime_command_operand_exhaustion(*value, check_runtime):
+                     return True
+                 continue
+-            # A Python comment is prose that no shell receives, so a command
++            # A host comment is prose that no shell receives, so a command
+             # named in it can take operands only from the same comment, never
+             # from later host code. Recheck that comment as standalone shell
+             # text.
+@@ -2199,6 +2214,7 @@ def _has_shell_command_word_exhaustion(
          check_runtime,
          perl_eval_blocks=perl_eval_blocks,
          python_source=python_source,
@@ -1997,7 +2171,7 @@ index c323c84..de65a73 100644
      ):
          if command_string is None or _command_string_depth >= 8:
              return True
-@@ -2247,9 +2253,15 @@ def _shell_command_strings(
+@@ -2247,9 +2263,15 @@ def _shell_command_strings(
      *,
      perl_eval_blocks: bool = False,
      python_source: _PythonSourceOwnership | None = None,
@@ -2014,7 +2188,7 @@ index c323c84..de65a73 100644
          check_runtime()
          recognized, command_string = _command_string_from_clause(
              content,
-@@ -4847,6 +4859,8 @@ def _markdown_shell_text(
+@@ -4847,6 +4869,8 @@ def _markdown_shell_text(
      table_columns: int | None = None
      table_minimum_indent = 0
      table_delimiter_line = -1
@@ -2023,7 +2197,7 @@ index c323c84..de65a73 100644
      offset = 0
      lines = content.splitlines(keepends=True)
      for line_index, line in enumerate(lines):
-@@ -4921,6 +4935,13 @@ def _markdown_shell_text(
+@@ -4921,6 +4945,13 @@ def _markdown_shell_text(
              if (html_end and html_end in leading.lower()) or (not html_end and not leading):
                  html_end = None
          elif fence is not None:
@@ -2037,7 +2211,7 @@ index c323c84..de65a73 100644
              fence_body = stripped.lstrip(" \t")
              closing_fence = MARKDOWN_FENCE_CLOSE.fullmatch(fence_body)
              if (
-@@ -4997,6 +5018,7 @@ def _markdown_shell_text(
+@@ -4997,6 +5028,7 @@ def _markdown_shell_text(
                          table_minimum_indent = minimum_indent
                          table_delimiter_line = line_index + 1
                  if table_columns is not None:
@@ -2045,7 +2219,7 @@ index c323c84..de65a73 100644
                      mask_inline_delimiters()
                      if line_index != table_delimiter_line:
                          cells = _markdown_table_cells(stripped, prefix, check_runtime)
-@@ -5069,6 +5091,13 @@ def _markdown_shell_text(
+@@ -5069,6 +5101,13 @@ def _markdown_shell_text(
              paragraph_list_indent = 0
          offset += len(line)
      mask_inline_delimiters()
@@ -2059,10 +2233,35 @@ index c323c84..de65a73 100644
      projected = "".join(output)
      if prose_apostrophes:
          # A prose-looking line can still be inside an earlier shell word, such
-@@ -5143,6 +5172,11 @@ def _has_bounded_parse_exhaustion(
+@@ -5105,6 +5144,21 @@ def _markdown_shell_text(
+     return projected
+-
++
+-
++
++def has_opaque_constructed_values(
++    content: str,
++    check_runtime: Callable[[], None],
++    *,
++    file_type: str = "shell",
++    complete_context: bool = True,
++) -> bool:
++    """Keep unresolved constructed JS values incomplete with opaque attribution."""
++    return (
++        file_type == "javascript"
++        and complete_context
++        and bool(JavaScriptSourceOwnership(content, check_runtime).unsupported_values())
++    )
++
++
+ def has_bounded_parse_exhaustion(
+     content: str,
+     check_runtime: Callable[[], None],
+@@ -5143,15 +5197,26 @@ def _has_bounded_parse_exhaustion(
      structural_quote_openers = None
      json_strings: list[tuple[int, int]] = []
      python_source = None
++    javascript_source = None
 +    shell_source = None
 +    if file_type == "shell" and complete_context:
 +        shell_source = ShellSourceOwnership(content, check_runtime)
@@ -2071,7 +2270,13 @@ index c323c84..de65a73 100644
      if file_type == "perl" and complete_context:
          content = _perl_literal_print_shell_text(content, check_runtime)
      if file_type == "python" and complete_context:
-@@ -5152,6 +5186,7 @@ def _has_bounded_parse_exhaustion(
+         # Only a complete module can prove Python token ownership. A fragment
+         # may begin inside a string and would invert code and literal bytes.
+         python_source = _PythonSourceOwnership(content, check_runtime)
++    if file_type == "javascript" and complete_context:
++        javascript_source = JavaScriptSourceOwnership(content, check_runtime)
++        if javascript_source.analysis_incomplete() or javascript_source.unsupported_values():
++            return True
      if file_type == "markdown":
          if complete_context:
              json_strings = validated_json_string_spans(content, check_runtime)
@@ -2079,10 +2284,11 @@ index c323c84..de65a73 100644
              structural_quote_closers = {end - 1 for _, end in json_strings}
              structural_quote_openers = {start for start, _ in json_strings}
          content = _markdown_shell_text(
-@@ -5168,6 +5203,7 @@ def _has_bounded_parse_exhaustion(
+@@ -5168,6 +5233,8 @@ def _has_bounded_parse_exhaustion(
          structural_quote_closers=structural_quote_closers,
          structural_quote_openers=structural_quote_openers,
          python_source=python_source,
++        javascript_source=javascript_source,
 +        shell_source=shell_source,
          perl_eval_blocks=file_type == "perl",
      ):
@@ -3852,3 +4058,1842 @@ index 0000000..8631930
 +            or _contains(self._comments, offset)
 +            or (_contains(self._tests, offset) and not _contains(self._bodies, offset))
 +        )
+diff --git a/src/skillspector/javascript_source.py b/src/skillspector/javascript_source.py
+new file mode 100644
+index 0000000..9f67419
+--- /dev/null
++++ b/src/skillspector/javascript_source.py
+@@ -0,0 +1,170 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""Bounded syntax ownership after a closed JavaScript value/use proof.
++
++Unresolved constructed values retain incomplete coverage. Proven data literal
++syntax and comments cannot consume later host code as shell operands. Findings always
++inspect the original source, including every interpolation expression.
++"""
++
++from __future__ import annotations
++
++import re
++from bisect import bisect_right
++from collections.abc import Callable
++
++from skillspector.javascript_values import OwnershipBudgetExceededError, data_literal_ranges
++
++MAX_SOURCE_BYTES = 262_144
++MAX_NODES = 100_000
++MAX_DEPTH = 256
++PARSE_TIMEOUT_MICROS = 100_000
++_JAVASCRIPT_SHEBANG = re.compile(
++    r"#![ \t]*+(?:\S*/)?(?:env[ \t]++(?:-\S*[ \t]++)*(?:\S*/)?)?"
++    r"(?:node|nodejs|bun|deno)(?=[ \t\r\n]|$)"
++)
++
++
++class JavaScriptSourceOwnership:
++    def __init__(self, content: str, check_runtime: Callable[[], None]):
++        self._content = content
++        self._check_runtime = check_runtime
++        self._spans: tuple[tuple[int, ...], tuple[int, ...]] | None = None
++        self._literals: tuple[tuple[int, ...], tuple[int, ...]] | None = None
++        self._unsupported: tuple[tuple[int, ...], tuple[int, ...]] | None = None
++        self._computed = False
++
++    def _compute(self):
++        if not self._computed:
++            result = _source_spans(self._content, self._check_runtime)
++            if result is not None:
++                self._spans, self._literals, self._unsupported = result
++            self._computed = True
++
++    def _owner(self, spans, position):
++        if spans is None:
++            return None
++        starts, ends = spans
++        index = bisect_right(starts, position) - 1
++        if index >= 0 and position < ends[index]:
++            return starts[index], ends[index]
++        return None
++
++    def comment(self, position: int) -> tuple[int, int] | None:
++        self._compute()
++        return self._owner(self._spans, position)
++
++    def data_literal(self, position: int) -> tuple[int, int] | None:
++        self._compute()
++        return self._owner(self._literals, position)
++
++    def analysis_incomplete(self) -> bool:
++        """A missing/bounded parse cannot mean successful empty construction analysis."""
++        self._compute()
++        return self._unsupported is None
++
++    def unsupported_values(self) -> tuple[tuple[int, int], ...]:
++        self._compute()
++        if self._unsupported is None:
++            return ()
++        return tuple(zip(*self._unsupported, strict=True))
++
++
++def _source_spans(
++    content: str, check_runtime: Callable[[], None]
++) -> (
++    tuple[
++        tuple[tuple[int, ...], tuple[int, ...]],
++        tuple[tuple[int, ...], tuple[int, ...]],
++        tuple[tuple[int, ...], tuple[int, ...]],
++    ]
++    | None
++):
++    if len(content) > MAX_SOURCE_BYTES or (
++        content.startswith("#!") and _JAVASCRIPT_SHEBANG.match(content) is None
++    ):
++        return None
++    check_runtime()
++    try:
++        data = content.encode("utf-8")
++    except UnicodeError:
++        return None
++    if len(data) > MAX_SOURCE_BYTES:
++        return None
++    try:
++        import tree_sitter_javascript
++        from tree_sitter import Language, Parser
++    except ImportError:
++        return None
++    # The pinned binding supports this deprecated native deadline. Leave the
++    # caller's warning filters untouched; concurrent analyzers own their parser.
++    # Strict warning-as-error settings conservatively prove no ownership.
++    try:
++        parser = Parser(
++            Language(tree_sitter_javascript.language()), timeout_micros=PARSE_TIMEOUT_MICROS
++        )
++        tree = parser.parse(data)
++    except (ValueError, RuntimeError, DeprecationWarning):
++        return None
++    check_runtime()
++    if tree is None or tree.root_node.has_error:
++        return None
++    pending = [(tree.root_node, 0, None)]
++    comments: list[tuple[int, int]] = []
++    nodes, parents = [], {}
++    count = 0
++    while pending:
++        node, depth, owner = pending.pop()
++        nodes.append(node)
++        parents[node.id] = owner
++        count += 1
++        if count > MAX_NODES or depth > MAX_DEPTH:
++            return None
++        if count % 128 == 0:
++            check_runtime()
++        if node.type == "comment":
++            start, end = node.start_byte, node.end_byte
++            raw = data[start:end]
++            if not (raw.startswith(b"//") or (raw.startswith(b"/*") and raw.endswith(b"*/"))):
++                return None
++            comments.append((start, end))
++        pending.extend((child, depth + 1, node) for child in node.children)
++    try:
++        proof = data_literal_ranges(data, nodes, parents, check_runtime)
++    except OwnershipBudgetExceededError:
++        return None
++    if proof is None:
++        # No ownership is admitted after a failed identity proof. A separate
++        # pass still follows authored constructions to actual call arguments;
++        # unsupported imports and unobserved exports alone add no opacity.
++        comments = []
++        try:
++            fallback = data_literal_ranges(data, nodes, parents, check_runtime, opaque_only=True)
++        except OwnershipBudgetExceededError:
++            return None
++        if fallback is None:
++            return None
++        literals, unsupported = fallback
++    else:
++        literals, unsupported = proof
++    # Tree-sitter offsets count UTF-8 bytes. Decode disjoint ranges only once
++    # to preserve exact character offsets without repeated prefix decoding.
++    result = []
++    for ranges in (comments, literals, unsupported):
++        starts, ends = [], []
++        byte_cursor = char_cursor = 0
++        merged = []
++        for start, end in sorted(ranges):
++            if merged and start <= merged[-1][1]:
++                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
++            else:
++                merged.append((start, end))
++        for start, end in merged:
++            check_runtime()
++            char_cursor += len(data[byte_cursor:start].decode("utf-8"))
++            starts.append(char_cursor)
++            char_cursor += len(data[start:end].decode("utf-8"))
++            ends.append(char_cursor)
++            byte_cursor = end
++        result.append((tuple(starts), tuple(ends)))
++    return tuple(result)
+diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
+new file mode 100644
+index 0000000..1069306
+--- /dev/null
++++ b/src/skillspector/javascript_values.py
+@@ -0,0 +1,1657 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""A deliberately small, closed value/use proof for JavaScript data strings.
++
++Native filesystem paths, fetch URLs, stream writes, and directly thrown Error
++messages do not interpret strings as shell source. A spelling alone proves
++nothing: imports, immutable aliases, every local value use, and ambient-name
++shadowing are checked against the complete parsed module. Unsupported value
++flows grant no ownership for the artifact.
++"""
++
++import re
++from collections import defaultdict
++
++_GLOBAL_CAPABILITIES = {
++    "Error",
++    "fetch",
++    "process",
++    "JSON",
++    "String",
++    "Buffer",
++    "Math",
++    "Object",
++    "Array",
++    "Set",
++    "URL",
++}
++_FORBIDDEN_GLOBALS = {
++    "globalThis",
++    "global",
++    "window",
++    "self",
++    "Reflect",
++    "eval",
++    "Function",
++    "require",
++}
++_NATIVE_MODULES = {
++    "node:fs",
++    "node:fs/promises",
++    "node:path",
++    "node:crypto",
++    "node:stream",
++    "node:stream/promises",
++}
++_FS_PATH_ARGUMENTS = {
++    "createWriteStream": {0},
++    "readFile": {0},
++    "readFileSync": {0},
++    "statSync": {0},
++    "open": {0},
++    "rename": {0, 1},
++    "rm": {0},
++    "mkdir": {0},
++    "stat": {0},
++}
++MAX_PROOF_STEPS = 100_000
++
++
++class OwnershipBudgetExceededError(Exception):
++    pass
++
++
++def data_literal_ranges(data, nodes, parents, check_runtime, *, opaque_only=False):
++    """Return proven data ranges and authored values reaching unresolved sinks.
++
++    Strict mode refuses ownership when any native identity assumption is unproved.
++    Opaque-only mode grants no ranges and distinguishes actual unknown call
++    arguments from an unobserved export, return or unused result.
++    """
++    definitions = defaultdict(list)
++    references = defaultdict(list)
++    imported = {}
++    remaining = MAX_PROOF_STEPS
++    unsupported = []
++    computed_storage_roots = set()
++    error_handler_active = False
++    error_handler_result = None
++    error_binding_ids = set()
++    unsafe_native = any(
++        n.type == "with_statement"
++        or (n.type == "method_definition" and any(c.type in {"get", "set"} for c in n.children))
++        for n in nodes
++    )
++
++    def step():
++        nonlocal remaining
++        remaining -= 1
++        if remaining < 0:
++            raise OwnershipBudgetExceededError
++        check_runtime()
++
++    def text(node):
++        raw = data[node.start_byte : node.end_byte].decode("utf-8")
++        if opaque_only and node.type in {
++            "identifier",
++            "property_identifier",
++            "shorthand_property_identifier",
++            "shorthand_property_identifier_pattern",
++        }:
++            return re.sub(
++                r"\\u(?:\{([0-9a-fA-F]+)\}|([0-9a-fA-F]{4}))",
++                lambda match: chr(int(match.group(1) or match.group(2), 16)),
++                raw,
++            )
++        return raw
++
++    def parent(node):
++        return parents.get(node.id)
++
++    def field(node, name):
++        return node.child_by_field_name(name)
++
++    def semantic_children(node):
++        return [child for child in node.named_children if child.type != "comment"]
++
++    def const_declaration(node):
++        p = parent(node)
++        return (
++            p is not None
++            and p.type == "lexical_declaration"
++            and data[p.start_byte : p.start_byte + 5] == b"const"
++        )
++
++    def bindings(initial, *, assignment=False):
++        """Walk grammar-owned binding targets, never object keys/default values."""
++        pending = [initial]
++        while pending:
++            step()
++            node = pending.pop()
++            if node is None:
++                continue
++            if node.type in {"identifier", "shorthand_property_identifier_pattern"}:
++                yield node
++            elif assignment and node.type in {"member_expression", "subscript_expression"}:
++                yield node
++            elif node.type in {"assignment_pattern", "object_assignment_pattern"}:
++                pending.append(field(node, "left"))
++            elif node.type == "pair_pattern":
++                pending.append(field(node, "value"))
++            elif node.type in {
++                "formal_parameters",
++                "object_pattern",
++                "array_pattern",
++                "rest_pattern",
++                "parenthesized_expression",
++            }:
++                pending.extend(c for c in node.named_children if c.type != "comment")
++            else:
++                raise OwnershipBudgetExceededError
++
++    for node in nodes:
++        step()
++        if node.type in {"with_statement", "this"} or (
++            node.type == "method_definition"
++            and any(c.type in {"get", "set"} for c in node.children)
++        ):
++            if not opaque_only:
++                return None
++        if node.type in {
++            "identifier",
++            "property_identifier",
++            "shorthand_property_identifier",
++            "shorthand_property_identifier_pattern",
++        } and "\\" in data[node.start_byte : node.end_byte].decode("utf-8"):
++            # Escaped spellings have the same runtime binding identity. This
++            # bounded slice abstains rather than comparing raw spellings.
++            if not opaque_only:
++                return None
++        if node.type in {
++            "identifier",
++            "shorthand_property_identifier",
++            "shorthand_property_identifier_pattern",
++        }:
++            references[text(node)].append(node)
++        if node.type == "variable_declarator":
++            for name in bindings(field(node, "name")):
++                definitions[text(name)].append(name)
++        if node.type == "for_in_statement" and any(
++            c.type in {"const", "let", "var"} for c in node.children
++        ):
++            for name in bindings(field(node, "left")):
++                definitions[text(name)].append(name)
++        if node.type in {
++            "function_declaration",
++            "generator_function_declaration",
++            "function_expression",
++            "generator_function",
++            "class_declaration",
++            "class",
++        }:
++            name = field(node, "name")
++            if name is not None:
++                for binding in bindings(name):
++                    definitions[text(binding)].append(binding)
++        if node.type in {"formal_parameters", "catch_clause"}:
++            target = field(node, "parameter") if node.type == "catch_clause" else node
++            if target is not None:
++                for name in bindings(target):
++                    definitions[text(name)].append(name)
++        if node.type == "arrow_function":
++            name = field(node, "parameter")
++            if name is not None:
++                for binding in bindings(name):
++                    definitions[text(binding)].append(binding)
++        if node.type == "import_statement":
++            source = field(node, "source")
++            module = text(source)[1:-1] if source is not None else ""
++            supported = module in _NATIVE_MODULES and "\\" not in module
++            if not supported and not opaque_only:
++                return None
++            stack = list(node.named_children)
++            while stack:
++                child = stack.pop()
++                if child.type == "import_specifier":
++                    original = field(child, "name")
++                    local = field(child, "alias") or original
++                    if original is None or local is None:
++                        return None
++                    definitions[text(local)].append(local)
++                    if supported:
++                        imported[local.id] = (module, text(original))
++                elif child.type in {"namespace_import", "import_clause"}:
++                    local_names = [c for c in child.named_children if c.type == "identifier"]
++                    if local_names and not opaque_only:
++                        return None
++                    for local in local_names:
++                        definitions[text(local)].append(local)
++                        if supported:
++                            imported[local.id] = (module, "")
++                    stack.extend(c for c in child.named_children if c.type != "identifier")
++                elif child.type != "string":
++                    stack.extend(child.named_children)
++
++    scope_cache = {}
++    definition_cache = {}
++
++    def function_scope(initial):
++        if initial.id in scope_cache:
++            return scope_cache[initial.id]
++        node = parent(initial)
++        while node is not None and node.type not in {
++            "program",
++            "function_declaration",
++            "function_expression",
++            "arrow_function",
++            "generator_function_declaration",
++            "generator_function",
++            "method_definition",
++        }:
++            step()
++            node = parent(node)
++        scope_cache[initial.id] = node
++        return node
++
++    lexical_scopes = {
++        "program",
++        "statement_block",
++        "switch_body",
++        "catch_clause",
++        "for_statement",
++        "for_in_statement",
++        "function_declaration",
++        "function_expression",
++        "arrow_function",
++        "generator_function_declaration",
++        "generator_function",
++        "method_definition",
++    }
++    binding_scope_cache = {}
++
++    def binding_scope(definition):
++        if definition.id in binding_scope_cache:
++            return binding_scope_cache[definition.id]
++        owner = parent(definition)
++        while owner is not None and owner.type in {
++            "object_pattern",
++            "array_pattern",
++            "pair_pattern",
++            "assignment_pattern",
++            "object_assignment_pattern",
++            "rest_pattern",
++        }:
++            owner = parent(owner)
++        if owner is not None and owner.type == "formal_parameters":
++            result = function_scope(definition)
++        elif owner is not None and owner.type == "catch_clause":
++            result = owner
++        elif (
++            owner is not None
++            and owner.type == "for_in_statement"
++            and any(c.type == "var" for c in owner.children)
++        ):
++            result = function_scope(definition)
++        elif (
++            owner is not None
++            and owner.type == "variable_declarator"
++            and parent(owner).type != "lexical_declaration"
++        ):
++            result = function_scope(definition)
++        else:
++            # Function declarations bind in their surrounding block, unlike
++            # parameters and named function expressions.
++            cursor = (
++                parent(owner)
++                if owner is not None
++                and owner.type in {"function_declaration", "generator_function_declaration"}
++                else owner
++            )
++            while cursor is not None and cursor.type not in lexical_scopes:
++                step()
++                cursor = parent(cursor)
++            result = cursor
++        binding_scope_cache[definition.id] = result
++        return result
++
++    def lexical_definitions(reference):
++        cursor = parent(reference)
++        while cursor is not None:
++            step()
++            if cursor.type in lexical_scopes:
++                matches = [n for n in definitions[text(reference)] if binding_scope(n) == cursor]
++                if matches:
++                    return matches
++            cursor = parent(cursor)
++        return []
++
++    def data_definition(reference):
++        if reference.id not in definition_cache:
++            matches = lexical_definitions(reference)
++            definition_cache[reference.id] = matches[0] if len(matches) == 1 else None
++        return definition_cache[reference.id]
++
++    def scope_encloses(scope, reference):
++        cursor = parent(reference)
++        while cursor is not None:
++            step()
++            if cursor == scope:
++                return True
++            cursor = parent(cursor)
++        return False
++
++    def capability(node, visiting=frozenset()):
++        step()
++        if node is None or node.id in visiting or len(visiting) > 128:
++            return None
++        visiting = visiting | {node.id}
++        if node.type in {
++            "identifier",
++            "shorthand_property_identifier",
++            "shorthand_property_identifier_pattern",
++        }:
++            name = text(node)
++            defs = lexical_definitions(node)
++            if name in _GLOBAL_CAPABILITIES and not defs and not unsafe_native:
++                for definition in definitions[name]:
++                    owner = parent(definition)
++                    if (
++                        owner is not None
++                        and owner.type == "function_declaration"
++                        and binding_scope(definition) != function_scope(owner)
++                        and scope_encloses(function_scope(owner), node)
++                    ):
++                        # Sloppy-script Annex B may also create an enclosing
++                        # var binding for a block function declaration.
++                        return None
++                return ("ambient", name)
++            if len(defs) != 1:
++                return None
++            if defs[0].id in imported:
++                return imported[defs[0].id] if not unsafe_native else None
++            owner = parent(defs[0])
++            if (
++                owner is not None
++                and owner.type == "variable_declarator"
++                and const_declaration(owner)
++            ):
++                return capability(field(owner, "value"), visiting)
++            return None
++        if node.type == "member_expression":
++            base = capability(field(node, "object"), visiting)
++            member = field(node, "property")
++            if base is not None and member is not None and member.type == "property_identifier":
++                result = (base[0], ".".join(part for part in (base[1], text(member)) if part))
++                if (
++                    base[0] == "ambient"
++                    and base[1].startswith("process")
++                    and result[1]
++                    not in {
++                        "process.stdout",
++                        "process.stderr",
++                        "process.stdout.write",
++                        "process.stderr.write",
++                        "process.exitCode",
++                        "process.getBuiltinModule",
++                        "process.argv",
++                        "process.argv.slice",
++                    }
++                ):
++                    return None
++                return result
++        if node.type == "call_expression" and capability(field(node, "function"), visiting) == (
++            "ambient",
++            "process.getBuiltinModule",
++        ):
++            arguments = field(node, "arguments")
++            if arguments is not None and len(semantic_children(arguments)) == 1:
++                module = semantic_children(arguments)[0]
++                if module.type == "string" and text(module)[1:-1] in {
++                    "child_process",
++                    "node:child_process",
++                }:
++                    return ("node:child_process", "")
++        if node.type == "parenthesized_expression" and len(node.named_children) == 1:
++            return capability(node.named_children[0], visiting)
++        return None
++
++    def target_mutates_capability(initial):
++        for node in bindings(initial, assignment=True):
++            step()
++            cap = capability(node)
++            if cap not in {None, ("ambient", "process.exitCode")}:
++                return True
++            if (
++                node.type == "subscript_expression"
++                and capability(field(node, "object")) is not None
++            ):
++                return True
++            if (
++                node.type in {"identifier", "shorthand_property_identifier_pattern"}
++                and text(node) in {"String", "Number", "Boolean", "setTimeout", "clearTimeout"}
++                and not definitions[text(node)]
++            ):
++                return True
++        return False
++
++    # Ambient constructors can be shadowed or replaced; reflective global
++    # access and escaping aliases cannot establish the required native binding.
++    for node in nodes:
++        step()
++        if node.type == "identifier" and text(node) in _FORBIDDEN_GLOBALS:
++            unsafe_native = True
++            if not opaque_only:
++                return None
++        if node.type == "member_expression":
++            member = field(node, "property")
++            if member is not None and text(member) in {"constructor", "call", "apply", "bind"}:
++                if not opaque_only:
++                    return None
++        cap = capability(node)
++        if cap is not None:
++            p = parent(node)
++            if p is None:
++                if not opaque_only:
++                    return None
++            native_binding = p.type == "import_specifier"
++            const_alias = p.type == "variable_declarator" and const_declaration(p)
++            member_receiver = p.type == "member_expression" and field(p, "object") == node
++            invoked = p.type in {"call_expression", "new_expression"} and (
++                field(p, "function") == node or field(p, "constructor") == node
++            )
++            exit_status = (
++                cap == ("ambient", "process.exitCode")
++                and p.type == "assignment_expression"
++                and field(p, "left") == node
++            )
++            if not (native_binding or const_alias or member_receiver or invoked or exit_status):
++                if not opaque_only:
++                    return None
++        if node.type in {
++            "assignment_expression",
++            "augmented_assignment_expression",
++            "update_expression",
++            "for_in_statement",
++        }:
++            target = field(node, "left") or field(node, "argument")
++            if target_mutates_capability(target):
++                unsafe_native = True
++                if not opaque_only:
++                    return None
++        if node.type == "call_expression":
++            function = field(node, "function")
++            if function is None:
++                if not opaque_only:
++                    return None
++            if function.type in {"subscript_expression", "import"}:
++                if not opaque_only:
++                    return None
++            if function.type == "identifier":
++                name = text(function)
++                defs = definitions[name]
++                declared_function = (
++                    len(defs) == 1 and parent(defs[0]).type == "function_declaration"
++                )
++                native = capability(function)
++                # Unbound execution APIs and aliases are never assumed data
++                # sinks. Supported host primitives below take no source code.
++                ambient = not defs and name in {"String", "Number", "Boolean", "clearTimeout"}
++                if not defs and name == "setTimeout":
++                    arguments = field(node, "arguments")
++                    ambient = (
++                        arguments is not None
++                        and bool(semantic_children(arguments))
++                        and semantic_children(arguments)[0].type
++                        in {"arrow_function", "function_expression"}
++                    )
++                if not declared_function and native is None and not ambient:
++                    if not opaque_only:
++                        return None
++            if function.type == "member_expression":
++                member = field(function, "property")
++                if member is not None and text(member) in {
++                    "constructor",
++                    "call",
++                    "apply",
++                    "bind",
++                    "defineProperty",
++                    "setPrototypeOf",
++                }:
++                    if not opaque_only:
++                        return None
++                if member is not None and text(member) == "assign":
++                    args = field(node, "arguments")
++                    if (
++                        args is None
++                        or not args.named_children
++                        or capability(args.named_children[0]) is not None
++                    ):
++                        if not opaque_only:
++                            return None
++
++    def local_function(function):
++        if function is None or function.type != "identifier":
++            return None
++        definition = data_definition(function)
++        if definition is None or parent(definition).type != "function_declaration":
++            return None
++        function = parent(definition)
++        if any(scope_encloses(function, reference) for reference in references["arguments"]):
++            # Named parameters do not cover aliases through the arguments
++            # object, including reads captured by nested arrow functions.
++            return None
++        for reference in references[text(definition)]:
++            step()
++            if reference.id == definition.id or data_definition(reference) != definition:
++                continue
++            owner = parent(reference)
++            if (
++                owner is None
++                or owner.type != "call_expression"
++                or field(owner, "function") != reference
++            ):
++                return None
++        return parent(definition)
++
++    def function_returns(function):
++        return [n for n in nodes if n.type == "return_statement" and function_scope(n) == function]
++
++    def fresh_record_roots(initial, visiting=frozenset()):
++        step()
++        if initial is None or initial.id in visiting or len(visiting) > 128:
++            return set()
++        visiting = visiting | {initial.id}
++        if initial.type == "object":
++            for child in initial.named_children:
++                if child.type not in {"pair", "shorthand_property_identifier", "comment"}:
++                    # Accessors and spreads do not prove ordinary data storage;
++                    # assigning a field can invoke a setter.
++                    return set()
++                if child.type == "pair":
++                    key = field(child, "key")
++                    if key is None or "\\" in text(key) or text(key).strip("\"'") == "__proto__":
++                        return set()
++            return {initial.id}
++        if (
++            initial.type in {"await_expression", "parenthesized_expression"}
++            and len(initial.named_children) == 1
++        ):
++            return fresh_record_roots(initial.named_children[0], visiting)
++        if initial.type == "identifier":
++            definition = data_definition(initial)
++            if (
++                definition is not None
++                and parent(definition).type == "variable_declarator"
++                and const_declaration(parent(definition))
++            ):
++                return fresh_record_roots(field(parent(definition), "value"), visiting)
++        if initial.type == "call_expression":
++            function = local_function(field(initial, "function"))
++            if function is not None:
++                returns = function_returns(function)
++                roots = [
++                    fresh_record_roots(r.named_children[0], visiting)
++                    if len(r.named_children) == 1
++                    else set()
++                    for r in returns
++                ]
++                if roots and all(roots):
++                    return set().union(*roots)
++        return set()
++
++    def value_reads(name):
++        reads = []
++        for reference in references[text(name)]:
++            step()
++            if reference.id == name.id or data_definition(reference) != name:
++                continue
++            owner = parent(reference)
++            receiver = reference
++            while (
++                owner is not None
++                and owner.type in {"member_expression", "subscript_expression"}
++                and field(owner, "object") == receiver
++            ):
++                receiver, owner = owner, parent(owner)
++            if (
++                owner is not None
++                and owner.type == "assignment_expression"
++                and field(owner, "left") == receiver
++            ):
++                continue
++            owner = parent(reference)
++            if (
++                owner is not None
++                and owner.type == "assignment_expression"
++                and field(owner, "left") == reference
++            ):
++                continue
++            reads.append(reference)
++        return reads
++
++    def guarded_string_slice(function):
++        """Prove only a direct const-string branch, without general method flow."""
++        if unsafe_native or function.type != "member_expression":
++            return False
++        receiver, member = field(function, "object"), field(function, "property")
++        if receiver is None or receiver.type != "identifier" or member is None:
++            return False
++        if text(member) != "slice":
++            return False
++        definition = data_definition(receiver)
++        if (
++            definition is None
++            or parent(definition).type != "variable_declarator"
++            or not const_declaration(parent(definition))
++        ):
++            return False
++        call = parent(function)
++        arguments = field(call, "arguments") if call is not None else None
++        if arguments is None or any(c.type != "number" for c in semantic_children(arguments)):
++            return False
++        assignment = parent(call)
++        statement = parent(assignment) if assignment is not None else None
++        branch = parent(statement) if statement is not None else None
++        if (
++            assignment is None
++            or assignment.type != "assignment_expression"
++            or field(assignment, "right") != call
++            or statement is None
++            or statement.type != "expression_statement"
++            or branch is None
++            or branch.type != "if_statement"
++            or field(branch, "consequence") != statement
++        ):
++            return False
++        condition = field(branch, "condition")
++        if condition is not None and condition.type == "parenthesized_expression":
++            children = semantic_children(condition)
++            condition = children[0] if len(children) == 1 else None
++        if condition is None or condition.type != "binary_expression":
++            return False
++        operator, left, right = (
++            field(condition, name) for name in ("operator", "left", "right")
++        )
++        if (
++            operator is None
++            or text(operator) != "==="
++            or left is None
++            or left.type != "unary_expression"
++            or right is None
++            or right.type != "string"
++            or text(right) not in {"'string'", '"string"'}
++        ):
++            return False
++        operator, argument = field(left, "operator"), field(left, "argument")
++        return (
++            operator is not None
++            and text(operator) == "typeof"
++            and argument is not None
++            and argument.type == "identifier"
++            and data_definition(argument) == definition
++        )
++
++    def is_data(initial):
++        # In opaque-only mode a True result also includes unobserved escapes.
++        # Those preserve legacy accounting and never grant syntax ownership.
++        pending = [initial]
++        visited = set()
++        while pending:
++            step()
++            node = pending.pop()
++            if node.id in visited:
++                continue
++            visited.add(node.id)
++            p = parent(node)
++            if p is None:
++                if opaque_only:
++                    continue
++                return False
++            if p.type in {
++                "parenthesized_expression",
++                "await_expression",
++                "binary_expression",
++                "ternary_expression",
++                "sequence_expression",
++                "template_substitution",
++                "template_string",
++            }:
++                if p.type == "binary_expression":
++                    operator = field(p, "operator")
++                    if operator is not None and text(operator) in {"in", "instanceof"}:
++                        # These pass the operand into a proxy/hasInstance hook;
++                        # the boolean result does not prove an inert value use.
++                        return False
++                pending.append(p)
++                continue
++            if p.type == "variable_declarator" and field(p, "value") == node:
++                name = field(p, "name")
++                if (
++                    name is not None
++                    and name.type in {"object_pattern", "array_pattern"}
++                    and opaque_only
++                ):
++                    # This grants no field ownership; retain observed reads of
++                    # every binding the initializer may populate.
++                    for binding in bindings(name):
++                        pending.extend(value_reads(binding))
++                    continue
++                if name is None or name.type != "identifier" or data_definition(name) != name:
++                    if opaque_only:
++                        continue
++                    return False
++                declaration = parent(p)
++                if (
++                    parent(declaration) is not None
++                    and parent(declaration).type == "export_statement"
++                    and not opaque_only
++                ):
++                    return False
++                uses = value_reads(name)
++                if not uses:
++                    if opaque_only:
++                        continue
++                    return False
++                pending.extend(uses)
++                continue
++            if (
++                p.type == "assignment_expression"
++                and field(p, "right") == node
++                and field(p, "left") is not None
++                and field(p, "left").type == "identifier"
++            ):
++                name = field(p, "left")
++                definition = data_definition(name)
++                if definition is None:
++                    if opaque_only:
++                        continue
++                    return False
++                owner = parent(definition)
++                if owner is None or owner.type != "variable_declarator":
++                    if opaque_only:
++                        continue
++                    return False
++                declaration = parent(owner)
++                if (
++                    not opaque_only
++                    and parent(declaration) is not None
++                    and parent(declaration).type == "export_statement"
++                ):
++                    return False
++                uses = value_reads(definition)
++                if not uses:
++                    if opaque_only:
++                        continue
++                    return False
++                pending.extend(uses)
++                continue
++            if p.type == "assignment_expression" and field(p, "right") == node:
++                target = field(p, "left")
++                if target is not None and target.type in {
++                    "member_expression",
++                    "subscript_expression",
++                }:
++                    receiver = field(target, "object")
++                    if (
++                        receiver is None
++                        or receiver.type != "identifier"
++                        or bool(fresh_record_roots(receiver) & computed_storage_roots)
++                        or not fresh_record_roots(receiver)
++                    ):
++                        return False
++                    definition = data_definition(receiver)
++                    if definition is None:
++                        if opaque_only:
++                            continue
++                        return False
++                    uses = value_reads(definition)
++                    if not uses:
++                        if opaque_only:
++                            continue
++                        return False
++                    pending.extend(uses)
++                    continue
++            if (
++                p.type in {"member_expression", "subscript_expression"}
++                and field(p, "object") == node
++            ):
++                outer = parent(p)
++                if (
++                    outer is not None
++                    and outer.type == "call_expression"
++                    and field(outer, "function") == p
++                ):
++                    if not (native_collection_method(p) or guarded_string_slice(p)):
++                        # A result edge says nothing about receiver use inside
++                        # map/reduce callbacks or an unproved method body.
++                        return False
++                    pending.append(outer)
++                else:
++                    pending.append(p)
++                continue
++            if p.type == "pair" and field(p, "value") == node:
++                pending.append(parent(p))
++                continue
++            if p.type in {"object", "array"}:
++                pending.append(p)
++                continue
++            if p.type == "unary_expression":
++                operator = field(p, "operator")
++                if operator is not None and text(operator) in {"!", "typeof", "void"}:
++                    continue
++            if p.type in {"if_statement", "while_statement", "do_statement", "for_statement"}:
++                if field(p, "condition") == node:
++                    continue
++            if (
++                p.type == "throw_statement"
++                and error_handler_active
++                and node.type == "identifier"
++                and data_definition(node) is not None
++                and data_definition(node).id in error_binding_ids
++                and function_scope(node) == function_scope(data_definition(node))
++            ):
++                # Preserve only the same Error object. Every possible local
++                # handler read is still checked by the outer overapproximation.
++                continue
++            if p.type == "return_statement":
++                function = function_scope(p)
++                name = field(function, "name") if function is not None else None
++                if function is None or function.type != "function_declaration" or name is None:
++                    if opaque_only:
++                        continue
++                    return False
++                if not opaque_only and (
++                    (parent(function) is not None and parent(function).type == "export_statement")
++                    or local_function(name) != function
++                ):
++                    return False
++                uses = []
++                for reference in references[text(name)]:
++                    if reference.id == name.id:
++                        continue
++                    owner = parent(reference)
++                    if (
++                        owner is None
++                        or owner.type != "call_expression"
++                        or field(owner, "function") != reference
++                    ):
++                        if opaque_only:
++                            continue
++                        return False
++                    uses.append(owner)
++                if not uses:
++                    if opaque_only:
++                        continue
++                    return False
++                pending.extend(uses)
++                continue
++            if p.type == "spread_element":
++                if parent(p) is not None and parent(p).type == "arguments":
++                    return False
++                pending.append(p)
++                continue
++            if p.type == "call_expression" and field(p, "arguments") == node:
++                # Tagged templates are actual calls with a template argument,
++                # not unobserved literal results.
++                return False
++            if p.type != "arguments":
++                if opaque_only:
++                    continue
++                return False
++            call = parent(p)
++            if call is None or call.type not in {"call_expression", "new_expression"}:
++                if opaque_only:
++                    continue
++                return False
++            arguments = semantic_children(p)
++            try:
++                index = arguments.index(node)
++            except ValueError:
++                if opaque_only:
++                    continue
++                return False
++            if any(argument.type == "spread_element" for argument in arguments[:index]):
++                return False
++            cap = capability(
++                field(call, "constructor" if call.type == "new_expression" else "function")
++            )
++            function_node = field(call, "function")
++            if (
++                function_node is not None
++                and function_node.type == "identifier"
++                and text(function_node) in {"Number", "Boolean"}
++                and not definitions[text(function_node)]
++                and not unsafe_native
++            ):
++                continue
++            if cap == ("ambient", "URL") and call.type == "new_expression" and index in {0, 1}:
++                continue
++            if cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")} and index == 0:
++                if len(arguments) != 1:
++                    # Replacers/revivers may execute with the input value.
++                    # Their callback contract is outside this bounded proof.
++                    return False
++                pending.append(call)
++                continue
++            if cap == ("ambient", "fetch") and index == 1:
++                continue
++            if native_collection_method(field(call, "function"), predicates_only=True):
++                continue
++            function = local_function(field(call, "function"))
++            if function is not None:
++                parameters = field(function, "parameters")
++                if parameters is None:
++                    return False
++                parameter_nodes = semantic_children(parameters)
++                if index >= len(parameter_nodes):
++                    return False
++                parameter = parameter_nodes[index]
++                if parameter.type != "identifier":
++                    return False
++                uses = value_reads(parameter)
++                if not uses:
++                    if opaque_only:
++                        continue
++                    return False
++                pending.extend(uses)
++                continue
++            if cap == ("ambient", "Error") and call.type == "new_expression" and index == 0:
++                outer = parent(call)
++                if outer is not None and outer.type == "throw_statement":
++                    scope = function_scope(outer)
++                    if scope is not None and scope.type != "program":
++                        name = field(scope, "name")
++                        if (
++                            scope.type != "function_declaration"
++                            or name is None
++                            or local_function(name) != scope
++                            or parent(scope).type == "export_statement"
++                        ):
++                            return False
++                    if not error_consumers_are_data():
++                        return False
++                    continue
++                if opaque_only:
++                    continue
++                return False
++            if (
++                cap
++                in {
++                    ("ambient", "fetch"),
++                    ("ambient", "process.stdout.write"),
++                    ("ambient", "process.stderr.write"),
++                }
++                and index == 0
++            ):
++                continue
++            if (
++                cap is not None
++                and cap[0] in {"node:fs", "node:fs/promises"}
++                and index in _FS_PATH_ARGUMENTS.get(cap[1], set())
++            ):
++                continue
++            if (
++                cap is not None
++                and cap[0] == "node:path"
++                and cap[1] in {"join", "resolve", "dirname", "basename"}
++            ):
++                pending.append(call)
++                continue
++            return False
++        return True
++
++    def native_collection_method(function, *, predicates_only=False):
++        if unsafe_native:
++            return False
++        if function is None or function.type != "member_expression":
++            return False
++        receiver, member = field(function, "object"), field(function, "property")
++        if receiver is None or member is None:
++            return False
++        if capability(function) == ("ambient", "Array.isArray"):
++            return True
++        name = text(member)
++        if predicates_only and name not in {"has", "includes", "indexOf", "lastIndexOf"}:
++            return False
++        if receiver.type == "array":
++            return name in {"join", "includes", "indexOf", "lastIndexOf"}
++        if receiver.type != "identifier":
++            return False
++        definition = data_definition(receiver)
++        if definition is None:
++            return False
++        declaration = parent(definition)
++        if (
++            declaration is None
++            or declaration.type != "variable_declarator"
++            or not const_declaration(declaration)
++        ):
++            return False
++        container = parent(declaration)
++        if parent(container) is not None and parent(container).type == "export_statement":
++            return False
++        value = field(declaration, "value")
++        methods = set()
++        if value is not None and value.type == "array":
++            methods = {"join", "includes", "indexOf", "lastIndexOf"}
++        elif (
++            value is not None
++            and value.type == "new_expression"
++            and capability(field(value, "constructor")) == ("ambient", "Set")
++        ):
++            methods = {"has"}
++        if name not in methods:
++            return False
++        for reference in references[text(definition)]:
++            step()
++            if reference.id == definition.id or data_definition(reference) != definition:
++                continue
++            owner = parent(reference)
++            if (
++                owner is None
++                or owner.type != "member_expression"
++                or field(owner, "object") != reference
++            ):
++                return False
++            method, call = field(owner, "property"), parent(owner)
++            if method is None or text(method) not in methods:
++                return False
++            if call is None or call.type != "call_expression" or field(call, "function") != owner:
++                return False
++        return True
++
++    def field_calls_are_data(initial):
++        pending = [initial]
++        while pending:
++            step()
++            node = pending.pop()
++            if node.type == "new_expression":
++                return False
++            if node.type == "call_expression":
++                function = field(node, "function")
++                cap = capability(function)
++                native = cap is not None and cap[0] in _NATIVE_MODULES
++                arguments = field(node, "arguments")
++                intrinsic_json = (
++                    cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")}
++                    and arguments is not None
++                    and len(semantic_children(arguments)) == 1
++                )
++                primitive = (
++                    function is not None
++                    and function.type == "identifier"
++                    and text(function) in {"String", "Number", "Boolean"}
++                    and not definitions[text(function)]
++                )
++                if not (
++                    native or intrinsic_json or primitive or native_collection_method(function)
++                ):
++                    return False
++            pending.extend(node.named_children)
++        return True
++
++    def contains_string(initial):
++        pending, seen = [initial], set()
++        while pending:
++            step()
++            node = pending.pop()
++            if node.id in seen:
++                continue
++            seen.add(node.id)
++            if node.type in {"string", "template_string"}:
++                return True
++            if node.type == "identifier" and len(definitions[text(node)]) == 1:
++                owner = parent(definitions[text(node)][0])
++                if owner is not None and owner.type == "variable_declarator":
++                    value = field(owner, "value")
++                    if value is not None:
++                        pending.append(value)
++            if node.type == "ternary_expression":
++                pending.extend(
++                    c
++                    for c in (field(node, "consequence"), field(node, "alternative"))
++                    if c is not None
++                )
++                continue
++            if node.type == "call_expression":
++                if authored_value(node):
++                    return True
++                continue
++            if node.type in {
++                "member_expression",
++                "subscript_expression",
++                "arrow_function",
++                "function_expression",
++                "function_declaration",
++            }:
++                continue
++            pending.extend(node.named_children)
++        return False
++
++    def ignored_or_boolean_result(initial):
++        node = initial
++        while True:
++            step()
++            p = parent(node)
++            if p is None:
++                return False
++            if p.type in {"parenthesized_expression", "await_expression"}:
++                node = p
++                continue
++            if p.type == "expression_statement":
++                return True
++            if p.type == "unary_expression":
++                operator = field(p, "operator")
++                return operator is not None and text(operator) in {"!", "typeof", "void"}
++            if p.type == "arrow_function" and field(p, "body") == node:
++                arguments = parent(p)
++                call = parent(arguments) if arguments is not None else None
++                function = field(call, "function") if call is not None else None
++                return (
++                    arguments is not None
++                    and arguments.type == "arguments"
++                    and bool(semantic_children(arguments))
++                    and semantic_children(arguments)[0] == p
++                    and function is not None
++                    and function.type == "identifier"
++                    and text(function) == "setTimeout"
++                    and not definitions[text(function)]
++                )
++            if p.type == "binary_expression":
++                operator = field(p, "operator")
++                if operator is not None and text(operator) in {
++                    "==",
++                    "!=",
++                    "===",
++                    "!==",
++                    "<",
++                    ">",
++                    "<=",
++                    ">=",
++                }:
++                    return True
++                if operator is not None and text(operator) in {"&&", "||", "??"}:
++                    node = p
++                    continue
++            if (
++                p.type
++                in {
++                    "if_statement",
++                    "while_statement",
++                    "do_statement",
++                    "for_statement",
++                    "ternary_expression",
++                }
++                and field(p, "condition") == node
++            ):
++                return True
++            return False
++
++    def error_consumers_are_data():
++        """Overapproximate handlers; never predict an exception's call path."""
++        nonlocal error_handler_active, error_handler_result
++        if error_handler_result is not None:
++            return error_handler_result
++        if error_handler_active:
++            # Rethrowing into another native Error does not discharge any
++            # handler read: the outer pass still proves every handler binding.
++            return True
++        handlers, callbacks = [], set()
++        for node in nodes:
++            step()
++            if node.type in {"export_statement", "class", "class_declaration", "field_definition"}:
++                # Class initializers have implicit execution frames outside
++                # this deliberately shallow Error source-admission boundary.
++                error_handler_result = False
++                return False
++            if node.type == "catch_clause":
++                parameter = field(node, "parameter")
++                if parameter is not None:
++                    if parameter.type != "identifier":
++                        error_handler_result = False
++                        return False
++                    handlers.append(parameter)
++            if node.type != "member_expression":
++                continue
++            member = field(node, "property")
++            if member is None:
++                continue
++            name = text(member)
++            if name in {
++                "then", "finally", "allSettled", "any", "race", "reject",
++                "on", "once", "addListener", "prependListener", "addEventListener",
++                "setUncaughtExceptionCaptureCallback",
++            }:
++                error_handler_result = False
++                return False
++            if name != "catch":
++                continue
++            call = parent(node)
++            if call is None or call.type != "call_expression" or field(call, "function") != node:
++                error_handler_result = False
++                return False
++            arguments = field(call, "arguments")
++            args = semantic_children(arguments) if arguments is not None else []
++            if len(args) != 1 or args[0].type != "arrow_function":
++                error_handler_result = False
++                return False
++            receiver = field(node, "object")
++            callee = field(receiver, "function") if receiver is not None else None
++            declaration = (
++                local_function(callee)
++                if callee is not None and callee.type == "identifier"
++                else None
++            )
++            consumer = parent(call)
++            if (
++                receiver is None
++                or receiver.type != "call_expression"
++                or declaration is None
++                or not any(child.type == "async" for child in declaration.children)
++                or consumer is None
++                or consumer.type not in {"await_expression", "expression_statement"}
++            ):
++                # Property spelling alone proves neither a native Promise nor
++                # that a callback's thrown Error cannot escape in its result.
++                error_handler_result = False
++                return False
++            callback = args[0]
++            if any(child.type == "async" for child in callback.children):
++                # Only synchronous, directly checked arrow handlers are owned.
++                error_handler_result = False
++                return False
++            callbacks.add(callback.id)
++            if any(scope_encloses(callback, ref) for ref in references["arguments"]):
++                error_handler_result = False
++                return False
++            parameters = field(callback, "parameters")
++            parameter = field(callback, "parameter")
++            params = semantic_children(parameters) if parameters is not None else []
++            if parameter is not None:
++                params.append(parameter)
++            if len(params) != 1 or any(p.type != "identifier" for p in params):
++                error_handler_result = False
++                return False
++            handlers.extend(params)
++        # This is a source-admission boundary, not an exception call graph.
++        # Private declarations may call each other directly. Async results must
++        # be awaited or have an immediately consumed, proved catch handler;
++        # callbacks and exported promises may otherwise conceal Error escapes.
++        for function in nodes:
++            if function.type != "function_declaration":
++                continue
++            name = field(function, "name")
++            if name is None or local_function(name) != function:
++                error_handler_result = False
++                return False
++            asynchronous = any(child.type == "async" for child in function.children)
++            for reference in value_reads(name):
++                call = parent(reference)
++                caller = function_scope(call)
++                if caller is not None and (
++                    caller.type not in {"program", "function_declaration"}
++                    and caller.id not in callbacks
++                ):
++                    error_handler_result = False
++                    return False
++                if not asynchronous:
++                    continue
++                consumer = parent(call)
++                if consumer is not None and consumer.type == "await_expression":
++                    continue
++                if consumer is not None and consumer.type == "member_expression":
++                    method = field(consumer, "property")
++                    outer = parent(consumer)
++                    if (
++                        method is not None
++                        and text(method) == "catch"
++                        and outer is not None
++                        and outer.type == "call_expression"
++                        and field(outer, "function") == consumer
++                    ):
++                        consumer = parent(outer)
++                        if consumer is not None and consumer.type in {
++                            "await_expression", "expression_statement"
++                        }:
++                            continue
++                error_handler_result = False
++                return False
++        error_binding_ids.update(parameter.id for parameter in handlers)
++        error_handler_active = True
++        try:
++            error_handler_result = all(
++                function_scope(reference) == function_scope(parameter)
++                and is_data(reference)
++                for parameter in handlers
++                for reference in value_reads(parameter)
++            )
++        finally:
++            error_handler_active = False
++        return error_handler_result
++
++    def known_nonstring_result(node):
++        function = field(node, "function")
++        cap = capability(function)
++        if cap == ("ambient", "Math.min"):
++            return True
++        if cap == ("ambient", "Object.assign"):
++            arguments = field(node, "arguments")
++            if arguments is not None and semantic_children(arguments):
++                target = semantic_children(arguments)[0]
++                if target.type == "new_expression" and capability(field(target, "constructor")) == (
++                    "ambient",
++                    "Error",
++                ):
++                    return True
++        if cap in {
++            ("ambient", "process.getBuiltinModule"),
++            ("ambient", "process.argv.slice"),
++            ("ambient", "Buffer.alloc"),
++            ("ambient", "fetch"),
++            ("ambient", "process.stdout.write"),
++            ("ambient", "process.stderr.write"),
++        }:
++            return True
++        if cap is not None and cap[0] in {"node:fs", "node:fs/promises"}:
++            return cap[1] in {"open", "stat", "mkdir", "rm", "rename", "createWriteStream"}
++        if cap in {("node:stream", "Readable.fromWeb"), ("node:stream/promises", "pipeline")}:
++            return True
++        return (
++            function is not None
++            and function.type == "identifier"
++            and text(function) in {"Number", "Boolean", "setTimeout", "clearTimeout"}
++            and not definitions[text(function)]
++        )
++
++    def authored_string_constructor(initial):
++        # This is positive source attribution only, never a native identity
++        # proof: replacing a constructor cannot erase its authored input path.
++        pending, seen = [initial], set()
++        while pending:
++            step()
++            node = pending.pop()
++            if node is None or node.id in seen:
++                continue
++            seen.add(node.id)
++            if node.type == "member_expression":
++                member = field(node, "property")
++                if member is not None and text(member) in {"fromCharCode", "fromCodePoint"}:
++                    return True
++            if node.type == "identifier":
++                definition = data_definition(node)
++                if definition is not None:
++                    owner = parent(definition)
++                    if (
++                        owner is not None
++                        and owner.type == "variable_declarator"
++                        and const_declaration(owner)
++                    ):
++                        pending.append(field(owner, "value"))
++        return False
++
++    def authored_value(initial):
++        """Trace source-authored pieces; native file/network contents are external."""
++        pending, visited = [initial], set()
++        while pending:
++            step()
++            node = pending.pop()
++            if node is None or node.id in visited:
++                continue
++            visited.add(node.id)
++            if node.type == "template_string":
++                return True
++            if node.type == "string":
++                if text(node)[1:-1]:
++                    return True
++                continue
++            if node.type == "identifier":
++                defs = definitions[text(node)]
++                if len(defs) == 1:
++                    owner = parent(defs[0])
++                    if owner is not None and owner.type == "variable_declarator":
++                        pending.append(field(owner, "value"))
++                continue
++            if node.type in {
++                "arrow_function",
++                "function_expression",
++                "function_declaration",
++                "generator_function",
++                "generator_function_declaration",
++            }:
++                # Their authored construction nodes are inspected independently.
++                continue
++            if node.type == "member_expression" or node.type == "subscript_expression":
++                pending.append(field(node, "object"))
++                continue
++            if node.type == "pair":
++                pending.append(field(node, "value"))
++                continue
++            if node.type == "call_expression":
++                function = field(node, "function")
++                cap = capability(function)
++                arguments = field(node, "arguments")
++                if function is not None and function.type == "identifier":
++                    definition = data_definition(function)
++                    owner = parent(definition) if definition is not None else None
++                    if (
++                        owner is not None
++                        and owner.type == "variable_declarator"
++                        and const_declaration(owner)
++                    ):
++                        producer = field(owner, "value")
++                        if producer is not None and producer.type in {
++                            "arrow_function",
++                            "function_expression",
++                        }:
++                            body = field(producer, "body")
++                            if body is not None and body.type != "statement_block":
++                                pending.append(body)
++                            else:
++                                for returned in function_returns(producer):
++                                    pending.extend(returned.named_children)
++                if cap in {
++                    ("ambient", "String.fromCharCode"),
++                    ("ambient", "String.fromCodePoint"),
++                } or authored_string_constructor(function):
++                    return True
++                if cap in {("ambient", "fetch"), ("ambient", "Buffer.alloc")} or (
++                    cap is not None
++                    and cap[0] in {"node:fs", "node:fs/promises"}
++                    and cap[1]
++                    in {"readFile", "readFileSync", "open", "stat", "statSync", "createWriteStream"}
++                ):
++                    continue
++                if function is not None and function.type == "member_expression":
++                    member = field(function, "property")
++                    if member is not None and text(member) in {"fromCharCode", "fromCodePoint"}:
++                        return True
++                    # A method on authored string/array pieces may synthesize
++                    # source even when its implementation is outside the proof.
++                    pending.append(field(function, "object"))
++                if not opaque_only and arguments is not None:
++                    pending.extend(semantic_children(arguments))
++                if (
++                    function is not None
++                    and function.type == "identifier"
++                    and text(function) == "String"
++                ):
++                    if arguments is not None:
++                        pending.extend(semantic_children(arguments))
++                    continue
++                if function is not None and function.type == "member_expression":
++                    member = field(function, "property")
++                    # These operations can construct text from source-authored
++                    # pieces. Arbitrary producer calls with metadata arguments
++                    # are not assumed to return those arguments as source.
++                    if member is not None and text(member) in {
++                        "join",
++                        "concat",
++                        "replace",
++                        "replaceAll",
++                        "slice",
++                        "substring",
++                        "substr",
++                        "trim",
++                        "trimStart",
++                        "trimEnd",
++                        "padStart",
++                        "padEnd",
++                        "repeat",
++                        "normalize",
++                        "toUpperCase",
++                        "toLowerCase",
++                    }:
++                        pending.append(field(function, "object"))
++                        if arguments is not None:
++                            pending.extend(semantic_children(arguments))
++                continue
++            if node.type == "array" and any(c.type == "number" for c in node.named_children):
++                return True
++            pending.extend(node.named_children)
++        return False
++
++    # Fresh data records may receive data fields; they cannot be aliases of a
++    # native prototype. Every other property write or reflective namespace
++    # access invalidates the local native-method assumptions for this source.
++    for node in nodes:
++        step()
++        if node.type == "member_expression":
++            member = field(node, "property")
++            receiver = field(node, "object")
++            name = text(member) if member is not None else ""
++            if name in {
++                "prototype",
++                "__proto__",
++                "__defineGetter__",
++                "__defineSetter__",
++                "__lookupGetter__",
++                "__lookupSetter__",
++            }:
++                unsafe_native = True
++                if not opaque_only:
++                    return None
++            namespace = capability(receiver)
++            allowed = {
++                ("ambient", "Object"): {"assign"},
++                ("ambient", "Array"): {"isArray"},
++                ("ambient", "String"): {"fromCharCode", "fromCodePoint"},
++            }
++            if namespace in allowed and name not in allowed[namespace]:
++                if name in {
++                    "getPrototypeOf",
++                    "getOwnPropertyDescriptor",
++                    "getOwnPropertyDescriptors",
++                    "create",
++                    "defineProperty",
++                    "defineProperties",
++                    "setPrototypeOf",
++                }:
++                    unsafe_native = True
++                if not opaque_only:
++                    return None
++        if node.type in {
++            "assignment_expression",
++            "augmented_assignment_expression",
++            "update_expression",
++            "for_in_statement",
++        }:
++            target = field(node, "left") or field(node, "argument")
++            for binding in bindings(target, assignment=True):
++                if binding.type in {"member_expression", "subscript_expression"}:
++                    if binding.type == "subscript_expression":
++                        # A computed write may replace the record's prototype.
++                        # Keep aliases/factory instances conservative without
++                        # invalidating unrelated records in the same source.
++                        computed_storage_roots.update(
++                            fresh_record_roots(field(binding, "object"))
++                        )
++                    if capability(binding) == ("ambient", "process.exitCode"):
++                        continue
++                    receiver = field(binding, "object")
++                    member = field(binding, "property") or field(binding, "index")
++                    replaces_global = (
++                        receiver is not None
++                        and receiver.type == "this"
++                        and member is not None
++                        and text(member).strip("\"'") in _GLOBAL_CAPABILITIES
++                    )
++                    if not fresh_record_roots(receiver):
++                        if replaces_global or receiver is None or receiver.type != "this":
++                            unsafe_native = True
++                        if not opaque_only:
++                            return None
++        if node.type == "call_expression" and capability(field(node, "function")) == (
++            "ambient",
++            "Object.assign",
++        ):
++            arguments = field(node, "arguments")
++            if arguments is None or not semantic_children(arguments):
++                if not opaque_only:
++                    return None
++            target = semantic_children(arguments)[0]
++            native_error = target.type == "new_expression" and capability(
++                field(target, "constructor")
++            ) == ("ambient", "Error")
++            if not native_error and not fresh_record_roots(target):
++                unsafe_native = True
++                if not opaque_only:
++                    return None
++
++    literals = []
++    for node in nodes:
++        step()
++        if node.type == "template_string":
++            if not is_data(node) or (
++                not opaque_only
++                and any(
++                    child.type == "template_substitution" and not field_calls_are_data(child)
++                    for child in node.children
++                )
++            ):
++                unsupported.append((node.start_byte, node.end_byte))
++            else:
++                literals.append(node)
++        if node.type in {"binary_expression", "augmented_assignment_expression"}:
++            operator = field(node, "operator")
++            if (
++                operator is not None
++                and text(operator) in {"+", "+="}
++                and contains_string(node)
++                and not is_data(node)
++            ):
++                unsupported.append((node.start_byte, node.end_byte))
++        if node.type == "call_expression":
++            function = field(node, "function")
++            cap = capability(function)
++            if cap is not None and cap[0] == "node:child_process":
++                arguments = field(node, "arguments")
++                if (
++                    arguments is None
++                    or not semantic_children(arguments)
++                    or semantic_children(arguments)[0].type != "string"
++                ):
++                    unsupported.append((node.start_byte, node.end_byte))
++                continue
++            is_local_function = (
++                function is not None
++                and function.type == "identifier"
++                and len(definitions[text(function)]) == 1
++                and parent(definitions[text(function)][0]).type == "function_declaration"
++            )
++            if authored_value(node) and not (
++                is_local_function
++                or known_nonstring_result(node)
++                or ignored_or_boolean_result(node)
++                or is_data(node)
++            ):
++                unsupported.append((node.start_byte, node.end_byte))
++    # Only individually proved data values own their complete syntax. In
++    # particular, an interpolation cannot open a shell word into later host
++    # source. Raw finding production still receives every original byte.
++    if opaque_only:
++        return [], unsupported
++    ranges = [(node.start_byte, node.end_byte) for node in literals]
++    for node in nodes:
++        if node.type == "string" and is_data(node):
++            ranges.append((node.start_byte, node.end_byte))
++    return ranges, unsupported
