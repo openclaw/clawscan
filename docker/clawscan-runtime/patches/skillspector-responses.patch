@@ -1612,7 +1612,7 @@ index 74c304a..4699cbb 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-index c323c84..158a5b5 100644
+index c323c84..8833628 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 @@ -41,6 +41,8 @@ from skillspector.artifacts import (
@@ -1737,7 +1737,7 @@ index c323c84..158a5b5 100644
          python_source = _PythonSourceOwnership(content, check_runtime)
 +    if file_type == "javascript" and complete_context:
 +        javascript_source = JavaScriptSourceOwnership(content, check_runtime)
-+        if javascript_source.unsupported_values():
++        if javascript_source.analysis_incomplete() or javascript_source.unsupported_values():
 +            return True
      if file_type == "markdown":
          if complete_context:
@@ -2370,10 +2370,10 @@ index 0000000..f8a8c3e
 +    _child()
 diff --git a/src/skillspector/javascript_source.py b/src/skillspector/javascript_source.py
 new file mode 100644
-index 0000000..7717dd1
+index 0000000..9f67419
 --- /dev/null
 +++ b/src/skillspector/javascript_source.py
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,170 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Bounded syntax ownership after a closed JavaScript value/use proof.
@@ -2433,6 +2433,11 @@ index 0000000..7717dd1
 +    def data_literal(self, position: int) -> tuple[int, int] | None:
 +        self._compute()
 +        return self._owner(self._literals, position)
++
++    def analysis_incomplete(self) -> bool:
++        """A missing/bounded parse cannot mean successful empty construction analysis."""
++        self._compute()
++        return self._unsupported is None
 +
 +    def unsupported_values(self) -> tuple[tuple[int, int], ...]:
 +        self._compute()
@@ -2541,10 +2546,10 @@ index 0000000..7717dd1
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..055fd85
+index 0000000..a6a42a6
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1193 @@
+@@ -0,0 +1,1318 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -2593,6 +2598,8 @@ index 0000000..055fd85
 +_FS_PATH_ARGUMENTS = {
 +    "createWriteStream": {0},
 +    "readFile": {0},
++    "readFileSync": {0},
++    "statSync": {0},
 +    "open": {0},
 +    "rename": {0, 1},
 +    "rm": {0},
@@ -2618,7 +2625,11 @@ index 0000000..055fd85
 +    imported = {}
 +    remaining = MAX_PROOF_STEPS
 +    unsupported = []
-+    unsafe_native = any(n.type == "with_statement" for n in nodes)
++    unsafe_native = any(
++        n.type == "with_statement"
++        or (n.type == "method_definition" and any(c.type in {"get", "set"} for c in n.children))
++        for n in nodes
++    )
 +
 +    def step():
 +        nonlocal remaining
@@ -2647,6 +2658,9 @@ index 0000000..055fd85
 +
 +    def field(node, name):
 +        return node.child_by_field_name(name)
++
++    def semantic_children(node):
++        return [child for child in node.named_children if child.type != "comment"]
 +
 +    def const_declaration(node):
 +        p = parent(node)
@@ -2685,7 +2699,10 @@ index 0000000..055fd85
 +
 +    for node in nodes:
 +        step()
-+        if node.type in {"with_statement", "this"}:
++        if node.type in {"with_statement", "this"} or (
++            node.type == "method_definition"
++            and any(c.type in {"get", "set"} for c in node.children)
++        ):
 +            if not opaque_only:
 +                return None
 +        if node.type in {
@@ -2752,6 +2769,8 @@ index 0000000..055fd85
 +                        return None
 +                    for local in local_names:
 +                        definitions[text(local)].append(local)
++                        if supported:
++                            imported[text(local)] = (module, "")
 +                    stack.extend(c for c in child.named_children if c.type != "identifier")
 +                elif child.type != "string":
 +                    stack.extend(child.named_children)
@@ -2773,7 +2792,7 @@ index 0000000..055fd85
 +            if len(defs) != 1:
 +                return None
 +            if name in imported:
-+                return imported[name]
++                return imported[name] if not unsafe_native else None
 +            owner = parent(defs[0])
 +            if (
 +                owner is not None
@@ -2809,8 +2828,8 @@ index 0000000..055fd85
 +            "process.getBuiltinModule",
 +        ):
 +            arguments = field(node, "arguments")
-+            if arguments is not None and len(arguments.named_children) == 1:
-+                module = arguments.named_children[0]
++            if arguments is not None and len(semantic_children(arguments)) == 1:
++                module = semantic_children(arguments)[0]
 +                if module.type == "string" and text(module)[1:-1] in {
 +                    "child_process",
 +                    "node:child_process",
@@ -2904,8 +2923,8 @@ index 0000000..055fd85
 +                    arguments = field(node, "arguments")
 +                    ambient = (
 +                        arguments is not None
-+                        and bool(arguments.named_children)
-+                        and arguments.named_children[0].type
++                        and bool(semantic_children(arguments))
++                        and semantic_children(arguments)[0].type
 +                        in {"arrow_function", "function_expression"}
 +                    )
 +                if not declared_function and native is None and not ambient:
@@ -3053,6 +3072,10 @@ index 0000000..055fd85
 +        visiting = visiting | {initial.id}
 +        if initial.type == "object":
 +            for child in initial.named_children:
++                if child.type not in {"pair", "shorthand_property_identifier", "comment"}:
++                    # Accessors and spreads do not prove ordinary data storage;
++                    # assigning a field can invoke a setter.
++                    return False
 +                if child.type == "pair":
 +                    key = field(child, "key")
 +                    if key is None or "\\" in text(key) or text(key).strip("\"'") == "__proto__":
@@ -3078,15 +3101,6 @@ index 0000000..055fd85
 +        return False
 +
 +    def value_reads(name):
-+        declaration = parent(name)
-+        if declaration is not None and declaration.type == "variable_declarator":
-+            container = parent(declaration)
-+            if (
-+                container is not None
-+                and parent(container) is not None
-+                and parent(container).type == "export_statement"
-+            ):
-+                return []
 +        reads = []
 +        for reference in references[text(name)]:
 +            step()
@@ -3129,7 +3143,9 @@ index 0000000..055fd85
 +            visited.add(node.id)
 +            p = parent(node)
 +            if p is None:
-+                return opaque_only
++                if opaque_only:
++                    continue
++                return False
 +            if p.type in {
 +                "parenthesized_expression",
 +                "await_expression",
@@ -3144,16 +3160,21 @@ index 0000000..055fd85
 +            if p.type == "variable_declarator" and field(p, "value") == node:
 +                name = field(p, "name")
 +                if name is None or name.type != "identifier" or data_definition(name) != name:
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
 +                declaration = parent(p)
 +                if (
 +                    parent(declaration) is not None
 +                    and parent(declaration).type == "export_statement"
++                    and not opaque_only
 +                ):
-+                    return opaque_only
++                    return False
 +                uses = value_reads(name)
 +                if not uses:
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
 +                pending.extend(uses)
 +                continue
 +            if (
@@ -3165,13 +3186,26 @@ index 0000000..055fd85
 +                name = field(p, "left")
 +                definition = data_definition(name)
 +                if definition is None:
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
 +                owner = parent(definition)
 +                if owner is None or owner.type != "variable_declarator":
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
++                declaration = parent(owner)
++                if (
++                    not opaque_only
++                    and parent(declaration) is not None
++                    and parent(declaration).type == "export_statement"
++                ):
++                    return False
 +                uses = value_reads(definition)
 +                if not uses:
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
 +                pending.extend(uses)
 +                continue
 +            if p.type == "assignment_expression" and field(p, "right") == node:
@@ -3186,13 +3220,17 @@ index 0000000..055fd85
 +                        or receiver.type != "identifier"
 +                        or not fresh_record(receiver)
 +                    ):
-+                        return opaque_only
++                        return False
 +                    definition = data_definition(receiver)
 +                    if definition is None:
-+                        return opaque_only
++                        if opaque_only:
++                            continue
++                        return False
 +                    uses = value_reads(definition)
 +                    if not uses:
-+                        return opaque_only
++                        if opaque_only:
++                            continue
++                        return False
 +                    pending.extend(uses)
 +                    continue
 +            if (
@@ -3223,11 +3261,14 @@ index 0000000..055fd85
 +                function = function_scope(p)
 +                name = field(function, "name") if function is not None else None
 +                if function is None or function.type != "function_declaration" or name is None:
-+                    return opaque_only
-+                if parent(function) is not None and parent(function).type == "export_statement":
-+                    return opaque_only
-+                if local_function(name) != function:
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
++                if not opaque_only and (
++                    (parent(function) is not None and parent(function).type == "export_statement")
++                    or local_function(name) != function
++                ):
++                    return False
 +                uses = []
 +                for reference in references[text(name)]:
 +                    if reference.id == name.id:
@@ -3238,22 +3279,43 @@ index 0000000..055fd85
 +                        or owner.type != "call_expression"
 +                        or field(owner, "function") != reference
 +                    ):
-+                        return opaque_only
++                        if opaque_only:
++                            continue
++                        return False
 +                    uses.append(owner)
 +                if not uses:
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
 +                pending.extend(uses)
 +                continue
++            if p.type == "spread_element":
++                if parent(p) is not None and parent(p).type == "arguments":
++                    return False
++                pending.append(p)
++                continue
++            if p.type == "call_expression" and field(p, "arguments") == node:
++                # Tagged templates are actual calls with a template argument,
++                # not unobserved literal results.
++                return False
 +            if p.type != "arguments":
-+                return opaque_only
++                if opaque_only:
++                    continue
++                return False
 +            call = parent(p)
 +            if call is None or call.type not in {"call_expression", "new_expression"}:
-+                return opaque_only
-+            arguments = p.named_children
++                if opaque_only:
++                    continue
++                return False
++            arguments = semantic_children(p)
 +            try:
 +                index = arguments.index(node)
 +            except ValueError:
-+                return opaque_only
++                if opaque_only:
++                    continue
++                return False
++            if any(argument.type == "spread_element" for argument in arguments[:index]):
++                return False
 +            cap = capability(
 +                field(call, "constructor" if call.type == "new_expression" else "function")
 +            )
@@ -3277,21 +3339,28 @@ index 0000000..055fd85
 +            function = local_function(field(call, "function"))
 +            if function is not None:
 +                parameters = field(function, "parameters")
-+                if parameters is None or index >= len(parameters.named_children):
++                if parameters is None:
 +                    return False
-+                parameter = parameters.named_children[index]
++                parameter_nodes = semantic_children(parameters)
++                if index >= len(parameter_nodes):
++                    return False
++                parameter = parameter_nodes[index]
 +                if parameter.type != "identifier":
 +                    return False
 +                uses = value_reads(parameter)
 +                if not uses:
-+                    return opaque_only
++                    if opaque_only:
++                        continue
++                    return False
 +                pending.extend(uses)
 +                continue
 +            if cap == ("ambient", "Error") and call.type == "new_expression" and index == 0:
 +                outer = parent(call)
 +                if outer is not None and outer.type == "throw_statement":
 +                    continue
-+                return opaque_only
++                if opaque_only:
++                    continue
++                return False
 +            if (
 +                cap
 +                in {
@@ -3417,6 +3486,13 @@ index 0000000..055fd85
 +                    value = field(owner, "value")
 +                    if value is not None:
 +                        pending.append(value)
++            if node.type == "ternary_expression":
++                pending.extend(
++                    c
++                    for c in (field(node, "consequence"), field(node, "alternative"))
++                    if c is not None
++                )
++                continue
 +            if node.type == "call_expression":
 +                if authored_value(node):
 +                    return True
@@ -3454,8 +3530,8 @@ index 0000000..055fd85
 +                return (
 +                    arguments is not None
 +                    and arguments.type == "arguments"
-+                    and bool(arguments.named_children)
-+                    and arguments.named_children[0] == p
++                    and bool(semantic_children(arguments))
++                    and semantic_children(arguments)[0] == p
 +                    and function is not None
 +                    and function.type == "identifier"
 +                    and text(function) == "setTimeout"
@@ -3500,8 +3576,8 @@ index 0000000..055fd85
 +            return True
 +        if cap == ("ambient", "Object.assign"):
 +            arguments = field(node, "arguments")
-+            if arguments is not None and arguments.named_children:
-+                target = arguments.named_children[0]
++            if arguments is not None and semantic_children(arguments):
++                target = semantic_children(arguments)[0]
 +                if target.type == "new_expression" and capability(field(target, "constructor")) == (
 +                    "ambient",
 +                    "Error",
@@ -3526,6 +3602,32 @@ index 0000000..055fd85
 +            and text(function) in {"Number", "Boolean", "setTimeout", "clearTimeout"}
 +            and not definitions[text(function)]
 +        )
++
++    def authored_string_constructor(initial):
++        # This is positive source attribution only, never a native identity
++        # proof: replacing a constructor cannot erase its authored input path.
++        pending, seen = [initial], set()
++        while pending:
++            step()
++            node = pending.pop()
++            if node is None or node.id in seen:
++                continue
++            seen.add(node.id)
++            if node.type == "member_expression":
++                member = field(node, "property")
++                if member is not None and text(member) in {"fromCharCode", "fromCodePoint"}:
++                    return True
++            if node.type == "identifier":
++                definition = data_definition(node)
++                if definition is not None:
++                    owner = parent(definition)
++                    if (
++                        owner is not None
++                        and owner.type == "variable_declarator"
++                        and const_declaration(owner)
++                    ):
++                        pending.append(field(owner, "value"))
++        return False
 +
 +    def authored_value(initial):
 +        """Trace source-authored pieces; native file/network contents are external."""
@@ -3566,18 +3668,36 @@ index 0000000..055fd85
 +                continue
 +            if node.type == "call_expression":
 +                function = field(node, "function")
++                cap = capability(function)
 +                arguments = field(node, "arguments")
++                if cap in {
++                    ("ambient", "String.fromCharCode"),
++                    ("ambient", "String.fromCodePoint"),
++                } or authored_string_constructor(function):
++                    return True
++                if cap in {("ambient", "fetch"), ("ambient", "Buffer.alloc")} or (
++                    cap is not None
++                    and cap[0] in {"node:fs", "node:fs/promises"}
++                    and cap[1]
++                    in {"readFile", "readFileSync", "open", "stat", "statSync", "createWriteStream"}
++                ):
++                    continue
 +                if function is not None and function.type == "member_expression":
 +                    member = field(function, "property")
 +                    if member is not None and text(member) in {"fromCharCode", "fromCodePoint"}:
 +                        return True
++                    # A method on authored string/array pieces may synthesize
++                    # source even when its implementation is outside the proof.
++                    pending.append(field(function, "object"))
++                if not opaque_only and arguments is not None:
++                    pending.extend(semantic_children(arguments))
 +                if (
 +                    function is not None
 +                    and function.type == "identifier"
 +                    and text(function) == "String"
 +                ):
 +                    if arguments is not None:
-+                        pending.extend(arguments.named_children)
++                        pending.extend(semantic_children(arguments))
 +                    continue
 +                if function is not None and function.type == "member_expression":
 +                    member = field(function, "property")
@@ -3604,7 +3724,7 @@ index 0000000..055fd85
 +                    }:
 +                        pending.append(field(function, "object"))
 +                        if arguments is not None:
-+                            pending.extend(arguments.named_children)
++                            pending.extend(semantic_children(arguments))
 +                continue
 +            if node.type == "array" and any(c.type == "number" for c in node.named_children):
 +                return True
@@ -3638,7 +3758,16 @@ index 0000000..055fd85
 +                ("ambient", "String"): {"fromCharCode", "fromCodePoint"},
 +            }
 +            if namespace in allowed and name not in allowed[namespace]:
-+                unsafe_native = True
++                if name in {
++                    "getPrototypeOf",
++                    "getOwnPropertyDescriptor",
++                    "getOwnPropertyDescriptors",
++                    "create",
++                    "defineProperty",
++                    "defineProperties",
++                    "setPrototypeOf",
++                }:
++                    unsafe_native = True
 +                if not opaque_only:
 +                    return None
 +        if node.type in {
@@ -3669,14 +3798,15 @@ index 0000000..055fd85
 +            "Object.assign",
 +        ):
 +            arguments = field(node, "arguments")
-+            if arguments is None or not arguments.named_children:
++            if arguments is None or not semantic_children(arguments):
 +                if not opaque_only:
 +                    return None
-+            target = arguments.named_children[0]
++            target = semantic_children(arguments)[0]
 +            native_error = target.type == "new_expression" and capability(
 +                field(target, "constructor")
 +            ) == ("ambient", "Error")
 +            if not native_error and not fresh_record(target):
++                unsafe_native = True
 +                if not opaque_only:
 +                    return None
 +
@@ -3710,8 +3840,8 @@ index 0000000..055fd85
 +                arguments = field(node, "arguments")
 +                if (
 +                    arguments is None
-+                    or not arguments.named_children
-+                    or arguments.named_children[0].type != "string"
++                    or not semantic_children(arguments)
++                    or semantic_children(arguments)[0].type != "string"
 +                ):
 +                    unsupported.append((node.start_byte, node.end_byte))
 +                continue

@@ -281,6 +281,19 @@ _EXECUTABLE_BOUNDARIES = [
     r"function f(\u0066etch, tool, flags) {fetch(`${tool}${flags} /`);}",
     'const parts=process.argv.slice(2); process.getBuiltinModule("child_process").exec(parts.join(" "));',
     r"function f(run, cmd, flags) {const f\u0065tch=run; fetch(`${cmd}${flags} /`);}",
+    "function f(cmd,url){obj.run(cmd);fetch(url)} f(...[], `${a}${b}`);",
+    'function f(cmd,url){obj.run(cmd);fetch(url)} f(/*comment*/ `${a}${b}`, "https://example.com");',
+    'function f(run){Object.assign(this,{fetch:run});fetch(String.fromCharCode(114,109,32,45,114,102,32,47));} f(process.getBuiltinModule("child_process").execSync);',
+    'import {execSync} from "node:child_process"; const encode=String.fromCharCode; execSync(encode(114,109,32,45,114,102,32,47));',
+    'import {execSync} from "node:child_process"; export const cmd=String.fromCharCode(114,109,32,45,114,102,32,47); execSync(cmd);',
+    "const cmd=String.fromCharCode(114,109,32,45,114,102,32,47); export {cmd}; obj.run(cmd);",
+    "const record={set text(value){obj.run(value);}}; record.text=`${cmd}${flags} /`; process.stdout.write(JSON.stringify(record));",
+    "function record(){return {set text(value){obj.run(value);}};} const target=record(); target.text=`${cmd}${flags} /`; process.stdout.write(JSON.stringify(target));",
+    'const record={}; const proto={set text(value){obj.run(value);}}; const key="__proto__"; record[key]=proto; record.text=`${cmd}${flags} /`; process.stdout.write(JSON.stringify(record));',
+    'const cmd=["rm", " -r", "f /home/"].reduce((a,b)=>a+b); obj.run(cmd);',
+    "obj.run`${cmd}${flags} /`;",
+    'function f(run){const encode=String.fromCharCode; Object.assign(this,{fetch:run}); fetch(encode(114,109,32,45,114,102,32,47));} f(process.getBuiltinModule("child_process").execSync);',
+    'import fs from "node:fs"; fs.open=run; fs.open(`${cmd}${flags} /`);',
 ]
 
 
@@ -349,3 +362,44 @@ def test_unsupported_import_fallback_never_grants_comment_or_literal_ownership(s
         owner.comment(index) is None and owner.data_literal(index) is None
         for index in range(len(source))
     )
+
+
+@pytest.mark.parametrize(
+    "module,constant,limit",
+    [
+        ("javascript_source", "MAX_SOURCE_BYTES", 8),
+        ("javascript_source", "MAX_NODES", 2),
+        ("javascript_source", "MAX_DEPTH", 2),
+        ("javascript_values", "MAX_PROOF_STEPS", 2),
+    ],
+)
+def test_constructed_execution_bounds_are_incomplete_without_a_shell_tail(
+    monkeypatch, module, constant, limit
+):
+    import importlib
+
+    monkeypatch.setattr(
+        importlib.import_module("skillspector." + module), constant, limit
+    )
+    row = ledger("obj.run(String.fromCharCode(114,109,32,45,114,102,32,47));")[
+        "inspection_ledger"
+    ][0]
+    assert row["outcome"] == LedgerOutcome.PARTIAL
+    assert row["reason_code"] == LedgerReason.STATIC_PARSE_LIMIT
+
+
+def test_source_padding_cannot_remove_constructed_execution_limitation():
+    from skillspector.javascript_source import MAX_SOURCE_BYTES
+
+    source = "obj.run(String.fromCharCode(114,109,32,45,114,102,32,47));"
+    assert tm.has_opaque_constructed_values(
+        source, lambda: None, file_type="javascript"
+    )
+    assert tm.has_bounded_parse_exhaustion(
+        source + "\n" * MAX_SOURCE_BYTES, lambda: None, file_type="javascript"
+    )
+
+
+def test_comment_nodes_do_not_change_safe_native_parameter_positions():
+    source = "function output(/*comment*/ message) {process.stdout.write(message);} output(/*comment*/ `hello ${name}`);"
+    assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.COMPLETED
