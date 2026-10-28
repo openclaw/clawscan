@@ -36,7 +36,7 @@ def test_osv_inspects_large_advisory_sets_under_aggregate_caps(monkeypatch, coun
     assert len(result[0]) == min(count, 256)
     assert result[0][-1].vuln_id == f"GENERATED-{min(count, 256) - 1}"
     assert result[0][-1].severity == "CRITICAL"
-    assert budget.detail_requests == (1 if count <= 256 else 256)
+    assert budget.detail_requests == 1
     assert budget.results_retained == min(count, 256)
     if count > 256:
         assert any(item.reason is osv.LedgerReason.OUTPUT_LIMIT for item in result.limitations)
@@ -856,7 +856,7 @@ def test_full_query_preserves_aggregate_budgets(monkeypatch, cap):
     assert budget.results_retained <= budget.max_results
     assert budget.response_bytes <= budget.max_response_bytes
     assert budget.detail_requests <= budget.max_detail_requests
-    assert len(requests) == (1 if cap in ("results", "requests") else 2)
+    assert len(requests) == (1 if cap == "requests" else 2)
     assert not osv._cache
 
 
