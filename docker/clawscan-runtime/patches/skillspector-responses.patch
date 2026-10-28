@@ -1075,8 +1075,8 @@ index 7fc577c..c620345 100644
          return None
 -    return list(results[:MAX_OSV_VULNS_PER_PACKAGE])
 +    return list(results)
- 
- 
+
+
  def _put_cache(key: tuple[str, str | None, str], results: list[VulnResult]) -> None:
      # The cache is process-global, so keep both its keys and values bounded.
 +    if len(results) > MAX_OSV_CACHE_RESULTS_PER_ENTRY:
@@ -1086,8 +1086,8 @@ index 7fc577c..c620345 100644
          del _cache[next(iter(_cache))]
 -    _cache[key] = (time.monotonic(), list(results[:MAX_OSV_VULNS_PER_PACKAGE]))
 +    _cache[key] = (time.monotonic(), list(results))
- 
- 
+
+
  def clear_cache() -> None:
 @@ -481,6 +534,81 @@ def _request_json_bounded(
      raise ValueError("OSV response was unavailable")
@@ -1272,10 +1272,9 @@ index bb21ad0..d703b4b 100644
  [project.optional-dependencies]
 diff --git a/src/skillspector/markdown_tokens.py b/src/skillspector/markdown_tokens.py
 new file mode 100644
-index 0000000..2ac53a8
 --- /dev/null
 +++ b/src/skillspector/markdown_tokens.py
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,256 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Conservative raw-source ownership for CommonMark inline code delimiters."""
@@ -1285,6 +1284,59 @@ index 0000000..2ac53a8
 +
 +from markdown_it import MarkdownIt
 +from markdown_it.rules_inline.backticks import backtick
++from markdown_it.token import Token
++
++
++def _table_inline_origins(
++    content: str,
++    blocks: list[Token],
++    starts: list[int],
++    check_runtime: Callable[[], None],
++) -> dict[int, int]:
++    """Map only complete, verbatim canonical rows to their exact source cells."""
++    origins: dict[int, int] = {}
++    table_depth = 0
++    row_map: list[int] | None = None
++    row_blocks: list[Token] = []
++    for block in blocks:
++        check_runtime()
++        if block.type == "table_open":
++            table_depth += 1
++        elif block.type == "table_close":
++            table_depth -= 1
++        elif table_depth and block.type == "tr_open":
++            row_map, row_blocks = block.map, []
++        elif table_depth and block.type == "inline":
++            row_blocks.append(block)
++        elif table_depth and block.type == "tr_close":
++            if not row_map or row_map[1] != row_map[0] + 1 or row_map[1] >= len(starts):
++                continue
++            start, end = starts[row_map[0]], starts[row_map[1]]
++            line = content[start:end].removesuffix("\n")
++            # The canonical table extension unescapes pipes in cell source.
++            # Such rows require a richer source map; preserve the fallback.
++            if "\\|" in line:
++                continue
++            cells: list[tuple[str, int]] = []
++            cursor = 0
++            for raw in line.split("|"):
++                check_runtime()
++                cells.append((raw.strip(), start + cursor + len(raw) - len(raw.lstrip())))
++                cursor += len(raw) + 1
++            if cells and not cells[0][0]:
++                cells.pop(0)
++            if cells and not cells[-1][0]:
++                cells.pop()
++            # No virtual padding, discarded extra cells or container prefixes
++            # can establish ownership. Every cell must map in source order.
++            if len(cells) != len(row_blocks) or any(
++                text != inline.content for (text, _), inline in zip(cells, row_blocks, strict=True)
++            ):
++                continue
++            origins.update(
++                (id(inline), origin) for (_, origin), inline in zip(cells, row_blocks, strict=True)
++            )
++    return origins
 +
 +
 +class MarkdownCodeSpanClosers:
@@ -1293,7 +1345,8 @@ index 0000000..2ac53a8
 +    A block's inline source must map uniquely and verbatim to the original
 +    text. Containers that remove prefixes from continuation lines, escaped
 +    delimiters, uncertain mappings and oversized documents grant no ownership.
-+    Tables, fenced/indented code and raw HTML never grant inline ownership.
++    Optional table ownership maps every canonical cell verbatim and in source order.
++    Fenced/indented code and raw HTML never grant inline ownership.
 +    """
 +
 +    def __init__(
@@ -1302,6 +1355,7 @@ index 0000000..2ac53a8
 +        check_runtime: Callable[[], None],
 +        *,
 +        excluded_ranges: tuple[tuple[int, int], ...] = (),
++        include_tables: bool = False,
 +    ):
 +        self._closers: set[int] = set()
 +        self._delimiters: set[int] = set()
@@ -1428,6 +1482,9 @@ index 0000000..2ac53a8
 +        # CommonMark line maps count only normalized LF, not Unicode line
 +        # separators that str.splitlines() would also treat as boundaries.
 +        starts = [0, *(i + 1 for i, char in enumerate(content) if char == "\n"), len(content)]
++        table_origins = (
++            _table_inline_origins(content, blocks, starts, check_runtime) if include_tables else {}
++        )
 +        table_depth = 0
 +        for block in blocks:
 +            check_runtime()
@@ -1435,9 +1492,7 @@ index 0000000..2ac53a8
 +                table_depth += 1
 +            elif block.type == "table_close":
 +                table_depth -= 1
-+            # Table cells unescape pipes and share a whole-row map. A substring
-+            # elsewhere in that row is not proof of this cell's raw origin.
-+            if table_depth or block.type == "table_close":
++            if block.type == "table_close":
 +                continue
 +            if block.type != "inline" or not block.map or not block.content:
 +                continue
@@ -1452,9 +1507,14 @@ index 0000000..2ac53a8
 +                for excluded_start, excluded_end in excluded_ranges
 +            ):
 +                continue
-+            origin = content.find(block.content, start, end)
-+            if origin < 0 or content.find(block.content, origin + 1, end) >= 0:
-+                continue
++            if table_depth:
++                origin = table_origins.get(id(block))
++                if origin is None:
++                    continue
++            else:
++                origin = content.find(block.content, start, end)
++                if origin < 0 or content.find(block.content, origin + 1, end) >= 0:
++                    continue
 +            record = records.get(id(block.content))
 +            if record is None or record[0] is not block.content:
 +                continue
@@ -1472,7 +1532,7 @@ index 0000000..2ac53a8
 +        """Return proven inline delimiters, preserving every byte inside them."""
 +        return frozenset(self._delimiters)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
-index 3095bc3..a3cadb4 100644
+index 3095bc3..769daf8 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
 +++ b/src/skillspector/nodes/analyzers/static_runner.py
 @@ -36,8 +36,10 @@ from typing import cast
@@ -1533,7 +1593,7 @@ index 3095bc3..a3cadb4 100644
 -        PythonStringClosers(content, check_runtime) if _infer_file_type(path) == "python" else None
 +        PythonStringClosers(content, check_runtime)
 +        if _infer_file_type(path) == "python"
-+        else MarkdownCodeSpanClosers(content, check_runtime)
++        else MarkdownCodeSpanClosers(content, check_runtime, include_tables=True)
 +        if _infer_file_type(path) == "markdown" and complete_context
 +        else None
      )
@@ -1693,7 +1753,7 @@ index 74c304a..b8bc498 100644
 @@ -485,7 +485,7 @@ class TestQueryResourceBounds:
      def test_truncated_provider_result_is_not_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
          import skillspector.nodes.analyzers.osv_client as osv
- 
+
 -        monkeypatch.setattr(osv, "MAX_OSV_VULNS_PER_PACKAGE", 1)
 +        monkeypatch.setattr(osv, "MAX_OSV_RESULTS", 1)
          batch = {"results": [{"vulns": [{"id": "OSV-1"}, {"id": "OSV-2"}]}]}
