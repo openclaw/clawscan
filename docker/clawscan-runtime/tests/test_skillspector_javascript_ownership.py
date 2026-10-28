@@ -523,3 +523,43 @@ def test_error_callback_boundaries_cannot_hide_authored_error_escapes(consumer, 
     row = ledger(source)["inspection_ledger"][0]
     assert row["outcome"] == LedgerOutcome.PARTIAL
     assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "async function read(){throw new Error(`${cmd}${flags} /`);} read().catch(err=>{obj.save(()=>{throw err;});});",
+        "async function read(){throw new Error(`${cmd}${flags} /`);} read().catch(err=>{obj.save(function(){throw err;});});",
+        "function fail(){throw new Error(`${cmd}${flags} /`);} async function read(){throw 0;} read().catch(err=>{class Carrier{value=fail();} obj.take(Carrier);});",
+        "function fail(){throw new Error(`${cmd}${flags} /`);} async function read(){throw 0;} read().catch(err=>{obj.take(class {value=fail();});});",
+    ],
+)
+@pytest.mark.parametrize("tail", ["", "\n" + TAIL], ids=["short", "long"])
+def test_captured_error_and_deferred_class_scopes_refuse_ownership(statement, tail):
+    from skillspector.javascript_source import JavaScriptSourceOwnership
+
+    source = statement + tail
+    owner = JavaScriptSourceOwnership(source, lambda: None)
+    assert owner.data_literal(source.index("`")) is None
+    assert any(
+        source[start:end] == "`${cmd}${flags} /`"
+        for start, end in owner.unsupported_values()
+    )
+    row = ledger(source)["inspection_ledger"][0]
+    assert row["outcome"] == LedgerOutcome.PARTIAL
+    assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        "function(error){process.stderr.write(error.message);}",
+        "async error=>{process.stderr.write(error.message);}",
+        "()=>{}",
+    ],
+)
+def test_only_synchronous_single_parameter_arrow_error_handlers_are_supported(handler):
+    source = "async function read(){throw new Error(`${cmd}${flags} /`);} read().catch(" + handler + ");"
+    row = ledger(source)["inspection_ledger"][0]
+    assert row["outcome"] == LedgerOutcome.PARTIAL
+    assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT

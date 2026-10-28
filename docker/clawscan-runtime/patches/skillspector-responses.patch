@@ -4236,10 +4236,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..3105d6d
+index 0000000..1069306
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1653 @@
+@@ -0,0 +1,1657 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -5090,6 +5090,7 @@ index 0000000..3105d6d
 +                and node.type == "identifier"
 +                and data_definition(node) is not None
 +                and data_definition(node).id in error_binding_ids
++                and function_scope(node) == function_scope(data_definition(node))
 +            ):
 +                # Preserve only the same Error object. Every possible local
 +                # handler read is still checked by the outer overapproximation.
@@ -5440,7 +5441,9 @@ index 0000000..3105d6d
 +        handlers, callbacks = [], set()
 +        for node in nodes:
 +            step()
-+            if node.type == "export_statement":
++            if node.type in {"export_statement", "class", "class_declaration", "field_definition"}:
++                # Class initializers have implicit execution frames outside
++                # this deliberately shallow Error source-admission boundary.
 +                error_handler_result = False
 +                return False
 +            if node.type == "catch_clause":
@@ -5471,7 +5474,7 @@ index 0000000..3105d6d
 +                return False
 +            arguments = field(call, "arguments")
 +            args = semantic_children(arguments) if arguments is not None else []
-+            if len(args) != 1 or args[0].type not in {"arrow_function", "function_expression"}:
++            if len(args) != 1 or args[0].type != "arrow_function":
 +                error_handler_result = False
 +                return False
 +            receiver = field(node, "object")
@@ -5495,8 +5498,8 @@ index 0000000..3105d6d
 +                error_handler_result = False
 +                return False
 +            callback = args[0]
-+            if field(callback, "name") is not None:
-+                # A named expression can export its callable self-binding.
++            if any(child.type == "async" for child in callback.children):
++                # Only synchronous, directly checked arrow handlers are owned.
 +                error_handler_result = False
 +                return False
 +            callbacks.add(callback.id)
@@ -5508,7 +5511,7 @@ index 0000000..3105d6d
 +            params = semantic_children(parameters) if parameters is not None else []
 +            if parameter is not None:
 +                params.append(parameter)
-+            if len(params) > 1 or any(p.type != "identifier" for p in params):
++            if len(params) != 1 or any(p.type != "identifier" for p in params):
 +                error_handler_result = False
 +                return False
 +            handlers.extend(params)
@@ -5559,7 +5562,8 @@ index 0000000..3105d6d
 +        error_handler_active = True
 +        try:
 +            error_handler_result = all(
-+                is_data(reference)
++                function_scope(reference) == function_scope(parameter)
++                and is_data(reference)
 +                for parameter in handlers
 +                for reference in value_reads(parameter)
 +            )
