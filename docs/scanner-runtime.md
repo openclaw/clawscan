@@ -150,6 +150,16 @@ do not represent missing bundled bytes or require a reference ledger exception.
 Reports with archive/transitive provenance or suppression are not eligible for
 this exception. Exit codes above 1 remain failures.
 
+Canonical PCM WAVE assets may use the same explicit binary-exclusion accounting
+when the installed producer supplies validated `riff_wave_pcm_v1` structural
+evidence from the complete original bytes. Only a visible, non-executable `.wav`
+with exact RIFF/WAVE headers, a PCM `fmt ` chunk and a frame-aligned `data` chunk
+qualifies; extra chunks, trailers, unknown codecs and incomplete inputs fail
+closed. The consumer rechecks the proof's fields, sizes and arithmetic against
+the component. Integrity and YARA still cover the asset; static-pattern and
+semantic analyzers retain their explicit binary exclusion. This adds no text
+inspection or semantic-completion claim.
+
 Operational completion is not clean analysis or publication approval. Raw
 `is_complete: false`, `status: partial`, recommendations, findings and every
 exception remain unchanged. The ClawHub judge projection keeps its conservative

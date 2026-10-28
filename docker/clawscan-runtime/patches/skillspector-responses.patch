@@ -695,7 +695,7 @@ index 4878677..362af86 100644
  name = "trove-classifiers"
  version = "2026.6.1.19"
 diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
-index 15b9b4c..5a4be87 100644
+index 15b9b4c..f8ac47c 100644
 --- a/src/skillspector/nodes/build_context.py
 +++ b/src/skillspector/nodes/build_context.py
 @@ -44,6 +44,7 @@ from skillspector.artifacts import (
@@ -706,9 +706,32 @@ index 15b9b4c..5a4be87 100644
      decode_text,
      promote_artifact_to_decoded_text,
  )
-@@ -2448,7 +2449,14 @@ def _project_manifest(
+@@ -78,6 +79,7 @@ from skillspector.nested_artifacts import (
+     is_zip_content,
+ )
+ from skillspector.oms import project_oms_content
++from skillspector.passive_audio import passive_wave_component, passive_wave_evidence
+ from skillspector.python_ast import (
+     PythonSourceClassification,
+     classify_python_source,
+@@ -1082,6 +1084,14 @@ def _build_component_metadata(
+             elif executable:
+                 component["concealed_executable"] = False
+                 component["hidden_skill_script_llm_review_withheld"] = True
++        if (
++            passive_wave_component(component)
++            and len(data) == size_bytes
++            and classify_artifact(path, data)["content_kind"] is ContentKind.BINARY
++        ):
++            evidence = passive_wave_evidence(data)
++            if evidence is not None:
++                component["passive_binary"] = evidence
+         metadata.append(component)
+         if _expired(path):
+             break
+@@ -2448,7 +2458,14 @@ def _project_manifest(
          manifest["version"] = _scalar_text(version)
-
+ 
      manifest["triggers"] = _string_list(data.get("triggers", []))
 -    manifest["permissions"] = _string_list(data.get("permissions", []))
 +    permissions = data.get("permissions", [])
@@ -722,19 +745,19 @@ index 15b9b4c..5a4be87 100644
      # `allowed-tools` (Agent Skills standard) — accept list, comma string, or space-separated string.
      # Separators inside a `Tool(specifier)` scope belong to the scope, so
      # `Bash(git status:*) Read` stays two grants.
-@@ -2496,7 +2504,7 @@ def _parse_manifest(
+@@ -2496,7 +2513,7 @@ def _parse_manifest(
      """Parse SKILL.md or skill.md YAML frontmatter into a manifest dict.
-
+ 
      Returns dict with name, description, version, triggers (list), permissions
 -    (list), allowed-tools (list), parameters (list). Returns {} if no file or
 +    (list or mapping), allowed-tools (list), parameters (list). Returns {} if no file or
      parse fails.
      Parsing is restricted to a bounded byte prefix, including for direct helper
      callers that do not provide the bundle's already-bounded raw cache.
-@@ -3651,6 +3659,67 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+@@ -3651,6 +3668,67 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
              )
          )
-
+ 
 +    # Decode only a structurally validated passive PDF subset. Unknown/active
 +    # content retains an explicit incomplete interpretation. Original bytes stay
 +    # in raw_file_cache; the canonical single-line view carries its byte digest.
@@ -799,7 +822,7 @@ index 15b9b4c..5a4be87 100644
      # Python's successful source decode takes precedence over a magic prefix.
      for artifact in artifact_inventory:
          path = artifact["path"]
-@@ -3969,6 +4038,7 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+@@ -3969,6 +4047,7 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
          ),
          "ast_cache": {},
          "python_ast_cache_key": python_ast_cache_key,
@@ -7661,3 +7684,387 @@ index 0000000..6d72c32
 +        assert tool.has_bounded_parse_exhaustion(
 +            source, lambda: None, file_type="markdown", complete_context=False
 +        )
+diff --git a/src/skillspector/nodes/report.py b/src/skillspector/nodes/report.py
+index 3d7a594..64a34a7 100644
+--- a/src/skillspector/nodes/report.py
++++ b/src/skillspector/nodes/report.py
+@@ -56,6 +56,7 @@ from skillspector.models import (
+ )
+ from skillspector.nodes.analyzers import ANALYZER_MODULES
+ from skillspector.nodes.deduplicate import deduplicate
++from skillspector.passive_audio import passive_wave_component, validated_wave_evidence
+ from skillspector.python_ast import clear_python_ast_cache
+ from skillspector.sarif_models import (
+     SARIF_SCHEMA_URI,
+@@ -1468,6 +1469,10 @@ def _json_component(component: Mapping[str, object]) -> dict[str, object]:
+             "source_digest",
+         )
+     }
++    if passive_wave_component(component):
++        evidence = validated_wave_evidence(component.get("passive_binary"), component.get("size_bytes"))
++        if evidence is not None:
++            result["passive_binary"] = evidence
+     outer_path = component.get("outer_path")
+     nested_path = component.get("nested_path")
+     if (
+diff --git a/src/skillspector/passive_audio.py b/src/skillspector/passive_audio.py
+new file mode 100644
+index 0000000..8c4a530
+--- /dev/null
++++ b/src/skillspector/passive_audio.py
+@@ -0,0 +1,123 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++
++"""Exact structural evidence for a narrow, passive PCM WAVE carrier.
++
++This evidence describes binary exclusion; it never claims text/semantic inspection.
++Unknown chunks and codecs remain unsupported rather than receiving an exemption.
++"""
++
++from __future__ import annotations
++
++import struct
++from collections.abc import Mapping
++from pathlib import PurePosixPath
++
++_FIELDS = frozenset(
++    {
++        "format",
++        "channels",
++        "sample_rate",
++        "bits_per_sample",
++        "block_align",
++        "byte_rate",
++        "data_bytes",
++        "frames",
++        "container_bytes",
++    }
++)
++
++
++def validated_wave_evidence(value: object, size_bytes: object) -> dict[str, object] | None:
++    """Validate the entire versioned wire contract, including integer arithmetic."""
++    if not isinstance(value, Mapping) or set(value) != _FIELDS:
++        return None
++    if value["format"] != "riff_wave_pcm_v1":
++        return None
++    if type(size_bytes) is not int or not 44 < size_bytes <= 0xFFFFFFFF + 8:
++        return None
++    if any(type(value[key]) is not int for key in _FIELDS - {"format"}):
++        return None
++    channels = value["channels"]
++    rate = value["sample_rate"]
++    bits = value["bits_per_sample"]
++    if not 1 <= channels <= 8 or not 1 <= rate <= 384000 or bits not in (8, 16, 24, 32):
++        return None
++    block = channels * (bits // 8)
++    length = value["data_bytes"]
++    if not 0 < length <= 0xFFFFFFFF or length % block:
++        return None
++    if (
++        value["block_align"] != block
++        or value["byte_rate"] != rate * block
++        or value["frames"] != length // block
++        or value["container_bytes"] != size_bytes
++        or size_bytes != 44 + length + length % 2
++    ):
++        return None
++    return dict(value)
++
++
++def passive_wave_component(component: Mapping[str, object]) -> bool:
++    """Restrict evidence to visible, top-level, non-executable binary assets."""
++    path = component.get("path")
++    if not isinstance(path, str) or not path or "\\" in path or "!/" in path or "\x00" in path:
++        return False
++    parts = path.split("/")
++    if any(not part or part.startswith(".") for part in parts):
++        return False
++    if PurePosixPath(path).suffix.lower() != ".wav":
++        return False
++    return (
++        component.get("type") == "other"
++        and component.get("executable") is False
++        and type(component.get("lines")) is int
++        and component["lines"] >= 0
++        and not any(
++            component.get(key)
++            for key in (
++                "hidden",
++                "local_only",
++                "hidden_ancestor",
++                "source_local_only",
++                "outer_path",
++                "nested_path",
++                "container_type",
++                "container_ancestry",
++                "container_depth",
++                "concealed_executable",
++            )
++        )
++    )
++
++
++def passive_wave_evidence(data: bytes) -> dict[str, object] | None:
++    """Prove complete RIFF/WAVE, canonical fmt(PCM) + data, with no trailer."""
++    if len(data) <= 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
++        return None
++    if data[12:16] != b"fmt " or data[36:40] != b"data":
++        return None
++    (container,) = struct.unpack_from("<I", data, 4)
++    fmt_size, codec, channels, rate, byte_rate, block, bits = struct.unpack_from(
++        "<IHHIIHH", data, 16
++    )
++    (length,) = struct.unpack_from("<I", data, 40)
++    if container != len(data) - 8 or fmt_size != 16 or codec != 1:
++        return None
++    evidence = validated_wave_evidence(
++        {
++            "format": "riff_wave_pcm_v1",
++            "channels": channels,
++            "sample_rate": rate,
++            "bits_per_sample": bits,
++            "block_align": block,
++            "byte_rate": byte_rate,
++            "data_bytes": length,
++            "frames": length // block if block else 0,
++            "container_bytes": len(data),
++        },
++        len(data),
++    )
++    if evidence is None or (length % 2 and data[-1:] != b"\x00"):
++        return None
++    return evidence
+diff --git a/tests/nodes/test_passive_wave_evidence.py b/tests/nodes/test_passive_wave_evidence.py
+new file mode 100644
+index 0000000..8a96468
+--- /dev/null
++++ b/tests/nodes/test_passive_wave_evidence.py
+@@ -0,0 +1,226 @@
++"""Native PCM evidence remains tied to complete non-executable source bytes."""
++
++import struct
++
++import pytest
++
++from skillspector.nodes.build_context import _build_component_metadata
++from skillspector.nodes.report import _json_component
++
++
++def wave_bytes(*, channels=1, rate=44100, bits=16, payload=None, codec=1):
++    block = channels * (bits // 8)
++    payload = b"\x00" * max(block * 3, 1) if payload is None else payload
++    padding = b"\x00" if len(payload) % 2 else b""
++    body = (
++        struct.pack(
++            "<4sIHHIIHH4sI",
++            b"fmt ",
++            16,
++            codec,
++            channels,
++            rate,
++            rate * block,
++            block,
++            bits,
++            b"data",
++            len(payload),
++        )
++        + payload
++        + padding
++    )
++    return b"RIFF" + struct.pack("<I", len(body) + 4) + b"WAVE" + body
++
++
++def metadata(tmp_path, raw, *, name="assets/bark.wav", mode=0o644, cached=None):
++    target = tmp_path / name
++    target.parent.mkdir(parents=True, exist_ok=True)
++    target.write_bytes(raw)
++    target.chmod(mode)
++    rows, _ = _build_component_metadata(
++        tmp_path, [name], {}, {name: raw if cached is None else cached}
++    )
++    return rows[0]
++
++
++@pytest.mark.parametrize("channels,bits,size", [(1, 8, 3), (1, 16, 6), (2, 24, 18), (8, 32, 96)])
++def test_complete_pcm_evidence_survives_json_report(tmp_path, channels, bits, size):
++    raw = wave_bytes(channels=channels, bits=bits, payload=b"\x00" * size)
++    original = bytes(raw)
++    row = metadata(tmp_path, raw)
++    evidence = row.get("passive_binary")
++    assert evidence == {
++        "format": "riff_wave_pcm_v1",
++        "channels": channels,
++        "sample_rate": 44100,
++        "bits_per_sample": bits,
++        "block_align": channels * (bits // 8),
++        "byte_rate": 44100 * channels * (bits // 8),
++        "data_bytes": size,
++        "frames": size // (channels * (bits // 8)),
++        "container_bytes": len(raw),
++    }
++    assert _json_component(row)["passive_binary"] == evidence
++    assert row["type"] == "other" and row["executable"] is False and row["lines"] == 0
++    assert raw == original and (tmp_path / "assets/bark.wav").read_bytes() == original
++
++
++def mutate(raw, offset, value):
++    return raw[:offset] + value + raw[offset + len(value) :]
++
++
++@pytest.mark.parametrize(
++    "change",
++    [
++        lambda b: mutate(b, 0, b"RIFX"),
++        lambda b: mutate(b, 0, b"RF64"),
++        lambda b: mutate(b, 4, struct.pack("<I", len(b))),
++        lambda b: mutate(b, 8, b"AVI "),
++        lambda b: mutate(b, 12, b"LIST"),
++        lambda b: mutate(b, 16, struct.pack("<I", 18)),
++        lambda b: mutate(b, 20, struct.pack("<H", 3)),
++        lambda b: mutate(b, 22, struct.pack("<H", 0)),
++        lambda b: mutate(b, 22, struct.pack("<H", 9)),
++        lambda b: mutate(b, 24, struct.pack("<I", 0)),
++        lambda b: mutate(b, 24, struct.pack("<I", 384001)),
++        lambda b: mutate(b, 28, struct.pack("<I", 1)),
++        lambda b: mutate(b, 32, struct.pack("<H", 1)),
++        lambda b: mutate(b, 34, struct.pack("<H", 64)),
++        lambda b: mutate(b, 36, b"JUNK"),
++        lambda b: mutate(b, 40, struct.pack("<I", 0)),
++        lambda b: mutate(b, 40, struct.pack("<I", 3)),
++        lambda b: b[:-1],
++        lambda b: b + b"\x00",  # Unaccounted trailer.
++        lambda b: mutate(b, 4, struct.pack("<I", len(b) + 8)) + b"LIST\x00\x00\x00\x00",
++        lambda b: b"\x7fELF" + b[4:],
++        lambda b: b"MZ" + b[2:],
++        lambda b: b"#!/bin/sh\n" + b,
++        lambda b: b"\xa7\x0d\x0d\x0a" + b[4:],
++    ],
++)
++def test_unknown_or_executable_carriers_receive_no_pcm_evidence(tmp_path, change):
++    assert "passive_binary" not in metadata(tmp_path, change(wave_bytes()))
++
++
++@pytest.mark.parametrize(
++    "mode,cached,name",
++    [
++        (0o755, None, "assets/bark.wav"),
++        (0o644, b"RIFF", "assets/bark.wav"),
++        (0o644, b"", "assets/bark.wav"),
++        (0o644, None, "assets/bark.bin"),
++        (0o644, None, "assets/bark.wav.py"),
++    ],
++)
++def test_proof_requires_complete_passive_named_source(tmp_path, mode, cached, name):
++    assert "passive_binary" not in metadata(
++        tmp_path, wave_bytes(), mode=mode, cached=cached, name=name
++    )
++
++
++def test_noncanonical_padding_receives_no_pcm_evidence(tmp_path):
++    raw = wave_bytes(bits=8, payload=b"\x80" * 3)
++    assert "passive_binary" not in metadata(tmp_path, raw[:-1] + b"x")
++
++
++@pytest.mark.parametrize(
++    "field,value",
++    [
++        ("format", "safe"),
++        ("channels", True),
++        ("sample_rate", 0),
++        ("bits_per_sample", 64),
++        ("block_align", 1),
++        ("byte_rate", 1),
++        ("data_bytes", 0),
++        ("frames", 0),
++        ("container_bytes", 1),
++        ("extra", "unsupported"),
++    ],
++)
++def test_report_does_not_forward_invalid_pcm_claims(tmp_path, field, value):
++    row = metadata(tmp_path, wave_bytes())
++    assert row.get("passive_binary") is not None
++    row["passive_binary"] = {**row["passive_binary"], field: value}
++    assert "passive_binary" not in _json_component(row)
++
++
++@pytest.mark.parametrize(
++    "field",
++    [
++        "channels",
++        "sample_rate",
++        "bits_per_sample",
++        "block_align",
++        "byte_rate",
++        "data_bytes",
++        "frames",
++        "container_bytes",
++    ],
++)
++@pytest.mark.parametrize("value", [True, False, None, "1", 1.5, -1])
++def test_report_rejects_noninteger_or_negative_counts(tmp_path, field, value):
++    row = metadata(tmp_path, wave_bytes())
++    row["passive_binary"][field] = value
++    assert "passive_binary" not in _json_component(row)
++
++
++@pytest.mark.parametrize(
++    "field,value",
++    [
++        ("path", "assets/bark.bin"),
++        ("path", ".private/bark.wav"),
++        ("path", "bundle.zip!/bark.wav"),
++        ("path", "assets/../bark.wav"),
++        ("type", "python"),
++        ("executable", True),
++        ("lines", -1),
++        ("local_only", True),
++        ("hidden", True),
++        ("source_local_only", True),
++        ("outer_path", "bundle.zip"),
++        ("container_depth", 1),
++    ],
++)
++def test_report_rejects_proof_attached_to_ineligible_component(tmp_path, field, value):
++    row = metadata(tmp_path, wave_bytes())
++    row[field] = value
++    assert "passive_binary" not in _json_component(row)
++
++
++def test_all_truncated_canonical_inputs_remain_unproved(tmp_path):
++    raw = wave_bytes()
++    for length in range(len(raw)):
++        assert "passive_binary" not in metadata(tmp_path, raw[:length])
++
++
++@pytest.mark.parametrize("name", [".private/bark.wav", "bundle.zip!/bark.wav"])
++def test_builder_omits_hidden_and_nested_proof(tmp_path, name):
++    assert "passive_binary" not in metadata(tmp_path, wave_bytes(), name=name)
++
++
++def test_normal_build_context_retains_decoded_cache_counts_and_pcm_proof(tmp_path):
++    from skillspector.artifacts import ContentKind, decode_text
++    from skillspector.nodes.build_context import build_context
++
++    (tmp_path / "SKILL.md").write_text(
++        "---\nname: pcm-fixture\ndescription: sound asset\n---\n# Sound\n"
++    )
++    raw = wave_bytes(payload=b"\xff\n" * 12)
++    asset = tmp_path / "assets/bark.wav"
++    asset.parent.mkdir()
++    asset.write_bytes(raw)
++    result = build_context({"skill_path": str(tmp_path)})
++    row = next(c for c in result["component_metadata"] if c["path"] == "assets/bark.wav")
++    assert row["lines"] == len(decode_text(raw).splitlines()) > 0
++    assert row.get("passive_binary") is not None
++    assert _json_component(row)["passive_binary"] == row["passive_binary"]
++    artifact = next(a for a in result["artifact_inventory"] if a["path"] == row["path"])
++    assert artifact["content_kind"] is ContentKind.BINARY
++    assert result["raw_file_cache"][row["path"]] == raw == asset.read_bytes()
++
++
++def test_utf8_decodable_wave_keeps_text_inspection_without_binary_proof(tmp_path):
++    raw = wave_bytes(rate=1024, payload=b"\x00" * 6)
++    assert raw.decode("utf-8")
++    assert "passive_binary" not in metadata(tmp_path, raw)
