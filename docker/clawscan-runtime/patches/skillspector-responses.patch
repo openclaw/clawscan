@@ -2853,7 +2853,7 @@ index 2876b5e..49f726d 100644
          check_runtime()
      raw = SecurityTextView("raw", text)
 diff --git a/src/skillspector/llm_analyzer_base.py b/src/skillspector/llm_analyzer_base.py
-index 470f6d3..b810c50 100644
+index 470f6d3..620af5f 100644
 --- a/src/skillspector/llm_analyzer_base.py
 +++ b/src/skillspector/llm_analyzer_base.py
 @@ -28,6 +28,7 @@ to ``None`` for raw-string mode.
@@ -2956,7 +2956,7 @@ index 470f6d3..b810c50 100644
          self._timeout = timeout
          self._dynamic_timeout = callable(timeout)
          self._input_budget = get_max_input_tokens(model)
-@@ -1131,7 +1175,73 @@ class LLMAnalyzerBase:
+@@ -1131,7 +1175,142 @@ class LLMAnalyzerBase:
                          )
                      )
 
@@ -2969,14 +2969,15 @@ index 470f6d3..b810c50 100644
 +        self, sources: list[Batch], *, max_findings: int | None = None, **prompt_kwargs: object
 +    ) -> list[Batch]:
 +        """Group small sources without changing original file/chunk boundaries."""
-+        packets: list[Batch] = []
-+        pending: list[Batch] = []
-+        # A conservative UTF-8 byte ceiling avoids assuming four characters per
-+        # token when combining unrelated files. Existing oversized single-file
-+        # chunks retain the original path and its original model-budget checks.
 +        byte_limit = min(96_000, self._input_budget)
++        if not sources:
++            return []
++        if len(sources) == 1:
++            self._require_time_remaining()
++            return list(sources)
 +
-+        def packet(members: list[Batch]) -> Batch:
++        def packet(indexes: list[int]) -> Batch:
++            members = [sources[index] for index in indexes]
 +            return Batch(
 +                file_path=members[0].file_path,
 +                content="",
@@ -2984,54 +2985,122 @@ index 470f6d3..b810c50 100644
 +                members=tuple(members),
 +            )
 +
-+        def flush() -> None:
-+            if pending:
-+                packets.append(pending[0] if len(pending) == 1 else packet(pending))
-+                pending.clear()
-+
-+        for source in sources:
++        def prompt_bytes(indexes: list[int]) -> int:
 +            self._require_time_remaining()
++            return len(self.build_prompt(packet(indexes), **prompt_kwargs).encode())
++
++        # Measure real serialization once per source. Oversized original units
++        # retain their original path and model-budget behavior, never trimming.
++        single_bytes = [prompt_bytes([index]) for index in range(len(sources))]
++        eligible = [
++            size <= byte_limit
++            and (max_findings is None or len(source.findings) <= max_findings)
++            for source, size in zip(sources, single_bytes, strict=True)
++        ]
++        if not any(eligible):
++            return list(sources)
++        anchor = min(
++            (index for index, fits in enumerate(eligible) if fits),
++            key=single_bytes.__getitem__,
++        )
++        anchor_bytes = single_bytes[anchor]
++        anchor_delta = prompt_bytes([anchor, anchor]) - anchor_bytes
++        # The two native packet layouts serialize independent source records.
++        # Measure count-dependent headers and decimal source-ID width with a
++        # small real anchor instead of repeatedly serializing every open bin.
++        count_adjustment = {
++            count: prompt_bytes([anchor] * count)
++            - anchor_bytes
++            - (count - 1) * anchor_delta
++            - max(0, count - 10)
++            for count in range(1, 17)
++        }
++        following_bytes = [
++            prompt_bytes([anchor, index]) - anchor_bytes if fits else 0
++            for index, fits in enumerate(eligible)
++        ]
++
++        def predicted_bytes(indexes: list[int]) -> int:
++            return (
++                single_bytes[indexes[0]]
++                + sum(following_bytes[index] for index in indexes[1:])
++                + count_adjustment[len(indexes)]
++                + max(0, len(indexes) - 10)
++            )
++
++        def overlaps(indexes: list[int], source: Batch) -> bool:
 +            # Ledger projection selects packet findings by file and line range.
 +            # Overlapping chunks therefore need separate request identities.
-+            if any(
-+                member.file_path == source.file_path
++            return any(
++                sources[index].file_path == source.file_path
 +                and (
-+                    member.end_line is None
++                    sources[index].end_line is None
 +                    or source.end_line is None
 +                    or (
-+                        member.start_line <= source.end_line
-+                        and source.start_line <= member.end_line
++                        sources[index].start_line <= source.end_line
++                        and source.start_line <= sources[index].end_line
 +                    )
 +                )
-+                for member in pending
-+            ):
-+                flush()
-+            candidate = [*pending, source]
-+            if (
-+                len(candidate) <= 16
-+                and (
-+                    max_findings is None
-+                    or sum(len(member.findings) for member in candidate) <= max_findings
-+                )
-+                and len(self.build_prompt(packet(candidate), **prompt_kwargs).encode())
-+                <= byte_limit
-+            ):
-+                pending.append(source)
-+                continue
-+            flush()
-+            if (max_findings is None or len(source.findings) <= max_findings) and len(
-+                self.build_prompt(packet([source]), **prompt_kwargs).encode()
-+            ) <= byte_limit:
-+                pending.append(source)
++                for index in indexes
++            )
++
++        packets: list[tuple[int, Batch]] = []
++
++        def flush(indexes: list[int]) -> None:
++            if len(indexes) == 1:
++                packets.append((indexes[0], sources[indexes[0]]))
++                return
++            candidate = packet(indexes)
++            self._require_time_remaining()
++            # Predictions only choose placement. The actual serialized prompt
++            # always enforces the byte limit, even for a future nonadditive
++            # subclass. A disagreement cannot omit, trim or overpack a source.
++            if len(self.build_prompt(candidate, **prompt_kwargs).encode()) <= byte_limit:
++                packets.append((indexes[0], candidate))
 +            else:
-+                # Never trim a file to fit the grouping budget.
-+                packets.append(source)
-+        flush()
-+        return packets
++                packets.extend((index, sources[index]) for index in indexes)
++
++        pending: list[list[int]] = []
++        last_packet_start: dict[str, int] = {}
++        for index, source in enumerate(sources):
++            self._require_time_remaining()
++            if not eligible[index]:
++                packets.append((index, source))
++                last_packet_start[source.file_path] = index
++                continue
++            best: tuple[int, int] | None = None
++            for position, indexes in enumerate(pending):
++                # Preserve original chunk order within each source file even
++                # when unrelated files fill gaps in earlier open packets.
++                if indexes[0] < last_packet_start.get(source.file_path, -1):
++                    continue
++                if len(indexes) >= 16 or overlaps(indexes, source):
++                    continue
++                if max_findings is not None and (
++                    sum(len(sources[item].findings) for item in indexes) + len(source.findings)
++                    > max_findings
++                ):
++                    continue
++                size = predicted_bytes([*indexes, index])
++                if size <= byte_limit and (best is None or size > best[0]):
++                    best = (size, position)
++            if best is not None:
++                pending[best[1]].append(index)
++                last_packet_start[source.file_path] = pending[best[1]][0]
++            else:
++                # At most sixteen unfinished packets and sixteen sources in
++                # each. Source order breaks ties; the oldest bin retires first.
++                if len(pending) >= 16:
++                    flush(pending.pop(0))
++                pending.append([index])
++                last_packet_start[source.file_path] = index
++        for indexes in pending:
++            flush(indexes)
++        return [batch for _, batch in sorted(packets, key=lambda item: item[0])]
 
      # -- Prompt / parse -----------------------------------------------------
 
-@@ -1142,6 +1252,26 @@ class LLMAnalyzerBase:
+@@ -1142,6 +1321,26 @@ class LLMAnalyzerBase:
          so the LLM can reference exact line numbers in its findings.
          Override in subclasses that need a custom prompt layout.
          """
@@ -3058,7 +3127,7 @@ index 470f6d3..b810c50 100644
          numbered = number_lines(batch.content, batch.start_line)
          return append_output_language_instruction(
              BASE_ANALYSIS_PROMPT.format(
-@@ -1158,6 +1288,26 @@ class LLMAnalyzerBase:
+@@ -1158,6 +1357,26 @@ class LLMAnalyzerBase:
          via :meth:`LLMFinding.to_finding`.  Override in subclasses that use a
          different ``response_schema`` or raw-string mode.
          """
@@ -3085,7 +3154,7 @@ index 470f6d3..b810c50 100644
          if isinstance(response, LLMAnalysisResult):
              return [f.to_finding(batch.file_path) for f in response.findings]
          raise NotImplementedError(
-@@ -1166,6 +1316,9 @@ class LLMAnalyzerBase:
+@@ -1166,6 +1385,9 @@ class LLMAnalyzerBase:
 
      # -- Run loop -----------------------------------------------------------
 
@@ -3095,7 +3164,7 @@ index 470f6d3..b810c50 100644
      def _invoke_batch(self, batch: Batch, prompt: str) -> tuple[Batch, list]:
          """Invoke and parse one batch synchronously."""
          logger.debug(
-@@ -1175,6 +1328,8 @@ class LLMAnalyzerBase:
+@@ -1175,6 +1397,8 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
@@ -3104,7 +3173,7 @@ index 470f6d3..b810c50 100644
          if structured_llm:
              try:
                  response = _invoke_with_usage(structured_llm, prompt, self._usage_collector)
-@@ -1264,6 +1419,8 @@ class LLMAnalyzerBase:
+@@ -1264,6 +1488,8 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
