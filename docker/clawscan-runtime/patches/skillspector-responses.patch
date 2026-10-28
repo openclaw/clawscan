@@ -1195,7 +1195,7 @@ index 0000000..2ac53a8
 +        """Return proven inline delimiters, preserving every byte inside them."""
 +        return frozenset(self._delimiters)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
-index 3095bc3..99a1f54 100644
+index 3095bc3..13cdca4 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
 +++ b/src/skillspector/nodes/analyzers/static_runner.py
 @@ -50,6 +50,7 @@ from skillspector.inspection_ledger import (
@@ -1206,7 +1206,15 @@ index 3095bc3..99a1f54 100644
  from skillspector.models import (
      AnalyzerFinding,
      Finding,
-@@ -2048,7 +2049,7 @@ def _restore_source_lines(
+@@ -59,6 +60,7 @@ from skillspector.models import (
+ )
+ from skillspector.nodes.deduplicate import classification_metadata_key
+ from skillspector.oms import project_oms_content
++from skillspector.pdf_passive import decoded_pdf_security_text
+ from skillspector.python_ast import (
+     MAX_PYTHON_AST_SOURCE_CHARS,
+     ParsedPythonFile,
+@@ -2048,7 +2050,7 @@ def _restore_source_lines(
  
  
  def _window_string_closer(
@@ -1215,7 +1223,7 @@ index 3095bc3..99a1f54 100644
  ) -> Callable[[int], bool]:
      """Answer string-closer queries in one window's source coordinates."""
  
-@@ -2120,11 +2121,15 @@ def _scan_declared_marker_views(
+@@ -2120,11 +2122,15 @@ def _scan_declared_marker_views(
              )
          return True
  
@@ -1235,7 +1243,7 @@ index 3095bc3..99a1f54 100644
      )
  
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
-@@ -2283,7 +2288,9 @@ def _scan_declared_marker_views(
+@@ -2283,7 +2289,9 @@ def _scan_declared_marker_views(
                                  marker_view.text,
                                  check_runtime,
                                  file_type=_infer_file_type(path),
@@ -1246,6 +1254,48 @@ index 3095bc3..99a1f54 100644
                              )
                          )
  
+@@ -2314,9 +2322,41 @@ def _scan_all_views_detailed(
+     python_source: bool | None = None,
+     readable_binary: bool = False,
+     _oms_projected: bool = False,
++    _pdf_projected: bool = False,
+ ) -> tuple[list[Finding], LedgerReason | None, dict[str, int | float]]:
+     """Scan bounded raw windows and return any limit with observed/limit metrics."""
+     started_at = time.monotonic() if started_at is None else started_at
++    decoded_pdf = None if _pdf_projected else decoded_pdf_security_text(content)
++    if decoded_pdf is not None:
++        common = {
++            "max_findings": max_findings,
++            "timeout_seconds": timeout_seconds,
++            "started_at": started_at,
++            "_pdf_projected": True,
++        }
++        raw_findings, raw_reason, raw_metrics = _scan_all_views_detailed(
++            path, content, pattern_modules, python_ast_cache_key,
++            python_ast=python_ast, python_source=python_source,
++            readable_binary=readable_binary, _oms_projected=_oms_projected, **common,
++        )
++        decoded_findings, decoded_reason, decoded_metrics = _scan_all_views_detailed(
++            path, decoded_pdf, pattern_modules, None,
++            python_source=False, _oms_projected=True, **common,
++        )
++        for finding in decoded_findings:
++            # Locations identify the derived PDF carrier rather than pretending
++            # that compressed PDF bytes have plain-text source lines.
++            finding.start_line = finding.end_line = 1
++            finding.start_column = finding.end_column = None
++            finding.evidence["pdf_projection"] = (
++                "Decoded passive PDF strings and printable source; line1 identifies the carrier."
++            )
++        combined = _deduplicate_view_findings([*raw_findings, *decoded_findings])
++        if len(combined) > max_findings:
++            return combined[:max_findings], LedgerReason.OUTPUT_LIMIT, {
++                "observed_findings": len(combined), "limit_findings": max_findings
++            }
++        return combined, raw_reason or decoded_reason, raw_metrics if raw_reason else decoded_metrics
+     if readable_binary:
+         modules = [
+             module
 diff --git a/src/skillspector/security_reconstruction.py b/src/skillspector/security_reconstruction.py
 index 8c8fcc5..1082330 100644
 --- a/src/skillspector/security_reconstruction.py
@@ -1577,10 +1627,10 @@ new file mode 100644
 +    return sorted(set(spans))
 diff --git a/src/skillspector/pdf_passive.py b/src/skillspector/pdf_passive.py
 new file mode 100644
-index 0000000..371b103
+index 0000000..f8a8c3e
 --- /dev/null
 +++ b/src/skillspector/pdf_passive.py
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,503 @@
 +"""Bounded format-aware decoding of a deliberately small passive PDF subset.
 +
 +Unknown dictionaries, fonts, operators, orphan objects and active features are
@@ -1606,6 +1656,47 @@ index 0000000..371b103
 +MAX_PDF_OBJECTS = 256
 +MAX_PDF_OPERATORS = 4096
 +MAX_PDF_SECONDS = 5.0
++
++
++def decoded_pdf_security_text(content: str) -> str | None:
++    """Expose the bounded carrier's decoded characters as an additive scan view.
++
++    This is not PDF admission: the original JSON carrier must still be scanned.
++    A forged carrier in a text artifact can only add work, never hide source.
++    """
++    if len(content) > MAX_PDF_VIEW_BYTES or not content.startswith('{"format":'):
++        return None
++    try:
++        carrier = json.loads(content)
++    except (ValueError, RecursionError):
++        return None
++    if not isinstance(carrier, dict) or set(carrier) != {
++        "format", "source_sha256", "text", "raw_printable"
++    }:
++        return None
++    if carrier["format"] != "bounded-passive-pdf-v1":
++        return None
++    if not isinstance(carrier["source_sha256"], str) or not re.fullmatch(
++        r"[0-9a-f]{64}", carrier["source_sha256"]
++    ):
++        return None
++    texts = carrier["text"]
++    raw = carrier["raw_printable"]
++    if not isinstance(texts, list) or not all(isinstance(text, str) for text in texts):
++        return None
++    if not isinstance(raw, str):
++        return None
++    # Preserve actual Unicode and line/word boundaries; JSON escapes are a
++    # transport representation, not the text that the PDF reader exposes.
++    decoded = "\n\n".join([*texts, raw])
++    try:
++        if len(decoded.encode("utf-8")) > MAX_PDF_VIEW_BYTES:
++            return None
++    except UnicodeEncodeError:
++        # JSON permits escaped lone surrogates, but analyzer fingerprints and
++        # downstream report serializers require valid UTF-8. Keep the raw scan.
++        return None
++    return decoded
 +
 +
 +@dataclass(frozen=True)
