@@ -1911,7 +1911,7 @@ index 74c304a..b8bc498 100644
 +    assert len(requests) == 2
 +    assert len(osv._cache) == 1
 diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
-index c323c84..5db9eca 100644
+index c323c84..49e4a5f 100644
 --- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 +++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
 @@ -41,6 +41,7 @@ from skillspector.artifacts import (
@@ -1922,15 +1922,30 @@ index c323c84..5db9eca 100644
  from skillspector.logging_config import get_logger
  from skillspector.models import AnalyzerFinding, Finding, Location, Severity
  from skillspector.python_ast import ParsedPythonFile, parse_python_source
-@@ -4847,6 +4848,7 @@ def _markdown_shell_text(
+@@ -4847,6 +4848,8 @@ def _markdown_shell_text(
      table_columns: int | None = None
      table_minimum_indent = 0
      table_delimiter_line = -1
 +    table_ranges: list[tuple[int, int]] = []
++    fence_ranges: list[tuple[int, int]] = []
      offset = 0
      lines = content.splitlines(keepends=True)
      for line_index, line in enumerate(lines):
-@@ -4997,6 +4999,7 @@ def _markdown_shell_text(
+@@ -4921,6 +4924,13 @@ def _markdown_shell_text(
+             if (html_end and html_end in leading.lower()) or (not html_end and not leading):
+                 html_end = None
+         elif fence is not None:
++            # A canonical container parse may end a list fence at dedentation.
++            # Keep this projection's stricter literal boundary when refining
++            # inline delimiters, just as for the table boundaries below.
++            if fence_ranges and fence_ranges[-1][1] == offset:
++                fence_ranges[-1] = (fence_ranges[-1][0], offset + len(line))
++            else:
++                fence_ranges.append((offset, offset + len(line)))
+             fence_body = stripped.lstrip(" \t")
+             closing_fence = MARKDOWN_FENCE_CLOSE.fullmatch(fence_body)
+             if (
+@@ -4997,6 +5007,7 @@ def _markdown_shell_text(
                          table_minimum_indent = minimum_indent
                          table_delimiter_line = line_index + 1
                  if table_columns is not None:
@@ -1938,7 +1953,7 @@ index c323c84..5db9eca 100644
                      mask_inline_delimiters()
                      if line_index != table_delimiter_line:
                          cells = _markdown_table_cells(stripped, prefix, check_runtime)
-@@ -5069,6 +5072,13 @@ def _markdown_shell_text(
+@@ -5069,6 +5080,13 @@ def _markdown_shell_text(
              paragraph_list_indent = 0
          offset += len(line)
      mask_inline_delimiters()
@@ -1946,13 +1961,13 @@ index c323c84..5db9eca 100644
 +        from skillspector.markdown_tokens import MarkdownCodeSpanClosers
 +
 +        for delimiter in MarkdownCodeSpanClosers(
-+            content, check_runtime, excluded_ranges=tuple(table_ranges)
++            content, check_runtime, excluded_ranges=tuple(table_ranges + fence_ranges)
 +        ).delimiter_offsets():
 +            output[delimiter] = " "
      projected = "".join(output)
      if prose_apostrophes:
          # A prose-looking line can still be inside an earlier shell word, such
-@@ -5152,6 +5162,7 @@ def _has_bounded_parse_exhaustion(
+@@ -5152,6 +5170,7 @@ def _has_bounded_parse_exhaustion(
      if file_type == "markdown":
          if complete_context:
              json_strings = validated_json_string_spans(content, check_runtime)
