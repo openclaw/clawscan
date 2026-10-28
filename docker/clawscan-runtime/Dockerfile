@@ -1,4 +1,10 @@
+ARG SHFMT_VERSION=v3.14.1
+FROM golang:1.27.3 AS bash-parser
+ARG SHFMT_VERSION
+RUN CGO_ENABLED=0 GOBIN=/out go install "mvdan.cc/sh/v3/cmd/shfmt@${SHFMT_VERSION}"
+
 FROM python:3.12-slim
+ARG SHFMT_VERSION
 
 ARG SKILLSPECTOR_REF=95a52d89fa16f608f0b18ccee76b0918ea4b7eef
 ARG AIG_SKILL_SCAN_REF=a5c5a72c2e5b88fc6e5b27e0c86110943c4d350b
@@ -23,6 +29,8 @@ RUN apt-get update \
 
 COPY patches/ /tmp/clawscan-patches/
 COPY tests/ /tmp/clawscan-adapter-tests/
+COPY --from=bash-parser /out/shfmt /usr/local/bin/shfmt
+RUN test "$(shfmt --version)" = "$SHFMT_VERSION"
 
 # Exact upstream pins fail closed if a transport patch stops applying.
 RUN git init /tmp/skillspector \
@@ -41,7 +49,7 @@ RUN git init /tmp/skillspector \
 RUN python -m pip install --no-cache-dir --upgrade pip uv \
     && python -m pip install --no-cache-dir /tmp/skillspector pytest \
       "cisco-ai-skill-scanner==$CISCO_AI_SKILL_SCANNER_VERSION" \
-    && python -m pytest -q /tmp/clawscan-adapter-tests/test_skillspector_responses.py /tmp/clawscan-adapter-tests/test_skillspector_applicability.py /tmp/clawscan-adapter-tests/test_skillspector_accounting.py /tmp/clawscan-adapter-tests/test_skillspector_frontmatter_json.py /tmp/clawscan-adapter-tests/test_skillspector_osv_evidence.py /tmp/clawscan-adapter-tests/test_skillspector_pdf.py /tmp/clawscan-adapter-tests/test_skillspector_markdown_containers.py /tmp/clawscan-adapter-tests/test_skillspector_javascript_ownership.py \
+    && python -m pytest -q /tmp/clawscan-adapter-tests/test_skillspector_responses.py /tmp/clawscan-adapter-tests/test_skillspector_applicability.py /tmp/clawscan-adapter-tests/test_skillspector_accounting.py /tmp/clawscan-adapter-tests/test_skillspector_frontmatter_json.py /tmp/clawscan-adapter-tests/test_skillspector_osv_evidence.py /tmp/clawscan-adapter-tests/test_skillspector_pdf.py /tmp/clawscan-adapter-tests/test_skillspector_markdown_containers.py /tmp/clawscan-adapter-tests/test_skillspector_semantic_packets.py /tmp/clawscan-adapter-tests/test_skillspector_meta_packets.py /tmp/clawscan-adapter-tests/test_skillspector_security_view_cache.py /tmp/clawscan-adapter-tests/test_skillspector_ledger_capacity.py /tmp/clawscan-adapter-tests/test_skillspector_table_markers.py /tmp/clawscan-adapter-tests/test_skillspector_fence_boundaries.py /tmp/clawscan-adapter-tests/test_skillspector_csv_markers.py /tmp/clawscan-adapter-tests/test_skillspector_shell_source.py /tmp/clawscan-adapter-tests/test_skillspector_javascript_ownership.py \
     && uv tool install /tmp/aig/skill-scan --with pytest \
     && /root/.local/share/uv/tools/aig-skill-scan/bin/python -m pytest -q /tmp/clawscan-adapter-tests/test_aig_responses.py \
     && uv tool install "snyk-agent-scan==$SNYK_AGENT_SCAN_VERSION" \
