@@ -22,7 +22,7 @@ func skillSpectorCaveatComponentScopes(components []any, exclusions []json.RawMe
 	records := make(map[string]map[string]any, len(components))
 	for _, value := range components {
 		component, ok := value.(map[string]any)
-		if !ok || !skillSpectorKnownFields(component, "path type lines executable size_bytes source_url source_identity source_digest outer_path nested_path container_type container_depth container_ancestry") {
+		if !ok || !skillSpectorKnownFields(component, "path type lines executable size_bytes source_url source_identity source_digest outer_path nested_path container_type container_depth container_ancestry passive_binary") {
 			return scopes, false
 		}
 		if component["source_url"] != nil || component["source_identity"] != nil || component["source_digest"] != nil {
@@ -74,6 +74,9 @@ func skillSpectorCaveatComponentScopes(components []any, exclusions []json.RawMe
 		return scopes, false
 	}
 	for name, component := range records {
+		if _, hasEvidence := component["passive_binary"]; hasEvidence && (!excluded[name] || !skillSpectorPassiveWave(component)) {
+			return scopes, false
+		}
 		if excluded[name] {
 			delete(scopes.lines, name)
 			continue
@@ -124,6 +127,10 @@ func skillSpectorPassiveBinaryExclusions(components map[string]map[string]any, e
 		}
 		switch strings.ToLower(path.Ext(name)) {
 		case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico":
+		case ".wav":
+			if !skillSpectorPassiveWave(component) {
+				return excluded, false
+			}
 		default:
 			return excluded, false
 		}
