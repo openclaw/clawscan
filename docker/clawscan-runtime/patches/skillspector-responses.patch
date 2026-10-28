@@ -1532,10 +1532,10 @@ new file mode 100644
 +        """Return proven inline delimiters, preserving every byte inside them."""
 +        return frozenset(self._delimiters)
 diff --git a/src/skillspector/nodes/analyzers/static_runner.py b/src/skillspector/nodes/analyzers/static_runner.py
-index 3095bc3..769daf8 100644
+index 3095bc3..8ba1cd5 100644
 --- a/src/skillspector/nodes/analyzers/static_runner.py
 +++ b/src/skillspector/nodes/analyzers/static_runner.py
-@@ -36,8 +36,10 @@ from typing import cast
+@@ -36,11 +36,14 @@ from typing import cast
  from skillspector.artifacts import (
      ContentKind,
      SecurityTextView,
@@ -1546,7 +1546,11 @@ index 3095bc3..769daf8 100644
      is_default_ignorable,
      security_text_views,
  )
-@@ -50,6 +52,7 @@ from skillspector.inspection_ledger import (
++from skillspector.csv_tokens import CSVStringClosers
+ from skillspector.inspection_ledger import (
+     InspectionLedgerEvent,
+     LedgerOutcome,
+@@ -50,6 +53,7 @@ from skillspector.inspection_ledger import (
      ledger_event,
  )
  from skillspector.logging_config import get_logger
@@ -1554,7 +1558,7 @@ index 3095bc3..769daf8 100644
  from skillspector.models import (
      AnalyzerFinding,
      Finding,
-@@ -59,6 +62,7 @@ from skillspector.models import (
+@@ -59,6 +63,7 @@ from skillspector.models import (
  )
  from skillspector.nodes.deduplicate import classification_metadata_key
  from skillspector.oms import project_oms_content
@@ -1562,16 +1566,16 @@ index 3095bc3..769daf8 100644
  from skillspector.python_ast import (
      MAX_PYTHON_AST_SOURCE_CHARS,
      ParsedPythonFile,
-@@ -2048,7 +2052,7 @@ def _restore_source_lines(
+@@ -2048,7 +2053,7 @@ def _restore_source_lines(
 
 
  def _window_string_closer(
 -    python_strings: PythonStringClosers, window_start: int
-+    python_strings: PythonStringClosers | MarkdownCodeSpanClosers, window_start: int
++    python_strings: PythonStringClosers | MarkdownCodeSpanClosers | CSVStringClosers, window_start: int
  ) -> Callable[[int], bool]:
      """Answer string-closer queries in one window's source coordinates."""
 
-@@ -2071,6 +2075,7 @@ def _scan_declared_marker_views(
+@@ -2071,6 +2076,7 @@ def _scan_declared_marker_views(
      defer_projected_output_limit: bool,
      complete_context: bool,
      prepared_analyses: Mapping[int, object] | None = None,
@@ -1579,7 +1583,7 @@ index 3095bc3..769daf8 100644
  ) -> tuple[list[Finding], bool, bool, _StaticResourceLimitError | None]:
      """Reconstruct marker payloads with directive-relative context windows."""
      findings: list[Finding] = []
-@@ -2120,11 +2125,15 @@ def _scan_declared_marker_views(
+@@ -2120,11 +2126,17 @@ def _scan_declared_marker_views(
              )
          return True
 
@@ -1595,11 +1599,13 @@ index 3095bc3..769daf8 100644
 +        if _infer_file_type(path) == "python"
 +        else MarkdownCodeSpanClosers(content, check_runtime, include_tables=True)
 +        if _infer_file_type(path) == "markdown" and complete_context
++        else CSVStringClosers(content, check_runtime)
++        if path.casefold().endswith(".csv") and complete_context
 +        else None
      )
 
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
-@@ -2148,6 +2157,7 @@ def _scan_declared_marker_views(
+@@ -2148,6 +2160,7 @@ def _scan_declared_marker_views(
              for full_view in security_text_views(
                  context_prefix + raw_window,
                  check_runtime=check_runtime,
@@ -1607,7 +1613,7 @@ index 3095bc3..769daf8 100644
              )
          )
          across_security_views = len(full_views) > 1
-@@ -2283,7 +2293,9 @@ def _scan_declared_marker_views(
+@@ -2283,7 +2296,9 @@ def _scan_declared_marker_views(
                                  marker_view.text,
                                  check_runtime,
                                  file_type=_infer_file_type(path),
@@ -1618,7 +1624,7 @@ index 3095bc3..769daf8 100644
                              )
                          )
 
-@@ -2314,9 +2326,43 @@ def _scan_all_views_detailed(
+@@ -2314,9 +2329,43 @@ def _scan_all_views_detailed(
      python_source: bool | None = None,
      readable_binary: bool = False,
      _oms_projected: bool = False,
@@ -1662,7 +1668,7 @@ index 3095bc3..769daf8 100644
      if readable_binary:
          modules = [
              module
-@@ -2340,6 +2386,7 @@ def _scan_all_views_detailed(
+@@ -2340,6 +2389,7 @@ def _scan_all_views_detailed(
              timeout_seconds=timeout_seconds,
              started_at=started_at,
              python_source=False,
@@ -1670,7 +1676,7 @@ index 3095bc3..769daf8 100644
          )
          findings = [
              finding
-@@ -2390,6 +2437,7 @@ def _scan_all_views_detailed(
+@@ -2390,6 +2440,7 @@ def _scan_all_views_detailed(
              # This view is derived JSON metadata, not a Python execution surface.
              python_source=False,
              _oms_projected=True,
@@ -1678,7 +1684,7 @@ index 3095bc3..769daf8 100644
          )
          for finding in findings:
              finding.start_line = finding.end_line = 1
-@@ -2578,6 +2626,7 @@ def _scan_all_views_detailed(
+@@ -2578,6 +2629,7 @@ def _scan_all_views_detailed(
                  defer_projected_output_limit=coalesce is not None,
                  complete_context=whole_artifact_window,
                  prepared_analyses=prepared_analyses,
@@ -1686,7 +1692,7 @@ index 3095bc3..769daf8 100644
              )
              bounded_parse_limited = bounded_parse_limited or marker_bounded_parse_limited
          except _StaticResourceLimitError as exc:
-@@ -2712,6 +2761,7 @@ def _scan_all_views_detailed(
+@@ -2712,6 +2764,7 @@ def _scan_all_views_detailed(
                  full_views = security_text_views(
                      context_prefix + raw_window,
                      check_runtime=finding_budget.check_runtime,
@@ -1694,7 +1700,7 @@ index 3095bc3..769daf8 100644
                  )
              except _StaticResourceLimitError as exc:
                  return (
-@@ -2887,6 +2937,7 @@ def _scan_all_views_detailed(
+@@ -2887,6 +2940,7 @@ def _scan_all_views_detailed(
                      for full_view in security_text_views(
                          projection.text,
                          check_runtime=finding_budget.check_runtime,
@@ -1702,7 +1708,7 @@ index 3095bc3..769daf8 100644
                      ):
                          named_view = SecurityTextView(
                              f"{projection.name}-{full_view.name}",
-@@ -2951,6 +3002,7 @@ def _scan_all_views_detailed(
+@@ -2951,6 +3005,7 @@ def _scan_all_views_detailed(
                  full_views = security_text_views(
                      continuity.view.text,
                      check_runtime=finding_budget.check_runtime,
@@ -1710,7 +1716,7 @@ index 3095bc3..769daf8 100644
                  )
                  across_security_views = len(full_views) > 1
                  for full_view in full_views:
-@@ -3262,6 +3314,7 @@ def run_static_patterns(
+@@ -3262,6 +3317,7 @@ def run_static_patterns(
              python_ast=python_ast,
              python_source=python_source,
              readable_binary=path in readable_binary_paths,
@@ -1718,7 +1724,7 @@ index 3095bc3..769daf8 100644
          )
          runtime_limit = MAX_STATIC_ANALYSIS_SECONDS_PER_ARTIFACT
          if shared_remaining is not None:
-@@ -3467,6 +3520,7 @@ def run_static_patterns_with_ledger(
+@@ -3467,6 +3523,7 @@ def run_static_patterns_with_ledger(
                              python_ast=python_ast,
                              python_source=python_source,
                              readable_binary=bool(artifact.get("readable_binary")),
@@ -3223,3 +3229,104 @@ diff --git a/src/skillspector/inspection_ledger.py b/src/skillspector/inspection
 
 
  class LedgerOutcome(StrEnum):
+diff --git a/src/skillspector/csv_tokens.py b/src/skillspector/csv_tokens.py
+new file mode 100644
+index 0000000..df398a0
+--- /dev/null
++++ b/src/skillspector/csv_tokens.py
+@@ -0,0 +1,95 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++
++"""Optional closing-delimiter proof for complete comma-separated data."""
++
++from __future__ import annotations
++
++import csv
++import io
++from collections.abc import Callable
++
++
++def _closing_quotes(content: str, check_runtime: Callable[[], None]) -> frozenset[int]:
++    check_runtime()
++    if not content or len(content) > 1_048_576 or "\x00" in content:
++        return frozenset()
++    # Bound allocation before asking the canonical parser to create rows/cells.
++    # The lexer also maps every canonical field back to exact source characters.
++    rows: list[list[str]] = []
++    row: list[str] = []
++    closers: set[int] = set()
++    cursor = 0
++    fields = 0
++    while True:
++        check_runtime()
++        fields += 1
++        if fields > 8192:
++            return frozenset()
++        quoted = cursor < len(content) and content[cursor] == '"'
++        cursor += int(quoted)
++        start = cursor
++        while cursor < len(content):
++            if cursor % 4096 == 0:
++                check_runtime()
++            char = content[cursor]
++            if quoted and char == '"':
++                if content.startswith('""', cursor):
++                    cursor += 2
++                    continue
++                break
++            if not quoted and char in ',\r\n':
++                break
++            cursor += 1
++        if quoted:
++            if cursor >= len(content):
++                return frozenset()
++            row.append(content[start:cursor].replace('""', '"'))
++            closers.add(cursor)
++            cursor += 1
++        else:
++            row.append(content[start:cursor])
++        if cursor < len(content) and content[cursor] == ',':
++            cursor += 1
++            continue
++        if cursor < len(content):
++            if content[cursor] == '\r' and content.startswith('\r\n', cursor):
++                cursor += 2
++            elif content[cursor] == '\n':
++                cursor += 1
++            else:
++                return frozenset()
++        rows.append(row)
++        row = []
++        if cursor >= len(content):
++            break
++    if len(rows) < 2 or len(rows[0]) < 2:
++        return frozenset()
++    check_runtime()
++    try:
++        canonical = list(csv.reader(io.StringIO(content, newline=""), strict=True))
++    except csv.Error:
++        return frozenset()
++    check_runtime()
++    return frozenset(closers) if canonical == rows else frozenset()
++
++
++class CSVStringClosers:
++    """Prove structural closing quotes while retaining every field-body byte.
++
++    Only complete comma-separated documents with at least two rows and a
++    multi-column first row qualify; ragged rows retain their canonical meaning. Fragments, other dialects, uncertain source mappings and
++    budget exhaustion grant no ownership. Explicit marker instructions are still
++    parsed inside every field by the caller.
++    """
++
++    def __init__(self, content: str, check_runtime: Callable[[], None]) -> None:
++        self._content = content
++        self._check_runtime = check_runtime
++        self._closers: frozenset[int] | None = None
++
++    def closes_string(self, offset: int) -> bool:
++        if self._closers is None:
++            self._closers = _closing_quotes(self._content, self._check_runtime)
++        self._check_runtime()
++        return offset in self._closers
