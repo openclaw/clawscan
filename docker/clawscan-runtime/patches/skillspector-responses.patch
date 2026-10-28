@@ -1647,22 +1647,20 @@ index 3095bc3..d7c25ac 100644
      ".rb": "ruby",
      ".pl": "perl",
 @@ -2048,12 +2055,12 @@ def _restore_source_lines(
- 
- 
+
+
  def _window_string_closer(
 -    python_strings: PythonStringClosers, window_start: int
 +    source_closer: Callable[[int], bool], window_start: int
  ) -> Callable[[int], bool]:
      """Answer string-closer queries in one window's source coordinates."""
- 
+
      def closes_string(offset: int) -> bool:
 -        return python_strings.closes_string(window_start + offset)
 +        return source_closer(window_start + offset)
--
-+
+
      return closes_string
--
-+
+
 @@ -2071,6 +2078,7 @@ def _scan_declared_marker_views(
      defer_projected_output_limit: bool,
      complete_context: bool,
@@ -1674,7 +1672,7 @@ index 3095bc3..d7c25ac 100644
 @@ -2120,12 +2128,34 @@ def _scan_declared_marker_views(
              )
          return True
- 
+
 -    # A complete Python module proves which quotes close its string literals.
 -    # The proof covers the whole artifact, so it holds in every window. It is
 -    # computed only when a loose quoted directive header reaches a quote.
@@ -1708,7 +1706,7 @@ index 3095bc3..d7c25ac 100644
 +                else native_parser(content, check_runtime)
 +            )
 +        return native_strings.closes_string(offset)
- 
+
      for owned_start, raw_start in zip(owned_starts, raw_starts, strict=True):
          check_runtime()
 @@ -2148,6 +2178,7 @@ def _scan_declared_marker_views(
@@ -1740,7 +1738,7 @@ index 3095bc3..d7c25ac 100644
 +                                complete_context=False,
                              )
                          )
- 
+
 @@ -2314,9 +2347,43 @@ def _scan_all_views_detailed(
      python_source: bool | None = None,
      readable_binary: bool = False,
