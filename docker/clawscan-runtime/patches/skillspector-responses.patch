@@ -2546,10 +2546,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..97d3dfc
+index 0000000..2b9658b
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1379 @@
+@@ -0,0 +1,1470 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -2851,7 +2851,8 @@ index 0000000..97d3dfc
 +            # parameters and named function expressions.
 +            cursor = (
 +                parent(owner)
-+                if owner is not None and owner.type == "function_declaration"
++                if owner is not None
++                and owner.type in {"function_declaration", "generator_function_declaration"}
 +                else owner
 +            )
 +            while cursor is not None and cursor.type not in lexical_scopes:
@@ -2878,6 +2879,15 @@ index 0000000..97d3dfc
 +            definition_cache[reference.id] = matches[0] if len(matches) == 1 else None
 +        return definition_cache[reference.id]
 +
++    def scope_encloses(scope, reference):
++        cursor = parent(reference)
++        while cursor is not None:
++            step()
++            if cursor == scope:
++                return True
++            cursor = parent(cursor)
++        return False
++
 +    def capability(node, visiting=frozenset()):
 +        step()
 +        if node is None or node.id in visiting or len(visiting) > 128:
@@ -2897,7 +2907,7 @@ index 0000000..97d3dfc
 +                        owner is not None
 +                        and owner.type == "function_declaration"
 +                        and binding_scope(definition) != function_scope(owner)
-+                        and function_scope(owner) == function_scope(node)
++                        and scope_encloses(function_scope(owner), node)
 +                    ):
 +                        # Sloppy-script Annex B may also create an enclosing
 +                        # var binding for a block function declaration.
@@ -3158,6 +3168,68 @@ index 0000000..97d3dfc
 +            reads.append(reference)
 +        return reads
 +
++    def guarded_string_slice(function):
++        """Prove only a direct const-string branch, without general method flow."""
++        if unsafe_native or function.type != "member_expression":
++            return False
++        receiver, member = field(function, "object"), field(function, "property")
++        if receiver is None or receiver.type != "identifier" or member is None:
++            return False
++        if text(member) != "slice":
++            return False
++        definition = data_definition(receiver)
++        if (
++            definition is None
++            or parent(definition).type != "variable_declarator"
++            or not const_declaration(parent(definition))
++        ):
++            return False
++        call = parent(function)
++        arguments = field(call, "arguments") if call is not None else None
++        if arguments is None or any(c.type != "number" for c in semantic_children(arguments)):
++            return False
++        assignment = parent(call)
++        statement = parent(assignment) if assignment is not None else None
++        branch = parent(statement) if statement is not None else None
++        if (
++            assignment is None
++            or assignment.type != "assignment_expression"
++            or field(assignment, "right") != call
++            or statement is None
++            or statement.type != "expression_statement"
++            or branch is None
++            or branch.type != "if_statement"
++            or field(branch, "consequence") != statement
++        ):
++            return False
++        condition = field(branch, "condition")
++        if condition is not None and condition.type == "parenthesized_expression":
++            children = semantic_children(condition)
++            condition = children[0] if len(children) == 1 else None
++        if condition is None or condition.type != "binary_expression":
++            return False
++        operator, left, right = (
++            field(condition, name) for name in ("operator", "left", "right")
++        )
++        if (
++            operator is None
++            or text(operator) != "==="
++            or left is None
++            or left.type != "unary_expression"
++            or right is None
++            or right.type != "string"
++            or text(right) not in {"'string'", '"string"'}
++        ):
++            return False
++        operator, argument = field(left, "operator"), field(left, "argument")
++        return (
++            operator is not None
++            and text(operator) == "typeof"
++            and argument is not None
++            and argument.type == "identifier"
++            and data_definition(argument) == definition
++        )
++
 +    def is_data(initial):
 +        # In opaque-only mode a True result also includes unobserved escapes.
 +        # Those preserve legacy accounting and never grant syntax ownership.
@@ -3183,6 +3255,12 @@ index 0000000..97d3dfc
 +                "template_substitution",
 +                "template_string",
 +            }:
++                if p.type == "binary_expression":
++                    operator = field(p, "operator")
++                    if operator is not None and text(operator) in {"in", "instanceof"}:
++                        # These pass the operand into a proxy/hasInstance hook;
++                        # the boolean result does not prove an inert value use.
++                        return False
 +                pending.append(p)
 +                continue
 +            if p.type == "variable_declarator" and field(p, "value") == node:
@@ -3281,6 +3359,10 @@ index 0000000..97d3dfc
 +                    and outer.type == "call_expression"
 +                    and field(outer, "function") == p
 +                ):
++                    if not (native_collection_method(p) or guarded_string_slice(p)):
++                        # A result edge says nothing about receiver use inside
++                        # map/reduce callbacks or an unproved method body.
++                        return False
 +                    pending.append(outer)
 +                else:
 +                    pending.append(p)
@@ -3369,6 +3451,10 @@ index 0000000..97d3dfc
 +            if cap == ("ambient", "URL") and call.type == "new_expression" and index in {0, 1}:
 +                continue
 +            if cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")} and index == 0:
++                if len(arguments) != 1:
++                    # Replacers/revivers may execute with the input value.
++                    # Their callback contract is outside this bounded proof.
++                    return False
 +                pending.append(call)
 +                continue
 +            if cap == ("ambient", "fetch") and index == 1:
@@ -3497,7 +3583,12 @@ index 0000000..97d3dfc
 +                function = field(node, "function")
 +                cap = capability(function)
 +                native = cap is not None and cap[0] in _NATIVE_MODULES
-+                intrinsic_json = cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")}
++                arguments = field(node, "arguments")
++                intrinsic_json = (
++                    cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")}
++                    and arguments is not None
++                    and len(semantic_children(arguments)) == 1
++                )
 +                primitive = (
 +                    function is not None
 +                    and function.type == "identifier"

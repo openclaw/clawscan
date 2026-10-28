@@ -303,6 +303,13 @@ _EXECUTABLE_BOUNDARIES = [
     "for (const fetch of [obj.run]) fetch(`${cmd}${flags} /`);",
     "function unused(){const write=process.stdout.write;} write(`${cmd}${flags} /`);",
     "if(true){function fetch(value){obj.run(value);}} fetch(`${cmd}${flags} /`);",
+    "process.stdout.write(JSON.stringify(`${cmd}${flags} /`, (key,value)=>{obj.run(value);return value;}));",
+    'process.stdout.write(JSON.stringify(JSON.parse(`"${cmd}${flags} /"`, (key,value)=>{obj.run(value);return value;})));',
+    "process.stdout.write(JSON.stringify([`${cmd}${flags} /`].map(value=>{obj.run(value);return value;})));",
+    "if(true){function fetch(value){obj.run(value);}} function main(){fetch(`${cmd}${flags} /`);} main();",
+    "function* fetch(value){obj.run(value);} fetch(`${cmd}${flags} /`).next();",
+    "const test={[Symbol.hasInstance](value){obj.run(value);return false;}}; Boolean(`${cmd}${flags} /` instanceof test);",
+    "const test=new Proxy({},{has(target,value){obj.run(value);return false;}}); Boolean(`${cmd}${flags} /` in test);",
 ]
 
 
@@ -424,3 +431,27 @@ def test_comment_nodes_do_not_change_safe_native_parameter_positions():
 )
 def test_native_identity_uses_the_actual_lexical_binding(source):
     assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.COMPLETED
+
+
+def test_direct_const_primitive_guard_proves_only_inert_string_slicing():
+    source = (
+        "const message=`result ${value}`; let detail=''; "
+        "if(typeof message==='string') detail=message.slice(0,300); "
+        "throw new Error(detail);"
+    )
+    assert ledger(source)["inspection_ledger"][0]["outcome"] == LedgerOutcome.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "const message=`${cmd}${flags} /`; let detail=''; if(typeof message==='string') detail=message.slice(0,300); obj.run(detail);",
+        "let message=`${cmd}${flags} /`; let detail=''; if(typeof message==='string') detail=message.slice(0,300); throw new Error(detail);",
+        "const message=`${cmd}${flags} /`; let detail=''; if(typeof other==='string') detail=message.slice(0,300); throw new Error(detail);",
+        "const message=`${cmd}${flags} /`; let detail=''; if(typeof message==='string') detail=message.slice(callback()); throw new Error(detail);",
+    ],
+)
+def test_string_guard_never_proves_unrelated_or_executable_uses(statement):
+    row = ledger(statement)["inspection_ledger"][0]
+    assert row["outcome"] == LedgerOutcome.PARTIAL
+    assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT
