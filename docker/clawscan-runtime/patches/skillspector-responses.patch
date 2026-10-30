@@ -4511,10 +4511,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..e9582b5
+index 0000000..220f918
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1710 @@
+@@ -0,0 +1,1726 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -4595,6 +4595,7 @@ index 0000000..e9582b5
 +    error_handler_active = False
 +    error_handler_result = None
 +    error_binding_ids = set()
++    escaped_json_identity = False
 +    unsafe_native = any(
 +        n.type == "with_statement"
 +        or (n.type == "method_definition" and any(c.type in {"get", "set"} for c in n.children))
@@ -5001,6 +5002,8 @@ index 0000000..e9582b5
 +                and field(p, "left") == node
 +            )
 +            if not (native_binding or const_alias or member_receiver or invoked or exit_status):
++                if cap in {("ambient", "JSON"), ("ambient", "JSON.stringify")}:
++                    escaped_json_identity = True
 +                if not opaque_only:
 +                    return None
 +        if node.type in {
@@ -5226,6 +5229,23 @@ index 0000000..e9582b5
 +            and argument.type == "identifier"
 +            and data_definition(argument) == definition
 +        )
++
++    def json_call_preserves_value(cap, arguments):
++        from skillspector.javascript_native_values import json_call_has_inert_options
++
++        args = semantic_children(arguments) if arguments is not None else []
++        if not json_call_has_inert_options(cap, args):
++            return False
++        if len(args) == 1:
++            return True
++        # A literal null replacer and numeric spacing cannot invoke callbacks
++        # or coercion hooks. The serialized value and result still need their
++        # ordinary use proofs; unknown replacers/revivers remain unsupported.
++        if escaped_json_identity:
++            return False
++        if args[0].type in {"string", "template_string", "number", "true", "false", "null"}:
++            return True
++        return native_values is not None and native_values.serializes_without_callbacks(args[0])
 +
 +    def is_data(initial, *, boundary=None):
 +        # In opaque-only mode a True result also includes unobserved escapes.
@@ -5469,7 +5489,7 @@ index 0000000..e9582b5
 +            if cap == ("ambient", "URL") and call.type == "new_expression" and index in {0, 1}:
 +                continue
 +            if cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")} and index == 0:
-+                if len(arguments) != 1:
++                if not json_call_preserves_value(cap, p):
 +                    # Replacers/revivers may execute with the input value.
 +                    # Their callback contract is outside this bounded proof.
 +                    return False
@@ -5626,11 +5646,7 @@ index 0000000..e9582b5
 +                cap = capability(function)
 +                native = cap is not None and cap[0] in _NATIVE_MODULES
 +                arguments = field(node, "arguments")
-+                intrinsic_json = (
-+                    cap in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")}
-+                    and arguments is not None
-+                    and len(semantic_children(arguments)) == 1
-+                )
++                intrinsic_json = json_call_preserves_value(cap, arguments)
 +                primitive = (
 +                    function is not None
 +                    and function.type == "identifier"
@@ -6227,10 +6243,10 @@ index 0000000..e9582b5
 +    return ranges, unsupported
 diff --git a/src/skillspector/javascript_native_values.py b/src/skillspector/javascript_native_values.py
 new file mode 100644
-index 0000000..fc14d5b
+index 0000000..7211120
 --- /dev/null
 +++ b/src/skillspector/javascript_native_values.py
-@@ -0,0 +1,909 @@
+@@ -0,0 +1,937 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""Bounded native value typing for closed, private validator functions.
@@ -6239,6 +6255,24 @@ index 0000000..fc14d5b
 +ranges itself. Unknown calls, deferred functions, exports and mutable identities
 +disable the optional proof rather than dropping an authored construction.
 +"""
++
++
++def json_call_has_inert_options(capability, arguments):
++    """Optional JSON arguments must not introduce dispatch or argument shifts."""
++    if capability not in {("ambient", "JSON.stringify"), ("ambient", "JSON.parse")}:
++        return False
++    if not 1 <= len(arguments) <= 3 or any(
++        argument.type == "spread_element" for argument in arguments
++    ):
++        return False
++    if len(arguments) == 1:
++        return True
++    return (
++        capability == ("ambient", "JSON.stringify")
++        and len(arguments) in {2, 3}
++        and arguments[1].type == "null"
++        and (len(arguments) == 2 or arguments[2].type == "number")
++    )
 +
 +
 +class NativeValidatorValues:
@@ -6631,7 +6665,7 @@ index 0000000..fc14d5b
 +                and self.primitive(self.kind(args[0]), error=True)
 +            ):
 +                return ("string",)
-+            if cap == ("ambient", "JSON.stringify") and len(args) == 1:
++            if cap == ("ambient", "JSON.stringify") and json_call_has_inert_options(cap, args):
 +                return ("string",)
 +            if cap == ("node:path", "basename") and len(args) == 1:
 +                return ("string",) if self.kind(args[0]) == ("string",) else None
@@ -6855,6 +6889,12 @@ index 0000000..fc14d5b
 +            if function is not None and self.private_function(function) is not None:
 +                continue
 +            args = self.children(self.field(node, "arguments"))
++            if cap in {
++                ("ambient", "process.stdout.write"), ("ambient", "process.stderr.write")
++            }:
++                if len(args) != 1 or self.kind(args[0]) != ("string",):
++                    return False
++                continue
 +            if cap in {("ambient", "console.log"), ("ambient", "console.error")}:
 +                # Formatting and object inspection have additional callback
 +                # contracts. Only the existing single-scalar output is owned.
@@ -6874,7 +6914,7 @@ index 0000000..fc14d5b
 +                    return False
 +                continue
 +            if cap == ("ambient", "JSON.stringify"):
-+                if len(args) != 1 or not self._serializable(args[0]):
++                if not json_call_has_inert_options(cap, args) or not self._serializable(args[0]):
 +                    return False
 +                continue
 +            if self.kind(node) is None:
@@ -6966,6 +7006,10 @@ index 0000000..fc14d5b
 +        # property's boolean result is observed. Plain-record ownership also
 +        # excludes prototypes, accessors, hooks and subsequent member writes.
 +        return self._serializable(receiver)
++
++    def serializes_without_callbacks(self, node):
++        """Only a closed source proof can admit non-primitive JSON traversal."""
++        return self.closed and self._serializable(node)
 +
 +    def _serializable(self, initial):
 +        """Bound JSON traversal to immutable plain records and native arrays.
