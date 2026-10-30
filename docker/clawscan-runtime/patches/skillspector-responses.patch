@@ -4511,10 +4511,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..220f918
+index 0000000..122b407
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1726 @@
+@@ -0,0 +1,1757 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -4591,6 +4591,7 @@ index 0000000..220f918
 +    remaining = MAX_PROOF_STEPS
 +    unsupported = []
 +    native_values = None
++    diagnostic_values = None
 +    computed_storage_roots = set()
 +    error_handler_active = False
 +    error_handler_result = None
@@ -5497,6 +5498,9 @@ index 0000000..220f918
 +                continue
 +            if cap == ("ambient", "fetch") and index == 1:
 +                continue
++            if index == 0 and len(arguments) == 1 and node.type == "template_string":
++                if diagnostic_template_is_data(node):
++                    continue
 +            if native_values is not None:
 +                storage = native_values.storage(field(call, "function"))
 +                if storage is not None:
@@ -6167,6 +6171,30 @@ index 0000000..220f918
 +                if not opaque_only:
 +                    return None
 +
++    def diagnostic_template_is_data(node):
++        nonlocal diagnostic_values
++        if unsafe_native:
++            return False
++        arguments = parent(node)
++        call = parent(arguments) if arguments is not None else None
++        function = field(call, "function") if call is not None else None
++        if function is None or function.type != "member_expression":
++            return False
++        receiver, member = field(function, "object"), field(function, "property")
++        if receiver is None or receiver.type != "identifier" or text(receiver) != "console":
++            return False
++        if member is None or text(member) not in {"log", "error"}:
++            return False
++        if diagnostic_values is None:
++            from skillspector.javascript_diagnostic_values import DiagnosticTemplateValues
++
++            diagnostic_values = DiagnosticTemplateValues(
++                data=data, nodes=nodes, parents=parents, definition=data_definition,
++                capability=capability, private_function=local_function, reads=value_reads,
++                bindings=bindings, ambient_intrinsic=ambient_intrinsic, step=step,
++            )
++        return diagnostic_values.template_is_data(node)
++
 +    if not opaque_only and not unsafe_native:
 +        from skillspector.javascript_native_values import NativeValidatorValues
 +
@@ -6187,6 +6215,9 @@ index 0000000..220f918
 +    for node in nodes:
 +        step()
 +        if node.type == "template_string":
++            if diagnostic_template_is_data(node):
++                literals.append(node)
++                continue
 +            if not is_data(node) or (
 +                not opaque_only
 +                and any(
@@ -8274,3 +8305,397 @@ index 0000000..709384e
 +    assert result["inspection_ledger"][0]["outcome"] != "completed" or any(
 +        f.rule_id == "TM1" for f in result["findings"]
 +    )
+
+diff --git a/src/skillspector/javascript_diagnostic_values.py b/src/skillspector/javascript_diagnostic_values.py
+new file mode 100644
+index 0000000..d55a8b7
+--- /dev/null
++++ b/src/skillspector/javascript_diagnostic_values.py
+@@ -0,0 +1,387 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++"""Scalar provenance for a template's own native console consumer.
++
++This optional proof grants no ownership to the source values' other consumers,
++file writes, process arguments, JSON serialization, or an entire native record.
++"""
++
++from skillspector.javascript_native_values import NativeValidatorValues
++
++
++class DiagnosticTemplateValues(NativeValidatorValues):
++    def _closed_source(self):
++        # Keep this proof separate from the existing closed value/use graph.
++        return False
++
++    def __init__(self, **kwargs):
++        self._imports = {}
++        super().__init__(**kwargs)
++        self._safe = None
++        self._imports_safe = True
++        for node in self.nodes:
++            self.step()
++            if node.type != "import_statement":
++                continue
++            source = self.field(node, "source")
++            module = self.text(source)[1:-1] if source is not None else ""
++            if module not in {"node:path", "node:fs", "node:child_process"}:
++                self._imports_safe = False
++                continue
++            pending = list(self.children(node))
++            while pending:
++                child = pending.pop()
++                self.step()
++                if child.type == "import_specifier":
++                    original = self.field(child, "name")
++                    local = self.field(child, "alias") or original
++                    if original is None or local is None:
++                        self._imports_safe = False
++                    else:
++                        self._imports[local.id] = (module, self.text(original))
++                elif child.type in {"namespace_import", "import_clause"}:
++                    if any(c.type == "identifier" for c in self.children(child)):
++                        self._imports_safe = False
++                    pending.extend(self.children(child))
++                elif child.type != "string":
++                    pending.extend(self.children(child))
++
++    def capability(self, node, visiting=frozenset()):
++        if node is not None and node.type == "identifier":
++            definition = self.definition(node)
++            if definition is not None and definition.id in self._imports:
++                return self._imports[definition.id]
++        return super().capability(node, visiting)
++
++    def _kind(self, node):
++        t = node.type
++        if t in {"string", "number", "true", "false", "null"}:
++            return (
++                {
++                    "string": "string",
++                    "number": "number",
++                    "true": "boolean",
++                    "false": "boolean",
++                    "null": "null",
++                }[t],
++            )
++        if t == "template_string":
++            for part in self.children(node):
++                self.step()
++                if part.type == "template_substitution":
++                    values = self.children(part)
++                    if len(values) != 1 or not self.primitive(self.kind(values[0])):
++                        return None
++            return ("string",)
++        if t == "parenthesized_expression":
++            values = self.children(node)
++            return self.kind(values[0]) if len(values) == 1 else None
++        if t in {"identifier", "shorthand_property_identifier"}:
++            definition = self.definition(node)
++            if definition is None:
++                return None
++            owner = self.parent(definition)
++            if owner is not None and owner.type == "array_pattern":
++                declaration = self.parent(owner)
++                lexical = self.parent(declaration) if declaration is not None else None
++                if (
++                    declaration is None
++                    or declaration.type != "variable_declarator"
++                    or self.field(declaration, "name") != owner
++                    or lexical is None
++                    or lexical.type != "lexical_declaration"
++                    or not any(c.type == "const" for c in lexical.children)
++                    or self._writes.get(definition.id)
++                ):
++                    return None
++                value = self.field(declaration, "value")
++                kind = self.kind(value)
++                return kind[1] if kind is not None and kind[0] == "array" else None
++            if owner is not None and owner.type == "for_in_statement":
++                # Element types survive only immutable for-of bindings. A
++                # reassignment or for-in key is not evidence about an element.
++                if (
++                    self.field(owner, "left") != definition
++                    or not any(c.type == "const" for c in owner.children)
++                    or not any(c.type == "of" for c in owner.children)
++                    or any(c.type == "await" for c in owner.children)
++                    or self._writes.get(definition.id)
++                ):
++                    return None
++                kind = self.kind(self.field(owner, "right"))
++                return kind[1] if kind is not None and kind[0] == "array" else None
++            if owner is None or owner.type != "variable_declarator":
++                return None
++            values = []
++            initial = self.field(owner, "value")
++            if initial is not None:
++                values.append(self.kind(initial))
++            for write in self._writes.get(definition.id, []):
++                self.step()
++                if write.type != "assignment_expression":
++                    return None
++                values.append(self.kind(self.field(write, "right")))
++            return (
++                values[0]
++                if values
++                and values[0] is not None
++                and all(self._same_kind(k, values[0]) for k in values)
++                else None
++            )
++        if t == "array":
++            kinds = [self.kind(c) for c in self.children(node)]
++            return (
++                ("array", kinds[0])
++                if kinds
++                and kinds[0] is not None
++                and all(self._same_kind(k, kinds[0]) for k in kinds)
++                else (("array", None) if not kinds else None)
++            )
++        if t == "object":
++            for part in self.children(node):
++                if part.type != "pair" or self.kind(self.field(part, "value")) is None:
++                    return None
++            return ("json",)
++        if t in {"member_expression", "subscript_expression"}:
++            cap = self.capability(node)
++            if cap == ("ambient", "process.argv"):
++                return ("array", ("string",))
++            receiver = self.kind(self.field(node, "object"))
++            member = self.field(node, "property") or self.field(node, "index")
++            if receiver is None or member is None:
++                return None
++            if t == "subscript_expression":
++                return (
++                    receiver[1]
++                    if receiver[0] == "array" and self.kind(member) == ("number",)
++                    else None
++                )
++            name = self.text(member)
++            if receiver[0] == "string" and name == "length":
++                return ("number",)
++            if receiver[0] == "spawn" and name in {"stdout", "stderr"}:
++                # Successful encoded output is a string. A failed spawn/null
++                # stream can throw before a trim result; it cannot supply a hook.
++                return ("string",)
++            if receiver[0] == "spawn" and name == "error":
++                return ("native_error",)
++            if receiver[0] == "native_error" and name == "message":
++                return ("string",)
++            if receiver[0] == "json" and name not in {"constructor", "__proto__", "prototype"}:
++                return ("json",)
++            return None
++        if t == "binary_expression":
++            op = self.field(node, "operator")
++            left = self.kind(self.field(node, "left"))
++            right = self.kind(self.field(node, "right"))
++            if op is None or left is None or right is None:
++                return None
++            operator = self.text(op)
++            if operator in {"||", "&&", "??"}:
++                return left if self._same_kind(left, right) else ("json",)
++            if operator in {"===", "!==", "==", "!="}:
++                return ("boolean",)
++            if operator == "+" and self.primitive(left) and self.primitive(right):
++                return ("string",) if "string" in {left[0], right[0]} else ("number",)
++            return None
++        if t == "unary_expression":
++            op = self.field(node, "operator")
++            return (
++                ("boolean",)
++                if op is not None
++                and self.text(op) == "!"
++                and self.kind(self.field(node, "argument")) is not None
++                else None
++            )
++        if t != "call_expression":
++            return None
++        function = self.field(node, "function")
++        args = self.children(self.field(node, "arguments"))
++        cap = self.capability(function)
++        if any(a.type == "spread_element" for a in args):
++            return None
++        if cap in {("node:path", "resolve"), ("node:path", "join")}:
++            return ("string",) if all(self.kind(a) == ("string",) for a in args) else None
++        if cap == ("node:fs", "existsSync") and len(args) == 1:
++            return ("boolean",) if self.kind(args[0]) == ("string",) else None
++        if cap == ("node:fs", "writeFileSync") and len(args) == 2:
++            return ("undefined",) if all(self.kind(a) == ("string",) for a in args) else None
++        if cap == ("node:child_process", "spawnSync") and len(args) == 3:
++            options = self.children(args[2])
++            option = options[0] if len(options) == 1 else None
++            key = self.field(option, "key")
++            value = self.field(option, "value")
++            if (
++                args[0].type == "string"
++                and args[1].type == "array"
++                and self.kind(args[1]) is not None
++                and args[2].type == "object"
++                and option is not None
++                and option.type == "pair"
++                and key is not None
++                and key.type == "property_identifier"
++                and self.text(key) == "encoding"
++                and value is not None
++                and value.type == "string"
++                and self.text(value)[1:-1] in {"utf8", "utf-8"}
++            ):
++                return ("spawn",)
++            return None
++        if cap == ("ambient", "process.argv.slice") and len(args) <= 2:
++            return (
++                ("array", ("string",)) if all(self.kind(a) == ("number",) for a in args) else None
++            )
++        if cap == ("ambient", "JSON.parse") and len(args) == 1:
++            return ("json",) if self.kind(args[0]) == ("string",) else None
++        if cap == ("ambient", "JSON.stringify") and len(args) == 1:
++            return ("string",) if self.kind(args[0]) is not None else None
++        if function is not None and function.type == "member_expression":
++            receiver = self.kind(self.field(function, "object"))
++            member = self.field(function, "property")
++            name = self.text(member) if member is not None else ""
++            if receiver == ("string",):
++                if name == "trim" and not args:
++                    return ("string",)
++                if (
++                    name in {"startsWith", "endsWith"}
++                    and len(args) == 1
++                    and self.kind(args[0]) == ("string",)
++                ):
++                    return ("boolean",)
++                if name == "split" and len(args) == 1 and self.kind(args[0]) == ("string",):
++                    return ("array", ("string",))
++        return None
++
++    def _native_member_read(self, node):
++        if self.capability(node) is not None or self.kind(node) is not None:
++            return True
++        owner = self.parent(node)
++        return (
++            owner is not None
++            and owner.type == "call_expression"
++            and self.field(owner, "function") == node
++            and self.kind(owner) is not None
++        )
++
++    def _operands_are_data(self, node):
++        if node.type == "array_pattern":
++            owner = self.parent(node)
++            declaration = self.parent(owner) if owner is not None else None
++            values = self.children(node)
++            kind = self.kind(self.field(owner, "value")) if owner is not None else None
++            return (
++                owner is not None
++                and owner.type == "variable_declarator"
++                and declaration is not None
++                and declaration.type == "lexical_declaration"
++                and self.text(declaration).startswith("const")
++                and kind is not None
++                and kind[0] == "array"
++                and all(
++                    value.type == "identifier" and not self._writes.get(value.id)
++                    for value in values
++                )
++            )
++        # Reuse the existing affirmative semantic grammar. Unknown node kinds
++        # and tagged calls stay outside this optional proof by default.
++        return super()._operands_are_data(node)
++
++    def _effects_safe(self):
++        if not self._imports_safe:
++            return False
++        for node in self.nodes:
++            self.step()
++            t = node.type
++            if not self._operands_are_data(node):
++                return False
++            if t == "optional_chain":
++                return False
++            if t == "unary_expression":
++                operator = self.field(node, "operator")
++                if operator is not None and self.text(operator) == "delete":
++                    return False
++            if t in {
++                "class",
++                "class_declaration",
++                "method_definition",
++                "arrow_function",
++                "function_expression",
++                "new_expression",
++                "export_statement",
++                "await_expression",
++                "yield_expression",
++                "generator_function",
++                "generator_function_declaration",
++                "spread_element",
++                "rest_pattern",
++                "assignment_pattern",
++            }:
++                return False
++            if t == "function_declaration" and any(c.type == "async" for c in node.children):
++                return False
++            if t in {
++                "assignment_expression",
++                "augmented_assignment_expression",
++                "update_expression",
++            }:
++                target = self.field(node, "left") or self.field(node, "argument")
++                if target is None or target.type != "identifier" or self.definition(target) is None:
++                    return False
++            if t == "for_in_statement":
++                kind = self.kind(self.field(node, "right"))
++                if (
++                    kind is None
++                    or kind[0] != "array"
++                    or any(c.type == "await" for c in node.children)
++                ):
++                    return False
++            if t in {"member_expression", "subscript_expression"}:
++                owner = self.parent(node)
++                if (
++                    self.capability(node) is None
++                    and not (
++                        owner is not None
++                        and owner.type == "call_expression"
++                        and self.field(owner, "function") == node
++                    )
++                    and self.kind(node) is None
++                ):
++                    return False
++            if t != "call_expression":
++                continue
++            function = self.field(node, "function")
++            cap = self.capability(function)
++            args = self.children(self.field(node, "arguments"))
++            if cap in {("ambient", "console.log"), ("ambient", "console.error")}:
++                if len(args) != 1 or not self.primitive(self.kind(args[0])):
++                    return False
++            elif cap == ("ambient", "process.exit"):
++                if len(args) > 1 or any(self.kind(a) != ("number",) for a in args):
++                    return False
++            elif function is not None and self.private_function(function) is not None:
++                if args:
++                    return False
++            elif self.kind(node) is None:
++                return False
++        return True
++
++    def template_is_data(self, node):
++        if self._safe is None:
++            self._safe = self._effects_safe()
++        if not self._safe:
++            return False
++        arguments = self.parent(node)
++        call = self.parent(arguments) if arguments is not None else None
++        if (
++            arguments is None
++            or arguments.type != "arguments"
++            or self.children(arguments) != [node]
++            or call is None
++            or call.type != "call_expression"
++        ):
++            return False
++        function = self.field(call, "function")
++        return self.capability(function) in {
++            ("ambient", "console.log"),
++            ("ambient", "console.error"),
++        } and self.kind(node) == ("string",)
