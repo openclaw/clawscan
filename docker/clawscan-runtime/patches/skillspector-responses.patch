@@ -9117,3 +9117,24 @@ diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/s
          if (
              parsed.dynamic
              and may_have_destructive_outer_operands
+diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+--- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
++++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+@@ -2252,14 +2252,13 @@
+             continue
+         if parsed.limited:
+             return True
+-        # Adjacent shell segments can reconstruct a command and its operands
+-        # inside one word. A completed raw-word parse does not inspect that
+-        # reconstructed command; preserve uncertainty using the same bounds.
++        # Quoted and unquoted shell segments can reconstruct a command and its
++        # operands inside one word. A completed raw-word parse does not inspect
++        # that reconstructed command; preserve uncertainty using the same bounds.
+         if (
+             any(
+                 content[opening] != "`"
+                 and closing < parsed.end - 1
+-                and content[closing + 1] in "'\""
+                 for opening, closing in parsed.quoted_spans
+             )
+             and _may_have_destructive_outer_operands(parsed.text)

@@ -158,3 +158,24 @@ def test_literal_quote_prose_retains_completion_with_shell_notation(source):
     )
     assert result.get("findings", []) == []
     assert result["inspection_ledger"][0]["outcome"] == "completed"
+
+
+@pytest.mark.parametrize("source", [
+    r'sh -c ":; rm "-rf\ /',
+    r"sh -c ':; rm '-rf\ /",
+    r'bash -c ":; rm "-r\f\ /',
+    r'sh -c ":; rm "-r"f"\ /',
+    r'sh -c ":; rm "-rf\ /\*',
+    r'sh -c ":; rm "-rf\ /srv/data',
+])
+@pytest.mark.parametrize("path", ["example.sh", "example.md"])
+def test_unquoted_shell_word_suffix_retains_destructive_evidence(source, path):
+    # Inert scanner input: a quote segment does not end the complete shell word.
+    result = static_runner.run_static_patterns_with_ledger(
+        {"components": [path], "file_cache": {path: source}}, [tool]
+    )
+    assert (
+        any(f.rule_id == "TM1" and str(f.severity).upper() == "HIGH"
+            for f in result.get("findings", []))
+        or result["inspection_ledger"][0]["outcome"] == "partial"
+    )
