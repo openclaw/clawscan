@@ -573,7 +573,8 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 		return "", "", fmt.Errorf("case %s required judge did not complete", benchmarkCase.ID)
 	}
 	for scanner, result := range benchmarkCase.Run.Scanners {
-		if result.Status != "completed" && result.Status != "skipped" {
+		adjudicatedPartial := benchmarkCase.Run.Complete && benchmarkCase.Run.Status == "completed" && usablePartialScanner(benchmarkCase.Run.Profile, scanner, result) && benchmarkCase.Run.Judge != nil && benchmarkCase.Run.Judge.Status == "completed"
+		if result.Status != "completed" && result.Status != "skipped" && !adjudicatedPartial {
 			return "", "", fmt.Errorf("case %s required scanner %s did not complete", benchmarkCase.ID, scanner)
 		}
 	}

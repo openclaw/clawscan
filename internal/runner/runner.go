@@ -218,15 +218,16 @@ type Target struct {
 }
 
 type ScannerResult struct {
-	Status      string          `json:"status"`
-	StartedAt   string          `json:"startedAt"`
-	CompletedAt string          `json:"completedAt"`
-	DurationMs  int64           `json:"durationMs"`
-	Command     []string        `json:"command"`
-	Error       string          `json:"error"`
-	OutputPath  string          `json:"outputPath,omitempty"`
-	ExitCode    *int            `json:"exitCode,omitempty"`
-	Raw         json.RawMessage `json:"raw"`
+	Status       string          `json:"status"`
+	ReportPolicy string          `json:"reportPolicy,omitempty"`
+	StartedAt    string          `json:"startedAt"`
+	CompletedAt  string          `json:"completedAt"`
+	DurationMs   int64           `json:"durationMs"`
+	Command      []string        `json:"command"`
+	Error        string          `json:"error"`
+	OutputPath   string          `json:"outputPath,omitempty"`
+	ExitCode     *int            `json:"exitCode,omitempty"`
+	Raw          json.RawMessage `json:"raw"`
 }
 
 type TargetWorkspaceManifest struct {
@@ -889,7 +890,7 @@ func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact, safet
 	for index, artifact := range artifacts {
 		for scanner, relPath := range paths[index] {
 			result := artifact.Scanners[scanner]
-			if len(result.Raw) == 0 || artifact.Status != "" && result.Status != "completed" {
+			if len(result.Raw) == 0 || artifact.Status != "" && result.Status != "completed" && !usablePartialScanner(artifact.Profile, scanner, result) {
 				result.OutputPath = ""
 				artifact.Scanners[scanner] = result
 				continue
@@ -1144,7 +1145,7 @@ func scannerResultContext(ctx context.Context, opts Options, scanner string, tar
 			Raw:         json.RawMessage(raw),
 		}
 		if scanner == "skillspector" {
-			result = validateSkillSpectorReport(result)
+			result = validateSkillSpectorReportForProfile(result, opts.Profile)
 		}
 		return result, nil
 	}
@@ -2504,7 +2505,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 					Raw:         nil,
 				}, nil
 			}
-			return validateSkillSpectorReport(ScannerResult{
+			return validateSkillSpectorReportForProfile(ScannerResult{
 				Status:      commandScannerResultStatus(output, runErr),
 				StartedAt:   startedAt,
 				CompletedAt: completedAt,
@@ -2512,7 +2513,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 				Error:       message,
 				ExitCode:    exitCode,
 				Raw:         json.RawMessage(raw),
-			}), nil
+			}, runner.Profile), nil
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -2546,7 +2547,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 			Raw:         nil,
 		}, nil
 	}
-	return validateSkillSpectorReport(ScannerResult{
+	return validateSkillSpectorReportForProfile(ScannerResult{
 		Status:      "completed",
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
@@ -2554,7 +2555,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		Error:       "",
 		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
-	}), nil
+	}, runner.Profile), nil
 }
 
 func defaultSkillSpectorOpenAIProvider(env map[string]string) {
@@ -2739,7 +2740,7 @@ func evaluateGate(artifact *Artifact, opts Options) {
 		}
 		evaluated[scanner] = true
 		result := artifact.Scanners[scanner]
-		if result.Status != "completed" {
+		if result.Status != "completed" && !usablePartialScanner(artifact.Profile, scanner, result) {
 			continue
 		}
 		policy := opts.GateRules[scanner]
