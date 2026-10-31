@@ -8699,3 +8699,442 @@ index 0000000..d55a8b7
 +            ("ambient", "console.log"),
 +            ("ambient", "console.error"),
 +        } and self.kind(node) == ("string",)
+diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+index 6904a53..a1d9833 100644
+--- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
++++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+@@ -536,6 +536,7 @@ class _ShellCommandWord:
+     end: int
+     dynamic: bool
+     limited: bool = False
++    quoted_spans: tuple[tuple[int, int], ...] = ()
+-
++
+-
++
+ @dataclass(frozen=True)
+@@ -1745,6 +1746,8 @@ def _parse_shell_command_word(
+         _command_wrapper_quote(content, start) if content[start] in "$`" else None
+     )
+     quote: str | None = None
++    quote_start: int | None = None
++    quoted_spans: list[tuple[int, int]] = []
+     ansi_c_quote = False
+     dynamic = False
+     limited = False
+@@ -1757,6 +1760,9 @@ def _parse_shell_command_word(
+         character = content[cursor]
+         if quote is not None:
+             if character == quote:
++                if quote_start is not None:
++                    quoted_spans.append((quote_start, cursor))
++                quote_start = None
+                 if owned_word_positions is not None:
+                     owned_word_positions.add(cursor)
+                 quote = None
+@@ -1815,6 +1821,7 @@ def _parse_shell_command_word(
+                     cursor = parameter_end
+                     if inherited_quote_closed[0]:
+                         quote = None
++                        quote_start = None
+                         ansi_c_quote = False
+                     continue
+             elif quote == '"' and character == "`":
+@@ -1863,6 +1870,7 @@ def _parse_shell_command_word(
+                 output.append(character)
+         elif character == "$" and cursor + 1 < limit and content[cursor + 1] in "'\"":
+             quote = content[cursor + 1]
++            quote_start = cursor + 1
+             ansi_c_quote = quote == "'"
+             cursor += 2
+             continue
+@@ -1940,6 +1948,7 @@ def _parse_shell_command_word(
+             if character == wrapper_quote:
+                 break
+             quote = character
++            quote_start = cursor
+         elif character == "\\" and cursor + 1 < limit:
+             if content[cursor + 1] == "\n":
+                 cursor += 2
+@@ -1962,17 +1971,48 @@ def _parse_shell_command_word(
+         cursor += 1
+     if quote is not None:
+         return None
+-    return _ShellCommandWord("".join(output), cursor, dynamic, limited)
++    return _ShellCommandWord("".join(output), cursor, dynamic, limited, tuple(quoted_spans))
+-
++
+-
++
+ def _destructive_command_words(content: str) -> Iterator[tuple[int, int]]:
++    for start, end, _ in _destructive_command_candidates(content):
++        yield start, end
++
++
++def _destructive_command_candidates(
++    content: str,
++    check_runtime: Callable[[], None] | None = None,
++    *,
++    allow_quote_ownership: bool = True,
++) -> Iterator[tuple[int, int, int | None]]:
++    # The forward command-word parser proves delimiters, not safety. Keep inner
++    # destructive words as independent candidates, but do not turn their outer
++    # closing quotation into an unmatched opening operand quote.
++    runtime_check = check_runtime or (lambda: None)
+     parsed_through = 0
++    known_quotes = {
++        (opening, end - 1)
++        for opening, end in (
++            validated_json_string_spans(content, runtime_check) if allow_quote_ownership else ()
++        )
++    }
++    pending_quotes = list(known_quotes)
++    heapq.heapify(pending_quotes)
++    enclosing_ends: list[int] = []
++    known_closers = {closing for _, closing in known_quotes}
+     parameter_end_cache: dict[int, _ParameterExpansionEnd] = {}
+     substitution_end_cache: dict[int, int | None] = {}
+     backtick_end_cache: dict[int, int | None] = {}
+     for candidate in _SHELL_COMMAND_WORD_START_RE.finditer(content):
++        runtime_check()
+         start = candidate.start()
+-        if start < parsed_through:
++        while pending_quotes and pending_quotes[0][0] < start:
++            _, closing = heapq.heappop(pending_quotes)
++            heapq.heappush(enclosing_ends, closing)
++        while enclosing_ends and enclosing_ends[0] <= start:
++            heapq.heappop(enclosing_ends)
++        enclosing_end = enclosing_ends[0] if enclosing_ends else None
++        if start < parsed_through or start in known_closers:
+             continue
+         if not _is_shell_command_word_start(content, start):
+             continue
+@@ -2002,9 +2042,17 @@ def _destructive_command_words(content: str) -> Iterator[tuple[int, int]]:
+             parameter_end_cache,
+             substitution_end_cache,
+             backtick_end_cache,
++            check_runtime=runtime_check,
++            enclosing_delimiter=content[enclosing_end] if enclosing_end is not None else None,
+         )
+         if parsed is None:
+             continue
++        if allow_quote_ownership and not parsed.limited:
++            for span in parsed.quoted_spans:
++                if span not in known_quotes:
++                    known_quotes.add(span)
++                    known_closers.add(span[1])
++                    heapq.heappush(pending_quotes, span)
+         # A long concatenated quoted word can expose every closing quote as a
+         # regex candidate. Skip the rest only when it cannot be an executed
+         # whitespace-bearing wrapper or a dynamic substitution wrapper.
+@@ -2022,7 +2070,7 @@ def _destructive_command_words(content: str) -> Iterator[tuple[int, int]]:
+             and command_basename in _DESTRUCTIVE_COMMAND_BASENAMES
+         ):
+             parsed_through = max(parsed_through, parsed.end)
+-            yield start, parsed.end
++            yield start, parsed.end, enclosing_end
+-
++
+-
++
+ def _has_shell_command_word_exhaustion(
+@@ -2883,6 +2931,7 @@ def _bounded_shell_tokens(
+     body_start: int,
+     *,
+     check_runtime: Callable[[], None] | None = None,
++    enclosing_quote_end: int | None = None,
+ ) -> tuple[tuple[_ShellToken, ...], int, bool]:
+     """Return argument words from one security-view-bounded shell command."""
+     runtime_check = check_runtime or (lambda: None)
+@@ -2906,7 +2955,9 @@ def _bounded_shell_tokens(
+     parse_limited = False
+     cursor = body_start
+     limit = min(len(content), body_start + _ROOT_GLOB_COMMAND_CHARS)
+-    wrapper_quote = _command_wrapper_quote(content, command_start)
++    wrapper_quote = (
++        _command_wrapper_quote(content, command_start) if enclosing_quote_end is None else None
++    )
+-
++
+     def start_word() -> None:
+         nonlocal word_started, current_is_argument, expect_redirection_target
+@@ -2993,6 +3044,9 @@ def _bounded_shell_tokens(
+         if (cursor - body_start) % 256 == 0:
+             runtime_check()
+         character = content[cursor]
++        if cursor == enclosing_quote_end:
++            flush()
++            return tuple(tokens), cursor, parse_limited or quote is not None
+         if quote is not None:
+             if character == quote:
+                 quote = None
+@@ -3279,6 +3333,7 @@ def _bounded_shell_tokens(
+         and (
+             content[limit] in "\n;|&()"
+             or content[limit] == wrapper_quote
++            or limit == enclosing_quote_end
+             or (content[limit] == "#" and not word_started)
+         )
+     )
+@@ -4671,7 +4726,7 @@ def _tm1_candidates(
+     ) -> Iterator[tuple[int, int, str, float, bool, int | None, int | None, str | None]]:
+         seen_commands: set[tuple[int, int]] = set()
+         covered_until = 0
+-        for command_start, body_start in _destructive_command_words(candidate_content):
++        for command_start, body_start, enclosing_end in _destructive_command_candidates(candidate_content):
+             if command_start < covered_until:
+                 continue
+             command_key = (command_start, body_start)
+@@ -4687,6 +4742,7 @@ def _tm1_candidates(
+                 candidate_content,
+                 command_start,
+                 body_start,
++                enclosing_quote_end=enclosing_end,
+             )
+             covered_until = max(covered_until, command_end)
+             command = candidate_content[command_start:command_end]
+@@ -5263,7 +5319,9 @@ def _has_bounded_parse_exhaustion(
+     ):
+         return True
+     covered_until = 0
+-    for command_start, body_start in _destructive_command_words(content):
++    for command_start, body_start, enclosing_end in _destructive_command_candidates(
++        content, check_runtime, allow_quote_ownership=complete_context
++    ):
+         check_runtime()
+         if command_start < covered_until:
+             continue
+@@ -5277,6 +5335,7 @@ def _has_bounded_parse_exhaustion(
+             command_start,
+             body_start,
+             check_runtime=check_runtime,
++            enclosing_quote_end=enclosing_end,
+         )
+         covered_until = max(covered_until, command_end)
+         if exhausted or _has_unsupported_brace_expansion(tokens):
+diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+--- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
++++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+@@ -2012,6 +2012,10 @@
+         while enclosing_ends and enclosing_ends[0] <= start:
+             heapq.heappop(enclosing_ends)
+         enclosing_end = enclosing_ends[0] if enclosing_ends else None
++        # Reconstructed command words retain the existing conservative operand
++        # boundary; only literal words inherit enclosing quote ownership.
++        if content[start] in "$`":
++            enclosing_end = None
+         if start < parsed_through or start in known_closers:
+             continue
+         if not _is_shell_command_word_start(content, start):
+diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+--- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
++++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+@@ -1722,6 +1722,7 @@
+     check_runtime: Callable[[], None] | None = None,
+     owned_word_positions: set[int] | None = None,
+     enclosing_delimiter: str | None = None,
++    enclosing_quote_end: int | None = None,
+ ) -> _ShellCommandWord | None:
+     runtime_check = check_runtime or (lambda: None)
+     # The shell recognizes ``NAME=value`` before expansion and never runs the
+@@ -1753,7 +1754,8 @@
+     limited = False
+     unquoted_characters = 0
+     cursor = start
+-    limit = len(content)
++    # A proven outer endpoint must not close an inner quote-spliced command.
++    limit = len(content) if enclosing_quote_end is None else min(len(content), enclosing_quote_end)
+     while cursor < limit:
+         if cursor > start and (cursor - start) % 4096 == 0:
+             runtime_check()
+@@ -1836,6 +1838,7 @@
+                 )
+                 if substitution_end is None:
+                     return None
++                quoted_spans.append((cursor, substitution_end - 1))
+                 static_value = _static_printf_substitution(
+                     content,
+                     cursor,
+@@ -1930,6 +1933,7 @@
+             )
+             if substitution_end is None:
+                 return None
++            quoted_spans.append((cursor, substitution_end - 1))
+             static_value = _static_printf_substitution(
+                 content,
+                 cursor,
+@@ -2000,6 +2004,7 @@
+     heapq.heapify(pending_quotes)
+     enclosing_ends: list[int] = []
+     known_closers = {closing for _, closing in known_quotes}
++    known_backtick_openers: set[int] = set()
+     parameter_end_cache: dict[int, _ParameterExpansionEnd] = {}
+     substitution_end_cache: dict[int, int | None] = {}
+     backtick_end_cache: dict[int, int | None] = {}
+@@ -2018,7 +2023,7 @@
+             enclosing_end = None
+         if start < parsed_through or start in known_closers:
+             continue
+-        if not _is_shell_command_word_start(content, start):
++        if not _is_shell_command_word_start(content, start) and start - 1 not in known_backtick_openers:
+             continue
+         if _has_quoted_assignment_prefix(content, start):
+             # This candidate cannot name a destructive command. Nested command
+@@ -2047,7 +2052,7 @@
+             substitution_end_cache,
+             backtick_end_cache,
+             check_runtime=runtime_check,
+-            enclosing_delimiter=content[enclosing_end] if enclosing_end is not None else None,
++            enclosing_quote_end=enclosing_end,
+         )
+         if parsed is None:
+             continue
+@@ -2056,6 +2061,8 @@
+                 if span not in known_quotes:
+                     known_quotes.add(span)
+                     known_closers.add(span[1])
++                    if content[span[0]] == "`":
++                        known_backtick_openers.add(span[0])
+                     heapq.heappush(pending_quotes, span)
+         # A long concatenated quoted word can expose every closing quote as a
+         # regex candidate. Skip the rest only when it cannot be an executed
+diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+--- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
++++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+@@ -537,6 +537,7 @@
+     dynamic: bool
+     limited: bool = False
+     quoted_spans: tuple[tuple[int, int], ...] = ()
++    reconstructed: bool = False
+-
++
+-
++
+ @dataclass(frozen=True)
+@@ -1751,6 +1752,7 @@
+     quoted_spans: list[tuple[int, int]] = []
+     ansi_c_quote = False
+     dynamic = False
++    reconstructed = False
+     limited = False
+     unquoted_characters = 0
+     cursor = start
+@@ -1804,6 +1806,7 @@
+                         limited = limited or reconstructs_command(cursor, substitution_end)
+                     else:
+                         output.append(static_value)
++                        reconstructed = True
+                     cursor = substitution_end
+                     continue
+                 parameter_end = _skip_parameter_expansion(
+@@ -1853,6 +1856,7 @@
+                     )
+                 else:
+                     output.append(static_value)
++                    reconstructed = True
+                 cursor = substitution_end
+                 continue
+             elif character == "\\" and quote == '"' and cursor + 1 < limit:
+@@ -1896,6 +1900,7 @@
+                 limited = limited or reconstructs_command(cursor, substitution_end)
+             else:
+                 output.append(static_value)
++                reconstructed = True
+             cursor = substitution_end
+             continue
+         elif character == "$":
+@@ -1946,6 +1951,7 @@
+                 limited = limited or reconstructs_command(cursor, substitution_end, backtick=True)
+             else:
+                 output.append(static_value)
++                reconstructed = True
+             cursor = substitution_end
+             continue
+         elif character in "'\"":
+@@ -1975,7 +1981,9 @@
+         cursor += 1
+     if quote is not None:
+         return None
+-    return _ShellCommandWord("".join(output), cursor, dynamic, limited, tuple(quoted_spans))
++    return _ShellCommandWord(
++        "".join(output), cursor, dynamic, limited, tuple(quoted_spans), reconstructed
++    )
+-
++
+-
++
+ def _destructive_command_words(content: str) -> Iterator[tuple[int, int]]:
+@@ -2056,8 +2064,20 @@
+         )
+         if parsed is None:
+             continue
++        # Any reconstructed piece keeps the conservative operand boundary,
++        # including literal and quoted prefixes before a static substitution.
++        if parsed.reconstructed:
++            enclosing_end = None
+         if allow_quote_ownership and not parsed.limited:
++            concatenated = sum(
++                content[opening] != "`" for opening, _ in parsed.quoted_spans
++            ) > 1
+             for span in parsed.quoted_spans:
++                # A segment close cannot end operands extended by another
++                # quoted segment. A lone literal quote can precede host syntax;
++                # backticks delimit an independent executable substitution.
++                if concatenated and content[span[0]] != "`" and span[1] != parsed.end - 1:
++                    continue
+                 if span not in known_quotes:
+                     known_quotes.add(span)
+                     known_closers.add(span[1])
+@@ -2232,6 +2252,31 @@
+             continue
+         if parsed.limited:
+             return True
++        # Adjacent shell segments can reconstruct a command and its operands
++        # inside one word. A completed raw-word parse does not inspect that
++        # reconstructed command; preserve uncertainty using the same bounds.
++        if (
++            any(
++                content[opening] != "`"
++                and closing < parsed.end - 1
++                and content[closing + 1] in "'\""
++                for opening, closing in parsed.quoted_spans
++            )
++            and _may_have_destructive_outer_operands(parsed.text)
++        ):
++            for command_start, body_start, _ in _destructive_command_candidates(
++                parsed.text, check_runtime, allow_quote_ownership=False
++            ):
++                tokens, _, exhausted = _bounded_shell_tokens(
++                    parsed.text, command_start, body_start, check_runtime=check_runtime
++                )
++                if (
++                    exhausted
++                    or _has_unsupported_brace_expansion(tokens)
++                    or _has_destructive_root_glob(tokens)
++                    or _has_destructive_root_path(tokens)
++                ):
++                    return True
+         if (
+             parsed.dynamic
+             and may_have_destructive_outer_operands
+diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+--- a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
++++ b/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py
+@@ -2252,14 +2252,13 @@
+             continue
+         if parsed.limited:
+             return True
+-        # Adjacent shell segments can reconstruct a command and its operands
+-        # inside one word. A completed raw-word parse does not inspect that
+-        # reconstructed command; preserve uncertainty using the same bounds.
++        # Quoted and unquoted shell segments can reconstruct a command and its
++        # operands inside one word. A completed raw-word parse does not inspect
++        # that reconstructed command; preserve uncertainty using the same bounds.
+         if (
+             any(
+                 content[opening] != "`"
+                 and closing < parsed.end - 1
+-                and content[closing + 1] in "'\""
+                 for opening, closing in parsed.quoted_spans
+             )
+             and _may_have_destructive_outer_operands(parsed.text)
