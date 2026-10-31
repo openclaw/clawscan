@@ -57,6 +57,51 @@ attempt's status, redacted result, validation error, duration, and expected
 inspection challenge/path/hash. The top-level `judge.result` is only the last
 attempt, and consumers must still validate its output schema and security evidence.
 
+## Partial scanner evidence in ClawHub profiles
+
+The `clawhub` and `clawhub-aig` profiles allow usable partial SkillSpector
+reports to reach the independent judge. These scanner results retain
+`status: "partial"` and add `reportPolicy: "judge-gaps"`. Their `raw` report and
+saved scanner output retain the original findings, completeness accounting,
+limitations, and provenance. The judge workspace contains the complete raw
+report at `skillspector-report-0.json` and the exact copied artifact in `artifact/`.
+
+Eligibility requires an unambiguous structured report with explicitly successful
+execution at both report and completeness levels, partial accounting, component
+and issue arrays, and usable gap records. Native commands must finish with exit
+0 or 1; missing, malformed, crashed, or unsuccessful output remains failed.
+There is no minimum coverage percentage. Other profiles retain their existing
+scanner validation behavior, and configured security gate rules still apply to
+usable partial evidence.
+
+Bundled plugin evidence may retain original child reports in
+`bundled_reports: [{"rootPath": "skills/example", "report": {...}}, ...]`.
+This one-level wrapper qualifies only when every unique canonical relative root
+has usable original evidence and at least one child is partial. Partial children
+use the same report checks; complete children retain strict completion checks
+and typed evidence/error/fatal guards, and require `execution_successful: true`
+at both report and `analysis_completeness` levels with `is_complete: true` in
+that accounting. Legacy complete reports outside this wrapper are unchanged.
+Nested aggregates, duplicate keys or roots,
+conflicting control aliases, invalid paths, and failed children reject the wrapper.
+Aggregate risk status and findings stay unchanged; the wrapper's execution flags
+and partial accounting do not synthesize completed coverage. The judge resolves
+original child component paths beneath each `artifact/<rootPath>/`.
+
+The judge independently investigates material gaps in the exact artifact,
+records inspected files in its existing receipt, and explains investigation and
+residual uncertainty in dimension details and user guidance. It may return
+benign, suspicious, or malicious; partial evidence alone determines none of
+these. Neither complete scanner coverage nor inspecting every gap is required.
+
+Consumers must explicitly support the partial status and policy pair. A run with
+this evidence can have top-level `status: "completed"` and `complete: true` only
+after its judge completes, including the existing receipt challenge, hash, and
+path checks. Reject incomplete runs, failed judges, and unrecognized partial
+results. Continue enforcing artifact identity, sandbox requirements, and genuine
+secret, malicious, and unsafe-bytecode checks. A receipt authenticates inspection
+evidence; it does not establish complete coverage or justify a verdict by itself.
+
 ## Versioned inspection receipts
 
 The built-in `clawhub` and `clawhub-aig` judges emit version 2 receipts. The

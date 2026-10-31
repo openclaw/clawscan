@@ -75,6 +75,16 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
   framework to ClawScan unless the product direction changes.
 - Judge placeholders and prompt interpolation must fail clearly when they
   reference a scanner that was not requested.
+- In the ClawHub profiles, usable partial SkillSpector reports may reach the
+  independent judge with `status: partial` and `reportPolicy: judge-gaps`.
+  Preserve raw partial status, findings, gaps, and provenance. The judge
+  investigates material gaps in the exact artifact and records inspection and
+  uncertainty; do not add a 100%-coverage or inspect-every-gap gate. Missing,
+  malformed, crashed, or unsuccessful output remains an operational failure.
+  Keep artifact receipts, hashes, sandbox checks, and genuine secret, malicious,
+  and unsafe-bytecode protections. Generic scanner semantics remain unchanged.
+  See `docs/judge.md` and `internal/runner/skillspector_partial_test.go` for the
+  consumer contract and regression checks.
 
 ## Profiles And Benchmarks
 

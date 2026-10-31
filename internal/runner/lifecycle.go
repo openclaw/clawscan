@@ -127,8 +127,9 @@ func finishArtifact(artifact *Artifact, opts Options, ctx context.Context, now f
 	evaluateGate(artifact, opts)
 	artifact.Status = "completed"
 	artifact.Complete = *runErr == nil
-	for _, result := range artifact.Scanners {
-		if result.Status != "completed" && result.Status != "skipped" {
+	for scanner, result := range artifact.Scanners {
+		adjudicatedPartial := usablePartialScanner(artifact.Profile, scanner, result) && artifact.Judge != nil && artifact.Judge.Status == "completed"
+		if result.Status != "completed" && result.Status != "skipped" && !adjudicatedPartial {
 			artifact.Complete = false
 		}
 	}
