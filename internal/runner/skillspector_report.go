@@ -138,8 +138,15 @@ func skillSpectorUsablePartial(raw json.RawMessage) bool {
 			if !ok || len(row) == 0 {
 				return false
 			}
-			if field == "ledger_exceptions" && row["fatal"] != false {
-				return false
+			if field == "ledger_exceptions" {
+				if row["fatal"] != false {
+					return false
+				}
+				for key := range row {
+					if key != "fatal" && strings.EqualFold(key, "fatal") {
+						return false
+					}
+				}
 			}
 		}
 	}

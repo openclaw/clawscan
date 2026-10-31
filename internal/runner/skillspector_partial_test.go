@@ -162,6 +162,7 @@ func TestClawHubPartialRejectsInvalidReport(t *testing.T) {
 		{"malformed-coverage", "accounting", "coverage_percent", "unknown"},
 		{"malformed-limitations", "accounting", "limitations", false},
 		{"invalid-exception", "accounting", "ledger_exceptions", []any{map[string]any{"fatal": true}}},
+		{"case-conflicting-fatal", "accounting", "ledger_exceptions", []any{map[string]any{"fatal": false, "Fatal": true}}},
 		{"invalid-analyzers", "accounting", "analyzer_statuses", []any{nil}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
