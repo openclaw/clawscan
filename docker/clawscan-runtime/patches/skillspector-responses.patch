@@ -4511,10 +4511,10 @@ index 0000000..9f67419
 +    return tuple(result)
 diff --git a/src/skillspector/javascript_values.py b/src/skillspector/javascript_values.py
 new file mode 100644
-index 0000000..122b407
+index 0000000..eb3cb9f
 --- /dev/null
 +++ b/src/skillspector/javascript_values.py
-@@ -0,0 +1,1757 @@
+@@ -0,0 +1,1777 @@
 +# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 +# SPDX-License-Identifier: Apache-2.0
 +"""A deliberately small, closed value/use proof for JavaScript data strings.
@@ -4987,20 +4987,33 @@ index 0000000..122b407
 +                    return None
 +        cap = capability(node)
 +        if cap is not None:
-+            p = parent(node)
++            use = node
++            p = parent(use)
++            # Parentheses preserve the reference. Validate the outer use,
++            # including escapes and mutations, rather than treating the
++            # wrapper as either an escape or permission to skip the guard.
++            while (
++                p is not None
++                and p.type == "parenthesized_expression"
++                and len(p.named_children) == 1
++                and p.named_children[0] == use
++            ):
++                step()
++                use = p
++                p = parent(use)
 +            if p is None:
 +                if not opaque_only:
 +                    return None
 +            native_binding = p.type == "import_specifier"
 +            const_alias = p.type == "variable_declarator" and const_declaration(p)
-+            member_receiver = p.type == "member_expression" and field(p, "object") == node
++            member_receiver = p.type == "member_expression" and field(p, "object") == use
 +            invoked = p.type in {"call_expression", "new_expression"} and (
-+                field(p, "function") == node or field(p, "constructor") == node
++                field(p, "function") == use or field(p, "constructor") == use
 +            )
 +            exit_status = (
 +                cap == ("ambient", "process.exitCode")
 +                and p.type == "assignment_expression"
-+                and field(p, "left") == node
++                and field(p, "left") == use
 +            )
 +            if not (native_binding or const_alias or member_receiver or invoked or exit_status):
 +                if cap in {("ambient", "JSON"), ("ambient", "JSON.stringify")}:
@@ -5020,6 +5033,13 @@ index 0000000..122b407
 +                    return None
 +        if node.type == "call_expression":
 +            function = field(node, "function")
++            while (
++                function is not None
++                and function.type == "parenthesized_expression"
++                and len(function.named_children) == 1
++            ):
++                step()
++                function = function.named_children[0]
 +            if function is None:
 +                if not opaque_only:
 +                    return None
