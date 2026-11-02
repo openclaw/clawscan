@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -118,7 +119,7 @@ def test_empty_file_stays_empty(analyzer: lab.LLMAnalyzerBase) -> None:
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-async def test_unsplittable_line_is_an_explicit_failure_without_provider_call(
+def test_unsplittable_line_is_an_explicit_failure_without_provider_call(
     analyzer: lab.LLMAnalyzerBase, monkeypatch: pytest.MonkeyPatch, asynchronous: bool
 ) -> None:
     provider = MagicMock(side_effect=AssertionError("provider must not be reached"))
@@ -129,7 +130,7 @@ async def test_unsplittable_line_is_an_explicit_failure_without_provider_call(
     assert len(batches) == 1
     assert batches[0].content == content
     if asynchronous:
-        outcome = await analyzer.arun_batches_detailed(batches, max_concurrency=1)
+        outcome = asyncio.run(analyzer.arun_batches_detailed(batches, max_concurrency=1))
     else:
         outcome = analyzer.run_batches_detailed(batches)
     assert not outcome.successful
@@ -221,7 +222,7 @@ def test_unfit_fixed_wrapper_retains_one_batch_without_per_line_refinement(
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-async def test_actual_packet_schema_is_budgeted_before_provider_call(
+def test_actual_packet_schema_is_budgeted_before_provider_call(
     analyzer: lab.LLMAnalyzerBase, monkeypatch: pytest.MonkeyPatch, asynchronous: bool
 ) -> None:
     from langchain_openai import ChatOpenAI
@@ -251,7 +252,7 @@ async def test_actual_packet_schema_is_budgeted_before_provider_call(
     monkeypatch.setattr(lab, "_ainvoke_with_usage", provider)
     with pytest.raises(RuntimeError, match="serialized LLM input exceeds"):
         if asynchronous:
-            await analyzer._ainvoke_batch(batch, prompt)
+            asyncio.run(analyzer._ainvoke_batch(batch, prompt))
         else:
             analyzer._invoke_batch(batch, prompt)
     provider.assert_not_called()

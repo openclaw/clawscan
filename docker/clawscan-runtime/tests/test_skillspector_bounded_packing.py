@@ -10,9 +10,10 @@ from skillspector.nodes.meta_analyzer import PER_FILE_ANALYSIS_PROMPT, LLMMetaAn
 def analyzer(prompt=None):
     result = object.__new__(LLMAnalyzerBase)
     result._timeout = None
-    result._input_budget = 1000
-    # These synthetic layouts isolate byte-placement behavior; request token
-    # enforcement has separate real-schema and real-invocation regressions.
+    result._input_budget = 1256
+    # These synthetic layouts reserve the real framing but omit the schema to
+    # isolate placement of 1,000 content bytes. Real layouts are checked below.
+    result._serialized_input = lambda prompt, **kwargs: prompt
     result._token_counter = lambda text: 0
     result.base_prompt = 'Generated rules'
     if prompt is not None:
@@ -133,3 +134,54 @@ def test_real_packet_layouts_keep_all_source_and_finding_identities_with_bounded
     assert all(not p.members or len(real(p, metadata_text='Generated metadata').encode()) <= 96000
                for p in result)
     assert len(calls) <= 2 * len(sources) + 18 + len(result)
+
+
+@pytest.mark.parametrize('meta', [False, True])
+@pytest.mark.parametrize('input_budget', [96000, 787500])
+def test_near_limit_packets_reserve_selected_schema_and_framing(meta, input_budget):
+    from skillspector.llm_analyzer_base import REQUEST_FRAMING_TOKENS
+    from skillspector.llm_utils import _StructuredAgentCLIModel
+
+    a = object.__new__(LLMMetaAnalyzer if meta else LLMAnalyzerBase)
+    a._timeout = None
+    a._input_budget = input_budget
+    a._token_counter = lambda text: len(text.encode())
+    a.base_prompt = PER_FILE_ANALYSIS_PROMPT if meta else 'Generated independent rules'
+    sources = [
+        Batch(file_path=f'original-{index}.md', content='', findings=[Finding(
+            rule_id='AR2', message='Original finding stays attached', severity='HIGH',
+            file=f'original-{index}.md', start_line=1,
+        )])
+        for index in range(4)
+    ]
+    kwargs = {'metadata_text': 'Retained original metadata'}
+    def packet():
+        return Batch(file_path=sources[0].file_path, content='', members=tuple(sources),
+                     findings=[finding for source in sources for finding in source.findings])
+    # Fill the raw layout almost to the byte cap. Its actual selected response
+    # schema and framing exceed the cap, while a three-member packet fits.
+    fixed_bytes = len(a.build_prompt(packet(), **kwargs).encode())
+    content_size = (96000 - 128 - fixed_bytes) // len(sources)
+    assert content_size > 0
+    for source in sources:
+        source.content = 'x' * content_size
+    combined = packet()
+    raw = a.build_prompt(combined, **kwargs)
+    assert len(raw.encode()) <= 96000
+    assert (len(a._serialized_input(raw, batch=combined).encode())
+            + REQUEST_FRAMING_TOKENS > 96000)
+
+    result = a._pack_semantic_sources(sources, max_findings=16 if meta else None, **kwargs)
+    assert len(result) == 2, 'schema overhead must split the bin instead of abandoning all packing'
+    assert any(len(item.members) == 3 for item in result)
+    assert Counter(id(source) for item in result for source in members(item)) == Counter(map(id, sources))
+    assert Counter(f.finding_id for item in result for f in item.findings) == Counter(
+        f.finding_id for source in sources for f in source.findings
+    )
+    for item in result:
+        prompt = a.build_prompt(item, **kwargs)
+        schema = a._packet_response_schema() if item.members else a.response_schema
+        cli_input = _StructuredAgentCLIModel(None, schema)._augment(prompt)
+        assert cli_input == a._serialized_input(prompt, batch=item)
+        assert len(cli_input.encode()) + REQUEST_FRAMING_TOKENS <= 96000
+        assert a._count_prompt_tokens(prompt, batch=item) <= a._input_budget
