@@ -11,6 +11,9 @@ def analyzer(prompt=None):
     result = object.__new__(LLMAnalyzerBase)
     result._timeout = None
     result._input_budget = 1000
+    # These synthetic layouts isolate byte-placement behavior; request token
+    # enforcement has separate real-schema and real-invocation regressions.
+    result._token_counter = lambda text: 0
     result.base_prompt = 'Generated rules'
     if prompt is not None:
         result.build_prompt = prompt
@@ -102,6 +105,7 @@ def test_real_packet_layouts_keep_all_source_and_finding_identities_with_bounded
     a = object.__new__(LLMMetaAnalyzer if meta else LLMAnalyzerBase)
     a._timeout = None
     a._input_budget = 96000
+    a._token_counter = lambda text: len(text.encode())
     a.base_prompt = PER_FILE_ANALYSIS_PROMPT if meta else 'Generated independent rules'
     sources = []
     for index in range(128):
