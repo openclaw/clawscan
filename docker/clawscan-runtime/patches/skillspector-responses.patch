@@ -9158,3 +9158,72 @@ diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/s
                  for opening, closing in parsed.quoted_spans
              )
              and _may_have_destructive_outer_operands(parsed.text)
+diff --git a/src/skillspector/__init__.py b/src/skillspector/__init__.py
+index 11995c4..3ed4f8f 100644
+--- a/src/skillspector/__init__.py
++++ b/src/skillspector/__init__.py
+@@ -15,7 +15,6 @@
+
+ """Skillspector v2 LangGraph workflow package."""
+
+-import warnings
+ from importlib.metadata import version as _pkg_version
+ from typing import Any
+
+@@ -23,18 +22,6 @@ from skillspector.graph_proxy import graph, restore_package_graph_export
+
+ __version__ = _pkg_version("skillspector")
+
+-# ponytail: langgraph deserializes with langchain's allowed_objects default,
+-# which warns. langchain_core's import re-enables that warning via
+-# surface_langchain_deprecation_warnings(), so import it first, then prepend our
+-# ignore filter so it wins. Drop this once langgraph pins an explicit default.
+-import langchain_core  # noqa: F401  (force its warning-filter setup before ours)
+-
+-warnings.filterwarnings(
+-    "ignore",
+-    message="The default value of `allowed_objects` will change",
+-    category=Warning,
+-)
+-
+
+ def create_graph() -> Any:
+     """Build and return a new SkillSpector workflow graph."""
+diff --git a/src/skillspector/_workflow_warnings.py b/src/skillspector/_workflow_warnings.py
+new file mode 100644
+index 0000000..363bb33
+--- /dev/null
++++ b/src/skillspector/_workflow_warnings.py
+@@ -0,0 +1,16 @@
++# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++# SPDX-License-Identifier: Apache-2.0
++
++"""Configure workflow warnings without loading LangChain for static imports."""
++
++import warnings
++
++import langchain_core  # noqa: F401  (initialize its warning filters before ours)
++
++# LangGraph imports serializers with an allowed_objects default. Keep this
++# targeted filter after LangChain installs its warning filters.
++warnings.filterwarnings(
++    "ignore",
++    message="The default value of `allowed_objects` will change",
++    category=Warning,
++)
+diff --git a/src/skillspector/graph.py b/src/skillspector/graph.py
+index c2ed28b..7f92c6d 100644
+--- a/src/skillspector/graph.py
++++ b/src/skillspector/graph.py
+@@ -23,6 +23,11 @@ from __future__ import annotations
+
+ from typing import Any
+
++# Configure serializer warnings before LangGraph imports its serializer.
++from skillspector import _workflow_warnings as _workflow_warnings
++
++# isort: split
++
+ from langgraph.graph import END, START, StateGraph
+
+ from skillspector.inspection_ledger import guard_analyzer_node
