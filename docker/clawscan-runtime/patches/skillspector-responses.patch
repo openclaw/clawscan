@@ -82,10 +82,11 @@ index 5e9a044..d5e3d55 100644
 
  class TestAzureOpenAIControls:
 diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/nodes/analyzers/test_semantic_security_discovery.py
+index 159b2c1d..9cfd74e8 100644
 --- a/tests/nodes/analyzers/test_semantic_security_discovery.py
 +++ b/tests/nodes/analyzers/test_semantic_security_discovery.py
-@@ -93,7 +93,7 @@
-
+@@ -93,7 +93,7 @@ class TestSemanticSecurityDiscoveryNode:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -93,26 +94,26 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              return_value=[(MagicMock(), [expected_finding])],
          ):
              result = node(base_state)
-@@ -134,7 +134,7 @@
-
+@@ -134,7 +134,7 @@ class TestSemanticSecurityDiscoveryNode:
+ 
          submitted_batches = []
-
+ 
 -        def fake_run_batches(self, batches):
 +        async def fake_run_batches(self, batches):
              submitted_batches.extend(batches)
              results = [(batch, []) for batch in batches]
              self._last_batch_outcome = BatchExecutionResult(successful=results)
-@@ -144,7 +144,7 @@
+@@ -144,7 +144,7 @@ class TestSemanticSecurityDiscoveryNode:
              "components": ["cached.py", "unreadable.py"],
              "file_cache": {"cached.py": "print('ready')\n"},
          }
 -        with patch.object(LLMAnalyzerBase, "run_batches", fake_run_batches):
 +        with patch.object(LLMAnalyzerBase, "arun_batches", fake_run_batches):
              result = node(state)
-
+ 
          assert [batch.file_path for batch in submitted_batches] == ["cached.py"]
-@@ -161,7 +161,7 @@
-
+@@ -161,7 +161,7 @@ class TestSemanticSecurityDiscoveryNode:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -120,35 +121,39 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              return_value=[(MagicMock(), findings)],
          ):
              result = node(base_state)
-@@ -200,7 +200,7 @@
+@@ -200,7 +200,7 @@ class TestSemanticSecurityDiscoveryBatching:
      def test_single_file_one_batch(self, base_state) -> None:
          from skillspector.llm_analyzer_base import LLMAnalyzerBase
-
+ 
 -        with patch.object(LLMAnalyzerBase, "run_batches", return_value=[]) as mock_run:
 +        with patch.object(LLMAnalyzerBase, "arun_batches", return_value=[]) as mock_run:
              node(base_state)
-
+ 
          mock_run.assert_called_once()
-@@ -221,7 +221,7 @@
+@@ -219,9 +219,10 @@ class TestSemanticSecurityDiscoveryBatching:
+ 
+         with patch(
              "skillspector.llm_analyzer_base.get_max_input_tokens",
-             return_value=50,
+-            return_value=50,
++            # The fixed prompt and schema must fit before source lines can be split.
++            return_value=8192,
          ):
 -            with patch.object(LLMAnalyzerBase, "run_batches", return_value=[]) as mock_run:
 +            with patch.object(LLMAnalyzerBase, "arun_batches", return_value=[]) as mock_run:
                  node(base_state)
-
+ 
          batches_arg = mock_run.call_args[0][0]
-@@ -244,7 +244,7 @@
+@@ -244,7 +245,7 @@ class TestUseLlmGuard:
          with patch(MOCK_PATCH_TARGET, _mock_get_chat_model):
              from skillspector.llm_analyzer_base import LLMAnalyzerBase
-
+ 
 -            with patch.object(LLMAnalyzerBase, "run_batches", return_value=[]):
 +            with patch.object(LLMAnalyzerBase, "arun_batches", return_value=[]):
                  result = node(state)
          assert result["findings"] == []
-
-@@ -336,7 +336,7 @@
-
+ 
+@@ -336,7 +337,7 @@ class TestErrorHandling:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -156,53 +161,53 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              side_effect=RuntimeError("LLM service unavailable"),
          ):
              result = node(
-@@ -364,7 +364,7 @@
-
+@@ -364,7 +365,7 @@ class TestErrorHandling:
+ 
          from skillspector.llm_analyzer_base import LLMAnalyzerBase
-
+ 
 -        with patch.object(LLMAnalyzerBase, "run_batches", side_effect=validation_err):
 +        with patch.object(LLMAnalyzerBase, "arun_batches", side_effect=validation_err):
              result = node({"file_cache": {"SKILL.md": "# Skill"}})
          assert result["findings"] == []
-
-@@ -380,7 +380,7 @@
-
+ 
+@@ -380,7 +381,7 @@ class TestErrorHandling:
+ 
          from skillspector.llm_analyzer_base import LLMAnalyzerBase
-
+ 
 -        with patch.object(LLMAnalyzerBase, "run_batches", side_effect=validation_err):
 +        with patch.object(LLMAnalyzerBase, "arun_batches", side_effect=validation_err):
              result = node(
                  {
                      "components": ["cached.py", "missing.py"],
-@@ -454,7 +454,7 @@
+@@ -454,7 +455,7 @@ class TestLLMCallTelemetry:
      def test_success_records_ok_true(self, base_state) -> None:
          from skillspector.llm_analyzer_base import LLMAnalyzerBase
-
+ 
 -        with patch.object(LLMAnalyzerBase, "run_batches", return_value=[]):
 +        with patch.object(LLMAnalyzerBase, "arun_batches", return_value=[]):
              result = node(base_state)
          assert result["llm_call_log"] == [{"node": ANALYZER_ID, "ok": True, "error": None}]
-
-@@ -479,7 +479,7 @@
-
+ 
+@@ -479,7 +480,7 @@ class TestLLMCallTelemetry:
+ 
          from skillspector.llm_analyzer_base import LLMAnalyzerBase
-
+ 
 -        with patch.object(LLMAnalyzerBase, "run_batches", side_effect=validation_err):
 +        with patch.object(LLMAnalyzerBase, "arun_batches", side_effect=validation_err):
              result = node({"file_cache": {"SKILL.md": "# Skill"}})
          assert result["llm_call_log"][0]["ok"] is False
-
-@@ -514,7 +514,7 @@
+ 
+@@ -514,7 +515,7 @@ def _make_file_aware_run_batches(responses: dict[str, LLMAnalysisResult]):
      """Return a mock run_batches that dispatches based on file_path in each batch."""
      from skillspector.llm_analyzer_base import Batch
-
+ 
 -    def _run_batches(self_inner, batches: list[Batch], **_kwargs):
 +    async def _run_batches(self_inner, batches: list[Batch], **_kwargs):
          results = []
          for batch in batches:
              response = responses.get(batch.file_path, LLMAnalysisResult(findings=[]))
-@@ -572,7 +572,7 @@
-
+@@ -572,7 +573,7 @@ class TestFixtureConftestMalicious:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -210,8 +215,8 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              _make_file_aware_run_batches(_CONFTEST_MALICIOUS_RESPONSES),
          ):
              result = node(state)
-@@ -591,7 +591,7 @@
-
+@@ -591,7 +592,7 @@ class TestFixtureConftestMalicious:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -219,8 +224,8 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              _make_file_aware_run_batches(_CONFTEST_MALICIOUS_RESPONSES),
          ):
              result = node(state)
-@@ -609,7 +609,7 @@
-
+@@ -609,7 +610,7 @@ class TestFixtureConftestMalicious:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -228,8 +233,8 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              _make_file_aware_run_batches(_CONFTEST_MALICIOUS_RESPONSES),
          ):
              result = node(state)
-@@ -633,7 +633,7 @@
-
+@@ -633,7 +634,7 @@ class TestFixtureConftestSafe:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -237,8 +242,8 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              return_value=[],
          ):
              result = node(state)
-@@ -680,7 +680,7 @@
-
+@@ -680,7 +681,7 @@ class TestFixtureSsd1SemanticInjection:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -246,8 +251,8 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              _make_file_aware_run_batches(_SSD1_RESPONSES),
          ):
              result = node(state)
-@@ -732,7 +732,7 @@
-
+@@ -732,7 +733,7 @@ class TestFixtureSsd2NovelPhrasing:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -255,8 +260,8 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              _make_file_aware_run_batches(_SSD2_RESPONSES),
          ):
              result = node(state)
-@@ -783,7 +783,7 @@
-
+@@ -783,7 +784,7 @@ class TestFixtureSsd3NlExfiltration:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -264,8 +269,8 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              _make_file_aware_run_batches(_SSD3_RESPONSES),
          ):
              result = node(state)
-@@ -833,7 +833,7 @@
-
+@@ -833,7 +834,7 @@ class TestFixtureSsd4NarrativeDeception:
+ 
          with patch.object(
              LLMAnalyzerBase,
 -            "run_batches",
@@ -273,14 +278,14 @@ diff --git a/tests/nodes/analyzers/test_semantic_security_discovery.py b/tests/n
              _make_file_aware_run_batches(_SSD4_RESPONSES),
          ):
              result = node(state)
-@@ -862,7 +862,7 @@
-
+@@ -862,7 +863,7 @@ class TestFixtureSsdClean:
+ 
          from skillspector.llm_analyzer_base import LLMAnalyzerBase
-
+ 
 -        with patch.object(LLMAnalyzerBase, "run_batches", return_value=[]):
 +        with patch.object(LLMAnalyzerBase, "arun_batches", return_value=[]):
              result = node(state)
-
+ 
          assert result["findings"] == []
 diff --git a/src/skillspector/nodes/analyzers/mcp_tool_poisoning.py b/src/skillspector/nodes/analyzers/mcp_tool_poisoning.py
 --- a/src/skillspector/nodes/analyzers/mcp_tool_poisoning.py
@@ -831,7 +836,7 @@ index 15b9b4c..f8ac47c 100644
          "previous_manifest": None,
          "model_config": model_config,
 diff --git a/src/skillspector/nodes/meta_analyzer.py b/src/skillspector/nodes/meta_analyzer.py
-index 252134d..c992acb 100644
+index 252134d9..31e87a11 100644
 --- a/src/skillspector/nodes/meta_analyzer.py
 +++ b/src/skillspector/nodes/meta_analyzer.py
 @@ -48,6 +48,7 @@ from skillspector.llm_analyzer_base import (
@@ -844,8 +849,8 @@ index 252134d..c992acb 100644
  )
 @@ -148,6 +149,17 @@ class MetaAnalyzerResult(BaseModel):
          return v
-
-
+ 
+ 
 +class MetaSourceResult(BaseModel):
 +    """Explicit acknowledgement of one independently reviewed source unit."""
 +
@@ -867,10 +872,10 @@ index 252134d..c992acb 100644
 +    elif isinstance(permissions, dict) and permissions:
 +        parts.append(f"Permissions: {json.dumps(permissions, ensure_ascii=False, sort_keys=True)}")
      return "\n".join(parts) if parts else "No metadata available"
-
-
+ 
+ 
 @@ -416,6 +430,32 @@ class LLMMetaAnalyzer(LLMAnalyzerBase):
-
+ 
      def build_prompt(self, batch: Batch, **kwargs: object) -> str:
          metadata_text = redact_text(str(kwargs.get("metadata_text", "No metadata available")))
 +        if batch.members:
@@ -910,7 +915,8 @@ index 252134d..c992acb 100644
 +        metadata_text: str = "No metadata available",
      ) -> list[Batch]:
          """Redact credential-bearing SC10 source text before provider batching."""
-         batches = super().get_batches(file_paths, file_cache, findings)
+-        batches = super().get_batches(file_paths, file_cache, findings)
++        batches = super().get_batches(file_paths, file_cache, findings, metadata_text=metadata_text)
 +        batches = [batch for batch in batches if batch.findings]
          for batch in batches:
              if any(finding.rule_id == "SC10" for finding in batch.findings):
@@ -922,7 +928,7 @@ index 252134d..c992acb 100644
 +
 +    def _packet_response_schema(self) -> type:
 +        return MetaPacketResult
-
+ 
      def parse_response(  # type: ignore[override]  # Base class permits custom parsed values.
          self,
 -        response: MetaAnalyzerResult,
@@ -965,8 +971,8 @@ index 252134d..c992acb 100644
              d = f.model_dump()
 @@ -597,6 +675,36 @@ class LLMMetaAnalyzer(LLMAnalyzerBase):
  # ---------------------------------------------------------------------------
-
-
+ 
+ 
 +def _unpack_meta_results(
 +    results: list[tuple[Batch, list]],
 +) -> list[tuple[Batch, list[dict[str, Any]]]]:
@@ -1001,12 +1007,12 @@ index 252134d..c992acb 100644
      """Return the ledger identity for one submitted meta-analysis batch."""
      return inspection_work_id(
 @@ -731,12 +839,11 @@ def _runtime_limited_events(findings: list[Finding]) -> list[InspectionLedgerEve
-
-
+ 
+ 
  def meta_analyzer(state: SkillspectorState) -> MetaAnalyzerResponse:
 -    """Filter and enrich findings via per-file LLM calls.
 +    """Filter and enrich findings via bounded, independently identified source packets.
-
+ 
      When ``use_llm`` is *True* and an LLM API key is configured (see
 -    ``llm_utils._resolve_llm_credentials``), each file that has at least one
 -    finding gets its own LLM call (or multiple calls if the file is too
@@ -1034,7 +1040,7 @@ index 252134d..c992acb 100644
 +            len(request_batches),
              model,
          )
-
+ 
 -        returned_results = run_async(analyzer.arun_batches(batches, metadata_text=metadata_text))
 +        returned_results = _unpack_meta_results(
 +            run_async(analyzer.arun_batches(request_batches, metadata_text=metadata_text))
@@ -3405,21 +3411,119 @@ index 2876b5e..49f726d 100644
          check_runtime()
      raw = SecurityTextView("raw", text)
 diff --git a/src/skillspector/llm_analyzer_base.py b/src/skillspector/llm_analyzer_base.py
-index 470f6d3..4801c9e 100644
+index 470f6d3a94d4af4fc298eb22e155dbf5567f9983..cd8ad1308d58b441684bde692de3903cb5a2afb9 100644
 --- a/src/skillspector/llm_analyzer_base.py
 +++ b/src/skillspector/llm_analyzer_base.py
 @@ -28,6 +28,7 @@ to ``None`` for raw-string mode.
  from __future__ import annotations
-
+ 
  import asyncio
 +import json
  import os
  import threading
  import time
-@@ -669,6 +670,17 @@ class LLMAnalysisResult(BaseModel):
+@@ -38,10 +39,12 @@ from email.utils import parsedate_to_datetime
+ from random import uniform
+ from typing import Any, Literal, cast
+ 
++import tiktoken
+ from langchain_anthropic import ChatAnthropic
+ from langchain_core.messages import BaseMessage
+ from langchain_openai.chat_models.base import BaseChatOpenAI
+ from pydantic import BaseModel, Field, ValidationError, field_validator
++from tiktoken import registry as tiktoken_registry
+ 
+ from skillspector.inference_usage import (
+     InferenceUsageRecord,
+@@ -67,6 +70,7 @@ from skillspector.llm_utils import (
+     chat_model_provider_name,
+     get_chat_model,
+     new_inference_usage_collector,
++    structured_output_instructions,
+ )
+ from skillspector.logging_config import get_logger
+ from skillspector.model_info import get_max_input_tokens
+@@ -125,6 +129,76 @@ class _StructuredResponseValidationError(Exception):
+     """Signal that provider output failed structured-response validation."""
+ 
+ 
++REQUEST_FRAMING_TOKENS = 256
++
++
++def _input_token_counter_key(chat_model: object) -> tuple[object, ...]:
++    """Retain the selected counter for equivalent client configurations."""
++    if not isinstance(chat_model, BaseChatOpenAI):
++        return ("conservative_utf8_bytes",)
++    custom = getattr(chat_model, "custom_get_token_ids", None)
++    if callable(custom):
++        # The selected counter retains this callable, so its identity cannot be
++        # recycled while this key is cached. Do not retain whole HTTP clients.
++        return ("configured_chat_model_tokenizer", id(custom))
++    label = getattr(chat_model, "tiktoken_model_name", None) or getattr(
++        chat_model, "model_name", None
++    )
++    return ("openai_codec", label if isinstance(label, str) else None)
++
++
++def _input_token_counter(chat_model: object) -> tuple[Callable[[str], int], str]:
++    """Use a configured/recognized OpenAI codec; unknown codecs use UTF-8 bytes.
++
++    A model label must not silently inherit another model's tokenizer. Byte
++    length is a conservative bound for text when no verified codec is known.
++    """
++
++    def byte_bound(text: str) -> int:
++        return len(text.encode("utf-8", errors="replace"))
++
++    if not isinstance(chat_model, BaseChatOpenAI):
++        return byte_bound, "conservative_utf8_bytes"
++    custom = getattr(chat_model, "custom_get_token_ids", None)
++    if callable(custom):
++
++        def configured(text: str) -> int:
++            try:
++                count = len(custom(text))
++                return count if count > 0 or not text else byte_bound(text)
++            except Exception:
++                return byte_bound(text)
++
++        return configured, "configured_chat_model_tokenizer"
++    label = getattr(chat_model, "tiktoken_model_name", None) or getattr(
++        chat_model, "model_name", None
++    )
++    if not isinstance(label, str):
++        return byte_bound, "conservative_utf8_bytes"
++    try:
++        # Name lookup is a pure table lookup. Never initialize a codec here:
++        # get_encoding/encoding_for_model can download its vocabulary without a
++        # timeout, outside the shared scan deadline. Use only an existing codec.
++        encoding_name = tiktoken.encoding_name_for_model(label)
++        encoding = tiktoken_registry.ENCODINGS.get(encoding_name)
++    except Exception:
++        return byte_bound, "conservative_utf8_bytes"
++    if encoding is None:
++        return byte_bound, "conservative_utf8_bytes"
++
++    def recognized(text: str) -> int:
++        try:
++            return len(encoding.encode(text, disallowed_special=()))
++        except Exception:
++            return byte_bound(text)
++
++    return recognized, "recognized_tiktoken_codec"
++
++
++class LLMInputBudgetError(RuntimeError):
++    """Retain an unsubmitted batch that cannot fit the serialized input budget."""
++
++
+ class LLMRuntimeLimitError(RuntimeError):
+     """Signal that no shared scan time remains for an LLM operation."""
+ 
+@@ -669,6 +743,17 @@ class LLMAnalysisResult(BaseModel):
      findings: list[LLMFinding] = Field(default_factory=list)
-
-
+ 
+ 
 +class SemanticSourceResult(BaseModel):
 +    """A separate, explicitly acknowledged result for one submitted source."""
 +
@@ -3434,16 +3538,16 @@ index 470f6d3..4801c9e 100644
  def estimate_tokens(text: str) -> int:
      """Approximate token count from character length."""
      return len(text) // CHARS_PER_TOKEN
-@@ -688,6 +700,7 @@ class Batch:
+@@ -688,6 +773,7 @@ class Batch:
      start_line: int = 1
      end_line: int | None = None
      findings: list[Finding] = field(default_factory=list)
 +    members: tuple[Batch, ...] = ()
-
+ 
      @property
      def is_chunk(self) -> bool:
-@@ -695,6 +708,8 @@ class Batch:
-
+@@ -695,6 +781,8 @@ class Batch:
+ 
      @property
      def file_label(self) -> str:
 +        if self.members:
@@ -3451,7 +3555,7 @@ index 470f6d3..4801c9e 100644
          label = f"File: {self.file_path}"
          if self.is_chunk:
              label += f" (lines {self.start_line}\u2013{self.end_line})"
-@@ -764,7 +779,32 @@ def ledger_events_for_batches(
+@@ -764,7 +852,32 @@ def ledger_events_for_batches(
      """Project detailed LLM batch execution into terminal ledger evidence."""
      events: list[InspectionLedgerEvent] = []
      successful_ranges: dict[str, list[tuple[int | None, int | None]]] = defaultdict(list)
@@ -3485,7 +3589,7 @@ index 470f6d3..4801c9e 100644
          if not isinstance(batch, Batch):
              logger.debug("Skipping ledger projection for malformed successful batch: %r", batch)
              continue
-@@ -785,7 +825,7 @@ def ledger_events_for_batches(
+@@ -785,7 +898,7 @@ def ledger_events_for_batches(
      failed_ranges: dict[str, list[tuple[BatchFailure, tuple[int | None, int | None]]]] = (
          defaultdict(list)
      )
@@ -3494,7 +3598,93 @@ index 470f6d3..4801c9e 100644
          if not isinstance(failure.batch, Batch):
              logger.debug("Skipping ledger projection for malformed failed batch: %r", failure.batch)
              continue
-@@ -953,9 +993,13 @@ class LLMAnalyzerBase:
+@@ -819,35 +932,81 @@ def ledger_events_for_batches(
+ # ---------------------------------------------------------------------------
+ 
+ 
++def numbered_line_overhead_bytes(last_line: int) -> int:
++    """Upper bound on the bytes :func:`number_lines` adds in front of each line.
++
++    The widest prefix belongs to the highest line number (``L19239: ``); both the
++    zero-padded and the compact form are at most that wide.
++    """
++    return len(f"L{last_line}: ".encode("utf-8", errors="replace"))
++
++
+ def chunk_file_by_lines(
+     content: str,
+     max_tokens: int,
+     overlap_lines: int = CHUNK_OVERLAP_LINES,
++    *,
++    max_bytes: int | None = None,
++    fits_chunk: Callable[[str, int, int], bool] | None = None,
+ ) -> list[tuple[str, int, int]]:
+     """Split *content* into line-range chunks that each fit within *max_tokens*.
+ 
+     Returns a list of ``(chunk_text, start_line, end_line)`` tuples where lines
+     are 1-indexed.  Consecutive chunks share *overlap_lines* lines of context so
+     findings near chunk boundaries still have surrounding code.
++
++    The token estimate includes numbered line prefixes and rounds cumulative
++    serialized size, rather than rounding each line independently.
++
++    When *max_bytes* is set, each chunk must also fit within that many UTF-8
++    bytes *after* :func:`number_lines` has prefixed it, which is what a CLI
++    provider's input cap measures.  A single line that alone exceeds the budget
++    still becomes its own chunk: content is never dropped or truncated. The
++    invocation guard records an explicit failure instead of submitting it.
+     """
+     lines = content.splitlines(keepends=True)
+     if not lines:
+         return [("", 1, 1)]
+ 
++    # A line's own terminator is at least as long as the "\n" number_lines joins
++    # with, so line bytes plus the widest prefix bound the numbered size.
++    prefix_bytes = numbered_line_overhead_bytes(len(lines))
++
+     chunks: list[tuple[str, int, int]] = []
+     start_idx = 0
+ 
+     while start_idx < len(lines):
+-        token_count = 0
++        byte_count = 0
+         end_idx = start_idx
+ 
+         while end_idx < len(lines):
+-            line_tokens = estimate_tokens(lines[end_idx])
+-            if token_count + line_tokens > max_tokens and end_idx > start_idx:
++            line_bytes = len(lines[end_idx].encode("utf-8", errors="replace")) + prefix_bytes
++            # Round the cumulative serialized size, not each short line. Prefixes
++            # and UTF-8 bytes conservatively bound the chars/4 token estimate.
++            over_tokens = (
++                byte_count + line_bytes + CHARS_PER_TOKEN - 1
++            ) // CHARS_PER_TOKEN > max_tokens
++            over_bytes = max_bytes is not None and byte_count + line_bytes > max_bytes
++            if (over_tokens or over_bytes) and end_idx > start_idx:
+                 break
+-            token_count += line_tokens
++            byte_count += line_bytes
+             end_idx += 1
+ 
++        if fits_chunk is not None and not fits_chunk(
++            "".join(lines[start_idx:end_idx]), start_idx + 1, end_idx
++        ):
++            low, high = start_idx + 1, end_idx
++            best = None
++            while low <= high:
++                middle = (low + high) // 2
++                if fits_chunk("".join(lines[start_idx:middle]), start_idx + 1, middle):
++                    best = middle
++                    low = middle + 1
++                else:
++                    high = middle - 1
++            # An unfit single line stays represented; the call guard refuses it.
++            end_idx = best if best is not None else start_idx + 1
++
+         chunk_text = "".join(lines[start_idx:end_idx])
+         chunks.append((chunk_text, start_idx + 1, end_idx))  # 1-indexed
+ 
+@@ -953,9 +1112,13 @@ class LLMAnalyzerBase:
          *,
          node: str = "llm_analyzer",
          timeout: float | None | Callable[[], float | None] = None,
@@ -3508,14 +3698,107 @@ index 470f6d3..4801c9e 100644
          self._timeout = timeout
          self._dynamic_timeout = callable(timeout)
          self._input_budget = get_max_input_tokens(model)
-@@ -1131,7 +1175,145 @@ class LLMAnalyzerBase:
-                         )
+@@ -967,6 +1130,8 @@ class LLMAnalyzerBase:
+             self._require_time_remaining()
+             raise
+         self._require_time_remaining()
++        self._token_counter, self._token_counter_source = _input_token_counter(self._llm)
++        self._call_token_counters = {_input_token_counter_key(self._llm): self._token_counter}
+         # Native SDK retries cannot re-read a workflow-wide deadline between
+         # attempts.  A dynamic deadline therefore uses our explicit retry loop,
+         # which checks and caps every retry/backoff against remaining time.
+@@ -1091,47 +1256,217 @@ class LLMAnalyzerBase:
+         file_paths: list[str],
+         file_cache: dict[str, str],
+         findings: list[Finding] | None = None,
++        **prompt_kwargs: object,
+     ) -> list[Batch]:
+-        """Create one :class:`Batch` per file, splitting oversized files into chunks."""
+-        base_overhead = estimate_tokens(self.base_prompt)
+-
++        """Retain every original line while bounding the complete request prompt."""
+         findings_by_file: dict[str, list[Finding]] = defaultdict(list)
+-        if findings:
+-            for f in findings:
+-                findings_by_file[f.file].append(f)
++        for finding in findings or []:
++            findings_by_file[finding.file].append(finding)
+ 
+         batches: list[Batch] = []
+         for path in file_paths:
+-            content = file_cache.get(path) or "No content available for this file."
++            self._require_time_remaining()
++            content = file_cache.get(path)
++            if content is None:
++                content = "No content available for this file."
+             file_findings = findings_by_file.get(path, [])
++            minimum = Batch(file_path=path, content="", findings=[])
++            if not self._prompt_fits_budget(
++                self.build_prompt(minimum, **prompt_kwargs), batch=minimum
++            ):
++                # Splitting cannot shrink fixed metadata. Retain one unsubmitted
++                # failure rather than repeatedly serializing it for every line.
++                batches.append(Batch(file_path=path, content=content, findings=file_findings))
++                logger.warning("Fixed LLM prompt cannot fit input budget; batch content retained")
++                continue
++            whole = Batch(file_path=path, content=content, findings=file_findings)
++            if self._prompt_fits_budget(self.build_prompt(whole, **prompt_kwargs), batch=whole):
++                batches.append(whole)
++                continue
+ 
+-            extra = self._estimate_extra_overhead(file_findings)
+-            content_budget = max(self._input_budget - base_overhead - extra, 1024)
++            def fits_chunk(
++                text: str,
++                start: int,
++                end: int,
++                *,
++                path: str = path,
++                file_findings: list[Finding] = file_findings,
++            ) -> bool:
++                batch = Batch(
++                    file_path=path,
++                    content=text,
++                    start_line=start,
++                    end_line=end,
++                    findings=findings_in_range(file_findings, start, end),
++                )
++                return self._prompt_fits_budget(
++                    self.build_prompt(batch, **prompt_kwargs), batch=batch
++                )
+ 
+-            content_tokens = estimate_tokens(content)
+-            if content_tokens <= content_budget:
++            for text, start, end in chunk_file_by_lines(
++                content, self._input_budget, fits_chunk=fits_chunk
++            ):
+                 batches.append(
+                     Batch(
+                         file_path=path,
+-                        content=content,
+-                        findings=file_findings,
++                        content=text,
++                        start_line=start,
++                        end_line=end,
++                        findings=findings_in_range(file_findings, start, end),
                      )
-
--        return batches
+                 )
+-            else:
+-                chunk_budget = max(int(content_budget), 1024)
+-                for chunk_text, s_line, e_line in chunk_file_by_lines(content, chunk_budget):
+-                    chunk_findings = findings_in_range(file_findings, s_line, e_line)
+-                    batches.append(
+-                        Batch(
+-                            file_path=path,
+-                            content=chunk_text,
+-                            start_line=s_line,
+-                            end_line=e_line,
+-                            findings=chunk_findings,
+-                        )
++
 +        if not getattr(self, "_pack_files", False):
 +            return batches
-+        return self._pack_semantic_sources(batches)
++        return self._pack_semantic_sources(batches, **prompt_kwargs)
 +
 +    def _pack_semantic_sources(
 +        self, sources: list[Batch], *, max_findings: int | None = None, **prompt_kwargs: object
@@ -3539,14 +3822,21 @@ index 470f6d3..4801c9e 100644
 +
 +        def prompt_bytes(indexes: list[int]) -> int:
 +            self._require_time_remaining()
-+            return len(self.build_prompt(packet(indexes), **prompt_kwargs).encode())
++            candidate = packet(indexes)
++            prompt = self.build_prompt(candidate, **prompt_kwargs)
++            return (
++                len(self._serialized_input(prompt, batch=candidate).encode())
++                + REQUEST_FRAMING_TOKENS
++            )
 +
++        # Use the same selected packet schema and framing as the call guard,
++        # including during placement. Otherwise a nearly full bin can fail only
++        # at flush and unnecessarily abandon all source packing.
 +        # Measure real serialization once per source. Oversized original units
 +        # retain their original path and model-budget behavior, never trimming.
 +        single_bytes = [prompt_bytes([index]) for index in range(len(sources))]
 +        eligible = [
-+            size <= byte_limit
-+            and (max_findings is None or len(source.findings) <= max_findings)
++            size <= byte_limit and (max_findings is None or len(source.findings) <= max_findings)
 +            for source, size in zip(sources, single_bytes, strict=True)
 +        ]
 +        if not any(eligible):
@@ -3591,7 +3881,7 @@ index 470f6d3..4801c9e 100644
 +                    or (
 +                        sources[index].start_line <= source.end_line
 +                        and source.start_line <= sources[index].end_line
-+                    )
+                     )
 +                )
 +                for index in indexes
 +            )
@@ -3608,10 +3898,17 @@ index 470f6d3..4801c9e 100644
 +            # always enforces the byte limit, even for a future nonadditive
 +            # subclass. An overflow invalidates the whole packing plan so a
 +            # split bin cannot reorder chunks relative to dependent packets.
-+            if len(self.build_prompt(candidate, **prompt_kwargs).encode()) <= byte_limit:
++            prompt = self.build_prompt(candidate, **prompt_kwargs)
++            serialized_bytes = (
++                len(self._serialized_input(prompt, batch=candidate).encode())
++                + REQUEST_FRAMING_TOKENS
++            )
++            if serialized_bytes <= byte_limit and self._prompt_fits_budget(prompt, batch=candidate):
 +                packets.append((indexes[0], candidate))
 +                return True
 +            return False
+-
+-        return batches
 +
 +        pending: list[list[int]] = []
 +        last_packet_start: dict[str, int] = {}
@@ -3652,10 +3949,10 @@ index 470f6d3..4801c9e 100644
 +            if not flush(indexes):
 +                return list(sources)
 +        return [batch for _, batch in sorted(packets, key=lambda item: item[0])]
-
+ 
      # -- Prompt / parse -----------------------------------------------------
-
-@@ -1142,6 +1324,26 @@ class LLMAnalyzerBase:
+ 
+@@ -1142,6 +1477,26 @@ class LLMAnalyzerBase:
          so the LLM can reference exact line numbers in its findings.
          Override in subclasses that need a custom prompt layout.
          """
@@ -3682,7 +3979,7 @@ index 470f6d3..4801c9e 100644
          numbered = number_lines(batch.content, batch.start_line)
          return append_output_language_instruction(
              BASE_ANALYSIS_PROMPT.format(
-@@ -1158,6 +1360,26 @@ class LLMAnalyzerBase:
+@@ -1158,6 +1513,26 @@ class LLMAnalyzerBase:
          via :meth:`LLMFinding.to_finding`.  Override in subclasses that use a
          different ``response_schema`` or raw-string mode.
          """
@@ -3709,31 +4006,80 @@ index 470f6d3..4801c9e 100644
          if isinstance(response, LLMAnalysisResult):
              return [f.to_finding(batch.file_path) for f in response.findings]
          raise NotImplementedError(
-@@ -1166,6 +1388,9 @@ class LLMAnalyzerBase:
-
+@@ -1166,6 +1541,56 @@ class LLMAnalyzerBase:
+ 
      # -- Run loop -----------------------------------------------------------
-
+ 
 +    def _packet_response_schema(self) -> type:
 +        return SemanticPacketResult
++
++    def _serialized_input(self, prompt: str, *, batch: Batch | None = None) -> str:
++        schema = (
++            self._packet_response_schema()
++            if batch is not None and batch.members
++            else self.response_schema
++        )
++        return prompt + structured_output_instructions(schema) if schema is not None else prompt
++
++    def _count_prompt_tokens(
++        self, prompt: str, *, chat_model: object | None = None, batch: Batch | None = None
++    ) -> int:
++        if chat_model is None:
++            counter = self._token_counter
++        else:
++            # Reuse a chosen fallback even if another request later populates
++            # the process-wide codec registry. Equivalent refreshed HTTP clients
++            # share a counter without keeping their connection pools alive.
++            counters = getattr(self, "_call_token_counters", None)
++            if counters is None:
++                counters = self._call_token_counters = {}
++            key = _input_token_counter_key(chat_model)
++            if key not in counters:
++                counters[key] = _input_token_counter(chat_model)[0]
++            counter = counters[key]
++        return counter(self._serialized_input(prompt, batch=batch)) + REQUEST_FRAMING_TOKENS
++
++    def _prompt_fits_budget(self, prompt: str, *, batch: Batch | None = None) -> bool:
++        self._require_time_remaining()
++        try:
++            self._check_prompt_budget(prompt, batch=batch)
++        except LLMInputBudgetError:
++            return False
++        return True
++
++    def _check_prompt_budget(
++        self, prompt: str, *, chat_model: object | None = None, batch: Batch | None = None
++    ) -> None:
++        """Reject the actual selected prompt/schema before a provider sees it."""
++        if (
++            self._count_prompt_tokens(prompt, chat_model=chat_model, batch=batch)
++            > self._input_budget
++        ):
++            raise LLMInputBudgetError(
++                "serialized LLM input exceeds its token budget; "
++                "batch content retained but not submitted"
++            )
 +
      def _invoke_batch(self, batch: Batch, prompt: str) -> tuple[Batch, list]:
          """Invoke and parse one batch synchronously."""
          logger.debug(
-@@ -1175,6 +1400,8 @@ class LLMAnalyzerBase:
+@@ -1175,6 +1600,9 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
 +        if batch.members:
 +            structured_llm = self._bind_structured_output(llm, self._packet_response_schema())
++        self._check_prompt_budget(prompt, chat_model=llm, batch=batch)
          if structured_llm:
              try:
                  response = _invoke_with_usage(structured_llm, prompt, self._usage_collector)
-@@ -1264,6 +1491,8 @@ class LLMAnalyzerBase:
+@@ -1264,6 +1692,9 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
 +        if batch.members:
 +            structured_llm = self._bind_structured_output(llm, self._packet_response_schema())
++        self._check_prompt_budget(prompt, chat_model=llm, batch=batch)
          if structured_llm:
              try:
                  response = await _ainvoke_with_usage(structured_llm, prompt, self._usage_collector)
@@ -9866,6 +10212,46 @@ diff --git a/src/skillspector/nodes/analyzers/static_patterns_tool_misuse.py b/s
              closers: set[int] = set()
              limits = _shell_quoted_candidate_limits(
                  content[start:end], check_runtime, quote_closers=closers
+diff --git a/src/skillspector/llm_utils.py b/src/skillspector/llm_utils.py
+index 4792103f..aae5f1bd 100644
+--- a/src/skillspector/llm_utils.py
++++ b/src/skillspector/llm_utils.py
+@@ -302,6 +302,20 @@ def _complete_agent_cli(
+     )
+ 
+ 
++def structured_output_instructions(schema: type) -> str:
++    """Text a CLI provider's structured call appends after the analyzer prompt.
++
++    Exposed so prompt budgeting can measure the exact bytes the transport adds.
++    """
++    schema_json = json.dumps(schema.model_json_schema(), indent=2)
++    return (
++        "\n\n"
++        "Respond with ONLY a single JSON object conforming to the JSON Schema "
++        "below. Do not wrap it in markdown code fences and do not add any prose "
++        f"before or after the JSON.\n\nJSON Schema:\n{schema_json}"
++    )
++
++
+ class _StructuredAgentCLIModel:
+     """Mimics ``ChatOpenAI.with_structured_output(schema)`` for a CLI provider.
+ 
+@@ -316,13 +330,7 @@ class _StructuredAgentCLIModel:
+         self._schema = schema
+ 
+     def _augment(self, prompt: str) -> str:
+-        schema_json = json.dumps(self._schema.model_json_schema(), indent=2)
+-        return (
+-            f"{prompt}\n\n"
+-            "Respond with ONLY a single JSON object conforming to the JSON Schema "
+-            "below. Do not wrap it in markdown code fences and do not add any prose "
+-            f"before or after the JSON.\n\nJSON Schema:\n{schema_json}"
+-        )
++        return prompt + structured_output_instructions(self._schema)
+ 
+     def _complete(self, prompt: str) -> str:
+         """Return provider output before structured parsing begins."""
 diff --git a/src/skillspector/__init__.py b/src/skillspector/__init__.py
 index 11995c4..3ed4f8f 100644
 --- a/src/skillspector/__init__.py

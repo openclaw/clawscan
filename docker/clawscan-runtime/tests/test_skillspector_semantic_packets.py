@@ -24,6 +24,7 @@ def planner():
     analyzer.base_prompt = "Generated security audit fixture."
     analyzer.model = "gpt-6.1-sol"
     analyzer._input_budget = 96000
+    analyzer._token_counter = lambda text: len(text.encode())
     analyzer._pack_files = True
     analyzer._timeout = None
     return analyzer
