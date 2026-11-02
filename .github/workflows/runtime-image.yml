@@ -21,6 +21,12 @@ permissions:
   contents: read
 
 jobs:
+  production-contract:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/runtime-image-production-contract.yml
+    permissions:
+      contents: read
+
   verify:
     if: github.event_name == 'pull_request'
     uses: ./.github/workflows/runtime-image-platform.yml
