@@ -1,0 +1,69 @@
+name: Production Scanner Contract
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Qualify locked production SDKs (40d9253)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout qualification helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qualification
+          persist-credentials: false
+
+      - name: Checkout exact reviewed candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 40d9253c4fa46b3068a7c3be38c872765c026873
+          fetch-depth: 2
+          path: candidate
+          persist-credentials: false
+
+      - name: Set up production Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12.16'
+
+      - name: Set up pinned Bash parser compiler
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+
+      - name: Install offline test isolation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+
+      - name: Check source, dependency and offline routing controls
+        run: python3 -m unittest discover -s qualification/scripts/runtime-image -p 'test_production_contract.py'
+
+      - name: Qualify the explicit source with the host worker contract
+        run: |
+          python3 qualification/scripts/runtime-image/production_contract.py \
+            --candidate "$GITHUB_WORKSPACE/candidate" \
+            --current "$GITHUB_WORKSPACE/qualification" \
+            --output "$RUNNER_TEMP/clawscan-production-contract"
+
+      - name: Retain exact source, installer and test receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-scanner-contract-40d9253
+          path: |
+            ${{ runner.temp }}/clawscan-production-contract/inputs.json
+            ${{ runner.temp }}/clawscan-production-contract/result.json
+            ${{ runner.temp }}/clawscan-production-contract/outputs/*.json
+            ${{ runner.temp }}/clawscan-production-contract/worker-original/scripts/security/*
+          if-no-files-found: ignore
+          retention-days: 7

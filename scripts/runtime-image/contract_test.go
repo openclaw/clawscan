@@ -152,6 +152,12 @@ func TestWorkflowPublicationFanInAndPRPermissions(t *testing.T) {
 					}
 					continue
 				}
+				if name == "production-contract" {
+					if event != "pull_request" || call.Uses != "./.github/workflows/runtime-image-production-contract.yml" || call.Permissions["contents"] != "read" || len(call.With) != 0 {
+						t.Fatal("host-worker qualification must be an independent read-only PR check")
+					}
+					continue
+				}
 				if call.Uses != "./.github/workflows/runtime-image-platform.yml" {
 					t.Fatal("verification and publication must share the native build implementation")
 				}
@@ -217,7 +223,7 @@ func TestNativeBuildSmokeAndProvenanceOrder(t *testing.T) {
 
 func TestWorkflowActionsAreImmutable(t *testing.T) {
 	pinned := regexp.MustCompile(`@[0-9a-f]{40}$`)
-	for _, name := range []string{"runtime-image.yml", "runtime-image-platform.yml"} {
+	for _, name := range []string{"runtime-image.yml", "runtime-image-platform.yml", "runtime-image-production-contract.yml"} {
 		for _, job := range readWorkflow(t, name).Jobs {
 			for _, step := range job.Steps {
 				if step.Uses != "" && !pinned.MatchString(step.Uses) {
