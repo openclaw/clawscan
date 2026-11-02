@@ -3411,7 +3411,7 @@ index 2876b5e..49f726d 100644
          check_runtime()
      raw = SecurityTextView("raw", text)
 diff --git a/src/skillspector/llm_analyzer_base.py b/src/skillspector/llm_analyzer_base.py
-index 470f6d3a..d74b7587 100644
+index 470f6d3a..d78b388b 100644
 --- a/src/skillspector/llm_analyzer_base.py
 +++ b/src/skillspector/llm_analyzer_base.py
 @@ -28,6 +28,7 @@ to ``None`` for raw-string mode.
@@ -3422,7 +3422,7 @@ index 470f6d3a..d74b7587 100644
  import os
  import threading
  import time
-@@ -38,6 +39,7 @@ from email.utils import parsedate_to_datetime
+@@ -38,10 +39,12 @@ from email.utils import parsedate_to_datetime
  from random import uniform
  from typing import Any, Literal, cast
  
@@ -3430,7 +3430,12 @@ index 470f6d3a..d74b7587 100644
  from langchain_anthropic import ChatAnthropic
  from langchain_core.messages import BaseMessage
  from langchain_openai.chat_models.base import BaseChatOpenAI
-@@ -67,6 +69,7 @@ from skillspector.llm_utils import (
+ from pydantic import BaseModel, Field, ValidationError, field_validator
++from tiktoken import registry as tiktoken_registry
+ 
+ from skillspector.inference_usage import (
+     InferenceUsageRecord,
+@@ -67,6 +70,7 @@ from skillspector.llm_utils import (
      chat_model_provider_name,
      get_chat_model,
      new_inference_usage_collector,
@@ -3438,11 +3443,26 @@ index 470f6d3a..d74b7587 100644
  )
  from skillspector.logging_config import get_logger
  from skillspector.model_info import get_max_input_tokens
-@@ -125,6 +128,57 @@ class _StructuredResponseValidationError(Exception):
+@@ -125,6 +129,76 @@ class _StructuredResponseValidationError(Exception):
      """Signal that provider output failed structured-response validation."""
  
  
 +REQUEST_FRAMING_TOKENS = 256
++
++
++def _input_token_counter_key(chat_model: object) -> tuple[object, ...]:
++    """Retain the selected counter for equivalent client configurations."""
++    if not isinstance(chat_model, BaseChatOpenAI):
++        return ("conservative_utf8_bytes",)
++    custom = getattr(chat_model, "custom_get_token_ids", None)
++    if callable(custom):
++        # The selected counter retains this callable, so its identity cannot be
++        # recycled while this key is cached. Do not retain whole HTTP clients.
++        return ("configured_chat_model_tokenizer", id(custom))
++    label = getattr(chat_model, "tiktoken_model_name", None) or getattr(
++        chat_model, "model_name", None
++    )
++    return ("openai_codec", label if isinstance(label, str) else None)
 +
 +
 +def _input_token_counter(chat_model: object) -> tuple[Callable[[str], int], str]:
@@ -3474,10 +3494,14 @@ index 470f6d3a..d74b7587 100644
 +    if not isinstance(label, str):
 +        return byte_bound, "conservative_utf8_bytes"
 +    try:
-+        encoding = tiktoken.encoding_for_model(label)
++        # Name lookup is a pure table lookup. Never initialize a codec here:
++        # get_encoding/encoding_for_model can download its vocabulary without a
++        # timeout, outside the shared scan deadline. Use only an existing codec.
++        encoding_name = tiktoken.encoding_name_for_model(label)
++        encoding = tiktoken_registry.ENCODINGS.get(encoding_name)
 +    except Exception:
-+        # Recognized codecs can still fail to initialize when the cache is
-+        # empty and its loader cannot reach or validate the vocabulary.
++        return byte_bound, "conservative_utf8_bytes"
++    if encoding is None:
 +        return byte_bound, "conservative_utf8_bytes"
 +
 +    def recognized(text: str) -> int:
@@ -3496,7 +3520,7 @@ index 470f6d3a..d74b7587 100644
  class LLMRuntimeLimitError(RuntimeError):
      """Signal that no shared scan time remains for an LLM operation."""
  
-@@ -669,6 +723,17 @@ class LLMAnalysisResult(BaseModel):
+@@ -669,6 +743,17 @@ class LLMAnalysisResult(BaseModel):
      findings: list[LLMFinding] = Field(default_factory=list)
  
  
@@ -3514,7 +3538,7 @@ index 470f6d3a..d74b7587 100644
  def estimate_tokens(text: str) -> int:
      """Approximate token count from character length."""
      return len(text) // CHARS_PER_TOKEN
-@@ -688,6 +753,7 @@ class Batch:
+@@ -688,6 +773,7 @@ class Batch:
      start_line: int = 1
      end_line: int | None = None
      findings: list[Finding] = field(default_factory=list)
@@ -3522,7 +3546,7 @@ index 470f6d3a..d74b7587 100644
  
      @property
      def is_chunk(self) -> bool:
-@@ -695,6 +761,8 @@ class Batch:
+@@ -695,6 +781,8 @@ class Batch:
  
      @property
      def file_label(self) -> str:
@@ -3531,7 +3555,7 @@ index 470f6d3a..d74b7587 100644
          label = f"File: {self.file_path}"
          if self.is_chunk:
              label += f" (lines {self.start_line}\u2013{self.end_line})"
-@@ -764,7 +832,32 @@ def ledger_events_for_batches(
+@@ -764,7 +852,32 @@ def ledger_events_for_batches(
      """Project detailed LLM batch execution into terminal ledger evidence."""
      events: list[InspectionLedgerEvent] = []
      successful_ranges: dict[str, list[tuple[int | None, int | None]]] = defaultdict(list)
@@ -3565,7 +3589,7 @@ index 470f6d3a..d74b7587 100644
          if not isinstance(batch, Batch):
              logger.debug("Skipping ledger projection for malformed successful batch: %r", batch)
              continue
-@@ -785,7 +878,7 @@ def ledger_events_for_batches(
+@@ -785,7 +898,7 @@ def ledger_events_for_batches(
      failed_ranges: dict[str, list[tuple[BatchFailure, tuple[int | None, int | None]]]] = (
          defaultdict(list)
      )
@@ -3574,7 +3598,7 @@ index 470f6d3a..d74b7587 100644
          if not isinstance(failure.batch, Batch):
              logger.debug("Skipping ledger projection for malformed failed batch: %r", failure.batch)
              continue
-@@ -819,35 +912,81 @@ def ledger_events_for_batches(
+@@ -819,35 +932,81 @@ def ledger_events_for_batches(
  # ---------------------------------------------------------------------------
  
  
@@ -3660,7 +3684,7 @@ index 470f6d3a..d74b7587 100644
          chunk_text = "".join(lines[start_idx:end_idx])
          chunks.append((chunk_text, start_idx + 1, end_idx))  # 1-indexed
  
-@@ -953,9 +1092,13 @@ class LLMAnalyzerBase:
+@@ -953,9 +1112,13 @@ class LLMAnalyzerBase:
          *,
          node: str = "llm_analyzer",
          timeout: float | None | Callable[[], float | None] = None,
@@ -3674,15 +3698,16 @@ index 470f6d3a..d74b7587 100644
          self._timeout = timeout
          self._dynamic_timeout = callable(timeout)
          self._input_budget = get_max_input_tokens(model)
-@@ -967,6 +1110,7 @@ class LLMAnalyzerBase:
+@@ -967,6 +1130,8 @@ class LLMAnalyzerBase:
              self._require_time_remaining()
              raise
          self._require_time_remaining()
 +        self._token_counter, self._token_counter_source = _input_token_counter(self._llm)
++        self._call_token_counters = {_input_token_counter_key(self._llm): self._token_counter}
          # Native SDK retries cannot re-read a workflow-wide deadline between
          # attempts.  A dynamic deadline therefore uses our explicit retry loop,
          # which checks and caps every retry/backoff against remaining time.
-@@ -1091,47 +1235,207 @@ class LLMAnalyzerBase:
+@@ -1091,47 +1256,207 @@ class LLMAnalyzerBase:
          file_paths: list[str],
          file_cache: dict[str, str],
          findings: list[Finding] | None = None,
@@ -3916,7 +3941,7 @@ index 470f6d3a..d74b7587 100644
  
      # -- Prompt / parse -----------------------------------------------------
  
-@@ -1142,6 +1446,26 @@ class LLMAnalyzerBase:
+@@ -1142,6 +1467,26 @@ class LLMAnalyzerBase:
          so the LLM can reference exact line numbers in its findings.
          Override in subclasses that need a custom prompt layout.
          """
@@ -3943,7 +3968,7 @@ index 470f6d3a..d74b7587 100644
          numbered = number_lines(batch.content, batch.start_line)
          return append_output_language_instruction(
              BASE_ANALYSIS_PROMPT.format(
-@@ -1158,6 +1482,26 @@ class LLMAnalyzerBase:
+@@ -1158,6 +1503,26 @@ class LLMAnalyzerBase:
          via :meth:`LLMFinding.to_finding`.  Override in subclasses that use a
          different ``response_schema`` or raw-string mode.
          """
@@ -3970,7 +3995,7 @@ index 470f6d3a..d74b7587 100644
          if isinstance(response, LLMAnalysisResult):
              return [f.to_finding(batch.file_path) for f in response.findings]
          raise NotImplementedError(
-@@ -1166,6 +1510,44 @@ class LLMAnalyzerBase:
+@@ -1166,6 +1531,56 @@ class LLMAnalyzerBase:
  
      # -- Run loop -----------------------------------------------------------
  
@@ -3988,7 +4013,19 @@ index 470f6d3a..d74b7587 100644
 +    def _count_prompt_tokens(
 +        self, prompt: str, *, chat_model: object | None = None, batch: Batch | None = None
 +    ) -> int:
-+        counter = self._token_counter if chat_model is None else _input_token_counter(chat_model)[0]
++        if chat_model is None:
++            counter = self._token_counter
++        else:
++            # Reuse a chosen fallback even if another request later populates
++            # the process-wide codec registry. Equivalent refreshed HTTP clients
++            # share a counter without keeping their connection pools alive.
++            counters = getattr(self, "_call_token_counters", None)
++            if counters is None:
++                counters = self._call_token_counters = {}
++            key = _input_token_counter_key(chat_model)
++            if key not in counters:
++                counters[key] = _input_token_counter(chat_model)[0]
++            counter = counters[key]
 +        return counter(self._serialized_input(prompt, batch=batch)) + REQUEST_FRAMING_TOKENS
 +
 +    def _prompt_fits_budget(self, prompt: str, *, batch: Batch | None = None) -> bool:
@@ -4015,7 +4052,7 @@ index 470f6d3a..d74b7587 100644
      def _invoke_batch(self, batch: Batch, prompt: str) -> tuple[Batch, list]:
          """Invoke and parse one batch synchronously."""
          logger.debug(
-@@ -1175,6 +1557,9 @@ class LLMAnalyzerBase:
+@@ -1175,6 +1590,9 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
@@ -4025,7 +4062,7 @@ index 470f6d3a..d74b7587 100644
          if structured_llm:
              try:
                  response = _invoke_with_usage(structured_llm, prompt, self._usage_collector)
-@@ -1264,6 +1649,9 @@ class LLMAnalyzerBase:
+@@ -1264,6 +1682,9 @@ class LLMAnalyzerBase:
              len(batch.findings),
          )
          llm, structured_llm = self._model_for_call()
