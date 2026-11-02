@@ -129,7 +129,8 @@
       "packaging": "26.3",
       "pluggy": "1.7.0",
       "pygments": "2.21.0",
-      "pytest": "9.0.2"
+      "pytest": "9.0.2",
+      "pip": "25.0.1"
     }
   },
   "tests": {

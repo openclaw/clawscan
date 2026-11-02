@@ -102,6 +102,24 @@ class ProductionContractTests(unittest.TestCase):
             with self.subTest(actual=actual), self.assertRaises(RuntimeError):
                 contract.inventory_binding(actual, expected)
 
+    def test_aig_inventory_accounts_for_original_venv_seed(self):
+        manifest = json.loads(
+            Path(contract.__file__).with_name("production-contract.json").read_text()
+        )
+        expected = manifest["expected_packages"]["aig"]
+        # Python 3.12.16 seeds this pip version before the original installer's
+        # uv pip install commands add the locked scanner dependencies.
+        actual = {**expected, "pip": "25.0.1"}
+        contract.inventory_binding(actual, expected)
+        missing_pip = {name: value for name, value in actual.items() if name != "pip"}
+        for invalid in [
+            missing_pip,
+            {**actual, "pip": "25.0.2"},
+            {**actual, "unreviewed-bootstrap-tool": "1.0"},
+        ]:
+            with self.subTest(actual=invalid), self.assertRaises(RuntimeError):
+                contract.inventory_binding(invalid, expected)
+
     def test_offline_child_has_no_credentials_and_source_is_read_only(self):
         with patch.dict(
             "os.environ",
@@ -130,7 +148,8 @@ class ProductionContractTests(unittest.TestCase):
             Path(contract.__file__).with_name("production-contract.json").read_text()
         )
         self.assertEqual(len(manifest["expected_packages"]["skillspector"]), 77)
-        self.assertEqual(len(manifest["expected_packages"]["aig"]), 25)
+        self.assertEqual(len(manifest["expected_packages"]["aig"]), 26)
+        self.assertEqual(manifest["expected_packages"]["aig"]["pip"], "25.0.1")
         self.assertEqual(len(manifest["tests"]), 2)
         self.assertEqual(
             manifest["tests"]["test_skillspector_javascript_validator_type_budget.py"],
