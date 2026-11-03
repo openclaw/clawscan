@@ -222,18 +222,10 @@ func normalizeClawHubSkillSpectorIssue(value any, index int) *clawHubSkillSpecto
 	}
 }
 
-// Paths carry file identity: display-text whitespace normalization can name a
-// different inventoried file. Preserve strings while keeping legacy coercions.
 func clawHubSkillSpectorFindingFile(record map[string]any) string {
-	readPath := func(source map[string]any, names ...string) string {
-		if value, ok := readMapValue(source, names...).(string); ok {
-			return value
-		}
-		return readMapString(source, names...)
-	}
 	return firstNonEmpty(
-		readPath(record, "file", "file_path", "filePath", "path"),
-		readPath(asStringMap(record["location"]), "file", "path"),
+		readMapPathString(record, "file", "file_path", "filePath", "path"),
+		readMapPathString(asStringMap(record["location"]), "file", "path"),
 	)
 }
 
@@ -270,7 +262,11 @@ func normalizeClawHubInspectionCaveats(accounting map[string]any) *clawHubInspec
 		}
 		normalized := map[string]any{}
 		for key, source := range map[string]string{"sourcePath": "source_path", "evidence": "evidence", "targetPath": "target_path", "status": "status", "disposition": "disposition", "referenceKind": "reference_kind"} {
-			if text := readMapString(row, source); text != "" {
+			text := readMapString(row, source)
+			if source == "source_path" || source == "target_path" {
+				text = readMapPathString(row, source)
+			}
+			if text != "" {
 				normalized[key] = truncateClawHubText(text, maxClawHubSkillSpectorShortTextChars)
 			}
 		}
@@ -288,7 +284,11 @@ func normalizeClawHubInspectionCaveats(accounting map[string]any) *clawHubInspec
 		}
 		normalized := map[string]any{}
 		for key, source := range map[string]string{"phase": "phase", "reasonCode": "reason_code", "path": "path", "message": "message"} {
-			if text := readMapString(row, source); text != "" {
+			text := readMapString(row, source)
+			if source == "path" {
+				text = readMapPathString(row, source)
+			}
+			if text != "" {
 				normalized[key] = truncateClawHubText(text, maxClawHubSkillSpectorShortTextChars)
 			}
 		}
@@ -396,6 +396,15 @@ func readMapValue(record map[string]any, names ...string) any {
 		}
 	}
 	return nil
+}
+
+// Paths carry file identity: display-text whitespace normalization can name a
+// different inventoried file. Preserve strings while keeping legacy coercions.
+func readMapPathString(record map[string]any, names ...string) string {
+	if value, ok := readMapValue(record, names...).(string); ok {
+		return value
+	}
+	return readMapString(record, names...)
 }
 
 func readMapString(record map[string]any, names ...string) string {
