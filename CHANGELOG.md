@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Run full CodeQL scans daily instead of on every main push, preserve PR and manual analysis, and start scans when draft PRs become ready for review.
+
 ## 0.3.1 - 2026-11-02
 
 - Refresh the frozen SkillSpector certificate bundle to certifi 2026.10.23, preserving the Responses adapter patch. Runtime Python delivery remains a separate requirement for incident-key rejection. Thanks @joshavant. (#94)
