@@ -1,26 +1,27 @@
 {
   "source": {
-    "commit": "1c37ba3462396c7616aaf251caea7782a874a0f2",
-    "parent": "376eff16ffdbbc4ac8a3b3f96a2d66241043bcbc",
-    "tree": "997ca61c69b63c521bf5fb040613457df6739c59",
-    "runtime_tree": "cd240968d09db24609f31428c3d50fc608153aae",
-    "diff_sha256": "5039de255ed2ee6103c0b706180a0e3c7a989f61ed422c8da6c3bae0c98c7a46",
+    "commit": "e9bfb7e7409cb2b7a422a8064780289c7d94c07a",
+    "parent": "7dca382c8031318c5baf933af513966b4d0c4d47",
+    "tree": "2874353579ca327fc5bc47ffaed556644abc6ff2",
+    "runtime_tree": "bd1667eb84dc0bfd454717500965724f96a51ba6",
+    "diff_sha256": "6c89eadd9e4e124d96f4477dc09a00f9b8fa0f01ef54b482ca3630a5a52a54c8",
     "files": {
       "docker/clawscan-runtime/Dockerfile": "6f5cfcd4a5f1fc5dd52a886286e15b39d4bf70ed9df66a30c207886b32747640",
-      "docker/clawscan-runtime/patches/skillspector-responses.patch": "da957572af59d780a6d13558c5c14abd8c539e09b3c6007ad514e12f4af7d4f7",
-      "docker/clawscan-runtime/tests/test_skillspector_input_budget.py": "f06bc02bc61fbeb80f9582ea902985eb22e67b9fb182621f3eb3ad8ae0eb61e2",
-      "docker/clawscan-runtime/tests/test_skillspector_semantic_packets.py": "5548a4ad17b08e681a06ea7ececc3a896f989ca7b22600e61b487316bfdacf8f",
+      "docker/clawscan-runtime/patches/skillspector-responses.patch": "4603a085aee7b1340f4c5906e9420be3282fde1142fe3a3a58e182a203e5bb79",
+      "docker/clawscan-runtime/tests/test_skillspector_input_budget.py": "08c0fadef454cd80d0113306306c4ee73d849b48167c6c3be6117778b246e7c1",
+      "docker/clawscan-runtime/tests/test_skillspector_semantic_packets.py": "fc12d1b5b3b51431541d82de09e2005d766f59e26ced60bbdbd513867ac3e4b9",
       "docker/clawscan-runtime/tests/test_skillspector_bounded_packing.py": "04d62680025a8389e0f210df1c392a0b2e9630b8ec15bad63f63de9ac3ccd7c1",
-      "docker/clawscan-runtime/tests/test_skillspector_lazy_workflow_imports.py": "e2c139ceb4aa8279606dbda48ff0ff3f0e281ebbb17e8d40e6c73ed599a4d8e5"
+      "docker/clawscan-runtime/tests/test_skillspector_lazy_workflow_imports.py": "e2c139ceb4aa8279606dbda48ff0ff3f0e281ebbb17e8d40e6c73ed599a4d8e5",
+      "docker/clawscan-runtime/tests/test_skillspector_meta_packets.py": "d88a1db371c15f75aeec2c8fc6802f18ed963e865359df027c87dc12b2ee19da"
     }
   },
   "worker": {
     "repository": "openclaw/clawhub",
-    "commit": "22252375c61a07466e470d54f30b18b666b2c4e4",
-    "original_clawscan_pin": "7b1fee40e020c8576136b67582a1f72b449836d2",
+    "commit": "4e67c8ab6b5b7f8dd0f316921daf07004b52498e",
+    "original_clawscan_pin": "72ce30bc537e28fe1cfd6eac0de96e5c3f54bb98",
     "files": {
       "scripts/security/install-clawscan-scanners.sh": "e08280d511a49e5ac954dc6bdfcaea399ed9320a27094af7b715736e8208d7a6",
-      "scripts/security/clawscan-source-commit.txt": "0575a688b1b4299937e30e5e78f4d379a172aa2292f0a7f01aefd61e378d9362",
+      "scripts/security/clawscan-source-commit.txt": "fe8035730c4b3d57bc307d958b9f80b50ebd3f494031b5302562b4bbe7b57b3e",
       "scripts/security/skillspector-pydantic-requirements.txt": "6e14cadc9977fb27f2b2ed17dd7a7ecdb2048564aee78f589809d612da138ed2",
       "scripts/security/aig-worker-requirements.txt": "a7d3231287535b6f972fe8cc97acfbdb064593cdc22da33e9136a1888d36823c",
       "scripts/security/test_skillspector_serialization.py": "f08253372d542daf86dc23cb7f3c21ab5e1ae045778ecd53d50e7454d12b6bbb"
@@ -139,9 +140,9 @@
   "tests": {
     "test_skillspector_javascript_validator_type_budget.py": "dbb47fa8afb2b7d890d5b0558422b12ceb2d46b013080c167120ad1c5aea960a",
     "test_skillspector_lazy_workflow_imports.py": "e2c139ceb4aa8279606dbda48ff0ff3f0e281ebbb17e8d40e6c73ed599a4d8e5",
-    "test_skillspector_input_budget.py": "f06bc02bc61fbeb80f9582ea902985eb22e67b9fb182621f3eb3ad8ae0eb61e2",
-    "test_skillspector_semantic_packets.py": "5548a4ad17b08e681a06ea7ececc3a896f989ca7b22600e61b487316bfdacf8f",
-    "test_skillspector_meta_packets.py": "3aad840d15f62a7425ce53b21b5b12ae04dc41b99bf8eda205371738affb3861",
+    "test_skillspector_input_budget.py": "08c0fadef454cd80d0113306306c4ee73d849b48167c6c3be6117778b246e7c1",
+    "test_skillspector_semantic_packets.py": "fc12d1b5b3b51431541d82de09e2005d766f59e26ced60bbdbd513867ac3e4b9",
+    "test_skillspector_meta_packets.py": "d88a1db371c15f75aeec2c8fc6802f18ed963e865359df027c87dc12b2ee19da",
     "test_skillspector_bounded_packing.py": "04d62680025a8389e0f210df1c392a0b2e9630b8ec15bad63f63de9ac3ccd7c1"
   },
   "scope": "One explicit source snapshot and observed host-worker dependency contract. A changed runtime tree requires fresh reviewed bindings and qualification. No production readiness or original-package acceptance is conferred."
