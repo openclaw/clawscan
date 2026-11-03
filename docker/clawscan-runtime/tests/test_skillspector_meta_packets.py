@@ -2,11 +2,14 @@
 
 import asyncio
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import skillspector.llm_analyzer_base as base
+import skillspector.nodes.meta_analyzer as meta_fragment_module
+from skillspector.dependency_sources import redact_text
+from skillspector.inspection_ledger import finalize_ledger
 from skillspector.models import Finding
 from skillspector.nodes.meta_analyzer import LLMMetaAnalyzer, meta_analyzer
 from skillspector.state import WorkflowResourceBudget
@@ -384,3 +387,229 @@ def test_queued_packet_expiry_respects_original_shared_budget(monkeypatch):
         finding.finding_id for finding in state["findings"]
     }
     assert result["llm_call_log"][0]["ok"] is False
+
+
+# Meta aggregation must retain every original sub-line source span.
+def _fragment_meta_planner():
+    value = meta_fragment_module.LLMMetaAnalyzer.__new__(
+        meta_fragment_module.LLMMetaAnalyzer
+    )
+    value.base_prompt = meta_fragment_module.PER_FILE_ANALYSIS_PROMPT
+    value._input_budget = 16000
+    value._token_counter = lambda text: len(text.encode())
+    value._timeout = None
+    value._pack_files = False
+    value._usage_collector = MagicMock()
+    value._usage_collector.snapshot.return_value = []
+    return value
+
+
+def _fragment_test_finding(rule="SC4", path="synthetic.js"):
+    return Finding(
+        rule_id=rule,
+        message="Synthetic security concern retained",
+        severity="HIGH",
+        file=path,
+        start_line=1,
+    )
+
+
+def _fragment_meta_members(batches):
+    return [member for batch in batches for member in batch.members or (batch,)]
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_fragment_actual_meta_planner_keeps_incomplete_fragment_line_failed(missing):
+    a = _fragment_meta_planner()
+    f = _fragment_test_finding()
+    units = _fragment_meta_members(
+        a.get_batches(["synthetic.js"], {"synthetic.js": "x" * 100000}, [f])
+    )
+    assert len(units) > 2
+    dropped = units[len(units) // 2]
+    outcome = base.BatchExecutionResult(
+        successful=[(b, []) for b in units if b is not dropped],
+        failures=[]
+        if missing
+        else [base.BatchFailure(dropped, "SyntheticFragmentFailure")],
+    )
+    events, status = meta_fragment_module._meta_ledger_response(units, outcome, [f])
+    assert status["status"] == "failed"
+    assert any(
+        e["outcome"] == "failed" and f.finding_id in e["emitted_finding_ids"]
+        for e in events
+    )
+
+
+def test_fragment_all_meta_fragment_results_missing_is_failed_and_preserves__fragment_test_finding():
+    a = _fragment_meta_planner()
+    f = _fragment_test_finding()
+    units = _fragment_meta_members(
+        a.get_batches(["synthetic.js"], {"synthetic.js": "x" * 100000}, [f])
+    )
+    events, status = meta_fragment_module._meta_ledger_response(
+        units, base.BatchExecutionResult(), [f]
+    )
+    assert status["status"] == "failed"
+    assert any(f.finding_id in e["emitted_finding_ids"] for e in events)
+
+
+def test_fragment_actual_meta_planner_packet_and_single_prompt_identify_source_columns():
+    a = _fragment_meta_planner()
+    f = _fragment_test_finding()
+    other = _fragment_test_finding(path="other.js")
+    batches = a.get_batches(
+        ["synthetic.js", "other.js"],
+        {"synthetic.js": "x" * 100000, "other.js": "const safe=1;"},
+        [f, other],
+    )
+    packets = [
+        b
+        for b in batches
+        if b.members and any(m.source_start_column is not None for m in b.members)
+    ]
+    assert packets, "exercise actual mixed-file packing"
+    for packet in packets:
+        prompt = a.build_prompt(packet)
+        assert all(
+            key in prompt
+            for key in (
+                "source_start_column",
+                "source_end_column",
+                "source_line_length",
+            )
+        )
+        a._check_prompt_budget(prompt, batch=packet)
+    for unit in _fragment_meta_members(batches):
+        if unit.source_start_column is not None:
+            assert "partial source line" in a.build_prompt(unit)
+    keys = [
+        meta_fragment_module._meta_batch_work_id(unit)
+        for unit in _fragment_meta_members(batches)
+    ]
+    assert len(set(keys)) == len(keys), (
+        "private return keys must not collapse same-line fragments"
+    )
+
+
+def test_fragment_sc10_credential_url_crossing_proposed_fragment_boundary_never_leaks():
+    a = _fragment_meta_planner()
+    ordinary = _fragment_test_finding()
+    plain = "x" * 100000
+    first = _fragment_meta_members(
+        a.get_batches(["synthetic.js"], {"synthetic.js": plain}, [ordinary])
+    )
+    boundary = first[0].source_end_column
+    marker = "SYNTHETIC_FAKE_SECRET_"
+    url = "https://user:" + marker * 100 + "@example.invalid/path"
+    content = plain[: boundary - 500] + " " + url + " " + plain[boundary - 500 :]
+    assert marker not in redact_text(content)
+    f = _fragment_test_finding("SC10")
+    batches = a.get_batches(["synthetic.js"], {"synthetic.js": content}, [f])
+    units = _fragment_meta_members(batches)
+    assert len(units) == 1 and units[0].source_start_column is None, (
+        "sensitive source remains whole for normal redaction"
+    )
+    assert marker not in a.build_prompt(units[0])
+    with pytest.raises(base.LLMInputBudgetError):
+        a._check_prompt_budget(a.build_prompt(units[0]), batch=units[0])
+    events, status = meta_fragment_module._meta_ledger_response(
+        units,
+        base.BatchExecutionResult(
+            failures=[base.BatchFailure(units[0], "LLMInputBudgetError")]
+        ),
+        [f],
+    )
+    assert (
+        status["status"] == "failed"
+        and f.finding_id in events[0]["emitted_finding_ids"]
+    )
+
+
+@pytest.mark.parametrize("mode", ["complete", "failure", "missing", "unknown"])
+def test_fragment_real_meta_node_reconciles_every_fragment_and_retains_original_findings(
+    monkeypatch, mode
+):
+    a = _fragment_meta_planner()
+    f = _fragment_test_finding()
+    text = "x" * 100000
+    preview = _fragment_meta_members(
+        a.get_batches(["synthetic.js"], {"synthetic.js": text}, [f])
+    )
+    target = preview[len(preview) // 2].source_start_column
+    seen = []
+
+    async def invoke(batch, prompt, **kwargs):
+        assert not batch.members
+        a._check_prompt_budget(prompt, batch=batch)
+        seen.append((batch.source_start_column, batch.source_end_column))
+        if mode == "failure" and batch.source_start_column == target:
+            raise RuntimeError("SyntheticFragmentFailure")
+        item = {
+            "finding_id": f.finding_id,
+            "pattern_id": f.rule_id,
+            "start_line": 1,
+            "is_vulnerability": True,
+            "confidence": 0.9,
+            "intent": "negligent",
+            "impact": "high",
+            "_file": f.file,
+        }
+        return batch, [item]
+
+    monkeypatch.setattr(a, "_ainvoke_batch_with_retries", invoke)
+    original_arun = a.arun_batches
+    if mode in ("missing", "unknown"):
+
+        async def omit_one(requests, **kwargs):
+            result = await original_arun(requests, **kwargs)
+            result = [(b, v) for b, v in result if b.source_start_column != target]
+            if mode == "unknown":
+                result.append(
+                    (
+                        base.Batch(
+                            file_path="synthetic.js", content=text, findings=[f]
+                        ),
+                        [],
+                    )
+                )
+            a._last_batch_outcome = base.BatchExecutionResult(
+                successful=result, failures=[]
+            )
+            return result
+
+        monkeypatch.setattr(a, "arun_batches", omit_one)
+    monkeypatch.setattr(meta_fragment_module, "LLMMetaAnalyzer", lambda **kwargs: a)
+    response = meta_fragment_module.meta_analyzer(
+        {
+            "findings": [f],
+            "components": ["synthetic.js"],
+            "file_cache": {"synthetic.js": text},
+            "manifest": {},
+            "model_config": {"default": "synthetic-offline"},
+        }
+    )
+    assert len(seen) == len(preview) == len(set(seen)), (
+        "each planned fragment ran once through normal aggregation"
+    )
+    assert f.finding_id in response["effective_finding_ids"]
+    retained = next(
+        value for value in response["findings"] if value.finding_id == f.finding_id
+    )
+    completeness, _ = finalize_ledger(
+        {
+            "components": ["synthetic.js"],
+            "findings": response["findings"],
+            "inspection_ledger": response["inspection_ledger"],
+            "analyzer_status_events": response["analyzer_status_events"],
+            "meta_review_required": True,
+        }
+    )
+    if mode == "complete":
+        assert response["analyzer_status_events"][0]["status"] == "completed"
+        assert completeness["execution_successful"] is True
+    else:
+        assert response["analyzer_status_events"][0]["status"] == "failed"
+        assert retained.evidence["llm_review_outcome"] == "failed"
+        assert completeness["execution_successful"] is False
+        assert response["llm_call_log"][0]["ok"] is False

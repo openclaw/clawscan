@@ -118,8 +118,18 @@ def test_json_source_boundaries_preserve_quoted_paths_unicode_and_fabricated_ids
 def test_large_single_source_is_never_trimmed_to_fit_the_grouping_budget():
     source = "Generated long line " * 9000
     batches = planner().get_batches(["large.txt"], {"large.txt": source})
-    assert batches[0].content == source
-    assert not batches[0].members
+    assert all(not batch.members for batch in batches)
+    assert len(batches) > 1
+    covered = 0
+    rebuilt = ""
+    for batch in batches:
+        planner()._check_prompt_budget(planner().build_prompt(batch), batch=batch)
+        start, end = batch.source_start_column, batch.source_end_column
+        assert start <= covered < end <= len(source)
+        assert batch.content == source[start:end]
+        rebuilt += batch.content[max(0, covered - start):]
+        covered = end
+    assert covered == len(source) and rebuilt == source
 
 
 def test_existing_small_artifact_mode_keeps_per_file_requests():
@@ -180,7 +190,18 @@ def test_overlapping_native_chunks_preserve_one_original_finding_origin():
         files["overlap.md"], analyzer._input_budget - base.estimate_tokens(analyzer.base_prompt)
     )
     members = [member for batch in batches for member in batch.members or (batch,)]
-    assert [(m.content, m.start_line, m.end_line) for m in members if m.file_path == "overlap.md"] == original_chunks
+    whole_line_chunks = [m for m in members if m.file_path == "overlap.md" and m.source_start_column is None]
+    assert [(m.content, m.start_line, m.end_line) for m in whole_line_chunks] == original_chunks[:2]
+    fragments = [m for m in members if m.file_path == "overlap.md" and m.source_start_column is not None]
+    covered = 0
+    reconstructed = ""
+    for fragment in fragments:
+        assert fragment.start_line == fragment.end_line == 61
+        assert fragment.source_start_column <= covered < fragment.source_end_column
+        analyzer._check_prompt_budget(analyzer.build_prompt(fragment), batch=fragment)
+        reconstructed += fragment.content[max(0, covered - fragment.source_start_column):].rstrip("\n")
+        covered = fragment.source_end_column
+    assert covered == 400_000 and reconstructed == "x" * 400_000
     assert original_chunks[0][1:] == (1, 60)
     assert original_chunks[1][1:] == (11, 60)
     outcome = BatchExecutionResult()

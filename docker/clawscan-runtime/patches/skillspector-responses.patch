@@ -10321,3 +10321,525 @@ index c2ed28b..7f92c6d 100644
  from langgraph.graph import END, START, StateGraph
 
  from skillspector.inspection_ledger import guard_analyzer_node
+
+diff --git a/src/skillspector/llm_analyzer_base.py b/src/skillspector/llm_analyzer_base.py
+--- a/src/skillspector/llm_analyzer_base.py
++++ b/src/skillspector/llm_analyzer_base.py
+@@ -774,6 +774,10 @@
+     end_line: int | None = None
+     findings: list[Finding] = field(default_factory=list)
+     members: tuple[Batch, ...] = ()
++    # Zero-based half-open Unicode-character columns; line endings are excluded.
++    source_start_column: int | None = None
++    source_end_column: int | None = None
++    source_line_length: int | None = None
+
+     @property
+     def is_chunk(self) -> bool:
+@@ -786,6 +790,11 @@
+         label = f"File: {self.file_path}"
+         if self.is_chunk:
+             label += f" (lines {self.start_line}\u2013{self.end_line})"
++        if self.source_start_column is not None:
++            label += (
++                f" (partial source line, columns {self.source_start_column + 1}"
++                f"–{self.source_end_column} of {self.source_line_length} characters)"
++            )
+         return label
+
+
+@@ -843,6 +852,82 @@
+     if next_uncovered_line <= failed_end:
+         uncovered.append((next_uncovered_line, failed_end))
+     return uncovered
++
++
++def _project_line_fragments(
++    successful: list[tuple[Batch, list]], failures: list[BatchFailure]
++) -> tuple[list[tuple[Batch, list]], list[BatchFailure], list[tuple[Batch, list]]]:
++    """Project a line only after its successful fragments cover every character.
++
++    The public ledger identifies work by line range. Sibling fragments must not
++    masquerade as successful retries of a different part of that same line.
++    """
++    groups = defaultdict(list)
++    whole_successes = []
++    whole_failures = []
++    partial_findings = []
++    for batch, findings in successful:
++        if batch.source_start_column is None:
++            whole_successes.append((batch, findings))
++        else:
++            groups[(batch.file_path, batch.start_line, batch.end_line)].append(
++                (batch, findings, None)
++            )
++    for failure in failures:
++        batch = failure.batch
++        if batch.source_start_column is None:
++            whole_failures.append(failure)
++        else:
++            groups[(batch.file_path, batch.start_line, batch.end_line)].append((batch, [], failure))
++    for (path, start, end), fragments in groups.items():
++        lengths = {batch.source_line_length for batch, _, _ in fragments}
++        total = fragments[0][0].source_line_length
++        valid = (
++            start == end
++            and type(total) is int
++            and total > 0
++            and len(lengths) == 1
++            and all(
++                type(batch.source_start_column) is int
++                and type(batch.source_end_column) is int
++                and 0 <= batch.source_start_column < batch.source_end_column <= total
++                for batch, _, _ in fragments
++            )
++        )
++        covered = 0
++        for left, right in sorted(
++            (batch.source_start_column, batch.source_end_column)
++            for batch, _, failure in fragments
++            if failure is None
++        ):
++            if not valid or left > covered:
++                break
++            covered = max(covered, right)
++        findings = [finding for _, values, _ in fragments for finding in values]
++        original_findings = {
++            finding.finding_id: finding for batch, _, _ in fragments for finding in batch.findings
++        }
++        line = Batch(
++            file_path=path,
++            content="",
++            start_line=start,
++            end_line=end,
++            findings=list(original_findings.values()),
++        )
++        if valid and covered == total:
++            whole_successes.append((line, findings))
++            continue
++        if findings:
++            # Successful fragments still contributed real findings, even though
++            # they cannot establish completion of the original source line.
++            partial_findings.append((line, findings))
++        failed = [failure for _, _, failure in fragments if failure is not None]
++        whole_failures.extend(
++            BatchFailure(line, failure.error_class, failure.reason) for failure in failed
++        )
++        if not failed:
++            whole_failures.append(BatchFailure(line, "IncompleteSourceLineFragments"))
++    return whole_successes, whole_failures, partial_findings
+
+
+ def ledger_events_for_batches(
+@@ -877,6 +962,20 @@
+         if isinstance(failure.batch, Batch)
+         for member in (failure.batch.members or (failure.batch,))
+     ]
++    successful, failures, partial_findings = _project_line_fragments(successful, failures)
++    for batch, findings in partial_findings:
++        events.append(
++            ledger_event(
++                analyzer_id=analyzer_id,
++                outcome=LedgerOutcome.PARTIAL,
++                phase="semantic",
++                path=batch.file_path,
++                start_line=batch.start_line,
++                end_line=batch.end_line,
++                reason=LedgerReason.LLM_BATCH_FAILED,
++                emitted_finding_ids=[finding.finding_id for finding in findings],
++            )
++        )
+     for batch, findings in successful:
+         if not isinstance(batch, Batch):
+             logger.debug("Skipping ledger projection for malformed successful batch: %r", batch)
+@@ -1306,19 +1405,71 @@
+             for text, start, end in chunk_file_by_lines(
+                 content, self._input_budget, fits_chunk=fits_chunk
+             ):
+-                batches.append(
+-                    Batch(
+-                        file_path=path,
+-                        content=text,
+-                        start_line=start,
+-                        end_line=end,
+-                        findings=findings_in_range(file_findings, start, end),
+-                    )
++                batch = Batch(
++                    file_path=path,
++                    content=text,
++                    start_line=start,
++                    end_line=end,
++                    findings=findings_in_range(file_findings, start, end),
+                 )
++                if start == end and not self._prompt_fits_budget(
++                    self.build_prompt(batch, **prompt_kwargs), batch=batch
++                ):
++                    batches.extend(self._fragment_source_line(batch, **prompt_kwargs))
++                else:
++                    batches.append(batch)
+
+         if not getattr(self, "_pack_files", False):
+             return batches
+         return self._pack_semantic_sources(batches, **prompt_kwargs)
++
++    def _fragment_source_line(self, batch: Batch, **prompt_kwargs: object) -> list[Batch]:
++        """Retain an oversized physical line as bounded, overlapping source spans."""
++        logical = batch.content.splitlines()
++        if len(logical) != 1 or not logical[0]:
++            return [batch]
++        body = logical[0]
++        ending = batch.content[len(body) :]
++        result = []
++        start = 0
++        while start < len(body):
++            self._require_time_remaining()
++
++            def fragment(end: int, start: int = start) -> Batch:
++                return Batch(
++                    file_path=batch.file_path,
++                    content=body[start:end] + (ending if end == len(body) else ""),
++                    start_line=batch.start_line,
++                    end_line=batch.end_line,
++                    findings=batch.findings,
++                    source_start_column=start,
++                    source_end_column=end,
++                    source_line_length=len(body),
++                )
++
++            low, high, best = start + 1, len(body), None
++            while low <= high:
++                middle = (low + high) // 2
++                candidate = fragment(middle)
++                if self._prompt_fits_budget(
++                    self.build_prompt(candidate, **prompt_kwargs), batch=candidate
++                ):
++                    best = middle
++                    low = middle + 1
++                else:
++                    high = middle - 1
++            if best is None:
++                # Fixed metadata/one character cannot fit. Preserve the entire
++                # remainder for the unchanged invocation guard to fail closed.
++                result.append(fragment(len(body)))
++                break
++            result.append(fragment(best))
++            if best == len(body):
++                break
++            # Keep boundary instructions/calls together without quadratic
++            # request growth under tiny budgets. Every iteration advances.
++            start = best - min(256, (best - start) // 8)
++        return result
+
+     def _pack_semantic_sources(
+         self, sources: list[Batch], *, max_findings: int | None = None, **prompt_kwargs: object
+@@ -1485,6 +1636,16 @@
+                     "start_line": member.start_line,
+                     "end_line": member.end_line,
+                     "numbered_content": number_lines(member.content, member.start_line),
++                    **(
++                        {
++                            "source_start_column": member.source_start_column,
++                            "source_end_column": member.source_end_column,
++                            "source_line_length": member.source_line_length,
++                            "column_units": "zero-based half-open Unicode characters; partial source line",
++                        }
++                        if member.source_start_column is not None
++                        else {}
++                    ),
+                 }
+                 for index, member in enumerate(batch.members)
+             ]
+@@ -1534,6 +1695,12 @@
+                     findings.append(finding.to_finding(member.file_path))
+             return findings
+         if isinstance(response, LLMAnalysisResult):
++            if batch.source_start_column is not None and any(
++                finding.start_line != batch.start_line
++                or (finding.end_line is not None and finding.end_line != batch.end_line)
++                for finding in response.findings
++            ):
++                raise _StructuredResponseValidationError
+             return [f.to_finding(batch.file_path) for f in response.findings]
+         raise NotImplementedError(
+             "Override parse_response for custom response_schema or raw-string mode"
+diff --git a/src/skillspector/nodes/meta_analyzer.py b/src/skillspector/nodes/meta_analyzer.py
+--- a/src/skillspector/nodes/meta_analyzer.py
++++ b/src/skillspector/nodes/meta_analyzer.py
+@@ -48,6 +48,7 @@
+     BatchFailure,
+     LLMAnalyzerBase,
+     LLMRuntimeLimitError,
++    _project_line_fragments,
+     _StructuredResponseValidationError,
+     append_output_language_instruction,
+     estimate_tokens,
+@@ -438,6 +439,16 @@
+                     "start_line": member.start_line,
+                     "end_line": member.end_line,
+                     "content": member.content,
++                    **(
++                        {
++                            "source_start_column": member.source_start_column,
++                            "source_end_column": member.source_end_column,
++                            "source_line_length": member.source_line_length,
++                            "column_units": "zero-based half-open Unicode characters; partial source line",
++                        }
++                        if member.source_start_column is not None
++                        else {}
++                    ),
+                     "static_findings": _format_findings_for_prompt(member.findings),
+                 }
+                 for index, member in enumerate(batch.members)
+@@ -483,6 +494,14 @@
+         # Bound response work too: grouping many finding-heavy files must not
+         # turn independent successful requests into one oversized response.
+         return self._pack_semantic_sources(batches, max_findings=16, metadata_text=metadata_text)
++
++    def _fragment_source_line(self, batch: Batch, **prompt_kwargs: object) -> list[Batch]:
++        # A credential URL must remain intact for the existing SC10 redactor.
++        # Splitting before redaction could expose an unrecognizable secret tail;
++        # keep this whole line for normal redaction and the unchanged call guard.
++        if any(finding.rule_id == "SC10" for finding in batch.findings):
++            return [batch]
++        return super()._fragment_source_line(batch, **prompt_kwargs)
+
+     def _packet_response_schema(self) -> type:
+         return MetaPacketResult
+@@ -707,11 +726,52 @@
+
+ def _meta_batch_work_id(batch: Batch) -> str:
+     """Return the ledger identity for one submitted meta-analysis batch."""
+-    return inspection_work_id(
++    identity = inspection_work_id(
+         "meta_analyzer",
+         batch.file_path,
+         batch.start_line if batch.end_line is not None else None,
+         batch.end_line,
++    )
++    if batch.source_start_column is not None:
++        # Internal return reconciliation needs a distinct key for each span.
++        # Public ledger identity remains the original source line range.
++        identity += (
++            f":columns:{batch.source_start_column}:{batch.source_end_column}"
++            f":length:{batch.source_line_length}"
++        )
++    return identity
++
++
++def _account_for_missing_meta_batches(
++    batches: list[Batch], outcome: BatchExecutionResult
++) -> BatchExecutionResult:
++    outcome = _unpack_meta_outcome(outcome)
++    submitted = {
++        _meta_batch_work_id(batch): batch
++        for request in batches
++        for batch in request.members or (request,)
++    }
++    successful: dict[str, tuple[Batch, list]] = {}
++    for returned, items in outcome.successful:
++        identity = _meta_batch_work_id(returned)
++        if identity in submitted and identity not in successful:
++            successful[identity] = (submitted[identity], items)
++    failures = [
++        BatchFailure(submitted[identity], failure.error_class, failure.reason)
++        for failure in outcome.failures
++        if (identity := _meta_batch_work_id(failure.batch)) in submitted
++    ]
++    observed = set(successful) | {_meta_batch_work_id(failure.batch) for failure in failures}
++    return BatchExecutionResult(
++        successful=list(successful.values()),
++        failures=[
++            *failures,
++            *(
++                BatchFailure(batch, "MissingBatchResult")
++                for identity, batch in submitted.items()
++                if identity not in observed
++            ),
++        ],
+     )
+
+
+@@ -721,6 +781,16 @@
+     filtered: list[Finding],
+ ) -> tuple[list[InspectionLedgerEvent], AnalyzerStatusEvent]:
+     """Account for each meta batch while preserving fail-closed finding identity."""
++    outcome = _account_for_missing_meta_batches(batches, outcome)
++    projected_successes, projected_failures, _ = _project_line_fragments(
++        [(batch, batch.findings) for batch, _ in outcome.successful], outcome.failures
++    )
++    outcome = BatchExecutionResult(
++        successful=[
++            (replace(batch, findings=findings), []) for batch, findings in projected_successes
++        ],
++        failures=projected_failures,
++    )
+     retained_ids = {finding.finding_id for finding in filtered}
+     completed_ids = {
+         finding.finding_id for batch, _ in outcome.successful for finding in batch.findings
+@@ -1007,21 +1077,15 @@
+                 ],
+             )
+
+-        if len(batch_results) < len(batches):
+-            # Some batches never returned. A finding the LLM never saw has no
+-            # verdict — keep it via the fallback path instead of letting
+-            # apply_filter treat the missing confirmation as a rejection.
+-            analysed_ids = {
+-                finding.finding_id for batch, _ in batch_results for finding in batch.findings
+-            }
+-            analysed = [
+-                finding for finding in eligible_findings if finding.finding_id in analysed_ids
+-            ]
+-            unanalysed = [
+-                finding for finding in eligible_findings if finding.finding_id not in analysed_ids
+-            ]
+-        else:
+-            analysed, unanalysed = eligible_findings, []
++        detailed = _account_for_missing_meta_batches(batches, detailed)
++        completed_sources, _, _ = _project_line_fragments(
++            [(batch, batch.findings) for batch, _ in detailed.successful], detailed.failures
++        )
++        analysed_ids = {finding.finding_id for _, values in completed_sources for finding in values}
++        analysed = [finding for finding in eligible_findings if finding.finding_id in analysed_ids]
++        unanalysed = [
++            finding for finding in eligible_findings if finding.finding_id not in analysed_ids
++        ]
+
+         filtered = analyzer.apply_filter(analysed, batch_results)
+         if unanalysed:
+diff --git a/src/skillspector/llm_analyzer_base.py b/src/skillspector/llm_analyzer_base.py
+--- a/src/skillspector/llm_analyzer_base.py
++++ b/src/skillspector/llm_analyzer_base.py
+@@ -56,7 +56,9 @@
+     InspectionLedgerEvent,
+     LedgerOutcome,
+     LedgerReason,
++    LedgerRecordType,
+     analyzer_status_for_events,
++    inspection_work_id,
+     ledger_event,
+     outcome_for_llm_batch_failure,
+ )
+@@ -930,6 +932,81 @@
+     return whole_successes, whole_failures, partial_findings
+
+
++def _consolidate_fragment_ledger_events(
++    analyzer_id: str, events: list[InspectionLedgerEvent], batches: list[Batch]
++) -> tuple[list[InspectionLedgerEvent], AnalyzerStatusEvent]:
++    """Keep one terminal line row and separate, non-planned failure facts."""
++    fragmented = {
++        (batch.file_path, batch.start_line, batch.end_line)
++        for batch in batches
++        if batch.source_start_column is not None
++    }
++    groups: dict[str, list[InspectionLedgerEvent]] = defaultdict(list)
++    result: list[InspectionLedgerEvent] = []
++    for event in events:
++        if (event["path"], event["start_line"], event["end_line"]) in fragmented:
++            groups[event["work_id"]].append(event)
++        else:
++            result.append(event)
++    severity = {
++        LedgerOutcome.COMPLETED: 0,
++        LedgerOutcome.SKIPPED: 1,
++        LedgerOutcome.PARTIAL: 2,
++        LedgerOutcome.FAILED: 3,
++    }
++    for rows in groups.values():
++        if len(rows) == 1:
++            result.extend(rows)
++            continue
++        failures = [row for row in rows if "error_class" in row]
++        primary = cast(
++            InspectionLedgerEvent,
++            dict(max(failures or rows, key=lambda row: severity[row["outcome"]])),
++        )
++        primary["input_finding_ids"] = list(
++            dict.fromkeys(finding_id for row in rows for finding_id in row["input_finding_ids"])
++        )
++        primary["emitted_finding_ids"] = list(
++            dict.fromkeys(finding_id for row in rows for finding_id in row["emitted_finding_ids"])
++        )
++        # Producer findings need one partial origin. A separate failure boundary
++        # retains any fatal fact without creating another planned line outcome.
++        if primary["phase"] != "meta" and primary["emitted_finding_ids"]:
++            primary["outcome"] = LedgerOutcome.PARTIAL
++        result.append(primary)
++        primary_fact = (primary["outcome"], primary.get("reason_code"), primary.get("error_class"))
++        facts = {primary_fact}
++        for failure in failures:
++            fact = (failure["outcome"], failure.get("reason_code"), failure.get("error_class"))
++            if fact in facts:
++                continue
++            facts.add(fact)
++            boundary = ledger_event(
++                analyzer_id=analyzer_id,
++                record_type=LedgerRecordType.SCOPE_BOUNDARY,
++                outcome=failure["outcome"],
++                phase=failure["phase"],
++                path=failure["path"],
++                start_line=failure["start_line"],
++                end_line=failure["end_line"],
++                reason=failure.get("reason_code"),
++                error_class=failure.get("error_class"),
++            )
++            # Scope facts are not planned work, and must not collide with the
++            # original line's ID. Keep the real analyzer in public provenance.
++            boundary["work_id"] = inspection_work_id(
++                f"{analyzer_id}:fragment-failure:{fact[0]}:{fact[1]}:{fact[2]}",
++                failure["path"],
++                failure["start_line"],
++                failure["end_line"],
++            )
++            result.append(boundary)
++    status = analyzer_status_for_events(analyzer_id, result)
++    if any(event["outcome"] == LedgerOutcome.FAILED for event in result):
++        status["status"] = "failed"
++    return result, status
++
++
+ def ledger_events_for_batches(
+     analyzer_id: str,
+     outcome: BatchExecutionResult,
+@@ -962,6 +1039,7 @@
+         if isinstance(failure.batch, Batch)
+         for member in (failure.batch.members or (failure.batch,))
+     ]
++    fragment_batches = [batch for batch, _ in successful] + [failure.batch for failure in failures]
+     successful, failures, partial_findings = _project_line_fragments(successful, failures)
+     for batch, findings in partial_findings:
+         events.append(
+@@ -1023,7 +1101,7 @@
+                     )
+                 )
+
+-    return events, analyzer_status_for_events(analyzer_id, events)
++    return _consolidate_fragment_ledger_events(analyzer_id, events, fragment_batches)
+
+
+ # ---------------------------------------------------------------------------
+diff --git a/src/skillspector/nodes/meta_analyzer.py b/src/skillspector/nodes/meta_analyzer.py
+--- a/src/skillspector/nodes/meta_analyzer.py
++++ b/src/skillspector/nodes/meta_analyzer.py
+@@ -48,6 +48,7 @@
+     BatchFailure,
+     LLMAnalyzerBase,
+     LLMRuntimeLimitError,
++    _consolidate_fragment_ledger_events,
+     _project_line_fragments,
+     _StructuredResponseValidationError,
+     append_output_language_instruction,
+@@ -841,7 +842,11 @@
+         )
+     if not events:
+         return events, analyzer_status_event(analyzer_id="meta_analyzer", status="completed")
+-    return events, analyzer_status_for_events("meta_analyzer", events)
++    return _consolidate_fragment_ledger_events(
++        "meta_analyzer",
++        events,
++        [member for request in batches for member in request.members or (request,)],
++    )
+
+
+ def _effective_finding_ids(findings: list[Finding]) -> list[str]:
