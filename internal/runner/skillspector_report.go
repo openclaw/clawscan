@@ -19,6 +19,8 @@ func validateSkillSpectorReportForProfile(result ScannerResult, profile string) 
 			if (result.ExitCode == nil || *result.ExitCode == 0 || *result.ExitCode == 1) && skillSpectorUsableBundledPartial(result.Raw) {
 				result.Status, result.ReportPolicy = "partial", judgeGapsReportPolicy
 				result.Error = ""
+			} else if (result.ExitCode == nil || *result.ExitCode == 0 || *result.ExitCode == 1) && skillSpectorUsableBundledComplete(result.Raw) {
+				result.ReportPolicy, result.Error = "", ""
 			} else {
 				result.Status = "failed"
 				result.Error = "SkillSpector bundled report contains unusable or ambiguous child evidence."
