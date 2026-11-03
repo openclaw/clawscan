@@ -25,10 +25,24 @@ func clawHubSkillSpectorSeverityRank(severity string) int {
 	}
 }
 
-func clawHubBundleFindingPath(root, file string) string {
+func clawHubBundleComponentPaths(child map[string]any) map[string]bool {
+	paths := map[string]bool{}
+	for _, value := range child["components"].([]any) {
+		component := asStringMap(value)
+		paths[component["path"].(string)] = true
+	}
+	return paths
+}
+
+func clawHubBundleFindingPath(root, file string, components map[string]bool) string {
 	file = strings.ReplaceAll(strings.TrimSpace(file), "\\", "/")
 	if strings.HasPrefix(file, "./") {
 		file = strings.TrimLeft(file[1:], "/")
+	}
+	// Native findings name child components. Prefer an exact inventory match
+	// before recognizing a path that only happens to start with the bundle root.
+	if components[file] {
+		return root + "/" + file
 	}
 	if file == root || strings.HasPrefix(file, root+"/") {
 		return file
@@ -111,6 +125,7 @@ func deriveClawHubCompleteBundleEvidence(raw json.RawMessage, record map[string]
 		entry := asStringMap(value)
 		child := asStringMap(entry["report"])
 		root := entry["rootPath"].(string)
+		components := clawHubBundleComponentPaths(child)
 		observeRisk(child)
 		version := firstNonEmpty(readMapString(child, "scanner_version", "scannerVersion", "version"), readNestedMapString(child, []string{"metadata"}, "skillspector_version", "skillspectorVersion", "version"))
 		if version != "" {
@@ -118,8 +133,10 @@ func deriveClawHubCompleteBundleEvidence(raw json.RawMessage, record map[string]
 		}
 		for _, value := range child["issues"].([]any) {
 			issue := normalizeClawHubSkillSpectorIssue(value, len(issues))
-			if issue.File != "" {
-				issue.File = truncateClawHubText(clawHubBundleFindingPath(root, issue.File), maxClawHubSkillSpectorShortTextChars)
+			source := asStringMap(value)
+			file := firstNonEmpty(readMapString(source, "file", "file_path", "filePath", "path"), readNestedMapString(source, []string{"location"}, "file", "path"))
+			if file != "" {
+				issue.File = truncateClawHubText(clawHubBundleFindingPath(root, file, components), maxClawHubSkillSpectorShortTextChars)
 			}
 			if severity == "" || clawHubSkillSpectorSeverityRank(issue.Severity) > clawHubSkillSpectorSeverityRank(severity) {
 				severity = issue.Severity
@@ -160,49 +177,46 @@ func deriveClawHubCompleteBundleEvidence(raw json.RawMessage, record map[string]
 
 // JSON gates need native findings, not the judge's renamed and bounded display
 // summary. Copy every field while rooting only known file-location fields.
-func clawHubCompleteBundleGateFindings(record map[string]any) []any {
+func clawHubBundleChildGateFindings(root string, child map[string]any) []any {
 	findings := []any{}
-	for _, value := range record["bundled_reports"].([]any) {
-		entry := asStringMap(value)
-		root := entry["rootPath"].(string)
-		child := asStringMap(entry["report"])
-		for _, value := range child["issues"].([]any) {
-			original := asStringMap(value)
-			finding := make(map[string]any, len(original))
-			for key, value := range original {
-				finding[key] = value
-			}
-			rootPaths := func(fields map[string]any, keys []string) {
-				for _, key := range keys {
-					if path, ok := fields[key].(string); ok && path != "" {
-						fields[key] = clawHubBundleFindingPath(root, path)
-					}
-				}
-			}
-			rootPaths(finding, []string{"file", "file_path", "filePath", "path"})
-			if location := asStringMap(original["location"]); location != nil {
-				copy := make(map[string]any, len(location))
-				for key, value := range location {
-					copy[key] = value
-				}
-				rootPaths(copy, []string{"file", "path"})
-				finding["location"] = copy
-			}
-			findings = append(findings, finding)
+	components := clawHubBundleComponentPaths(child)
+	for _, value := range child["issues"].([]any) {
+		original := asStringMap(value)
+		finding := make(map[string]any, len(original))
+		for key, value := range original {
+			finding[key] = value
 		}
+		rootPaths := func(fields map[string]any, keys []string) {
+			for _, key := range keys {
+				if path, ok := fields[key].(string); ok && path != "" {
+					fields[key] = clawHubBundleFindingPath(root, path, components)
+				}
+			}
+		}
+		rootPaths(finding, []string{"file", "file_path", "filePath", "path"})
+		if location := asStringMap(original["location"]); location != nil {
+			copy := make(map[string]any, len(location))
+			for key, value := range location {
+				copy[key] = value
+			}
+			rootPaths(copy, []string{"file", "path"})
+			finding["location"] = copy
+		}
+		findings = append(findings, finding)
 	}
 	return findings
 }
 
-// This private evaluation view never replaces Raw or applies presentation caps.
-func clawHubCompleteBundleGateEvidence(raw json.RawMessage) json.RawMessage {
+// Private views never replace Raw or apply presentation caps. Each attested
+// child retains its scalar dispositions, which a single aggregate cannot hold.
+func clawHubCompleteBundleGateViews(raw json.RawMessage) []json.RawMessage {
 	var record map[string]any
 	if json.Unmarshal(raw, &record) != nil {
-		return raw
+		return nil
 	}
 	analysis, complete := deriveClawHubCompleteBundleEvidence(raw, record, 0)
 	if !complete {
-		return raw
+		return nil
 	}
 	// Parse the gate projection independently so arbitrary native numeric fields
 	// retain their exact JSON value instead of passing through float64.
@@ -210,21 +224,47 @@ func clawHubCompleteBundleGateEvidence(raw json.RawMessage) json.RawMessage {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if decoder.Decode(&nativeRecord) != nil {
-		return raw
+		return nil
 	}
 	record = nativeRecord
+	findings := []any{}
+	childViews := []json.RawMessage{}
+	for _, value := range record["bundled_reports"].([]any) {
+		entry := asStringMap(value)
+		child := asStringMap(entry["report"])
+		// Preserve native child aliases and scalar fields before adding rooted
+		// finding projections. Neither view may hide a match in the other.
+		nativeView, err := json.Marshal(child)
+		if err != nil {
+			return nil
+		}
+		childViews = append(childViews, nativeView)
+		childFindings := clawHubBundleChildGateFindings(entry["rootPath"].(string), child)
+		findings = append(findings, childFindings...)
+		childView := make(map[string]any, len(child))
+		for key, value := range child {
+			childView[key] = value
+		}
+		for _, key := range []string{"filtered_findings", "findings", "issues"} {
+			childView[key] = childFindings
+		}
+		view, err := json.Marshal(childView)
+		if err != nil {
+			return nil
+		}
+		childViews = append(childViews, view)
+	}
 	record["status"] = analysis.Status
 	record["issue_count"] = analysis.IssueCount
-	findings := clawHubCompleteBundleGateFindings(record)
 	for _, key := range []string{"filtered_findings", "findings", "issues"} {
 		record[key] = findings
 	}
 	record["risk_assessment"] = map[string]any{"score": analysis.Score, "severity": analysis.Severity, "recommendation": analysis.Recommendation}
 	view, err := json.Marshal(record)
 	if err != nil {
-		return raw
+		return nil
 	}
-	return view
+	return append([]json.RawMessage{view}, childViews...)
 }
 
 func evaluateClawHubCompleteBundleGateRules(artifact *Artifact, scanner string, raw json.RawMessage, rules []JSONGateRule) {
@@ -232,19 +272,25 @@ func evaluateClawHubCompleteBundleGateRules(artifact *Artifact, scanner string, 
 	// trigger remaining rules. Each configured rule is recorded at most once.
 	start := len(artifact.GateRules)
 	evaluateJSONGateRules(artifact, scanner, raw, rules)
-	view := clawHubCompleteBundleGateEvidence(raw)
-	if bytes.Equal(view, raw) {
-		return
-	}
+	views := clawHubCompleteBundleGateViews(raw)
 	matched := map[string]bool{}
 	for _, fired := range artifact.GateRules[start:] {
 		matched[fired.Rule] = true
 	}
-	remaining := make([]JSONGateRule, 0, len(rules))
-	for _, rule := range rules {
-		if !matched[rule.ID] {
-			remaining = append(remaining, rule)
+	for _, view := range views {
+		remaining := make([]JSONGateRule, 0, len(rules))
+		for _, rule := range rules {
+			if !matched[rule.ID] {
+				remaining = append(remaining, rule)
+			}
+		}
+		if len(remaining) == 0 {
+			return
+		}
+		before := len(artifact.GateRules)
+		evaluateJSONGateRules(artifact, scanner, view, remaining)
+		for _, fired := range artifact.GateRules[before:] {
+			matched[fired.Rule] = true
 		}
 	}
-	evaluateJSONGateRules(artifact, scanner, view, remaining)
 }
