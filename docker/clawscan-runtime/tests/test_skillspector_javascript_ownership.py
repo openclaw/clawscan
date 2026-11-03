@@ -3,6 +3,7 @@
 import pytest
 
 from skillspector.inspection_ledger import LedgerOutcome, LedgerReason
+from skillspector.nodes.build_context import build_context
 from skillspector.nodes.analyzers import static_patterns_tool_misuse as tm
 from skillspector.nodes.analyzers import static_runner
 
@@ -563,3 +564,55 @@ def test_only_synchronous_single_parameter_arrow_error_handlers_are_supported(ha
     row = ledger(source)["inspection_ledger"][0]
     assert row["outcome"] == LedgerOutcome.PARTIAL
     assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT
+
+
+def inventory_context(tmp_path, extension, source):
+    (tmp_path / "SKILL.md").write_text("---\nname: generated\ndescription: Local fixture.\n---\n")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    path = f"scripts/helper.{extension}"
+    (tmp_path / path).write_text(source)
+    return path, build_context({"skill_path": str(tmp_path), "use_llm": False})
+
+
+@pytest.mark.parametrize("extension", ["js", "mjs", "cjs"])
+def test_inventory_classifies_node_module_extensions_as_javascript(tmp_path, extension):
+    source = "#!/usr/bin/env node\nconsole.log('generated inert fixture');\n"
+    path, context = inventory_context(tmp_path, extension, source)
+    metadata = next(row for row in context["component_metadata"] if row["path"] == path)
+    assert (metadata["type"], metadata["executable"]) == ("javascript", True)
+    assert context["file_cache"][path] == source
+
+
+@pytest.mark.parametrize(
+    "extension,source,expected_type",
+    [
+        ("unknown", "console.log('generated inert fixture');\n", "other"),
+        ("py", "#!/usr/bin/env python3\nprint('generated inert fixture')\n", "python"),
+    ],
+)
+def test_inventory_module_aliases_do_not_reclassify_other_sources(
+    tmp_path, extension, source, expected_type
+):
+    path, context = inventory_context(tmp_path, extension, source)
+    metadata = next(row for row in context["component_metadata"] if row["path"] == path)
+    assert metadata["type"] == expected_type
+
+
+@pytest.mark.parametrize("extension", ["js", "mjs", "cjs"])
+def test_inventory_module_labels_preserve_partial_coverage_and_high_findings(
+    tmp_path, extension
+):
+    source = (
+        'exec("rm -rf /");\n'
+        "obj.run(String.fromCharCode(114,109,32,45,114,102,32,47));\n"
+    )
+    path, context = inventory_context(tmp_path, extension, source)
+    result = static_runner.run_static_patterns_with_ledger(context, [tm])
+    row = next(event for event in result["inspection_ledger"] if event.get("path") == path)
+    assert row["outcome"] == LedgerOutcome.PARTIAL
+    assert row["reason_code"] == LedgerReason.OPAQUE_CONTENT
+    assert any(
+        finding.rule_id == "TM1" and finding.severity == "HIGH" and finding.start_line == 1
+        for finding in result["findings"]
+    )

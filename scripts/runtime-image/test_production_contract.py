@@ -150,7 +150,11 @@ class ProductionContractTests(unittest.TestCase):
         self.assertEqual(len(manifest["expected_packages"]["skillspector"]), 77)
         self.assertEqual(len(manifest["expected_packages"]["aig"]), 26)
         self.assertEqual(manifest["expected_packages"]["aig"]["pip"], "25.0.1")
-        self.assertEqual(len(manifest["tests"]), 6)
+        self.assertEqual(len(manifest["tests"]), 7)
+        self.assertEqual(
+            manifest["tests"]["test_skillspector_javascript_ownership.py"],
+            "3cd38754c6a7e76a5aefc8368eec8b4b0bbad2d97f433de3a9c2681b7f46583a",
+        )
         self.assertEqual(
             manifest["tests"]["test_skillspector_javascript_validator_type_budget.py"],
             "dbb47fa8afb2b7d890d5b0558422b12ceb2d46b013080c167120ad1c5aea960a",
