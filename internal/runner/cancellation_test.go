@@ -170,7 +170,10 @@ func TestRunJudgeContextReceiptRetrySharesCallerBudget(t *testing.T) {
 					t.Fatalf("judge lost started flag or caller failure: %+v", result)
 				}
 				for attemptIndex, attempt := range result.Attempts {
-					if attempt.CommandStarted == nil || !*attempt.CommandStarted || attempt.Status != "failed" || !strings.Contains(attempt.Error, "required artifact inspection receipt") {
+					// An attempt the caller interrupted keeps its own deadline or
+					// cancellation error; an attempt that completed without a receipt
+					// reports the missing receipt.
+					if attempt.CommandStarted == nil || !*attempt.CommandStarted || attempt.Status != "failed" || !(strings.Contains(attempt.Error, test.wantError.Error()) || strings.Contains(attempt.Error, "required artifact inspection receipt")) {
 						t.Fatalf("failed started attempt lost exposure/receipt failure: %+v", attempt)
 					}
 					raw, ok := attempt.Result.(map[string]any)

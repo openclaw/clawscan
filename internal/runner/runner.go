@@ -1561,11 +1561,17 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 		return outcome, nil
 	}
 	result.Result = parsed
+	if runErr != nil {
+		// The judge command itself failed (for example Codex rejected the
+		// prompt before contacting the model). Partial stdout such as a
+		// thread.started event is not a receipt; keep the command's error.
+		return outcome, nil
+	}
 	if state.inspection != nil {
 		if err := validateArtifactInspectionReceipt(parsedObject, *state.inspection); err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
-			outcome.retryable = runErr == nil
+			outcome.retryable = true
 		}
 	}
 	return outcome, nil
