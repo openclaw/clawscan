@@ -225,6 +225,28 @@ func TestClawHubCompleteBundleReaderKeepsOriginalChildGateFields(t *testing.T) {
 	assertReaderRegressionGate(t, raw, "filtered_findings[].severity", "HIGH")
 }
 
+func TestClawHubCompleteBundleReaderRootsDistinctNativeFindingAliases(t *testing.T) {
+	for _, alias := range []string{"filtered_findings", "findings"} {
+		t.Run(alias, func(t *testing.T) {
+			raw := readerRegressionBundle(t, func(_ map[string]any, child map[string]any) {
+				child[alias] = []any{map[string]any{
+					"id": "DISTINCT-NATIVE-ALIAS", "severity": "HIGH",
+					"file": "fixture-001.md", "file_path": "fixture-001.md",
+					"filePath": "fixture-001.md", "path": "fixture-001.md",
+					"location": map[string]any{"file": "fixture-001.md", "path": "fixture-001.md"},
+				}}
+			})
+			for _, field := range []string{"file", "file_path", "filePath", "path", "location.file", "location.path"} {
+				assertReaderRegressionGate(t, raw, alias+"[]."+field, "fixture-001.md")
+				assertReaderRegressionGate(t, raw, alias+"[]."+field, "skills/council-network/fixture-001.md")
+			}
+			assertReaderRegressionGate(t, raw, alias+"[].id", "DISTINCT-NATIVE-ALIAS")
+			// Canonical issues continue to match through their compatibility aliases.
+			assertReaderRegressionGate(t, raw, alias+"[].file", "skills/council-network/SKILL.md")
+		})
+	}
+}
+
 func TestClawHubCompleteBundleReaderNativeDispositionBlocksRun(t *testing.T) {
 	for _, order := range [][]string{{"UNSAFE", "DO_NOT_INSTALL"}, {"DO_NOT_INSTALL", "UNSAFE"}} {
 		t.Run(strings.Join(order, "-"), func(t *testing.T) {

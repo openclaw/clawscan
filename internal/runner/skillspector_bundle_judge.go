@@ -177,11 +177,15 @@ func deriveClawHubCompleteBundleEvidence(raw json.RawMessage, record map[string]
 
 // JSON gates need native findings, not the judge's renamed and bounded display
 // summary. Copy every field while rooting only known file-location fields.
-func clawHubBundleChildGateFindings(root string, child map[string]any) []any {
+func clawHubBundleChildGateFindings(root string, child map[string]any, originalFindings []any) []any {
 	findings := []any{}
 	components := clawHubBundleComponentPaths(child)
-	for _, value := range child["issues"].([]any) {
+	for _, value := range originalFindings {
 		original := asStringMap(value)
+		if original == nil {
+			findings = append(findings, value)
+			continue
+		}
 		finding := make(map[string]any, len(original))
 		for key, value := range original {
 			finding[key] = value
@@ -239,7 +243,25 @@ func clawHubCompleteBundleGateViews(raw json.RawMessage) []json.RawMessage {
 			return nil
 		}
 		childViews = append(childViews, nativeView)
-		childFindings := clawHubBundleChildGateFindings(entry["rootPath"].(string), child)
+		root := entry["rootPath"].(string)
+		// Native aliases may contain findings distinct from canonical issues.
+		// Retain their rooted forms before making compatibility projections.
+		rootedNative := make(map[string]any, len(child))
+		for key, value := range child {
+			rootedNative[key] = value
+		}
+		for _, key := range []string{"filtered_findings", "findings", "issues"} {
+			if original, ok := child[key].([]any); ok {
+				rootedNative[key] = clawHubBundleChildGateFindings(root, child, original)
+			}
+		}
+		rootedNativeView, err := json.Marshal(rootedNative)
+		if err != nil {
+			return nil
+		}
+		childViews = append(childViews, rootedNativeView)
+		originalIssues, _ := child["issues"].([]any)
+		childFindings := clawHubBundleChildGateFindings(root, child, originalIssues)
 		findings = append(findings, childFindings...)
 		childView := make(map[string]any, len(child))
 		for key, value := range child {
