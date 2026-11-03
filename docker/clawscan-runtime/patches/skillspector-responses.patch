@@ -700,7 +700,7 @@ index 4878677..362af86 100644
  name = "trove-classifiers"
  version = "2026.6.1.19"
 diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
-index 15b9b4c..f8ac47c 100644
+index 15b9b4c..b873b97 100644
 --- a/src/skillspector/nodes/build_context.py
 +++ b/src/skillspector/nodes/build_context.py
 @@ -44,6 +44,7 @@ from skillspector.artifacts import (
@@ -719,7 +719,16 @@ index 15b9b4c..f8ac47c 100644
  from skillspector.python_ast import (
      PythonSourceClassification,
      classify_python_source,
-@@ -1082,6 +1084,14 @@ def _build_component_metadata(
+@@ -160,6 +162,8 @@ _FILE_TYPES: dict[str, str] = {
+     ".toml": "toml",
+     ".txt": "text",
+     ".js": "javascript",
++    ".mjs": "javascript",
++    ".cjs": "javascript",
+     ".ts": "typescript",
+     ".rb": "ruby",
+     ".go": "go",
+@@ -1082,6 +1086,14 @@ def _build_component_metadata(
              elif executable:
                  component["concealed_executable"] = False
                  component["hidden_skill_script_llm_review_withheld"] = True
@@ -734,7 +743,7 @@ index 15b9b4c..f8ac47c 100644
          metadata.append(component)
          if _expired(path):
              break
-@@ -2448,7 +2458,14 @@ def _project_manifest(
+@@ -2448,7 +2460,14 @@ def _project_manifest(
          manifest["version"] = _scalar_text(version)
  
      manifest["triggers"] = _string_list(data.get("triggers", []))
@@ -750,7 +759,7 @@ index 15b9b4c..f8ac47c 100644
      # `allowed-tools` (Agent Skills standard) — accept list, comma string, or space-separated string.
      # Separators inside a `Tool(specifier)` scope belong to the scope, so
      # `Bash(git status:*) Read` stays two grants.
-@@ -2496,7 +2513,7 @@ def _parse_manifest(
+@@ -2496,7 +2515,7 @@ def _parse_manifest(
      """Parse SKILL.md or skill.md YAML frontmatter into a manifest dict.
  
      Returns dict with name, description, version, triggers (list), permissions
@@ -759,7 +768,7 @@ index 15b9b4c..f8ac47c 100644
      parse fails.
      Parsing is restricted to a bounded byte prefix, including for direct helper
      callers that do not provide the bundle's already-bounded raw cache.
-@@ -3651,6 +3668,67 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+@@ -3651,6 +3670,67 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
              )
          )
  
@@ -827,7 +836,7 @@ index 15b9b4c..f8ac47c 100644
      # Python's successful source decode takes precedence over a magic prefix.
      for artifact in artifact_inventory:
          path = artifact["path"]
-@@ -3969,6 +4047,7 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+@@ -3969,6 +4049,7 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
          ),
          "ast_cache": {},
          "python_ast_cache_key": python_ast_cache_key,
