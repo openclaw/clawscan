@@ -11,6 +11,7 @@ import sys
 
 
 ROOT = Path("runtime-image-proof")
+CONTRACT_PATH = Path(__file__).with_name("publication-contract.json")
 REVISION = "org.opencontainers.image.revision"
 SMOKE = "skillspector --help\naig-skill-scan --help\ncodex --version\n"
 
@@ -52,6 +53,17 @@ def image_name():
 
 def publication_allowed():
     require(os.environ["GITHUB_EVENT_NAME"] in {"push", "workflow_dispatch"}, "publication event forbidden")
+
+
+def publication_tags(proposed):
+    contract = json.loads(CONTRACT_PATH.read_text())
+    require(contract in ({"contract": "legacy"}, {"contract": "complete-bundles-v1"}),
+            "unsupported runtime publication contract")
+    name = contract["contract"]
+    # Existing binaries follow the legacy aliases. New bundle output is opt-in;
+    # its consumers select this channel or the verified immutable index digest.
+    tags = [image_name() + ":complete-bundles-v1"] if name == "complete-bundles-v1" else proposed
+    return tags, name
 
 
 def native():
@@ -164,6 +176,7 @@ def merge():
     tags = os.environ["IMAGE_TAGS"].splitlines()
     require(tags and len(tags) == len(set(tags)), "missing or duplicate tags")
     require(all(re.fullmatch(re.escape(image_name()) + r":[\w][\w.-]{0,127}", tag, re.ASCII) for tag in tags), "invalid image tags")
+    tags, contract = publication_tags(tags)
     references = [image_name() + "@" + proof["published_digest"] for proof in proofs]
     annotation = "index:" + REVISION + "=" + current["source"]
     base = ["docker", "buildx", "imagetools", "create", "--annotation", annotation]
@@ -180,7 +193,8 @@ def merge():
     require(final == candidate, "published index differs from validated index")
     for tag in tags:
         require(inspect_raw(tag, final_digest) == final, "tag does not resolve to complete index")
-    result = {**current, "image": image_name(), "digest": final_digest, "tags": tags, "platforms": proofs,
+    result = {**current, "image": image_name(), "digest": final_digest, "tags": tags,
+              "publication_contract": contract, "platforms": proofs,
               "manifest": final}
     save(ROOT / "manifest.json", result)
     with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
