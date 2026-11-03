@@ -2,20 +2,18 @@ name: CodeQL
 
 on:
   pull_request:
-    branches:
-      - main
-  push:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
   schedule:
-    - cron: "31 5 * * 1"
+    - cron: "31 5 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: codeql-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: codeql-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
