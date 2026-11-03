@@ -273,3 +273,51 @@ func TestRunJudgeCustomProfileRemainsSingleAttempt(t *testing.T) {
 		t.Fatalf("result = %+v, err = %v, attempts = %d", result, err, attempts)
 	}
 }
+
+// A failed judge command must keep its own error. Codex prints a
+// thread.started event before rejecting an oversized prompt at turn/start;
+// that partial JSON line is not a receipt and must not replace the real error.
+func TestRunClawHubJudgeKeepsCommandErrorOverReceiptCheck(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "plugin")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "package.json"), []byte(`{"name":"demo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exitCode := 1
+	commandRunner := &recordingCommandRunner{
+		stdout:   `{"type":"thread.started","thread_id":"t"}`,
+		stderr:   `Error: turn/start: turn/start failed: Input exceeds the maximum length of 1048576 characters. (code -32602), data: {"input_error_code":"input_too_large","max_chars":1048576,"actual_chars":1322168}`,
+		err:      errCommandFailed,
+		exitCode: &exitCode,
+	}
+	artifact, err := Run(Options{
+		Target:   target,
+		Profile:  clawHubProfileID,
+		Scanners: []string{"clawscan-static"},
+		Judge: &JudgeOptions{
+			Command: "judge --result-file {{ output }}",
+		},
+	}, RunContext{
+		Env:           map[string]string{},
+		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{}`)}}},
+		CommandRunner: commandRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Judge == nil || artifact.Judge.Status != "failed" {
+		t.Fatalf("judge = %#v", artifact.Judge)
+	}
+	if !strings.Contains(artifact.Judge.Error, "input_too_large") {
+		t.Fatalf("judge error lost the command failure: %q", artifact.Judge.Error)
+	}
+	if strings.Contains(artifact.Judge.Error, "artifact inspection receipt") {
+		t.Fatalf("judge error was replaced by the receipt check: %q", artifact.Judge.Error)
+	}
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("command failure must not be retried as a receipt failure: %d calls", len(commandRunner.calls))
+	}
+}
