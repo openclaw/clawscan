@@ -35,7 +35,7 @@ func clawHubBundleComponentPaths(child map[string]any) map[string]bool {
 }
 
 func clawHubBundleFindingPath(root, file string, components map[string]bool) string {
-	file = strings.ReplaceAll(strings.TrimSpace(file), "\\", "/")
+	file = strings.ReplaceAll(file, "\\", "/")
 	if strings.HasPrefix(file, "./") {
 		file = strings.TrimLeft(file[1:], "/")
 	}
@@ -134,7 +134,7 @@ func deriveClawHubCompleteBundleEvidence(raw json.RawMessage, record map[string]
 		for _, value := range child["issues"].([]any) {
 			issue := normalizeClawHubSkillSpectorIssue(value, len(issues))
 			source := asStringMap(value)
-			file := firstNonEmpty(readMapString(source, "file", "file_path", "filePath", "path"), readNestedMapString(source, []string{"location"}, "file", "path"))
+			file := clawHubSkillSpectorFindingFile(source)
 			if file != "" {
 				issue.File = truncateClawHubText(clawHubBundleFindingPath(root, file, components), maxClawHubSkillSpectorShortTextChars)
 			}
@@ -250,7 +250,7 @@ func clawHubCompleteBundleGateViews(raw json.RawMessage) []json.RawMessage {
 		for key, value := range child {
 			rootedNative[key] = value
 		}
-		for _, key := range []string{"filtered_findings", "findings", "issues"} {
+		for _, key := range []string{"filtered_findings", "filteredFindings", "findings", "issues", "vulnerabilities"} {
 			if original, ok := child[key].([]any); ok {
 				rootedNative[key] = clawHubBundleChildGateFindings(root, child, original)
 			}

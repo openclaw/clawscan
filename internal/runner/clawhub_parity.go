@@ -194,10 +194,7 @@ func normalizeClawHubSkillSpectorIssue(value any, index int) *clawHubSkillSpecto
 		issueID,
 	)
 	confidence := normalizeClawHubConfidence(readMapNumber(record, "confidence", "score"))
-	file := firstNonEmpty(
-		readMapString(record, "file", "file_path", "filePath", "path"),
-		readNestedMapString(record, []string{"location"}, "file", "path"),
-	)
+	file := clawHubSkillSpectorFindingFile(record)
 	startLine := firstMapNumber(
 		readMapNumber(record, "line", "line_number", "lineNumber", "start_line", "startLine"),
 		readNestedMapNumber(record, []string{"location"}, "line", "start_line", "startLine"),
@@ -223,6 +220,21 @@ func normalizeClawHubSkillSpectorIssue(value any, index int) *clawHubSkillSpecto
 		ReviewOutcome:    truncateClawHubText(firstNonEmpty(readMapString(record, "reviewOutcome"), readNestedMapString(record, []string{"evidence"}, "llm_review_outcome")), maxClawHubSkillSpectorShortTextChars),
 		ReviewConfidence: normalizeClawHubConfidence(firstMapNumber(readMapNumber(record, "reviewConfidence"), readNestedMapNumber(record, []string{"evidence"}, "llm_review_confidence"))),
 	}
+}
+
+// Paths carry file identity: display-text whitespace normalization can name a
+// different inventoried file. Preserve strings while keeping legacy coercions.
+func clawHubSkillSpectorFindingFile(record map[string]any) string {
+	readPath := func(source map[string]any, names ...string) string {
+		if value, ok := readMapValue(source, names...).(string); ok {
+			return value
+		}
+		return readMapString(source, names...)
+	}
+	return firstNonEmpty(
+		readPath(record, "file", "file_path", "filePath", "path"),
+		readPath(asStringMap(record["location"]), "file", "path"),
+	)
 }
 
 func clawHubSkillSpectorTags(value any) []string {
