@@ -48,10 +48,17 @@ const (
 	aigMCPMaxFileBytes = 64 << 20
 )
 
-// aigMCPHiddenDirs are directories aig-mcp-scan 0.2.0 leaves out of the repo
-// tree and pre-scan it shows the model. Published plugins often ship their only
-// runtime code in dist/ or build/, so the prompt lists those files explicitly.
-var aigMCPHiddenDirs = map[string]bool{"dist": true, "build": true, ".next": true, ".nuxt": true}
+// aigMCPHiddenDirs and aigMCPHiddenFiles mirror what aig-mcp-scan 0.2.0 leaves
+// out of the repo tree and pre-scan it shows the model (_TREE_SKIP_DIRS and
+// _TREE_SKIP_FILES). Published plugins often ship their only runtime code in
+// dist/ or build/, and staged .git/ content is in scope too, so the prompt
+// lists those files explicitly.
+var aigMCPHiddenDirs = map[string]bool{
+	"dist": true, "build": true, ".next": true, ".nuxt": true,
+	".git": true, "__pycache__": true, ".venv": true, "venv": true,
+}
+
+var aigMCPHiddenFiles = map[string]bool{"_VERDICT.txt": true, "_GROUND_TRUTH.txt": true, "_EVAL.txt": true}
 
 // aigMCPPluginPrompt adapts aig-mcp-scan's MCP-server audit to the OpenClaw
 // plugin runtime model. It is the prompt validated on popular ClawHub plugins
@@ -209,10 +216,13 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 }
 
 // stagePluginScanTarget copies a plugin directory for scanners that read the
-// tree themselves. Bundled third-party dependencies (node_modules at any
+// tree themselves. Only bundled third-party dependencies (node_modules at any
 // depth) are left out: they are out of scope for plugin review and make
-// LLM-driven scanners slow and noisy. The copy also keeps scanner-side writes
-// away from the original target.
+// LLM-driven scanners slow and noisy. Everything else the author shipped is
+// kept, including .git/ and clawscan-results/, which the judge workspace
+// filters: scanners must see authored code wherever it lives, as other
+// scanners do by reading the original target. The copy keeps scanner-side
+// writes away from the original target.
 func stagePluginScanTarget(runner ExternalScannerRunner, source string, dest string) error {
 	files := 0
 	var bytes int64
@@ -289,7 +299,7 @@ func aigMCPPrompt(listedFiles []string) string {
 	for i, file := range listed {
 		paths[i] = aigMCPStagedTarget + "/" + file
 	}
-	return prompt + " The directory summary you are given omits these in-scope files; read them with read_file " +
+	return prompt + " The directory summary you are given omits these in-scope files (including dist/, build/ and .git/ content); read them with read_file " +
 		"using these paths: " + strings.Join(paths, ", ") + more + "."
 }
 
@@ -312,6 +322,10 @@ func aigMCPListedFiles(root string) ([]string, error) {
 		rel = filepath.ToSlash(rel)
 		all = append(all, rel)
 		parts := strings.Split(rel, "/")
+		if aigMCPHiddenFiles[parts[len(parts)-1]] {
+			hidden = append(hidden, rel)
+			return nil
+		}
 		for _, part := range parts[:len(parts)-1] {
 			if aigMCPHiddenDirs[part] {
 				hidden = append(hidden, rel)

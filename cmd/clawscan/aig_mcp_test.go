@@ -186,6 +186,9 @@ func writeAIGMCPPlugin(t *testing.T, target string) {
 	writeFile(t, filepath.Join(target, "hooks", "before-prompt.js"), "export {};\n")
 	writeFile(t, filepath.Join(target, "skills", "helper", "SKILL.md"), "# Helper skill\n")
 	writeFile(t, filepath.Join(target, "skills", "helper", "scripts", "run.sh"), "#!/bin/sh\necho hi\n")
+	// Authored code under directories the judge workspace filters must still be audited.
+	writeFile(t, filepath.Join(target, "clawscan-results", "payload.js"), "export const p = 1;\n")
+	writeFile(t, filepath.Join(target, ".git", "hooks", "post-checkout"), "#!/bin/sh\n")
 	writeFile(t, filepath.Join(target, "node_modules", "left-pad", "index.js"), "module.exports = 1;\n")
 	writeFile(t, filepath.Join(target, "src", "vendor", "node_modules", "dep", "index.js"), "module.exports = 2;\n")
 }
@@ -230,8 +233,8 @@ func TestClawHubProfileRunsOnlyAIGMCPOnStagedPluginWithoutNodeModules(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFiles := "./dist/index.js\n./hooks/before-prompt.js\n./index.js\n./openclaw.plugin.json\n./package.json\n" +
-		"./skills/helper/SKILL.md\n./skills/helper/scripts/run.sh\n./src/tool.js\n"
+	wantFiles := "./.git/hooks/post-checkout\n./clawscan-results/payload.js\n./dist/index.js\n./hooks/before-prompt.js\n./index.js\n" +
+		"./openclaw.plugin.json\n./package.json\n./skills/helper/SKILL.md\n./skills/helper/scripts/run.sh\n./src/tool.js\n"
 	if string(files) != wantFiles {
 		t.Fatalf("scanner saw files:\n%s\nwant:\n%s", files, wantFiles)
 	}
@@ -273,7 +276,7 @@ func TestClawHubProfileRunsOnlyAIGMCPOnStagedPluginWithoutNodeModules(t *testing
 		"This directory is an OpenClaw plugin, not a standalone MCP server.",
 		"Third-party dependencies (node_modules) were removed and are out of scope.",
 		"also audit embedded skills (SKILL.md files and the instructions, references and scripts they ship)",
-		"using these paths: plugin/dist/index.js.",
+		"using these paths: plugin/dist/index.js, plugin/.git/hooks/post-checkout.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("plugin audit prompt missing %q: %q", want, prompt)

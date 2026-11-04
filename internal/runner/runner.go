@@ -2019,9 +2019,11 @@ func copyTargetToWorkspaceContext(ctx context.Context, source string, destRoot s
 }
 
 // copyTargetTreeContext copies a target like copyTargetToWorkspaceContext.
-// visit, when set, sees each entry below the root by target-relative path. It
-// can drop the entry (or a whole directory) from the copy, or stop the copy
-// with an error, for example to enforce size limits.
+// visit, when set, replaces the judge workspace's .git/clawscan-results
+// filter: it sees every entry below the root by target-relative path and alone
+// decides what is dropped (an entry or a whole directory), or stops the copy
+// with an error, for example to enforce size limits. Symlink checks apply
+// either way.
 func copyTargetTreeContext(ctx context.Context, source string, destRoot string, visit func(rel string, entry os.DirEntry) (bool, error)) (TargetWorkspaceManifest, error) {
 	manifest := TargetWorkspaceManifest{}
 	if err := ctx.Err(); err != nil {
@@ -2061,8 +2063,8 @@ func copyTargetTreeContext(ctx context.Context, source string, destRoot string, 
 		if err != nil {
 			return err
 		}
-		skip := shouldSkipWorkspacePath(source, path)
-		if !skip && visit != nil && path != source {
+		skip := visit == nil && shouldSkipWorkspacePath(source, path)
+		if visit != nil && path != source {
 			if skip, err = visit(relativeManifestPath(source, path), entry); err != nil {
 				return err
 			}

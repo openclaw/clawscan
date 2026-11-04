@@ -328,8 +328,10 @@ plugin directory the adapter:
 
 - copies the whole plugin into a private temporary workspace, leaving out only
   `node_modules` directories (bundled third-party code is out of scope and makes
-  the LLM agent slow and noisy). Embedded skills, hooks, scripts and `dist/` or
-  `build/` output stay in the copy. Symlinks that leave the plugin are refused,
+  the LLM agent slow and noisy). Embedded skills, hooks, scripts, `dist/` or
+  `build/` output, and `.git/` and `clawscan-results/` content stay in the copy:
+  unlike the judge workspace, scanner staging filters nothing else, so authored
+  code is audited wherever it lives. Symlinks that leave the plugin are refused,
   and a plugin with more than 20,000 files or 256 MiB outside `node_modules`
   fails instead of being audited partly;
 - runs `aig-mcp-scan --repo plugin --language en [-m <model>] [-u <base url>]
@@ -337,9 +339,10 @@ plugin directory the adapter:
   original target. The prompt explains the in-process plugin runtime
   (`api.registerTool`, prompt hooks, `registerHttpRoute`), prioritizes
   malicious or undeclared behavior, and puts embedded skills, hooks, scripts and
-  compiled output in scope. `aig-mcp-scan` leaves `dist/` and `build/` out of
-  the directory summary it shows the model and truncates that summary at 200
-  files, so the prompt lists the omitted files (every file for plugins over 200
+  compiled output in scope. `aig-mcp-scan` leaves `dist/`, `build/`, `.git/`,
+  `__pycache__/`, `.venv/` and `venv/` out of the directory summary it shows
+  the model and truncates that summary at 200 files, so the prompt lists the
+  omitted files (every file for plugins over 200
   files; up to 400 paths, source files and `SKILL.md` first);
 - passes credentials only through `LLM_API_KEY` or `OPENAI_API_KEY`, and the
   model and endpoint only through the `aig` settings `DEFAULT_MODEL` and
