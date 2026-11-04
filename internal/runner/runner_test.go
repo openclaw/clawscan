@@ -2425,12 +2425,8 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	if call.command != "skillspector" {
 		t.Fatalf("command = %q", call.command)
 	}
-	// SkillSpector scans a private artifact/ copy from its result directory.
-	if got := strings.Join(call.args[:3], " "); got != "scan artifact --format" {
+	if got := strings.Join(call.args[:3], " "); got != "scan "+target+" --format" {
 		t.Fatalf("args = %#v", call.args)
-	}
-	if call.cwd == "" || filepath.Base(call.args[5]) != "skillspector-report-0.json" || filepath.Dir(call.args[5]) != call.cwd {
-		t.Fatalf("cwd = %q args = %#v", call.cwd, call.args)
 	}
 	if call.args[3] != "json" {
 		t.Fatalf("args = %#v", call.args)
@@ -2469,60 +2465,51 @@ func TestSkillSpectorUsesResultDirAsDockerSandboxCWD(t *testing.T) {
 	}
 }
 
-func TestRunClawHubProfileMatchesProductionSkillSpectorWorkspace(t *testing.T) {
+// SkillSpector scans the target itself for every profile, so no copy filter
+// can hide paths such as clawscan-results/ from a gate without a judge.
+func TestRunSkillSpectorScansTargetForEveryProfile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "skill")
-	if err := os.MkdirAll(filepath.Join(target, "scripts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(target, "clawscan-results"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(target, "scripts", "check.sh"), []byte("echo ok\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(target, "clawscan-results", "loader.js"), []byte("require('./evil')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	commandRunner := &recordingCommandRunner{
-		writeOutput: `{"status":"clean","findings":[]}`,
-		runHook: func(command string, args []string, cwd string) error {
-			if command != "skillspector" {
-				return fmt.Errorf("command = %q", command)
+	for _, profile := range []string{"clawhub", "openclaw-install-policy", ""} {
+		t.Run("profile-"+profile, func(t *testing.T) {
+			commandRunner := &recordingCommandRunner{
+				writeOutput: `{"status":"clean","findings":[]}`,
+				runHook: func(command string, args []string, _ string) error {
+					if got := strings.Join(args[:3], " "); got != "scan "+target+" --format" {
+						return fmt.Errorf("args = %#v", args)
+					}
+					if _, err := os.Stat(filepath.Join(args[1], "clawscan-results", "loader.js")); err != nil {
+						return fmt.Errorf("scanner cannot see clawscan-results/: %w", err)
+					}
+					return nil
+				},
 			}
-			if got := strings.Join(args[:3], " "); got != "scan artifact --format" {
-				return fmt.Errorf("args = %#v", args)
+			artifact, err := Run(Options{
+				Target:   target,
+				Profile:  profile,
+				Scanners: []string{"skillspector"},
+				Sandbox:  SandboxOptions{Mode: SandboxModeOff},
+			}, RunContext{
+				Env:                 map[string]string{"OPENAI_API_KEY": "present"},
+				CommandRunner:       commandRunner,
+				SkillSpectorCommand: []string{"skillspector"},
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
-			outputIndex := indexOfArg(args, "--output")
-			if outputIndex < 0 || outputIndex+1 >= len(args) {
-				return fmt.Errorf("missing output path: %#v", args)
+			if artifact.Scanners["skillspector"].Status != "completed" || len(commandRunner.calls) != 1 {
+				t.Fatalf("result = %#v calls = %#v", artifact.Scanners["skillspector"], commandRunner.calls)
 			}
-			if filepath.Base(args[outputIndex+1]) != "skillspector-report-0.json" {
-				return fmt.Errorf("output path = %q", args[outputIndex+1])
-			}
-			for _, rel := range []string{"SKILL.md", filepath.Join("scripts", "check.sh")} {
-				if _, err := os.Stat(filepath.Join(cwd, "artifact", rel)); err != nil {
-					return fmt.Errorf("production workspace missing %s: %w", rel, err)
-				}
-			}
-			return nil
-		},
-	}
-	artifact, err := Run(Options{
-		Target:   target,
-		Profile:  "clawhub",
-		Scanners: []string{"skillspector"},
-		Sandbox:  SandboxOptions{Mode: SandboxModeOff},
-	}, RunContext{
-		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
-		CommandRunner:       commandRunner,
-		SkillSpectorCommand: []string{"skillspector"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if artifact.Scanners["skillspector"].Status != "completed" {
-		t.Fatalf("result = %#v", artifact.Scanners["skillspector"])
-	}
-	if len(commandRunner.calls) != 1 || commandRunner.calls[0].cwd == "" {
-		t.Fatalf("calls = %#v", commandRunner.calls)
+		})
 	}
 }
 
@@ -2752,7 +2739,7 @@ func TestRunUsesSkillSpectorForPluginDirectory(t *testing.T) {
 		t.Fatalf("calls = %#v", commandRunner.calls)
 	}
 	call := commandRunner.calls[0]
-	if !containsArg(call.args, "artifact") || containsArg(call.args, target) || !containsArg(call.args, "--no-llm") {
+	if !containsArg(call.args, target) || !containsArg(call.args, "--no-llm") {
 		t.Fatalf("SkillSpector args = %#v", call.args)
 	}
 }

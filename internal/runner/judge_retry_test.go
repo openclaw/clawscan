@@ -242,3 +242,25 @@ func TestRunClawHubJudgeKeepsCommandError(t *testing.T) {
 		t.Fatalf("command failure must not be retried: %d calls", len(commandRunner.calls))
 	}
 }
+
+// A command that exits 0 without writing {{ output }} produced no JSON and
+// takes the retry path; it is not reported as a filesystem error.
+func TestRunJudgeRetriesMissingOutputFile(t *testing.T) {
+	attempts := 0
+	command := judgeRetryCommand(func(cwd string, _ time.Duration) (CommandOutput, error) {
+		attempts++
+		if attempts == 2 {
+			if err := os.WriteFile(filepath.Join(cwd, "judge-output.json"), []byte(`{"verdict":"benign"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return CommandOutput{Stdout: `{"type":"thread.started"}`}, nil
+	})
+	result, err := RunJudge(JudgeOptions{Command: "judge --output {{ output }}"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
+	if err != nil || result.Status != "completed" || attempts != 2 || len(result.Attempts) != 2 {
+		t.Fatalf("result = %+v, err = %v, attempts = %d", result, err, attempts)
+	}
+	if !strings.Contains(result.Attempts[0].Error, "did not produce JSON output") {
+		t.Fatalf("first attempt error = %q", result.Attempts[0].Error)
+	}
+}

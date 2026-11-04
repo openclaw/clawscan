@@ -1498,9 +1498,14 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 	raw := strings.TrimSpace(output.Stdout)
 	if state.outputUsed {
 		outputBytes, readErr := readContextFile(context.Background(), state.outputPath)
-		if readErr == nil {
+		switch {
+		case readErr == nil:
 			raw = strings.TrimSpace(string(outputBytes))
-		} else if runErr == nil {
+		case runErr == nil && errors.Is(readErr, os.ErrNotExist):
+			// A successful command that never wrote {{ output }} produced no
+			// JSON; that is the retryable unusable-output case.
+			raw = ""
+		case runErr == nil:
 			runErr = readErr
 		}
 	}
@@ -2236,15 +2241,15 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		return ScannerResult{}, err
 	}
 	defer os.RemoveAll(resultDir)
-	// SkillSpector scans a private copy of the target at artifact/, from its
-	// result directory, so report paths match the judge workspace layout and
-	// never embed host paths.
-	if _, err := copyTargetToWorkspaceContext(workContext(runner.Context), target, filepath.Join(resultDir, "artifact")); err != nil {
-		return ScannerResult{}, fmt.Errorf("prepare SkillSpector workspace: %w", err)
+	// SkillSpector scans the target itself for every profile. A filtered copy
+	// would hide paths (such as .git/ or clawscan-results/) from scanners that
+	// gate installs without a judge.
+	scanTarget := target
+	cwd := ""
+	if runner.SandboxMode == SandboxModeDocker {
+		cwd = resultDir
 	}
-	scanTarget := "artifact"
-	cwd := resultDir
-	resultPath := filepath.Join(resultDir, "skillspector-report-0.json")
+	resultPath := filepath.Join(resultDir, "skillspector-report.json")
 	args = append(args, "scan", scanTarget, "--format", "json", "--output", resultPath)
 	if !skillSpectorLLMEnabled(runner.Env) {
 		args = append(args, "--no-llm")

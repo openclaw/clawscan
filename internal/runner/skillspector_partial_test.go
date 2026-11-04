@@ -296,3 +296,44 @@ func TestClawHubPartialMissingMalformedAndCrashedOutput(t *testing.T) {
 		t.Fatalf("crashed command became usable: %+v err=%v", result, err)
 	}
 }
+
+// Usable partial evidence and the bundled ClawHub prompt renderer depend on a
+// configured judge and the prompt file, never on the profile name.
+func TestUsablePartialCompletesUnderAnyProfileWithJudge(t *testing.T) {
+	raw, err := os.ReadFile("testdata/skillspector-usable-partial.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptSource, err := os.ReadFile("../profiles/clawhub/prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", "benign"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
+	command.runHook = func(_ string, _ []string, workspace string) error {
+		prompt, err := os.ReadFile(filepath.Join(workspace, "prompt.md"))
+		if err != nil || !bytes.Contains(prompt, []byte("SkillSpector findings supplied to Codex")) {
+			t.Fatalf("custom profile did not render the ClawHub prompt: err=%v", err)
+		}
+		return nil
+	}
+	artifact, err := Run(Options{
+		Target: target, Profile: "custom-review", Scanners: []string{"skillspector"},
+		ScannerResultPaths: map[string]string{"skillspector": path},
+		Judge:              &JudgeOptions{Command: "judge --prompt {{ prompt:clawhub/prompt.md }} --output {{ output }}", Files: map[string][]byte{"clawhub/prompt.md": promptSource}},
+	}, RunContext{Env: map[string]string{}, CommandRunner: command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := artifact.Scanners["skillspector"]
+	if !artifact.Complete || artifact.Status != "completed" || result.Status != "partial" || result.ReportPolicy != judgeGapsReportPolicy {
+		t.Fatalf("status=%s complete=%v scanner=%+v judge=%+v", artifact.Status, artifact.Complete, result.Status, artifact.Judge)
+	}
+}

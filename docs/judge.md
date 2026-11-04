@@ -48,8 +48,9 @@ A judge command that fails keeps its own error. Partial stdout, such as a JSON
 progress line printed before the command exits non-zero, never replaces that
 error, and a failed command is not retried.
 
-A judge command that exits successfully but writes no JSON, invalid JSON, or a
-JSON value that is not an object is run once more in a fresh workspace with the
+A judge command that exits successfully but writes no JSON (including never
+writing `{{ output }}`), invalid JSON, or a JSON value that is not an object is
+run once more in a fresh workspace with the
 same artifact files, scanner evidence, prompt, and output schema. A second
 unusable result still fails closed. A JSON object is the judge result; ClawScan
 never retries a verdict for being suspicious or malicious and does not validate
@@ -58,8 +59,9 @@ judge-specific fields.
 Both attempts share the existing judge timeout budget, including workspace
 preparation; retrying does not restart the timeout. A caller's shorter
 whole-process deadline still takes precedence, and no retry starts after
-cancellation. The artifact's `judge.attempts` records every attempt's
-`commandStarted`, status, redacted result, error, and duration. The top-level
+cancellation. The artifact's `judge.attempts` records every attempt
+that reached its command (`commandStarted`, status, redacted result, error, and
+duration); a judge that fails during workspace preparation has no attempts. The top-level
 `judge.result` is the last attempt, and consumers must still validate its output
 schema and security evidence.
 
@@ -86,7 +88,9 @@ saved scanner output retain the original findings, completeness accounting,
 limitations, and provenance. The judge workspace contains the complete raw
 report at `scanners/skillspector.json` and the exact copied artifact in
 `artifact/`. Without a judge, partial coverage fails the scanner as before. The
-profile name does not change this classification.
+profile name does not change this classification. When a judge is configured,
+SkillSpector reports must also be nonempty JSON objects, and bundled reports
+qualify only through the bundled-partial checks below.
 
 Eligibility requires an unambiguous structured report with explicitly successful
 execution at both report and completeness levels, partial accounting, component

@@ -338,10 +338,9 @@ commas, single-quoted strings, and unquoted keys.
 | `snyk` | Snyk Agent Scan | [repo](https://github.com/snyk/agent-scan) | Local skill scanner invoked through `uvx snyk-agent-scan`. | `SNYK_TOKEN` | verifies `uvx` launcher |
 | `socket` | Socket CLI | [repo](https://github.com/SocketDev/socket-cli) | Local file or directory scanner using Socket's public CLI full-scan path. | `SOCKET_CLI_API_TOKEN` | `npm install -g socket` |
 
-SkillSpector scans a private copy of the target named `artifact/` from its own
-result directory, for every profile. Report paths are therefore relative to
-that copy, match the judge workspace's `artifact/` layout, and never embed host
-paths. With the Docker sandbox, only that result directory is mounted.
+SkillSpector scans the target itself for every profile; no profile scans a
+filtered copy. With the Docker sandbox, the target is mounted read-only and the
+scanner's result directory is its working directory.
 
 Snyk Agent Scan 0.6 reports named findings in `risk_indexes` maps under
 `scan_path_responses`. ClawScan preserves that upstream JSON and includes those
