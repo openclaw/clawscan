@@ -317,6 +317,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	opts.ConfigSource = configSource
 	if len(intent.scanners) == 0 {
 		opts.PluginScanners = append([]string(nil), selected.profile.PluginScanners...)
+		attachPluginOnlyScannerResults(&opts, intent, selected)
 	}
 	opts.LoadedConfigPath = loadedConfigPath
 	opts.DiscoverConfig = intent.discoverConfig
@@ -427,6 +428,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		opts.ConfigSource = filepath.Clean(projectPath)
 		if len(intent.scanners) == 0 {
 			opts.PluginScanners = append([]string(nil), selected.profile.PluginScanners...)
+			attachPluginOnlyScannerResults(&opts, intent, selected)
 		}
 		opts.LoadedConfigPath = filepath.Clean(projectPath)
 		opts.OutputPath = ""
@@ -805,6 +807,12 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	}
 	for scanner, path := range intent.scannerResultPaths {
 		scannerResults[scanner] = path
+	}
+	// Results for scanners that only run on plugins are attached after parsing
+	// (see pluginOnlyScannerResults), because ParseArgs checks results against
+	// the skill scanner list.
+	for scanner := range pluginOnlyScannerResults(intent, selected) {
+		delete(scannerResults, scanner)
 	}
 
 	var args []string
@@ -1203,4 +1211,43 @@ func readValue(args []string, index int, flag string) (string, int, error) {
 		return "", index, fmt.Errorf("Expected value after %s", flag)
 	}
 	return args[next], next, nil
+}
+
+// pluginOnlyScannerResults returns --scanner-result paths (and profile
+// scannerResults) for scanners listed only in the profile's pluginScanners.
+// An explicit --scanner list replaces pluginScanners, so it has none.
+func pluginOnlyScannerResults(intent cliIntent, selected resolvedProfile) map[string]string {
+	if len(intent.scanners) > 0 || len(selected.profile.PluginScanners) == 0 {
+		return nil
+	}
+	skill := map[string]bool{}
+	for _, id := range profileScannerIDs(selected.profile.Scanners) {
+		skill[id] = true
+	}
+	results := map[string]string{}
+	for _, id := range selected.profile.PluginScanners {
+		if skill[id] {
+			continue
+		}
+		if path, ok := selected.profile.ScannerResults[id]; ok {
+			results[id] = resolveConfigPath(path, selected.configDir)
+		}
+		if path, ok := intent.scannerResultPaths[id]; ok {
+			results[id] = path
+		}
+	}
+	return results
+}
+
+func attachPluginOnlyScannerResults(opts *runner.Options, intent cliIntent, selected resolvedProfile) {
+	results := pluginOnlyScannerResults(intent, selected)
+	if len(results) == 0 {
+		return
+	}
+	if opts.ScannerResultPaths == nil {
+		opts.ScannerResultPaths = map[string]string{}
+	}
+	for id, path := range results {
+		opts.ScannerResultPaths[id] = path
+	}
 }

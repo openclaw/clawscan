@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,7 @@ type aigMCPCommandRunner struct {
 	calls    []commandCall
 	staged   []string
 	output   string
+	stdout   string
 	stderr   string
 	err      error
 	exitCode *int
@@ -76,7 +78,7 @@ func (runner *aigMCPCommandRunner) Run(command string, args []string, cwd string
 			return CommandOutput{}, err
 		}
 	}
-	return CommandOutput{Stderr: runner.stderr, ExitCode: runner.exitCode}, runner.err
+	return CommandOutput{Stdout: runner.stdout, Stderr: runner.stderr, ExitCode: runner.exitCode}, runner.err
 }
 
 func runAIGMCPTest(t *testing.T, target string, env map[string]string, commands CommandRunner) Artifact {
@@ -269,7 +271,7 @@ func TestAIGMCPPreservesFailures(t *testing.T) {
 		{
 			name:    "model returned nothing after retries",
 			runner:  &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "ERROR | LLM chat error, retry 5 times, exit\n"},
-			want:    []string{"aig-mcp-scan model calls failed", "LLM chat error, retry 5 times"},
+			want:    []string{"aig-mcp-scan did not finish its audit (model calls failed)", "LLM chat error, retry 5 times"},
 			wantRaw: true,
 		},
 		{
@@ -280,7 +282,7 @@ func TestAIGMCPPreservesFailures(t *testing.T) {
 		{
 			name:    "model calls failed behind a clean exit",
 			runner:  &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "INFO start\nERROR | LLM chat failed after retries: RateLimitError: quota\nINFO done\n"},
-			want:    []string{"aig-mcp-scan model calls failed", "LLM chat failed after retries: RateLimitError: quota"},
+			want:    []string{"aig-mcp-scan did not finish its audit (model calls failed)", "LLM chat failed after retries: RateLimitError: quota"},
 			wantRaw: true,
 		},
 		{
@@ -636,5 +638,122 @@ func TestSchemaPluginScannersMatchPluginCapableBuiltIns(t *testing.T) {
 	}
 	if got := strings.Join(schema.Defs.Profile.Properties.PluginScanners.Items.Enum, ","); got != strings.Join(want, ",") {
 		t.Fatalf("schema pluginScanners enum = %q, plugin-capable built-ins = %q", got, strings.Join(want, ","))
+	}
+}
+
+// aigMCPJudgeCommands routes the scanner to its fixture and counts judge starts.
+type aigMCPJudgeCommands struct {
+	scanner    *aigMCPCommandRunner
+	judgeCalls int
+}
+
+func (commands *aigMCPJudgeCommands) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+	if command == aigMCPCommand {
+		return commands.scanner.Run(command, args, cwd, timeout)
+	}
+	commands.judgeCalls++
+	return CommandOutput{Stdout: `{"verdict":"benign"}`}, nil
+}
+
+func TestAIGMCPUnfinishedAuditsNeverStartTheJudge(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		runner *aigMCPCommandRunner
+		want   string
+	}{
+		{
+			name:   "iteration budget exhausted on stderr",
+			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "2026-11-03 | WARNING  | Max iterations (80) reached\n"},
+			want:   "aig-mcp-scan did not finish its audit (the agent exhausted its iteration budget)",
+		},
+		{
+			name:   "iteration budget exhausted on stdout",
+			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stdout: "status: Max iterations reached, returning current result\n"},
+			want:   "aig-mcp-scan did not finish its audit (the agent exhausted its iteration budget)",
+		},
+		{
+			name:   "model failure on stdout",
+			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stdout: "LLM chat failed after retries: timeout\n"},
+			want:   "aig-mcp-scan did not finish its audit (model calls failed)",
+		},
+		{
+			name:   "scanNote missing",
+			runner: &aigMCPCommandRunner{output: strings.Replace(aigMCPSARIF, `, "scanNote": "complete"`, "", 1)},
+			want:   `aig-mcp-scan reported scanNote ""`,
+		},
+		{
+			name: "one of several runs incomplete",
+			runner: &aigMCPCommandRunner{output: `{"version":"2.1.0","runs":[` +
+				`{"results":[],"properties":{"scanNote":"complete"}},` +
+				`{"results":[],"properties":{"scanNote":"possibly-incomplete"}}]}`},
+			want: `aig-mcp-scan reported scanNote "possibly-incomplete"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			opts, err := ParseArgs([]string{createAIGMCPTestPlugin(t), "--scanner", "aig-mcp", "--sandbox", "off", "--judge", "judge-fixture"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			commands := &aigMCPJudgeCommands{scanner: test.runner}
+			artifact, err := Run(opts, RunContext{Env: withAIGMCPHostExec(map[string]string{"LLM_API_KEY": "k"}), CommandRunner: commands})
+			result := artifact.Scanners["aig-mcp"]
+			if result.Status != "failed" || !strings.Contains(result.Error, test.want) {
+				t.Fatalf("result = %#v", result)
+			}
+			if err == nil || commands.judgeCalls != 0 || artifact.Complete {
+				t.Fatalf("judge started on an unfinished audit: err=%v judgeCalls=%d complete=%v", err, commands.judgeCalls, artifact.Complete)
+			}
+		})
+	}
+}
+
+func TestImportedAIGMCPResultsGetAdapterValidation(t *testing.T) {
+	for _, test := range []struct {
+		name, raw, status, want string
+	}{
+		{name: "complete", raw: aigMCPSARIF, status: "completed"},
+		{name: "possibly incomplete", raw: strings.Replace(aigMCPSARIF, `"scanNote": "complete"`, `"scanNote": "possibly-incomplete"`, 1), status: "failed", want: `imported aig-mcp-scan reported scanNote "possibly-incomplete"`},
+		{name: "scanNote missing", raw: strings.Replace(aigMCPSARIF, `, "scanNote": "complete"`, "", 1), status: "failed", want: `imported aig-mcp-scan reported scanNote ""`},
+		{name: "not SARIF 2.1.0", raw: `{"findings":[]}`, status: "failed", want: "imported aig-mcp-scan returned invalid SARIF 2.1.0 JSON"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "aig-mcp.json")
+			if err := os.WriteFile(path, []byte(test.raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			opts := Options{ScannerResultPaths: map[string]string{"aig-mcp": path}}
+			result, err := scannerResultContext(context.Background(), opts, "aig-mcp", resolvedTarget{kind: targetKindPlugin}, "now", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != test.status || !strings.Contains(result.Error, test.want) || len(result.Raw) == 0 {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestBenchmarkJudgeWithoutVerdictIsUnscorable(t *testing.T) {
+	scanners := map[string]ScannerResult{"aig-mcp": {Status: "completed", Raw: json.RawMessage(aigMCPSARIF)}}
+	judged := func(result any) BenchmarkCase {
+		return BenchmarkCase{ID: "case", Run: Artifact{Status: "completed", Complete: true, Scanners: scanners, Judge: &JudgeResult{Status: "completed", Result: result}}}
+	}
+	if prediction, source, err := benchmarkCasePrediction(judged(map[string]any{"verdict": "benign"})); err != nil || prediction != "clean" || source != "judge" {
+		t.Fatalf("valid verdict: %q %q %v", prediction, source, err)
+	}
+	if prediction, source, err := benchmarkCasePrediction(judged(map[string]any{"summary": "no classification"})); err == nil || !strings.Contains(err.Error(), "judge returned no recognized verdict") {
+		t.Fatalf("missing verdict fell back to %q from %q (err %v)", prediction, source, err)
+	}
+	scannerOnly := BenchmarkCase{ID: "case", Run: Artifact{Status: "completed", Complete: true, Scanners: scanners}}
+	if prediction, source, err := benchmarkCasePrediction(scannerOnly); err != nil || prediction != "malicious" || source != "scanner:aig-mcp" {
+		t.Fatalf("scanner-only baseline: %q %q %v", prediction, source, err)
+	}
+}
+
+func TestAIGMCPPromptNamesTheReadTools(t *testing.T) {
+	for _, want := range []string{"No shell is available", "read_file_chunk", "search_files"} {
+		if !strings.Contains(aigMCPPrompt(nil), want) {
+			t.Fatalf("prompt missing %q", want)
+		}
 	}
 }

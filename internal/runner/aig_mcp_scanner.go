@@ -74,14 +74,18 @@ const aigMCPScopePrompt = " The whole plugin artifact is in scope, not only its 
 	"also audit embedded skills (SKILL.md files and the instructions, references and scripts they ship), " +
 	"hooks, tool and HTTP route handlers, install or lifecycle scripts, and compiled or bundled code " +
 	"such as dist/ and build/ output. Read the entry points named in package.json and " +
-	"openclaw.plugin.json even when they are compiled."
+	"openclaw.plugin.json even when they are compiled. No shell is available: use read_file, " +
+	"read_file_chunk (for any file longer than one read_file result) and search_files."
 
-// aigMCPProviderFailureMarkers are upstream log lines written when every model
-// call failed. aig-mcp-scan then still exits 0 and writes a clean-looking
-// SARIF report from its placeholder reply, so these lines must fail the scan.
-var aigMCPProviderFailureMarkers = []string{
-	"LLM chat failed after retries",
-	"LLM chat error, retry 5 times",
+// aigMCPIncompleteMarkers are upstream log lines written when the audit did
+// not finish: every model call failed, or the agent ran out of iterations.
+// aig-mcp-scan then still exits 0 and writes SARIF that looks complete
+// (scanNote "complete"), so these lines on either output fail the scan.
+var aigMCPIncompleteMarkers = []struct{ marker, reason string }{
+	{"LLM chat failed after retries", "model calls failed"},
+	{"LLM chat error, retry 5 times", "model calls failed"},
+	{"Max iterations (", "the agent exhausted its iteration budget"},
+	{"Max iterations reached", "the agent exhausted its iteration budget"},
 }
 
 var errInvalidAIGMCPSARIF = errors.New("aig-mcp-scan returned invalid SARIF 2.1.0 JSON")
@@ -185,17 +189,17 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 		result.Error = scannerCommandError(runErr, aigMCPStderrTail(output.Stderr), runner.Env)
 		return result, nil
 	}
-	// Keep the SARIF for inspection, but never let a report built from failed
-	// model calls or an admittedly incomplete audit read as a clean scan.
-	if line := aigMCPProviderFailure(output.Stderr); line != "" {
+	// Keep the SARIF for inspection, but never let a report from an audit that
+	// did not finish read as a clean scan.
+	if reason, line := aigMCPIncompleteRun(output.Stdout, output.Stderr); reason != "" {
 		result.Status = "failed"
-		result.Error = "aig-mcp-scan model calls failed; its SARIF report is not a complete audit: " +
+		result.Error = "aig-mcp-scan did not finish its audit (" + reason + "); its SARIF report is not a complete audit: " +
 			redactEnvValues(line, runner.Env)
 		return result, nil
 	}
-	if note := aigMCPScanNote(document); note != "" && note != "complete" {
+	if message := aigMCPIncompleteSARIF(document); message != "" {
 		result.Status = "failed"
-		result.Error = fmt.Sprintf("aig-mcp-scan reported scanNote %q; its SARIF report is not a complete audit.", note)
+		result.Error = message
 	}
 	return result, nil
 }
@@ -346,15 +350,17 @@ func aigMCPRequirements(env map[string]string) []EnvRequirement {
 	return aigAPIKeyRequirements(env, "scanner aig-mcp (set LLM_API_KEY or OPENAI_API_KEY)")
 }
 
-func aigMCPProviderFailure(stderr string) string {
-	for _, line := range strings.Split(stderr, "\n") {
-		for _, marker := range aigMCPProviderFailureMarkers {
-			if strings.Contains(line, marker) {
-				return truncateClawHubText(strings.TrimSpace(line), 1000)
+func aigMCPIncompleteRun(outputs ...string) (string, string) {
+	for _, output := range outputs {
+		for _, line := range strings.Split(output, "\n") {
+			for _, marker := range aigMCPIncompleteMarkers {
+				if strings.Contains(line, marker.marker) {
+					return marker.reason, truncateClawHubText(strings.TrimSpace(line), 1000)
+				}
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func aigMCPStderrTail(stderr string) string {
@@ -391,13 +397,37 @@ func parseAIGMCPSARIF(raw []byte) (aigMCPSARIFDocument, error) {
 	return document, nil
 }
 
-func aigMCPScanNote(document aigMCPSARIFDocument) string {
+// aigMCPIncompleteSARIF requires every run to state scanNote "complete".
+// aig-mcp-scan 0.2.0 always writes the property; anything else, including its
+// absence, means the report cannot stand for a full audit.
+func aigMCPIncompleteSARIF(document aigMCPSARIFDocument) string {
+	if len(document.Runs) == 0 {
+		return "aig-mcp-scan SARIF has no runs; it is not a complete audit."
+	}
 	for _, run := range document.Runs {
-		if note, ok := run.Properties["scanNote"].(string); ok && strings.TrimSpace(note) != "" {
-			return strings.TrimSpace(note)
+		note, _ := run.Properties["scanNote"].(string)
+		if strings.TrimSpace(note) != "complete" {
+			return fmt.Sprintf("aig-mcp-scan reported scanNote %q; its SARIF report is not a complete audit.", strings.TrimSpace(note))
 		}
 	}
 	return ""
+}
+
+// validateImportedAIGMCPResult applies the adapter's report checks to an
+// imported --scanner-result, so a saved partial or invalid audit cannot pass
+// as complete. The raw report is kept for inspection.
+func validateImportedAIGMCPResult(result ScannerResult) ScannerResult {
+	document, err := parseAIGMCPSARIF(result.Raw)
+	if err != nil {
+		result.Status = "failed"
+		result.Error = "imported " + err.Error()
+		return result
+	}
+	if message := aigMCPIncompleteSARIF(document); message != "" {
+		result.Status = "failed"
+		result.Error = "imported " + message
+	}
+	return result
 }
 
 // aigMCPSeverity maps a SARIF result level onto ClawScan severities. SARIF

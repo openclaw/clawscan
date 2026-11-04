@@ -379,7 +379,7 @@ func TestClawHubProfilePreservesAIGMCPFailures(t *testing.T) {
 		},
 		{
 			mode:      "model-failure",
-			wantError: []string{"aig-mcp-scan model calls failed", "LLM chat failed after retries: AuthenticationError: invalid key"},
+			wantError: []string{"aig-mcp-scan did not finish its audit (model calls failed)", "LLM chat failed after retries: AuthenticationError: invalid key"},
 			wantRaw:   true,
 		},
 	} {
@@ -456,4 +456,30 @@ func jsonEqual(left any, right any) bool {
 	a, errA := json.Marshal(left)
 	b, errB := json.Marshal(right)
 	return errA == nil && errB == nil && string(a) == string(b)
+}
+
+func TestClawHubProfileRejectsImportedIncompleteAIGMCPResult(t *testing.T) {
+	harness := newAIGMCPHarness(t)
+	target := filepath.Join(harness.dir, "plugin-under-review")
+	writeAIGMCPPlugin(t, target)
+	partial := filepath.Join(harness.dir, "partial.sarif.json")
+	writeFile(t, partial, strings.Replace(aigMCPStubSARIF, `"scanNote": "complete"`, `"scanNote": "possibly-incomplete"`, 1))
+
+	artifact, err := harness.run(t, target, "ok", "--scanner-result", "aig-mcp="+partial)
+	if err == nil || !strings.Contains(err.Error(), "scanner aig-mcp failed") {
+		t.Fatalf("run error = %v", err)
+	}
+	result := artifact.Scanners["aig-mcp"]
+	if result.Status != "failed" || !strings.Contains(result.Error, `imported aig-mcp-scan reported scanNote "possibly-incomplete"`) || !hasRaw(result.Raw) {
+		t.Fatalf("aig-mcp = %#v", result)
+	}
+	if harness.invoked() {
+		t.Fatal("imported result should not run the scanner")
+	}
+	if artifact.Complete || artifact.Judge != nil && artifact.Judge.Status == "completed" {
+		t.Fatalf("judge ran on an imported partial audit: complete=%v judge=%#v", artifact.Complete, artifact.Judge)
+	}
+	if _, err := os.Stat(harness.prompt); !os.IsNotExist(err) {
+		t.Fatalf("judge prompt was rendered: %v", err)
+	}
 }

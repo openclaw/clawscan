@@ -1188,6 +1188,9 @@ func scannerResultContext(ctx context.Context, opts Options, scanner string, tar
 		if scanner == "skillspector" {
 			result = validateSkillSpectorReportEvidence(result, opts.Judge != nil)
 		}
+		if scanner == aigMCPScannerID {
+			result = validateImportedAIGMCPResult(result)
+		}
 		return result, nil
 	}
 	if !scannerSupportsTargetKindInRegistry(registryForOptions(opts), scanner, target.kind) {

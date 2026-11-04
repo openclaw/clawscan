@@ -354,9 +354,17 @@ plugin directory the adapter:
   `suspicious`.
 
 `aig-mcp-scan` 0.2.0 gives its agent a shell and file writes during static
-audits, and prompt injection in the audited plugin could reach them. The
-runtime image patches both tools out and its build fails if that patch stops
-applying. The adapter therefore expects the Docker sandbox: with
+audits, and prompt injection in the audited plugin could reach them; its tool
+lookup is also case-insensitive. The runtime image's patch never registers the
+shell, limits static audits to an allow-list of read-only tools matched on
+canonical (trimmed, lowercase) names, and keeps every read confined to the
+audited directory. Upstream keeps only a 20,000-character prefix of any tool
+result over 40,000 characters in the model's history, so the patch also caps
+`read_file` at 30,000 characters with an explicit continuation and adds
+`read_file_chunk` (character-offset reads) and `search_files` (bounded literal
+search) so the rest of a large or compiled file is visible to the model. The
+image build runs those checks and fails if the patch stops applying or the
+registered tools change. The adapter therefore expects the Docker sandbox: with
 `--sandbox off` it fails unless `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` acknowledges a
 disposable host. A plain `pip install aig-mcp-scan` (and `clawscan install
 aig-mcp`) is unpatched; host consumers such as a ClawHub worker must install
@@ -365,11 +373,19 @@ release with this profile change therefore needs the runtime image published
 first and any host worker updated before its ClawScan pin moves; until then,
 plugin scans fail closed rather than running without `aig-mcp`.
 
-Failures are never reported as clean scans. A non-zero exit, missing or invalid
-SARIF, model calls that failed behind a clean exit (`LLM chat failed after
-retries` or `LLM chat error, retry 5 times`), and a `scanNote` other than
-`complete` all mark `aig-mcp` failed with the upstream error and a bounded
-stderr tail, so the judge does not start.
+Failures are never reported as clean scans. `aig-mcp-scan` exits 0 and writes
+SARIF marked `scanNote: complete` even when its audit did not finish, so the
+adapter also reads its output. Any of these marks `aig-mcp` failed with the
+upstream error and a bounded stderr tail, and the judge does not start:
+
+- a non-zero exit, or missing or invalid SARIF;
+- model calls that failed (`LLM chat failed after retries`, `LLM chat error,
+  retry 5 times`) or an exhausted iteration budget (`Max iterations (80)
+  reached`), on stdout or stderr;
+- any run whose `scanNote` is not `complete`, including a missing one.
+
+An imported `--scanner-result aig-mcp=<path>` gets the same SARIF and
+`scanNote` checks.
 
 Plugin targets are never auto-discovered. Zero-target discovery still scans only
 child skill directories under `./skills`; pass a plugin directory explicitly to
