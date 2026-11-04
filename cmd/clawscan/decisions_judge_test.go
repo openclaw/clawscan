@@ -413,12 +413,9 @@ func TestClawHubProfileDecisionsJudgeExcludesPluginDependencies(t *testing.T) {
 	writeFile(t, filepath.Join(target, "node_modules", "left-pad", "index.js"), marker+strings.Repeat("x", 100000))
 	writeFile(t, filepath.Join(target, "src", "vendor", "node_modules", "dep", "index.js"), marker)
 	writeFile(t, filepath.Join(target, "src", "index.js"), "export const pluginCode = true;\n")
-	fixtures := []string{}
-	for _, scanner := range []string{"skillspector", "aig"} {
-		path := filepath.Join(dir, scanner+".json")
-		writeFile(t, path, `{"version":"2.1.0","runs":[{"results":[]}]}`)
-		fixtures = append(fixtures, "--scanner-result", scanner+"="+path)
-	}
+	path := filepath.Join(dir, "aig-mcp.json")
+	writeFile(t, path, `{"version":"2.1.0","runs":[{"results":[],"properties":{"scanNote":"complete"}}]}`)
+	fixtures := []string{"--scanner-result", "aig-mcp=" + path}
 	args := append([]string{target, "--profile", "clawhub", "--sandbox", "off", "--json", "--no-overview"}, fixtures...)
 	var runErr error
 	stdout := captureStdout(t, func() {
