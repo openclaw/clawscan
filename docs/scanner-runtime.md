@@ -87,7 +87,9 @@ The runtime also installs Tencent's `aig-mcp-scan` 0.2.0 from PyPI
 only `read_file`, `read_file_chunk`, `search_files`, `think` and `finish`
 (matched case-insensitively, as upstream resolves names), refuses model-chosen
 MCP destinations, and adds the bounded chunk and search tools so files past
-upstream's history truncation stay model-visible. `tests/test_aig_mcp_static_tools.py`
+upstream's history truncation stay model-visible. It also makes an unusable final
+report (no format attempt matched, or unparseable finding blocks) an execution
+error instead of a clean SARIF report. `tests/test_aig_mcp_static_tools.py`
 and `tests/test_aig_mcp_entry_network.py` run in the build. The second drives
 the real CLI with a loopback model stub that injects remote MCP calls and fails
 if a loopback canary sees any connection. The scanner uses Chat Completions

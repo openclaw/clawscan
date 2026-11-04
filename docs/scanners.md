@@ -391,7 +391,12 @@ upstream error and a bounded stderr tail, and the judge does not start:
   reached`), logged as WARNING or ERROR records on stderr. INFO records and
   continuation lines that merely quote these words (a model report, a file
   name) do not count;
-- any run whose `scanNote` is not `complete`, including a missing one.
+- any run whose `scanNote` is not `complete`, including a missing one;
+- an unusable final report. Upstream keeps the last of three format attempts
+  even when none matched, so a refusal or plain prose would otherwise score 100
+  with no findings. The patched runtime exits with an error instead, both for
+  that and when any `<vuln>` finding block cannot be parsed. Only an explicit
+  `<empty>` result, or findings that all parse, produce SARIF.
 
 An imported `--scanner-result aig-mcp=<path>` gets the same SARIF and
 `scanNote` checks. Its logs are not available, so an imported report from an
