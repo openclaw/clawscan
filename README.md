@@ -214,8 +214,8 @@ The two ClawHub profiles explicitly configure the OpenAI scanner lanes with
 `SKILLSPECTOR_MODEL=gpt-6.1-sol`, and `SKILLSPECTOR_REASONING_EFFORT=medium`;
 A.I.G uses `DEFAULT_MODEL=gpt-6.1-sol` and `REASONING_EFFORT=medium` with OpenAI
 credentials (`aig-mcp` uses the same model and endpoint defaults, but not
-`REASONING_EFFORT` or the Standard-tier control). The verdict comes from the OpenAI Decisions API (`gpt-6-luna`)
-through `clawscan-decisions-judge`, which returns typed answers only; a separate
+`REASONING_EFFORT` or the Standard-tier control). The verdict comes from the
+OpenAI Decisions API (`gpt-6-luna`) through `clawscan-decisions-judge`, which returns typed answers only; a separate
 Codex overview step (`gpt-6-luna`, low reasoning, Standard service) writes the
 readable summary and never changes the verdict. Credentials stay in the
 environment. See [judge harness](docs/judge.md#clawhub-decisions-judge) for the

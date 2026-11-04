@@ -350,9 +350,11 @@ plugin directory the adapter:
   credentials and otherwise to `aig-mcp-scan`'s own defaults, and are always
   passed as `-m`/`-u` so generic `OPENAI_BASE_URL` or `LLM_MODEL` values meant
   for other tools never apply;
-- keeps the upstream SARIF unchanged as the scanner's raw evidence. The ClawHub
-  judge receives that one raw SARIF document (as `scanners/aig-mcp.json` in the
-  Decisions judge workspace, or in the rendered ClawHub prompt). Benchmarks map SARIF
+- keeps the upstream SARIF unchanged as the scanner's raw evidence. It is the
+  only scanner evidence in the judge workspace (`scanners/aig-mcp.json`); the
+  `clawhub` Decisions judge passes its findings to the model as bounded,
+  normalized evidence, and a `--judge` override that renders
+  `clawhub/prompt.md` receives the raw SARIF. Benchmarks map SARIF
   levels to severities (`error` high, `warning` or absent medium, `note` low,
   otherwise info): a high finding predicts `malicious`, any other finding
   `suspicious`.

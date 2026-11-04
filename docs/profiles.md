@@ -63,7 +63,7 @@ clawscan profiles -v
 Profiles can set `pluginScanners` to replace `scanners` for OpenClaw plugin
 targets. The built-in `clawhub` profile uses it so a plugin is audited as one
 artifact by `aig-mcp` alone: no skill scanner runs or is recorded for it, and
-the judge receives that one raw SARIF result. Skill targets keep the `scanners`
+its SARIF is the only scanner evidence in the judge workspace. Skill targets keep the `scanners`
 list unchanged. An explicit `--scanner` replaces both lists for that run.
 `aig-mcp` uses the A.I.G `DEFAULT_MODEL`/`DEFAULT_BASE_URL` defaults below but
 calls Chat Completions without the patched Responses transport, so
