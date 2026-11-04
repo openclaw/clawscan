@@ -17,6 +17,8 @@ func TestClawScanSchemaAcceptsSupportedProfiles(t *testing.T) {
 	schema := compileClawScanSchema(t)
 	fixtures := map[string][]byte{
 		"embedded clawhub profile": readFixture(t, filepath.Join("..", "internal", "profiles", "clawhub", "clawscan.yml")),
+		// Configs written before the optional overview step must stay valid.
+		"pre-overview clawhub profile (fa01a95)": readFixture(t, filepath.Join("testdata", "clawhub-profile-fa01a95.yml")),
 		"custom scanner and gate": []byte(`
 version: 1
 sandbox:

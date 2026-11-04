@@ -48,6 +48,7 @@ Choose the run mode:
 | Run ClawHub Security Signals | `clawscan benchmark clawhub-security-signals --split eval_holdout --limit 10 --scanner skillspector --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
 | Add or override a judge harness | Add `--judge '<command with placeholders>'`. |
+| Override or skip the readable overview | Add `--overview '<command>'` or `--no-overview`. |
 | Use host-installed scanner/judge CLIs | Add `--sandbox off` only in an already-isolated environment. |
 
 Helpful metadata:
@@ -81,8 +82,8 @@ Built-in profiles:
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `aig` | bundled Codex judge with ClawHub prompt/schema |
-| `clawhub-aig` | `skillspector`, `aig` | bundled Codex judge with ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `aig` | Decisions API judge (`clawscan-decisions-judge`) plus a Codex overview |
+| `clawhub-aig` | `skillspector`, `aig` | same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
 Profiles are loaded from embedded built-ins. Project `.clawscan.yml` /
@@ -260,7 +261,12 @@ Prompt files can reference requested scanner JSON:
 
 If a prompt references an unrequested scanner, ClawScan should fail clearly.
 The built-in `clawhub` profile uses this same judge mechanism with embedded
-prompt and output-schema files.
+policy and output-schema files: `clawscan-decisions-judge` asks the OpenAI
+Decisions API typed questions and writes `judge.result` (verdict, confidence,
+dimension statuses, finding predicates, and a `decision` record). Its
+`overview.command` then runs Codex with `{{ judge.result }}` and `judge.json`
+and writes readable prose to `overview.result`. Overview failures are recorded
+but never change the verdict, gate, or exit status.
 
 ## Verification
 

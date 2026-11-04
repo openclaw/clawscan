@@ -323,7 +323,7 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 }
 
 func requiresCommandExecution(opts Options) bool {
-	if opts.Judge != nil {
+	if opts.Judge != nil || opts.Overview != nil {
 		return true
 	}
 	for _, scanner := range opts.Scanners {

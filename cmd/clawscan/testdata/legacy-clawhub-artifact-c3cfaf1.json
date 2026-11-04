@@ -1,0 +1,227 @@
+{
+  "processCleanup": "unknown",
+  "status": "completed",
+  "complete": true,
+  "schemaVersion": "clawscan-run-v1",
+  "profile": "clawhub",
+  "configSource": "built-in",
+  "target": {
+    "kind": "skill",
+    "input": "/tmp/clawscan-legacy/skill",
+    "resolvedPath": "/tmp/clawscan-legacy/skill"
+  },
+  "startedAt": "2026-11-04T08:48:03.832092Z",
+  "completedAt": "2026-11-04T08:48:03.870303Z",
+  "env": {},
+  "sandbox": {
+    "mode": "off"
+  },
+  "scanners": {
+    "aig": {
+      "status": "completed",
+      "startedAt": "2026-11-04T08:48:03.833217Z",
+      "completedAt": "2026-11-04T08:48:03.833217Z",
+      "durationMs": 0,
+      "command": [
+        "scanner-result",
+        "aig=/tmp/clawscan-legacy/aig.json"
+      ],
+      "error": "",
+      "outputPath": "legacy-c3cfaf1/profiles/clawhub/skill/aig.json",
+      "raw": {
+        "version": "2.1.0",
+        "runs": [
+          {
+            "results": []
+          }
+        ]
+      }
+    },
+    "clawscan-static": {
+      "status": "completed",
+      "startedAt": "2026-11-04T08:48:03.832839Z",
+      "completedAt": "2026-11-04T08:48:03.833217Z",
+      "durationMs": 0,
+      "command": [
+        "clawscan-static",
+        "/tmp/clawscan-legacy/skill"
+      ],
+      "error": "",
+      "outputPath": "legacy-c3cfaf1/profiles/clawhub/skill/clawscan-static.json",
+      "raw": {
+        "schemaVersion": "clawscan-static-v1",
+        "scanner": {
+          "id": "clawscan-static",
+          "name": "ClawScan built-in static scanner",
+          "version": "clawscan-static-v1",
+          "rules": [
+            {
+              "id": "static.prompt_injection",
+              "description": "Looks for direct attempts to override prior instructions.",
+              "severity": "medium"
+            },
+            {
+              "id": "static.credential_exfiltration",
+              "description": "Looks for language that asks an agent to leak or exfiltrate credentials.",
+              "severity": "high"
+            },
+            {
+              "id": "static.pipe_to_shell",
+              "description": "Looks for curl or wget output piped directly into a shell.",
+              "severity": "medium"
+            },
+            {
+              "id": "static.destructive_shell",
+              "description": "Looks for destructive recursive removal of the filesystem root.",
+              "severity": "high"
+            },
+            {
+              "id": "static.python_process_execution",
+              "description": "Looks for Python APIs that execute shell commands or child processes.",
+              "severity": "high"
+            },
+            {
+              "id": "static.python_bytecode",
+              "description": "Flags precompiled Python bytecode that can execute without reviewable source.",
+              "severity": "high"
+            },
+            {
+              "id": "static.nul_byte_in_text",
+              "description": "Flags NUL bytes that can disguise executable or policy-relevant content as an opaque binary.",
+              "severity": "high"
+            },
+            {
+              "id": "static.opaque_binary",
+              "description": "Surfaces opaque binary content that cannot be inspected by text rules.",
+              "severity": "low"
+            }
+          ]
+        },
+        "files": {
+          "scanned": [
+            {
+              "path": "SKILL.md",
+              "bytes": 111,
+              "sha256": "f1583b57e73f84e8c1e6daac580b0dce0e544120d5d7c5fcbbee0f6f1868e67a"
+            }
+          ],
+          "omitted": [],
+          "totalScannedBytes": 111,
+          "totalOmittedBytes": 0,
+          "suppressedScanned": 0,
+          "suppressedOmitted": 0
+        },
+        "findings": []
+      }
+    },
+    "skillspector": {
+      "status": "completed",
+      "startedAt": "2026-11-04T08:48:03.832258Z",
+      "completedAt": "2026-11-04T08:48:03.832258Z",
+      "durationMs": 0,
+      "command": [
+        "scanner-result",
+        "skillspector=/tmp/clawscan-legacy/skillspector.json"
+      ],
+      "error": "",
+      "outputPath": "legacy-c3cfaf1/profiles/clawhub/skill/skillspector.json",
+      "raw": {
+        "status": "clean",
+        "findings": []
+      }
+    }
+  },
+  "gate": "pass",
+  "gateRules": [],
+  "judge": {
+    "commandStarted": true,
+    "status": "completed",
+    "outputPath": "/tmp/clawscan-judge-271504040/codex-result.json",
+    "error": "",
+    "result": {
+      "artifact_inspection": {
+        "additional_files_inspected": [],
+        "challenge": "d049a0affc1adc26f6f9fb7eb0af26f3fe40a5615a9cd2dbb1e1e3463ada29ad",
+        "required_file": "artifact/SKILL.md",
+        "required_file_sha256": "f1583b57e73f84e8c1e6daac580b0dce0e544120d5d7c5fcbbee0f6f1868e67a",
+        "status": "completed",
+        "version": 2
+      },
+      "confidence": "high",
+      "dimensions": {
+        "environment_proportionality": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "install_mechanism": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "instruction_scope": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "persistence_privilege": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "purpose_capability": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        }
+      },
+      "scan_findings_in_context": [],
+      "summary": "Daily notes appends a note to ./notes.md and does nothing else.",
+      "user_guidance": "Confirm you want notes appended to ./notes.md before installing.",
+      "verdict": "benign"
+    },
+    "attempts": [
+      {
+        "commandStarted": true,
+        "status": "completed",
+        "error": "",
+        "result": {
+          "artifact_inspection": {
+            "additional_files_inspected": [],
+            "challenge": "d049a0affc1adc26f6f9fb7eb0af26f3fe40a5615a9cd2dbb1e1e3463ada29ad",
+            "required_file": "artifact/SKILL.md",
+            "required_file_sha256": "f1583b57e73f84e8c1e6daac580b0dce0e544120d5d7c5fcbbee0f6f1868e67a",
+            "status": "completed",
+            "version": 2
+          },
+          "confidence": "high",
+          "dimensions": {
+            "environment_proportionality": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "install_mechanism": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "instruction_scope": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "persistence_privilege": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "purpose_capability": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            }
+          },
+          "scan_findings_in_context": [],
+          "summary": "Daily notes appends a note to ./notes.md and does nothing else.",
+          "user_guidance": "Confirm you want notes appended to ./notes.md before installing.",
+          "verdict": "benign"
+        },
+        "durationMs": 36,
+        "challenge": "d049a0affc1adc26f6f9fb7eb0af26f3fe40a5615a9cd2dbb1e1e3463ada29ad",
+        "requiredFile": "artifact/SKILL.md",
+        "requiredFileSha256": "f1583b57e73f84e8c1e6daac580b0dce0e544120d5d7c5fcbbee0f6f1868e67a"
+      }
+    ]
+  }
+}

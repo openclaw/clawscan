@@ -77,6 +77,9 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
   in the judge command; a failed judge command keeps its own error.
 - Judge placeholders and prompt interpolation must fail clearly when they
   reference a scanner that was not requested.
+- The optional overview step is advisory prose about a completed verdict. Its
+  failure, timeout, or output never changes the verdict, gate, run status,
+  completeness, or exit status.
 - When a judge is configured, usable partial SkillSpector reports may reach the
   independent judge with `status: partial` and `reportPolicy: judge-gaps`.
   Preserve raw partial status, findings, gaps, and provenance. The judge

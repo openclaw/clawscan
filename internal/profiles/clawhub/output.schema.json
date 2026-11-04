@@ -4,15 +4,13 @@
   "required": [
     "verdict",
     "confidence",
-    "summary",
     "dimensions",
     "scan_findings_in_context",
-    "user_guidance"
+    "decision"
   ],
   "properties": {
     "verdict": { "type": "string", "enum": ["benign", "suspicious", "malicious"] },
     "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
-    "summary": { "type": "string" },
     "dimensions": {
       "type": "object",
       "additionalProperties": false,
@@ -24,51 +22,11 @@
         "persistence_privilege"
       ],
       "properties": {
-        "purpose_capability": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "detail"],
-          "properties": {
-            "status": { "type": "string", "enum": ["ok", "note", "concern"] },
-            "detail": { "type": "string" }
-          }
-        },
-        "instruction_scope": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "detail"],
-          "properties": {
-            "status": { "type": "string", "enum": ["ok", "note", "concern"] },
-            "detail": { "type": "string" }
-          }
-        },
-        "install_mechanism": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "detail"],
-          "properties": {
-            "status": { "type": "string", "enum": ["ok", "note", "concern"] },
-            "detail": { "type": "string" }
-          }
-        },
-        "environment_proportionality": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "detail"],
-          "properties": {
-            "status": { "type": "string", "enum": ["ok", "note", "concern"] },
-            "detail": { "type": "string" }
-          }
-        },
-        "persistence_privilege": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "detail"],
-          "properties": {
-            "status": { "type": "string", "enum": ["ok", "note", "concern"] },
-            "detail": { "type": "string" }
-          }
-        }
+        "purpose_capability": { "$ref": "#/$defs/dimension" },
+        "instruction_scope": { "$ref": "#/$defs/dimension" },
+        "install_mechanism": { "$ref": "#/$defs/dimension" },
+        "environment_proportionality": { "$ref": "#/$defs/dimension" },
+        "persistence_privilege": { "$ref": "#/$defs/dimension" }
       }
     },
     "scan_findings_in_context": {
@@ -76,14 +34,68 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ruleId", "expected_for_purpose", "note"],
+        "required": ["ruleId", "scanner", "expected_for_purpose", "probability"],
         "properties": {
           "ruleId": { "type": "string" },
+          "scanner": { "type": "string" },
           "expected_for_purpose": { "type": "boolean" },
-          "note": { "type": "string" }
+          "probability": { "type": "number", "minimum": 0, "maximum": 1 }
         }
       }
     },
-    "user_guidance": { "type": "string" }
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api",
+        "endpointHost",
+        "requestedModel",
+        "model",
+        "latencyMs",
+        "httpAttempts",
+        "usage",
+        "input",
+        "verdict",
+        "signals"
+      ],
+      "properties": {
+        "api": { "type": "string", "enum": ["decisions"] },
+        "endpointHost": { "type": "string" },
+        "requestedModel": { "type": "string" },
+        "model": { "type": "string" },
+        "latencyMs": { "type": "integer", "minimum": 0 },
+        "httpAttempts": { "type": "integer", "minimum": 1 },
+        "usage": { "type": "object" },
+        "input": { "type": "object" },
+        "verdict": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["choice", "confidence", "probabilities"],
+          "properties": {
+            "choice": { "type": "string", "enum": ["benign", "suspicious", "malicious"] },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "probabilities": {
+              "type": "object",
+              "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "confidence"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "note", "concern"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
   }
 }

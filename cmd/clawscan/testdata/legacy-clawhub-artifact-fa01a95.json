@@ -1,0 +1,131 @@
+{
+  "processCleanup": "unknown",
+  "status": "completed",
+  "complete": true,
+  "schemaVersion": "clawscan-run-v1",
+  "profile": "clawhub",
+  "configSource": "built-in",
+  "target": {
+    "kind": "skill",
+    "input": "/tmp/clawscan-legacy/skill",
+    "resolvedPath": "/tmp/clawscan-legacy/skill"
+  },
+  "startedAt": "2026-11-04T08:47:54.437038Z",
+  "completedAt": "2026-11-04T08:47:54.472716Z",
+  "env": {},
+  "sandbox": {
+    "mode": "off"
+  },
+  "scanners": {
+    "aig": {
+      "status": "completed",
+      "startedAt": "2026-11-04T08:47:54.437691Z",
+      "completedAt": "2026-11-04T08:47:54.437691Z",
+      "durationMs": 0,
+      "command": [
+        "scanner-result",
+        "aig=/tmp/clawscan-legacy/aig.json"
+      ],
+      "error": "",
+      "outputPath": "legacy-fa01a95/profiles/clawhub/skill/aig.json",
+      "raw": {
+        "version": "2.1.0",
+        "runs": [
+          {
+            "results": []
+          }
+        ]
+      }
+    },
+    "skillspector": {
+      "status": "completed",
+      "startedAt": "2026-11-04T08:47:54.437132Z",
+      "completedAt": "2026-11-04T08:47:54.437132Z",
+      "durationMs": 0,
+      "command": [
+        "scanner-result",
+        "skillspector=/tmp/clawscan-legacy/skillspector.json"
+      ],
+      "error": "",
+      "outputPath": "legacy-fa01a95/profiles/clawhub/skill/skillspector.json",
+      "raw": {
+        "status": "clean",
+        "findings": []
+      }
+    }
+  },
+  "gate": "pass",
+  "gateRules": [],
+  "judge": {
+    "commandStarted": true,
+    "status": "completed",
+    "outputPath": "/tmp/clawscan-judge-3350912153/judge-output.json",
+    "error": "",
+    "result": {
+      "confidence": "high",
+      "dimensions": {
+        "environment_proportionality": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "install_mechanism": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "instruction_scope": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "persistence_privilege": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        },
+        "purpose_capability": {
+          "detail": "Coherent with the stated purpose.",
+          "status": "ok"
+        }
+      },
+      "scan_findings_in_context": [],
+      "summary": "Daily notes appends a note to ./notes.md and does nothing else.",
+      "user_guidance": "Confirm you want notes appended to ./notes.md before installing.",
+      "verdict": "benign"
+    },
+    "attempts": [
+      {
+        "commandStarted": true,
+        "status": "completed",
+        "error": "",
+        "result": {
+          "confidence": "high",
+          "dimensions": {
+            "environment_proportionality": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "install_mechanism": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "instruction_scope": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "persistence_privilege": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            },
+            "purpose_capability": {
+              "detail": "Coherent with the stated purpose.",
+              "status": "ok"
+            }
+          },
+          "scan_findings_in_context": [],
+          "summary": "Daily notes appends a note to ./notes.md and does nothing else.",
+          "user_guidance": "Confirm you want notes appended to ./notes.md before installing.",
+          "verdict": "benign"
+        },
+        "durationMs": 34
+      }
+    ]
+  }
+}

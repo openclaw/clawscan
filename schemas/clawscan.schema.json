@@ -52,6 +52,9 @@
         "judge": {
           "$ref": "#/$defs/judge"
         },
+        "overview": {
+          "$ref": "#/$defs/overview"
+        },
         "scannerEnvDefaults": {
           "type": "object",
           "additionalProperties": false,
@@ -378,6 +381,16 @@
     "judge": {
       "type": "object",
       "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        }
+      }
+    },
+    "overview": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional command that writes a readable summary after a completed judge verdict. It never changes the verdict or gate.",
       "properties": {
         "command": {
           "type": "string"

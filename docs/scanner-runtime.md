@@ -64,9 +64,10 @@ validation. An absent final artifact or a deadline at any stage remains an
 operational failure. This instrumentation neither changes deadlines nor repairs
 an underlying scanner/provider stall.
 
-The bundled ClawHub profiles use GPT-6.1 Sol: medium reasoning for the OpenAI
-SkillSpector and A.I.G scanner lanes; high reasoning and default Standard service
-for the final Codex judge. The profile contains explicit non-secret
+The bundled ClawHub profiles use GPT-6.1 Sol with medium reasoning for the OpenAI
+SkillSpector and A.I.G scanner lanes. The verdict comes from the OpenAI Decisions
+API (`gpt-6-luna`) through `clawscan-decisions-judge`, and a Codex `gpt-6-luna`
+low-effort overview writes the readable summary. The profile contains explicit non-secret
 `scannerEnvDefaults`. Environment overrides take precedence. A project-local
 profile shadows the bundled profile completely, including these defaults.
 
@@ -324,10 +325,10 @@ stderr, and failure stderr may be truncated: these logs are debugging evidence,
 not authoritative population counts. Missing telemetry stays unknown; a parent-
 owned consumer companion is needed before exposing complete production counts.
 
-The bundled final Codex judges also pass `-c 'service_tier="default"'`
-explicitly, alongside `--ignore-user-config` and high reasoning. A complete
-operator `--judge` command override remains authoritative, including a different
-model, effort, or service tier.
+The bundled Codex overview commands also pass `-c 'service_tier="default"'`
+explicitly, alongside `--ignore-user-config` and low reasoning. A complete
+operator `--judge` or `--overview` command override remains authoritative,
+including a different model, effort, or service tier.
 
 ## Executed upgrade proof
 
@@ -349,7 +350,8 @@ and arm64). Build logs must show exact-pin patch application and all installed
 SkillSpector/AIG SDK wire-contract tests passing. Export the resulting image or
 OCI layout successfully and retain its immutable digest; a cache-only build or
 host-side Python tests are not final-image export proof. From the exported image,
-smoke `skillspector --help`, `aig-skill-scan --help`, and `codex --version`.
+smoke `skillspector --help`, `aig-skill-scan --help`, `codex --version`, and
+`clawscan-decisions-judge --help`.
 No credentials or live paid calls are needed for these CI checks.
 
 A consumer deliberately running `--sandbox off` may instead install these same
