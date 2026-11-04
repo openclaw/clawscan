@@ -351,7 +351,8 @@ plugin directory the adapter:
   passed as `-m`/`-u` so generic `OPENAI_BASE_URL` or `LLM_MODEL` values meant
   for other tools never apply;
 - keeps the upstream SARIF unchanged as the scanner's raw evidence. The ClawHub
-  judge prompt receives that one raw SARIF document. Benchmarks map SARIF
+  judge receives that one raw SARIF document (as `scanners/aig-mcp.json` in the
+  Decisions judge workspace, or in the rendered ClawHub prompt). Benchmarks map SARIF
   levels to severities (`error` high, `warning` or absent medium, `note` low,
   otherwise info): a high finding predicts `malicious`, any other finding
   `suspicious`.
