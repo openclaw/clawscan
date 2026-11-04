@@ -501,3 +501,68 @@ func TestClawHubProfileRejectsPluginScannerResultForSkillTargets(t *testing.T) {
 		t.Fatalf("judge ran: %v", err)
 	}
 }
+
+// TestOldProjectProfileKeepsItsScannersForPluginsAndSkills replays a v0.3.0-era
+// .clawscan.yml with no pluginScanners field: both target kinds run exactly its
+// configured scanners with its gate rules, and aig-mcp is never selected.
+func TestOldProjectProfileKeepsItsScannersForPluginsAndSkills(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("stub scanner uses a POSIX shell")
+	}
+	dir := t.TempDir()
+	config, err := os.ReadFile(filepath.Join("testdata", "v0.3.0-project.clawscan.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "old.clawscan.yml"), string(config))
+	writeFile(t, filepath.Join(dir, "skillspector.json"), `{"status":"clean","findings":[]}`)
+	writeFile(t, filepath.Join(dir, "aig.sarif.json"), `{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04","level":"warning","message":{"text":"x"}}]}]}`)
+	bin := filepath.Join(dir, "bin")
+	writeFile(t, filepath.Join(bin, "team-grep"), "#!/bin/sh\nif grep -rqs 'fetch(' \"$1\"; then printf '{\"result\":{\"risk\":\"high\"}}\\n'; else printf '{\"result\":{\"risk\":\"low\"}}\\n'; fi\n")
+	if err := os.Chmod(filepath.Join(bin, "team-grep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(bin, "aig-mcp-scan"), "#!/bin/sh\necho invoked > \"$CLAWSCAN_TEST_AIG_MCP_LOG\"\nexit 3\n")
+	if err := os.Chmod(filepath.Join(bin, "aig-mcp-scan"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skill := filepath.Join(dir, "skill")
+	writeSkill(t, skill, "Use fetch(\"https://api.example.invalid\").\n")
+	plugin := filepath.Join(dir, "plugin")
+	writePlugin(t, plugin, "weather-plugin")
+	invoked := filepath.Join(dir, "aig-mcp-invoked")
+	env := []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "TEAM_MODE=strict", "CLAWSCAN_TEST_AIG_MCP_LOG=" + invoked}
+	t.Chdir(dir)
+	for _, test := range []struct {
+		target, kind, gate string
+	}{
+		{target: "./skill", kind: "skill", gate: "block"},
+		{target: "./plugin", kind: "plugin", gate: "warn"},
+	} {
+		var runErr error
+		stdout := captureStdout(t, func() {
+			runErr = run([]string{test.target, "--config", "old.clawscan.yml", "--profile", "team-review", "--sandbox", "off", "--json"}, env)
+		})
+		if runErr != nil {
+			t.Fatalf("%s: %v", test.target, runErr)
+		}
+		var artifact runner.Artifact
+		if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+			t.Fatal(err)
+		}
+		if artifact.Target.Kind != test.kind || scannerIDs(artifact) != "aig,skillspector,team-grep" || artifact.Gate != test.gate {
+			t.Fatalf("%s: kind=%s scanners=%s gate=%s", test.target, artifact.Target.Kind, scannerIDs(artifact), artifact.Gate)
+		}
+		for id, result := range artifact.Scanners {
+			if result.Status != "completed" {
+				t.Fatalf("%s: %s = %#v", test.target, id, result)
+			}
+		}
+		if artifact.Judge == nil || artifact.Judge.Status != "completed" || !artifact.Complete {
+			t.Fatalf("%s: judge = %#v complete = %v", test.target, artifact.Judge, artifact.Complete)
+		}
+	}
+	if _, err := os.Stat(invoked); !os.IsNotExist(err) {
+		t.Fatal("an old profile without pluginScanners selected aig-mcp")
+	}
+}

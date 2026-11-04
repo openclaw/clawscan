@@ -355,16 +355,20 @@ plugin directory the adapter:
 
 `aig-mcp-scan` 0.2.0 gives its agent a shell and file writes during static
 audits, and prompt injection in the audited plugin could reach them; its tool
-lookup is also case-insensitive. The runtime image's patch never registers the
-shell, limits static audits to an allow-list of read-only tools matched on
-canonical (trimmed, lowercase) names, and keeps every read confined to the
-audited directory. Upstream keeps only a 20,000-character prefix of any tool
+lookup is also case-insensitive, and its MCP client tools accept any URL the
+model supplies. The runtime image's patch never registers the shell, limits
+static audits to an allow-list of read-only tools matched on canonical
+(trimmed, lowercase) names, so the MCP tools are rejected before lookup, refuses
+model-chosen MCP destinations before any transport is created, and keeps every
+read confined to the audited directory. Upstream keeps only a 20,000-character prefix of any tool
 result over 40,000 characters in the model's history, so the patch also caps
 `read_file` at 30,000 characters with an explicit continuation and adds
 `read_file_chunk` (character-offset reads) and `search_files` (bounded literal
 search) so the rest of a large or compiled file is visible to the model. The
 image build runs those checks and fails if the patch stops applying or the
-registered tools change. The adapter therefore expects the Docker sandbox: with
+registered tools change. It also runs the real `aig-mcp-scan` CLI against a
+loopback model stub that injects remote MCP calls, and fails if a loopback
+canary (also set as the HTTP(S) proxy) receives any connection. The adapter therefore expects the Docker sandbox: with
 `--sandbox off` it fails unless `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` acknowledges a
 disposable host. A plain `pip install aig-mcp-scan` (and `clawscan install
 aig-mcp`) is unpatched; host consumers such as a ClawHub worker must install

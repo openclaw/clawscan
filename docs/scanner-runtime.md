@@ -85,10 +85,12 @@ The runtime also installs Tencent's `aig-mcp-scan` 0.2.0 from PyPI
 `aig-mcp` scanner. Static audits read untrusted plugin code, so
 `patches/aig-mcp-static-tools.patch` never registers the shell tool, allows
 only `read_file`, `read_file_chunk`, `search_files`, `think` and `finish`
-(matched case-insensitively, as upstream resolves names), and adds the bounded
-chunk and search tools so files past upstream's history truncation stay
-model-visible. `tests/test_aig_mcp_static_tools.py` runs in the build and fails
-it if the patch or the registered tools drift. The scanner uses Chat Completions
+(matched case-insensitively, as upstream resolves names), refuses model-chosen
+MCP destinations, and adds the bounded chunk and search tools so files past
+upstream's history truncation stay model-visible. `tests/test_aig_mcp_static_tools.py`
+and `tests/test_aig_mcp_entry_network.py` run in the build. The second drives
+the real CLI with a loopback model stub that injects remote MCP calls and fails
+if a loopback canary sees any connection. The scanner uses Chat Completions
 without a reasoning-effort or service-tier control and receives the model and
 endpoint as explicit `-m`/`-u` flags. Only the top-level package is pinned; its
 dependencies resolve at build time.
