@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   native:
-    name: Qualify locked production SDKs (ca84550)
+    name: Qualify locked production SDKs (15d86a2)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-22.04
     timeout-minutes: 25
@@ -24,7 +24,7 @@ jobs:
       - name: Checkout exact reviewed candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ca8455038be7451f7a8ae5221008cbffa5de5113
+          ref: 15d86a267275b4c2f0542a7161671aca0ffc4f98
           fetch-depth: 2
           path: candidate
           persist-credentials: false
@@ -59,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: production-scanner-contract-ca84550
+          name: production-scanner-contract-15d86a2
           path: |
             ${{ runner.temp }}/clawscan-production-contract/inputs.json
             ${{ runner.temp }}/clawscan-production-contract/result.json
