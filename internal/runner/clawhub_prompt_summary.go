@@ -2,57 +2,15 @@ package runner
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
-	"unicode/utf8"
 )
-
-// codexCLIMaxInputChars is the turn/start input limit enforced by the Codex
-// CLI pinned for the ClawHub judge (OPENAI_CODEX_VERSION in
-// docker/clawscan-runtime/Dockerfile and the judge smoke workflow, 0.164.0).
-// Codex counts Unicode scalar values and rejects longer input with
-// input_too_large before contacting the model. Revisit this constant whenever
-// the pinned Codex CLI changes.
-const codexCLIMaxInputChars = 1_048_576
-
-// clawHubJudgePromptBudgetChars keeps 10% headroom under the Codex limit for
-// the ClawHub parity profiles. A rendered prompt above this budget is never
-// handed to the judge command.
-const clawHubJudgePromptBudgetChars = codexCLIMaxInputChars * 9 / 10
-
-// ErrJudgePromptTooLarge classifies a judge attempt that was refused before
-// the judge command started because the rendered prompt exceeded its budget.
-var ErrJudgePromptTooLarge = errors.New("judge prompt too large")
-
-type judgePromptTooLargeError struct {
-	chars  int
-	budget int
-}
-
-func (err *judgePromptTooLargeError) Error() string {
-	return fmt.Sprintf("judge prompt too large: %d chars exceeds budget %d", err.chars, err.budget)
-}
-
-func (err *judgePromptTooLargeError) Is(target error) bool {
-	return target == ErrJudgePromptTooLarge
-}
-
-func judgePromptChars(prompt string) int {
-	return utf8.RuneCountInString(prompt)
-}
-
-func checkJudgePromptBudget(prompt string, budget int) error {
-	if chars := judgePromptChars(prompt); chars > budget {
-		return &judgePromptTooLargeError{chars: chars, budget: budget}
-	}
-	return nil
-}
 
 // SkillSpector accounting lists carry one row per excluded, partially
 // inspected, or referenced file, so they grow with package size. The judge
-// workspace keeps the complete raw report as skillspector-report-0.json; the
-// prompt carries counts plus a bounded, deterministic sample instead.
+// workspace keeps the complete raw report at scanners/skillspector.json; the
+// prompt carries counts plus a bounded, deterministic sample instead. Any
+// input limit belongs to the judge command, not to ClawScan.
 var clawHubCompletenessRecordLists = []struct {
 	field   string
 	groupBy string
@@ -72,7 +30,7 @@ const (
 	maxClawHubCompletenessEntryListItems = 16
 	maxClawHubCompletenessEntryItemChars = 128
 	clawHubCompletenessUngroupedKey      = "(none)"
-	clawHubSkillSpectorWorkspaceReport   = "skillspector-report-0.json"
+	clawHubSkillSpectorWorkspaceReport   = "scanners/skillspector.json"
 )
 
 func summarizeClawHubAnalysisCompleteness(completeness map[string]any) map[string]any {

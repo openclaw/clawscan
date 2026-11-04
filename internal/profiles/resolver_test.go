@@ -30,7 +30,7 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if opts.ConfigSource != "built-in" {
 		t.Fatalf("config source = %q, want built-in", opts.ConfigSource)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static,aig" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,aig" {
 		t.Fatalf("scanners = %q", got)
 	}
 	if len(opts.GateRules) != 0 {
@@ -219,12 +219,12 @@ func TestResolveArgsRejectsMissingExplicitSelection(t *testing.T) {
 func TestResolveArgsTreatsScannerOnlyCommandAsAdHocWithoutDefaultJudge(t *testing.T) {
 	dir := t.TempDir()
 
-	opts, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static"}, dir)
+	opts, err := ResolveArgs([]string{"./skill", "--scanner", "agentverus"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 	if opts.Profile != "" {
@@ -241,19 +241,19 @@ func TestResolveArgsFlagsOnlyRunIgnoresAncestorConfig(t *testing.T) {
 profiles:
   custom:
     scanners:
-      - virustotal
+      - socket
 `)
 	dir := filepath.Join(parent, "child")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	opts, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static"}, dir)
+	opts, err := ResolveArgs([]string{"./skill", "--scanner", "agentverus"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 	if opts.ConfigSource != "" {
@@ -267,7 +267,7 @@ func TestResolveArgsBuiltInProfileProvenanceSurvivesDiscoveredConfig(t *testing.
 profiles:
   unrelated:
     scanners:
-      - clawscan-static
+      - agentverus
 `)
 
 	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, dir)
@@ -293,7 +293,7 @@ func TestResolveArgsUnknownProfileDoesNotDiscoverConfig(t *testing.T) {
 profiles:
   custom:
     scanners:
-      - virustotal
+      - socket
 `)
 
 	_, err := ResolveArgs([]string{"./skill", "--profile", "custom"}, dir)
@@ -313,7 +313,7 @@ func TestResolveArgsDiscoverConfigFlag_RestoresOldBehavior(t *testing.T) {
 profiles:
   custom:
     scanners:
-      - clawscan-static
+      - agentverus
 `)
 
 	opts, err := ResolveArgs([]string{"./skill", "--profile", "custom", "--discover-config"}, dir)
@@ -336,7 +336,7 @@ func TestResolveArgsDiscoverConfigRequiresProfile(t *testing.T) {
 	// Without a profile the run would record the discovered file as its
 	// ConfigSource while applying none of its settings (sandbox mode/image/
 	// env); rejecting is honest, silently ignoring the config is not.
-	_, err := ResolveArgs([]string{"./skill", "--scanner", "clawscan-static", "--discover-config"}, t.TempDir())
+	_, err := ResolveArgs([]string{"./skill", "--scanner", "agentverus", "--discover-config"}, t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for --discover-config without --profile")
 	}
@@ -347,7 +347,7 @@ func TestResolveArgsDiscoverConfigRequiresProfile(t *testing.T) {
 
 func TestResolveArgsConfigAndDiscoverConfigFlagsAreMutuallyExclusive(t *testing.T) {
 	dir := t.TempDir()
-	_, err := ResolveArgs([]string{"./skill", "--config", "config.yml", "--discover-config", "--scanner", "clawscan-static"}, dir)
+	_, err := ResolveArgs([]string{"./skill", "--config", "config.yml", "--discover-config", "--scanner", "agentverus"}, dir)
 	if err == nil {
 		t.Fatal("expected error for --config and --discover-config together")
 	}
@@ -362,14 +362,14 @@ func TestResolveArgsExplicitConfigUsesExplicitSource(t *testing.T) {
 profiles:
   builtin:
     scanners:
-      - clawscan-static
+      - agentverus
 `)
 	explicit := filepath.Join(dir, "custom.yml")
 	writeFile(t, explicit, `version: 1
 profiles:
   custom:
     scanners:
-      - virustotal
+      - socket
 `)
 
 	opts, err := ResolveArgs([]string{"./skill", "--config", explicit, "--profile", "custom"}, dir)
@@ -393,12 +393,12 @@ func TestResolveArgsAllowsExplicitProfileWithoutTarget(t *testing.T) {
 	if opts.Target != "" {
 		t.Fatalf("target = %q", opts.Target)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "skillspector,clawscan-static,aig" {
+	if got := strings.Join(opts.Scanners, ","); got != "skillspector,aig" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
 
-func TestResolveArgsDoesNotRequireVirusTotalForClawHubProfile(t *testing.T) {
+func TestResolveArgsClawHubProfileNeedsOnlyJudgeCredentials(t *testing.T) {
 	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub"}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -415,7 +415,7 @@ func TestResolveArgsDoesNotRequireVirusTotalForClawHubProfile(t *testing.T) {
 }
 
 func TestResolveArgsAllowsExplicitScannerWithoutTarget(t *testing.T) {
-	opts, err := ResolveArgs([]string{"--scanner", "clawscan-static"}, t.TempDir())
+	opts, err := ResolveArgs([]string{"--scanner", "agentverus"}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,14 +425,14 @@ func TestResolveArgsAllowsExplicitScannerWithoutTarget(t *testing.T) {
 	if opts.Profile != "" {
 		t.Fatalf("profile = %q", opts.Profile)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
 
 func TestResolveBenchmarkRunSetForwardsPredictionsOutput(t *testing.T) {
 	resolved, err := ResolveBenchmarkRunSet("clawhub-security-signals", []string{
-		"--scanner", "clawscan-static",
+		"--scanner", "agentverus",
 		"--predictions-output", "./submission/predictions.jsonl",
 	}, t.TempDir())
 	if err != nil {
@@ -449,7 +449,7 @@ func TestResolveBenchmarkRunSetForwardsPredictionsOutput(t *testing.T) {
 
 func TestResolveBenchmarkRunSetForwardsIDsSource(t *testing.T) {
 	resolved, err := ResolveBenchmarkRunSet("SkillTrustBench", []string{
-		"--scanner", "clawscan-static",
+		"--scanner", "agentverus",
 		"--ids", "./subset.jsonl",
 	}, t.TempDir())
 	if err != nil {
@@ -492,8 +492,8 @@ func TestResolveBenchmarkRunSetUsesDocumentedClawHubAIGCandidateCommand(t *testi
 
 func TestResolveBenchmarkRunSetRejectsIDsWithLimitOrOffset(t *testing.T) {
 	for _, args := range [][]string{
-		{"--scanner", "clawscan-static", "--ids", "./subset.jsonl", "--limit", "1"},
-		{"--scanner", "clawscan-static", "--ids", "./subset.jsonl", "--offset", "1"},
+		{"--scanner", "agentverus", "--ids", "./subset.jsonl", "--limit", "1"},
+		{"--scanner", "agentverus", "--ids", "./subset.jsonl", "--offset", "1"},
 	} {
 		_, err := ResolveBenchmarkRunSet("SkillTrustBench", args, t.TempDir())
 		if err == nil || err.Error() != "--ids is mutually exclusive with --limit and --offset" {
@@ -508,7 +508,7 @@ func TestResolveBenchmarkRunSetUsesProposalClawHubProfileBeforeBuiltIn(t *testin
 profiles:
   clawhub:
     scanners:
-      - clawscan-static
+      - agentverus
     json: true
 `)
 
@@ -528,7 +528,7 @@ profiles:
 	if opts.Benchmark == nil || opts.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" || opts.Benchmark.Split != "benchmark" {
 		t.Fatalf("benchmark = %#v", opts.Benchmark)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 	if opts.Judge != nil {
@@ -549,7 +549,7 @@ func TestResolveArgsDiscoversNearestProjectConfigAndShadowsBuiltIn(t *testing.T)
 profiles:
   clawhub:
     scanners:
-      - virustotal
+      - socket
 `)
 	child := filepath.Join(dir, "nested")
 	if err := os.Mkdir(child, 0o755); err != nil {
@@ -559,7 +559,7 @@ profiles:
 profiles:
   clawhub:
     scanners:
-      - clawscan-static
+      - agentverus
     json: true
 `)
 
@@ -568,7 +568,7 @@ profiles:
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 	if !opts.JSON {
@@ -582,14 +582,14 @@ func TestResolveArgsLoadsExplicitConfigAndSkipsDiscovery(t *testing.T) {
 profiles:
   local:
     scanners:
-      - virustotal
+      - socket
 `)
 	config := filepath.Join(dir, "security", "profile.yml")
 	writeFile(t, config, `version: 1
 profiles:
   local:
     scanners:
-      - clawscan-static
+      - agentverus
     output: results/run.json
 `)
 
@@ -598,7 +598,7 @@ profiles:
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 	wantOutput := filepath.Join(dir, "security", "results", "run.json")
@@ -614,7 +614,7 @@ func TestResolveArgsLoadsRelativeExplicitConfigFromCWD(t *testing.T) {
 profiles:
   local:
     scanners:
-      - clawscan-static
+      - agentverus
 `)
 
 	opts, err := ResolveArgs([]string{"./skill", "--config", "security/profile.yml", "--profile", "local"}, dir)
@@ -622,7 +622,7 @@ profiles:
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -688,14 +688,14 @@ func TestResolveArgsUnknownProfileListsAvailableProfiles(t *testing.T) {
 
 func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 	dir := t.TempDir()
-	fixture := filepath.Join(dir, "vt.json")
+	fixture := filepath.Join(dir, "socket.json")
 	writeFile(t, fixture, `{"ok":true}`)
 
 	opts, err := ResolveArgs([]string{
 		"./skill",
 		"--profile", "clawhub",
-		"--scanner", "virustotal",
-		"--scanner-result", "virustotal=" + fixture,
+		"--scanner", "socket",
+		"--scanner-result", "socket=" + fixture,
 		"--output", "cli.json",
 		"--json",
 		"--judge", "judge --out {{ output }}",
@@ -707,10 +707,10 @@ func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := strings.Join(opts.Scanners, ","); got != "virustotal" {
+	if got := strings.Join(opts.Scanners, ","); got != "socket" {
 		t.Fatalf("scanners = %q", got)
 	}
-	if opts.ScannerResultPaths["virustotal"] != fixture {
+	if opts.ScannerResultPaths["socket"] != fixture {
 		t.Fatalf("scanner results = %#v", opts.ScannerResultPaths)
 	}
 	if opts.OutputPath != "cli.json" {
@@ -745,7 +745,7 @@ sandbox:
 profiles:
   review:
     scanners:
-      - clawscan-static
+      - agentverus
     sandbox:
       image: ghcr.io/acme/review-runtime:v2
       env:
@@ -781,7 +781,7 @@ func TestResolveArgsSupportsSandboxMountConfig(t *testing.T) {
 		"profiles:\n"+
 		"  review:\n"+
 		"    scanners:\n"+
-		"      - clawscan-static\n")
+		"      - agentverus\n")
 
 	opts, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
 	if err != nil {
@@ -816,7 +816,7 @@ func TestResolveArgsValidatesSandboxMountConfig(t *testing.T) {
 				"profiles:\n"+
 				"  review:\n"+
 				"    scanners:\n"+
-				"      - clawscan-static\n")
+				"      - agentverus\n")
 
 			_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
 			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
@@ -830,10 +830,10 @@ func TestResolveArgsRejectsUnrequestedScannerResultAfterOverrides(t *testing.T) 
 	_, err := ResolveArgs([]string{
 		"./skill",
 		"--profile", "clawhub",
-		"--scanner", "clawscan-static",
-		"--scanner-result", "virustotal=./vt.json",
+		"--scanner", "agentverus",
+		"--scanner-result", "socket=./socket.json",
 	}, t.TempDir())
-	if err == nil || err.Error() != "Scanner result provided for unrequested scanner: virustotal" {
+	if err == nil || err.Error() != "Scanner result provided for unrequested scanner: socket" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -845,7 +845,7 @@ func TestResolveArgsResolvesConfigRelativeJudgePlaceholderPaths(t *testing.T) {
 profiles:
   review:
     scanners:
-      - clawscan-static
+      - agentverus
     judge:
       command: judge --prompt {{ prompt:./prompts/review.md }} --schema {{ output_schema:schemas/out.json }} --out {{ output }}
 `)
@@ -869,7 +869,7 @@ func TestResolveArgsRejectsSecretValuesInConfig(t *testing.T) {
 profiles:
   bad:
     scanners:
-      - clawscan-static
+      - agentverus
     env:
       OPENAI_API_KEY: secret
 `)
@@ -887,12 +887,12 @@ func TestResolveArgsRejectsDuplicateScanners(t *testing.T) {
 profiles:
   dup:
     scanners:
-      - clawscan-static
-      - clawscan-static
+      - agentverus
+      - agentverus
 `)
 
 	_, err := ResolveArgs([]string{"./skill", "--profile", "dup", "--discover-config"}, dir)
-	if err == nil || err.Error() != "Duplicate scanner in profile dup: clawscan-static" {
+	if err == nil || err.Error() != "Duplicate scanner in profile dup: agentverus" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -904,7 +904,7 @@ func TestResolveArgsParsesUserDefinedScannerAlongsideBuiltIn(t *testing.T) {
 profiles:
   review:
     scanners:
-      - clawscan-static
+      - agentverus
       - id: my-scanner
         command: my-scanner --json {{target}}
         env:
@@ -919,7 +919,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static,my-scanner" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus,my-scanner" {
 		t.Fatalf("scanners = %q", got)
 	}
 	adapter, ok := opts.ScannerRegistry.Adapter("my-scanner")
@@ -1285,7 +1285,7 @@ profiles:
         gate:
           blockOnExitCode: nonzero
 `)
-	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review", "--scanner", "clawscan-static", "--sandbox", "off"}, dir)
+	opts, err := ResolveArgs([]string{target, "--config", config, "--profile", "review", "--scanner", "agentverus", "--sandbox", "off"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1302,7 +1302,7 @@ profiles:
 	}
 
 	benchmark, err := ResolveBenchmarkRunSet("clawhub-security-signals", []string{
-		"--config", config, "--profile", "review", "--scanner", "clawscan-static", "--sandbox", "off",
+		"--config", config, "--profile", "review", "--scanner", "agentverus", "--sandbox", "off",
 	}, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -1331,7 +1331,7 @@ profiles:
           warnOnExitCode: 2
 `)
 	resolved, err := ResolveRunSet([]string{
-		"--config", config, "--scanner", "clawscan-static", "--sandbox", "off",
+		"--config", config, "--scanner", "agentverus", "--sandbox", "off",
 	}, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -1353,12 +1353,12 @@ func TestResolveArgsRejectsUserDefinedScannerIDCollision(t *testing.T) {
 profiles:
   review:
     scanners:
-      - id: clawscan-static
+      - id: agentverus
         command: custom-static {{target}}
 `)
 
 	_, err := ResolveArgs([]string{"./skill", "--config", config, "--profile", "review"}, dir)
-	if err == nil || err.Error() != "User-defined scanner clawscan-static collides with a built-in scanner ID" {
+	if err == nil || err.Error() != "User-defined scanner agentverus collides with a built-in scanner ID" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -1624,7 +1624,7 @@ func TestResolveArgsSupportsAliasedScannerEntries(t *testing.T) {
 profiles:
   templates:
     scanners:
-      - &builtin clawscan-static
+      - &builtin agentverus
       - &custom
         id: my-scanner
         command: my-scanner {{target}}
@@ -1638,7 +1638,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static,my-scanner" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus,my-scanner" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -1976,11 +1976,11 @@ profiles:
 		t.Fatalf("err = %v", err)
 	}
 
-	opts, err := ResolveArgs([]string{"./skill", "--profile", "empty", "--scanner", "clawscan-static", "--discover-config"}, dir)
+	opts, err := ResolveArgs([]string{"./skill", "--profile", "empty", "--scanner", "agentverus", "--discover-config"}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(opts.Scanners, ","); got != "clawscan-static" {
+	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
 		t.Fatalf("scanners = %q", got)
 	}
 }
@@ -2039,7 +2039,7 @@ func TestResolveScannerEnvDefaults(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles:\n  clawhub:\n    scanners: [clawscan-static]\n")
+	writeFile(t, filepath.Join(dir, ".clawscan.yml"), "version: 1\nprofiles:\n  clawhub:\n    scanners: [agentverus]\n")
 	opts, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--discover-config"}, dir)
 	if err != nil {
 		t.Fatal(err)

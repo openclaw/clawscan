@@ -31,7 +31,7 @@ func TestRunTargetsDiscoveryFailuresRetainSafeOutput(t *testing.T) {
 			}
 			output := filepath.Join(root, "artifact.json")
 			result, err := RunTargets(Options{
-				Scanners: []string{"clawscan-static", "snyk"}, Judge: &JudgeOptions{Command: "must-not-run"}, OutputPath: output,
+				Scanners: []string{fixtureScannerID, "snyk"}, Judge: &JudgeOptions{Command: "must-not-run"}, OutputPath: output,
 			}, RunContext{Env: map[string]string{}}, root)
 			if err == nil || !strings.Contains(err.Error(), want) || result.Single == nil {
 				t.Fatalf("discovery failure evidence lost: %+v, %v", result, err)
@@ -63,14 +63,14 @@ func TestRunTargetsDiscoveryFailureStillRejectsInputOutputAliases(t *testing.T) 
 			if err := os.WriteFile(input, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			opts := Options{Scanners: []string{"clawscan-static"}, OutputPath: input}
+			opts := Options{Scanners: []string{fixtureScannerID}, OutputPath: input}
 			switch source {
 			case "context", "hardlink", "symlink-parent":
 				opts.ContextPath = input
 			case "config":
 				opts.ConfigSource = input
 			case "scanner":
-				opts.ScannerResultPaths = map[string]string{"clawscan-static": input}
+				opts.ScannerResultPaths = map[string]string{fixtureScannerID: input}
 			case "prompt":
 				opts.Judge = &JudgeOptions{Command: "cat {{ prompt:" + input + " }}"}
 			case "schema":
@@ -97,7 +97,7 @@ func TestRunTargetsDiscoveryFailureStillRejectsInputOutputAliases(t *testing.T) 
 func TestRunTargetsDiscoveryFailureRetainsOutputFailure(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "artifact.json")
-	result, err := RunTargets(Options{Scanners: []string{"clawscan-static"}, OutputPath: output}, RunContext{
+	result, err := RunTargets(Options{Scanners: []string{fixtureScannerID}, OutputPath: output}, RunContext{
 		Env: map[string]string{},
 		Now: func() time.Time {
 			if err := os.MkdirAll(output, 0o700); err != nil {
@@ -106,7 +106,7 @@ func TestRunTargetsDiscoveryFailureRetainsOutputFailure(t *testing.T) {
 			return time.Unix(0, 0)
 		},
 	}, root)
-	if err == nil || !strings.Contains(err.Error(), "./skills was not found") || !strings.Contains(err.Error(), "refusing non-regular output") || result.Single == nil || result.Single.Complete || result.Single.Status != "failed" || result.Single.Scanners["clawscan-static"].Status != "not_started" || result.Single.Error != err.Error() {
+	if err == nil || !strings.Contains(err.Error(), "./skills was not found") || !strings.Contains(err.Error(), "refusing non-regular output") || result.Single == nil || result.Single.Complete || result.Single.Status != "failed" || result.Single.Scanners[fixtureScannerID].Status != "not_started" || result.Single.Error != err.Error() {
 		t.Fatalf("output failure masked preparation failure or evidence: %+v, %v", result, err)
 	}
 }
@@ -117,9 +117,9 @@ func TestRunTargetsCanceledDiscoveryRetainsSafeOutput(t *testing.T) {
 	cancel()
 	output := filepath.Join(root, "artifact.json")
 	result, err := RunTargets(Options{
-		Scanners: []string{"clawscan-static"}, Judge: &JudgeOptions{Command: "must-not-run"}, OutputPath: output,
+		Scanners: []string{fixtureScannerID}, Judge: &JudgeOptions{Command: "must-not-run"}, OutputPath: output,
 	}, RunContext{Context: caller, Env: map[string]string{}}, root)
-	if !errors.Is(err, context.Canceled) || result.Single == nil || result.Single.Complete || result.Single.Status != "canceled" || result.Single.Scanners["clawscan-static"].Status != "not_started" || result.Single.Judge == nil || result.Single.Judge.CommandStarted == nil || *result.Single.Judge.CommandStarted {
+	if !errors.Is(err, context.Canceled) || result.Single == nil || result.Single.Complete || result.Single.Status != "canceled" || result.Single.Scanners[fixtureScannerID].Status != "not_started" || result.Single.Judge == nil || result.Single.Judge.CommandStarted == nil || *result.Single.Judge.CommandStarted {
 		t.Fatalf("caller cancellation or unstarted evidence lost: %+v, %v", result, err)
 	}
 	if _, err := os.Stat(output); err != nil {

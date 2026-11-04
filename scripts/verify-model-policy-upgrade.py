@@ -26,7 +26,7 @@ CONTROLS = (
     "DEFAULT_BASE_URL",
 )
 PROBE = r"""
-import hashlib, json, os, sys
+import json, os, sys
 from pathlib import Path
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
@@ -38,15 +38,6 @@ if name == "codex":
     record["config"] = [args[i+1] for i, v in enumerate(args) if v == "-c"]
     record["ignoreUserConfig"] = "--ignore-user-config" in args
     result = {"verdict":"benign", "probe":True}
-    challenge = Path("artifact-inspection.json")
-    if challenge.exists():
-        data = json.loads(challenge.read_text())
-        file = Path(data["required_file"])
-        result["artifact_inspection"] = {
-            "status":"completed", "challenge":data["challenge"],
-            "required_file_sha256":hashlib.sha256(file.read_bytes()).hexdigest(),
-            "files_inspected":[str(file)],
-        }
     if "--output-last-message" in args:
         Path(args[args.index("--output-last-message")+1]).write_text(json.dumps(result))
     else:

@@ -179,10 +179,10 @@ func runOpenClawInstallPolicyContext(ctx context.Context, args []string, environ
 			return failClosed(err)
 		}
 	}
-	metadataStaticOnly := applyInstallPolicyMetadataDefaults(&opts, args, metadataPreflight)
-	windowsDegraded := false
-	if !metadataStaticOnly {
-		windowsDegraded = applyInstallPolicyPlatformDefaults(&opts, args, runtime.GOOS)
+	if installPolicyMetadataValidationOnly(opts, args, metadataPreflight) {
+		response := installpolicy.Response{ProtocolVersion: 1, Decision: "allow"}
+		addNPMMetadataPreflightFinding(&response)
+		return installpolicy.WriteResponse(output, response)
 	}
 	if request.IsDependencyTree() {
 		scanTarget, cleanup, empty, err := installpolicy.PrepareDependencyTreeScanTarget(
@@ -204,6 +204,9 @@ func runOpenClawInstallPolicyContext(ctx context.Context, args []string, environ
 		}
 		opts.Target = scanTarget
 	}
+	if installPolicyWindowsUnscanned(opts, args, runtime.GOOS) {
+		return installpolicy.WriteResponse(output, windowsUnscannedResponse())
+	}
 	result, err := runner.RunTargets(opts, scanRunContextWithCaller(ctx, environ), cwd)
 	if err != nil {
 		return failClosed(err)
@@ -213,28 +216,35 @@ func runOpenClawInstallPolicyContext(ctx context.Context, args []string, environ
 	}
 	response := installpolicy.ResponseFromArtifact(*result.Single)
 	if metadataPreflight {
-		installpolicy.AddFinding(&response, installpolicy.Finding{
-			RuleID:   "clawscan.npm-metadata-preflight",
-			Severity: "info",
-			Message:  "ClawScan validated npm registry metadata in this preflight phase; OpenClaw submits the resolved package and dependency tree for separate code scans.",
-		})
-	}
-	if windowsDegraded {
-		applyWindowsDegradedResponse(&response)
+		addNPMMetadataPreflightFinding(&response)
 	}
 	return installpolicy.WriteResponse(output, response)
 }
 
-func applyWindowsDegradedResponse(response *installpolicy.Response) {
-	if response.Decision != "block" {
-		response.Decision = "warn"
-		response.Reason = "ClawScan used static-only scanning on native Windows; full Docker scanner coverage was unavailable"
-	}
+func addNPMMetadataPreflightFinding(response *installpolicy.Response) {
 	installpolicy.AddFinding(response, installpolicy.Finding{
-		RuleID:   "clawscan.windows-static-fallback",
-		Severity: "warn",
-		Message:  "Docker scanning is unavailable in the native Windows policy path; ClawScan used static analysis only.",
+		RuleID:   "clawscan.npm-metadata-preflight",
+		Severity: "info",
+		Message:  "ClawScan validated npm registry metadata in this preflight phase; OpenClaw submits the resolved package and dependency tree for separate code scans.",
 	})
+}
+
+// windowsUnscannedResponse is the visible native-Windows response for the
+// built-in profile: its scanners need the Linux Docker runtime, which cannot
+// consume native Windows staging paths, so nothing was scanned and OpenClaw
+// must obtain explicit confirmation.
+func windowsUnscannedResponse() installpolicy.Response {
+	response := installpolicy.Response{
+		ProtocolVersion: 1,
+		Decision:        "warn",
+		Reason:          "ClawScan could not scan on native Windows; Docker scanner coverage was unavailable",
+	}
+	installpolicy.AddFinding(&response, installpolicy.Finding{
+		RuleID:   "clawscan.windows-unscanned",
+		Severity: "warn",
+		Message:  "Docker scanning is unavailable in the native Windows policy path; ClawScan did not scan this candidate.",
+	})
+	return response
 }
 
 func hasProfileSelection(args []string) bool {
@@ -247,48 +257,27 @@ func hasProfileSelection(args []string) bool {
 	return false
 }
 
-func applyInstallPolicyPlatformDefaults(opts *runner.Options, args []string, goos string) bool {
-	if goos != "windows" ||
-		opts.Profile != "openclaw-install-policy" ||
-		opts.ConfigSource != "built-in" ||
-		hasInstallPolicyConfigOverride(args) {
-		return false
-	}
-	for _, arg := range args {
-		if arg == "--scanner" || strings.HasPrefix(arg, "--scanner=") ||
-			arg == "--sandbox" || strings.HasPrefix(arg, "--sandbox=") {
-			return false
-		}
-	}
-	opts.Scanners = []string{"clawscan-static"}
-	keepInstallPolicyGateRules(opts, "clawscan-static")
-	opts.Sandbox.Mode = runner.SandboxModeOff
-	return true
+// installPolicyWindowsUnscanned reports whether the built-in profile would
+// need Docker on native Windows. Explicit --scanner or --sandbox arguments and
+// operator-owned configs keep their own execution.
+func installPolicyWindowsUnscanned(opts runner.Options, args []string, goos string) bool {
+	return goos == "windows" &&
+		opts.Profile == "openclaw-install-policy" &&
+		opts.ConfigSource == "built-in" &&
+		!hasInstallPolicyExecutionOverride(args) &&
+		!hasInstallPolicyConfigOverride(args)
 }
 
-func applyInstallPolicyMetadataDefaults(
-	opts *runner.Options,
-	args []string,
-	metadataPreflight bool,
-) bool {
-	if !metadataPreflight ||
-		opts.Profile != "openclaw-install-policy" ||
-		opts.ConfigSource != "built-in" ||
-		hasInstallPolicyExecutionOverride(args) || hasInstallPolicyConfigOverride(args) {
-		return false
-	}
-	opts.Scanners = []string{"clawscan-static"}
-	keepInstallPolicyGateRules(opts, "clawscan-static")
-	opts.Sandbox.Mode = runner.SandboxModeOff
-	return true
-}
-
-func keepInstallPolicyGateRules(opts *runner.Options, scannerID string) {
-	for configuredScannerID := range opts.GateRules {
-		if configuredScannerID != scannerID {
-			delete(opts.GateRules, configuredScannerID)
-		}
-	}
+// installPolicyMetadataValidationOnly reports whether a validated npm metadata
+// preflight under the built-in profile needs no scan: the metadata is not
+// plugin code, and OpenClaw submits the package and dependency tree for
+// separate code scans.
+func installPolicyMetadataValidationOnly(opts runner.Options, args []string, metadataPreflight bool) bool {
+	return metadataPreflight &&
+		opts.Profile == "openclaw-install-policy" &&
+		opts.ConfigSource == "built-in" &&
+		!hasInstallPolicyExecutionOverride(args) &&
+		!hasInstallPolicyConfigOverride(args)
 }
 
 func hasInstallPolicyExecutionOverride(args []string) bool {
@@ -892,7 +881,6 @@ Required environment variables:
   aig: LLM_API_KEY or OPENAI_API_KEY. Use "clawscan scanners aig" for local scanner details and optional model configuration.
   socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
-  virustotal: VIRUSTOTAL_API_KEY
   skillspector: no ClawScan-required env vars; provider env vars enable LLM mode, otherwise --no-llm is used. Use "clawscan scanners skillspector" for provider vars.
   cisco: no ClawScan-required env vars; optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers.
   judge: provider credentials belong to the command passed to --judge.
@@ -904,7 +892,7 @@ Target notes:
   Plain clawscan without --scanner, --profile, or --config is invalid.
   Most scanners use a local skill file or directory target.
   A directory holding openclaw.plugin.json is scanned as an OpenClaw plugin.
-  The clawhub profile runs SkillSpector and clawscan-static for plugins as it does for skills.
+  The clawhub profile runs SkillSpector for plugins as it does for skills.
   Other skill-only scanners return a skipped result for plugins.
   Plugins are never auto-discovered; pass the plugin directory explicitly.
   Socket runs the public Socket CLI full-scan path over local dependency manifests.

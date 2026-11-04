@@ -81,7 +81,7 @@ func clawHubSkillSpectorAnalysis(artifact Artifact, checkedAtOverride *int64) (a
 	if result.Status == "failed" {
 		normalized.Status = "error"
 		normalized.Error = "SkillSpector command did not complete successfully."
-	} else if usablePartialScanner(artifact.Profile, "skillspector", result) {
+	} else if usablePartialScanner("skillspector", result) {
 		normalized.Status = "partial"
 		normalized.Error = ""
 	}

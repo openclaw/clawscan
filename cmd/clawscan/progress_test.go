@@ -152,8 +152,15 @@ func TestJudgeChildProgressSurvivesOuterKill(t *testing.T) {
 	if err := os.WriteFile(judgePath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// A scanner result fixture keeps scanner subprocess events out of the
+	// diagnostics, so any command_end event could only come from the judge.
+	skillSpectorFixture := filepath.Join(root, "skillspector.json")
+	if err := os.WriteFile(skillSpectorFixture, []byte(`{"status":"clean","findings":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	child := exec.Command(os.Args[0], "-test.run=^TestJudgeChildProgressCLIHelper$")
 	child.Env = append(os.Environ(), "CLAWSCAN_TEST_JUDGE_HELPER=1", "CLAWSCAN_TEST_TARGET="+target,
+		"CLAWSCAN_TEST_SKILLSPECTOR="+skillSpectorFixture,
 		"CLAWSCAN_TEST_OUTPUT="+artifactPath, "CLAWSCAN_TEST_PID_FILE="+pidPath,
 		"CLAWSCAN_TEST_JUDGE="+strconv.Quote(judgePath), "CLAWSCAN_PROGRESS=1", "CLAWSCAN_CHILD_PROGRESS=1")
 	var stdout bytes.Buffer
@@ -229,7 +236,8 @@ func TestJudgeChildProgressCLIHelper(t *testing.T) {
 	if os.Getenv("CLAWSCAN_TEST_JUDGE_HELPER") != "1" {
 		return
 	}
-	err := run([]string{os.Getenv("CLAWSCAN_TEST_TARGET"), "--scanner", "clawscan-static", "--sandbox", "off",
+	err := run([]string{os.Getenv("CLAWSCAN_TEST_TARGET"), "--scanner", "skillspector",
+		"--scanner-result", "skillspector=" + os.Getenv("CLAWSCAN_TEST_SKILLSPECTOR"), "--sandbox", "off",
 		"--judge", os.Getenv("CLAWSCAN_TEST_JUDGE"), "--output", os.Getenv("CLAWSCAN_TEST_OUTPUT")}, os.Environ())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

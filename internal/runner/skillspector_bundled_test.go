@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,20 +46,15 @@ func TestClawHubBundledPartialReachesJudge(t *testing.T) {
 		if err != nil || !bytes.Contains(rendered, []byte("bundled_reports")) || !bytes.Contains(rendered, []byte("rootPath")) {
 			t.Fatalf("prompt lost bundled source mapping: err=%v", err)
 		}
-		report, err := os.ReadFile(filepath.Join(workspace, "skillspector-report-0.json"))
+		report, err := os.ReadFile(filepath.Join(workspace, "scanners", "skillspector.json"))
 		if err != nil || !bytes.Equal(report, raw) || !bytes.Contains(report, []byte("dynamic_import")) {
 			t.Fatalf("judge lost original bundled reports/gaps: err=%v", err)
 		}
 		if _, err := os.ReadFile(filepath.Join(workspace, "artifact", "skills", "alpha", "tool.js")); err != nil {
 			return err
 		}
-		receipt := partialJudgeReceipt(t, workspace)
-		files := receipt["files_inspected"].([]string)
-		receipt["version"], receipt["required_file"] = 2, files[0]
-		receipt["additional_files_inspected"] = []string{"artifact/skills/alpha/tool.js"}
-		delete(receipt, "files_inspected")
 		command.writeOutput = string(judgeRetryOutput(t, map[string]any{
-			"verdict": "benign", "artifact_inspection": receipt,
+			"verdict":       "benign",
 			"user_guidance": "Inspected alpha/tool.js for the material import gap; scanner uncertainty remains recorded.",
 		}).Stdout)
 		return nil
@@ -79,7 +75,7 @@ func TestClawHubBundledPartialReachesJudge(t *testing.T) {
 	if artifact.Gate != "warn" || len(artifact.GateRules) != 1 {
 		t.Fatalf("aggregate findings bypassed gate: %s %+v", artifact.Gate, artifact.GateRules)
 	}
-	if !strings.Contains(string(prompt), "skillspector-report-0.json") {
+	if !strings.Contains(string(prompt), "scanners/skillspector.json") {
 		t.Fatal("prompt does not point to full raw evidence")
 	}
 }
@@ -111,11 +107,11 @@ func TestClawHubBundledPartialCompleteChildEvidence(t *testing.T) {
 		})
 	}
 	// Legacy complete reports remain accepted outside the new partial wrapper.
-	for _, profile := range []string{"", "custom", "clawhub", "clawhub-aig"} {
-		t.Run("legacy-standalone/"+profile, func(t *testing.T) {
+	for _, judged := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy-standalone/judged-%t", judged), func(t *testing.T) {
 			raw := `{"issues":[]}`
 			command := &recordingCommandRunner{writeOutput: raw, exitCode: intPointer(0)}
-			result, err := (ExternalScannerRunner{Profile: profile, CommandRunner: command, Env: map[string]string{}, SkillSpectorCommand: []string{"skillspector"}}).runSkillSpector(t.TempDir(), "now")
+			result, err := (ExternalScannerRunner{JudgeConfigured: judged, CommandRunner: command, Env: map[string]string{}, SkillSpectorCommand: []string{"skillspector"}}).runSkillSpector(t.TempDir(), "now")
 			if err != nil || result.Status != "completed" || result.ReportPolicy != "" || string(result.Raw) != raw {
 				t.Fatalf("legacy complete changed: status=%s policy=%s err=%v", result.Status, result.ReportPolicy, err)
 			}
@@ -215,7 +211,7 @@ func assertBundledScannerStatus(t *testing.T, raw []byte, want string) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := scannerResult(Options{Profile: "clawhub", ScannerResultPaths: map[string]string{"skillspector": path}}, "skillspector", resolvedTarget{}, "now", nil)
+	result, err := scannerResult(Options{Judge: &JudgeOptions{Command: "judge"}, ScannerResultPaths: map[string]string{"skillspector": path}}, "skillspector", resolvedTarget{}, "now", nil)
 	if err != nil || result.Status != want || !bytes.Equal(result.Raw, raw) || want == "failed" && result.ReportPolicy != "" {
 		t.Fatalf("status=%s want=%s policy=%s err=%v", result.Status, want, result.ReportPolicy, err)
 	}
@@ -232,19 +228,19 @@ func TestClawHubBundledPartialRiskAndCommandContract(t *testing.T) {
 			assertBundledScannerStatus(t, raw, "partial")
 		})
 	}
-	for _, profile := range []string{"", "custom", "clawhub", "clawhub-aig"} {
+	for _, judged := range []bool{false, true} {
 		for _, exit := range []int{0, 1, 2} {
 			command := &recordingCommandRunner{writeOutput: string(fixture), exitCode: intPointer(exit)}
 			if exit != 0 {
 				command.err = errCommandFailed
 			}
-			result, err := (ExternalScannerRunner{Profile: profile, CommandRunner: command, Env: map[string]string{}, SkillSpectorCommand: []string{"skillspector"}}).runSkillSpector(t.TempDir(), "now")
+			result, err := (ExternalScannerRunner{JudgeConfigured: judged, CommandRunner: command, Env: map[string]string{}, SkillSpectorCommand: []string{"skillspector"}}).runSkillSpector(t.TempDir(), "now")
 			want := "failed"
-			if (profile == "clawhub" || profile == "clawhub-aig") && exit < 2 {
+			if judged && exit < 2 {
 				want = "partial"
 			}
 			if err != nil || result.Status != want || !bytes.Equal(result.Raw, fixture) {
-				t.Fatalf("profile=%s exit=%d status=%s want=%s err=%v", profile, exit, result.Status, want, err)
+				t.Fatalf("judged=%t exit=%d status=%s want=%s err=%v", judged, exit, result.Status, want, err)
 			}
 			if want == "partial" && result.Error != "" {
 				t.Fatalf("accepted native exit still fails consumer operational-error check: exit=%d error=%s", exit, result.Error)

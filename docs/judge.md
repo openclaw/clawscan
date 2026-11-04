@@ -1,33 +1,23 @@
 # Judge Harness
 
-`judge.commandStarted` and each parity attempt's `commandStarted` describe the
-local harness **shell**: `false` proves it was not started, `true` proves the
-shell started, and omission means unknown. With the Docker sandbox, starting
-the host Docker client does not prove that the container shell started, so
-`commandStarted` remains unknown unless non-start is proven. An independently
-validated inspection receipt still retains its own evidence; it is not a
-Docker/container cleanup receipt. A prepared challenge, a `running`
-checkpoint, or entry into the judge phase does not prove invocation. Shell start
-does not independently prove a native/model invocation or its count; arbitrary
-harnesses may fail before that point or invoke more than once. Keep provider
-exposure unknown unless independently evidenced. Pre-command workspace failures
-retain a failed judge with `commandStarted: false`; canceled started commands
-retain failed results and receipt-attempt history, never a manufactured receipt.
-
-Receipt retries share `RunContext.Context` as well as the judge's existing
-timeout. No retry starts after cancellation. Even a readable valid receipt
-cannot complete a canceled run; consumers must reject incomplete top-level
-artifacts before considering scanner or judge verdicts.
-
-`--judge` hands scanner evidence to an external agent command so it can inspect
-the skill, do its own research in the scan workspace, and write a final JSON
-verdict:
+`--judge` hands scanner evidence to an external command so it can inspect the
+skill, do its own research in the scan workspace, and write a final JSON
+verdict. The judge is any tool that reads the rendered prompt and writes a JSON
+object that matches the output schema:
 
 ```bash
 clawscan ./my-skill \
   --scanner skillspector \
   --judge 'codex exec --cd {{ workspace }} --output-last-message {{ output }} - < {{ prompt:./prompt.md }}'
 ```
+
+ClawScan is judge-agnostic. It renders the prompt, prepares the workspace, runs
+the command, and records the command's result. It does not know which model or
+harness the command uses, and the profile name never changes judge behavior.
+Checks that belong to a particular judge, such as an input-size limit or proof
+that the model read workspace files, belong inside that judge command. A judge
+with an input limit should enforce it and fail with a clear error; ClawScan
+records that error as the judge failure.
 
 Supported `--judge` placeholders:
 
@@ -41,38 +31,73 @@ Supported `--judge` placeholders:
 | `{{ output_schema:<path> }}` | Copy a specific schema file and pass that file path. |
 | `{{ output }}` | File path where the judge should write its final JSON object. |
 
-For the `clawhub` and `clawhub-aig` profiles, a successful judge command whose
-artifact-inspection receipt fails validation is evaluated once more, in a fresh
-workspace with a fresh challenge. The retry receives the same artifact files,
-scanner evidence, prompt, and output schema. It must independently satisfy the
-challenge, required-file hash, and inspected-path checks. A second invalid receipt
-still fails closed; a valid security verdict is never retried merely for being
-suspicious or malicious. Command failures, timeouts, and malformed JSON are not
-retried by this policy.
+## Judge workspace
+
+Every profile gets the same workspace layout:
+
+| Path | Contents |
+| --- | --- |
+| `artifact/` | The exact copied target. |
+| `scanners/<scanner>.json` | Each scanner's complete raw evidence (`null` when a scanner has none). |
+| `metadata.json` | ClawScan run metadata: `schemaVersion`, `target`, `scanners`, the copied-artifact manifest under `workspace.artifact`, and `context` when the run has a `--context` file. |
+| `prompt.md`, `schema.json` | The rendered prompt and copied output schema, when the command references them. |
+
+## Results, failures, and retries
+
+A judge command that fails keeps its own error. Partial stdout, such as a JSON
+progress line printed before the command exits non-zero, never replaces that
+error, and a failed command is not retried.
+
+A judge command that exits successfully but writes no JSON (including never
+writing `{{ output }}`), invalid JSON, or a JSON value that is not an object is
+run once more in a fresh workspace with the
+same artifact files, scanner evidence, prompt, and output schema. A second
+unusable result still fails closed. A JSON object is the judge result; ClawScan
+never retries a verdict for being suspicious or malicious and does not validate
+judge-specific fields.
 
 Both attempts share the existing judge timeout budget, including workspace
-preparation; retrying does not restart the timeout. A caller's shorter whole-process
-deadline still takes precedence. The artifact's `judge.attempts` records each
-attempt's status, redacted result, validation error, duration, and expected
-inspection challenge/path/hash. The top-level `judge.result` is only the last
-attempt, and consumers must still validate its output schema and security evidence.
+preparation; retrying does not restart the timeout. A caller's shorter
+whole-process deadline still takes precedence, and no retry starts after
+cancellation. The artifact's `judge.attempts` records every attempt
+that reached its command (`commandStarted`, status, redacted result, error, and
+duration); a judge that fails during workspace preparation has no attempts. The top-level
+`judge.result` is the last attempt, and consumers must still validate its output
+schema and security evidence.
 
-## Partial scanner evidence in ClawHub profiles
+`judge.commandStarted` and each attempt's `commandStarted` describe the local
+harness **shell**: `false` proves it was not started, `true` proves the shell
+started, and omission means unknown. With the Docker sandbox, starting the host
+Docker client does not prove that the container shell started, so
+`commandStarted` remains unknown unless non-start is proven. A `running`
+checkpoint or entry into the judge phase does not prove invocation. Shell start
+does not independently prove a native/model invocation or its count; arbitrary
+harnesses may fail before that point or invoke more than once. Keep provider
+exposure unknown unless independently evidenced. Pre-command workspace failures
+retain a failed judge with `commandStarted: false`; canceled started commands
+retain failed results and attempt history. A canceled run is never complete;
+consumers must reject incomplete top-level artifacts before considering scanner
+or judge verdicts.
 
-The `clawhub` and `clawhub-aig` profiles allow usable partial SkillSpector
-reports to reach the independent judge. These scanner results retain
+## Partial SkillSpector evidence
+
+When a judge is configured, a usable partial SkillSpector report reaches the
+judge instead of failing the scan. These scanner results retain
 `status: "partial"` and add `reportPolicy: "judge-gaps"`. Their `raw` report and
 saved scanner output retain the original findings, completeness accounting,
 limitations, and provenance. The judge workspace contains the complete raw
-report at `skillspector-report-0.json` and the exact copied artifact in `artifact/`.
+report at `scanners/skillspector.json` and the exact copied artifact in
+`artifact/`. Without a judge, partial coverage fails the scanner as before. The
+profile name does not change this classification. When a judge is configured,
+SkillSpector reports must also be nonempty JSON objects, and bundled reports
+qualify only through the bundled-partial checks below.
 
 Eligibility requires an unambiguous structured report with explicitly successful
 execution at both report and completeness levels, partial accounting, component
 and issue arrays, and usable gap records. Native commands must finish with exit
 0 or 1; missing, malformed, crashed, or unsuccessful output remains failed.
-There is no minimum coverage percentage. Other profiles retain their existing
-scanner validation behavior, and configured security gate rules still apply to
-usable partial evidence.
+There is no minimum coverage percentage, and configured security gate rules
+still apply to usable partial evidence.
 
 Bundled plugin evidence may retain original child reports in
 `bundled_reports: [{"rootPath": "skills/example", "report": {...}}, ...]`.
@@ -88,19 +113,24 @@ Aggregate risk status and findings stay unchanged; the wrapper's execution flags
 and partial accounting do not synthesize completed coverage. The judge resolves
 original child component paths beneath each `artifact/<rootPath>/`.
 
-The judge independently investigates material gaps in the exact artifact,
-records inspected files in its existing receipt, and explains investigation and
-residual uncertainty in dimension details and user guidance. It may return
-benign, suspicious, or malicious; partial evidence alone determines none of
-these. Neither complete scanner coverage nor inspecting every gap is required.
+The judge independently investigates material gaps in the exact artifact and
+explains investigation and residual uncertainty in dimension details and user
+guidance. It may return benign, suspicious, or malicious; partial evidence alone
+determines none of these. Neither complete scanner coverage nor inspecting every
+gap is required.
 
 Consumers must explicitly support the partial status and policy pair. A run with
 this evidence can have top-level `status: "completed"` and `complete: true` only
-after its judge completes, including the existing receipt challenge, hash, and
-path checks. Reject incomplete runs, failed judges, and unrecognized partial
-results. Continue enforcing artifact identity, sandbox requirements, and genuine
-secret, malicious, and unsafe-bytecode checks. A receipt authenticates inspection
-evidence; it does not establish complete coverage or justify a verdict by itself.
+after its judge completes. Reject incomplete runs, failed judges, and
+unrecognized partial results. Continue enforcing artifact identity, sandbox
+requirements, and genuine secret, malicious, and unsafe-bytecode checks.
+
+## ClawHub prompt rendering
+
+The bundled `clawhub/prompt.md` is rendered into the ClawHub prompt layout,
+selected by that prompt file rather than by profile name. The pre-scan malicious
+signal comes from the run context when present, otherwise from A.I.G SARIF
+evidence; injection signals come only from the run context.
 
 Partial reports can carry one accounting row per excluded or partially inspected
 file. In the ClawHub prompt, `analysis_completeness.ledger_exceptions` and
@@ -109,74 +139,23 @@ file. In the ClawHub prompt, `analysis_completeness.ledger_exceptions` and
 sample_omitted, note}`. Counts cover up to 32 groups, with any remainder in
 `other_<key>_groups` and `other_<key>_entries`. The sample takes the first three
 rows of each group in count order, up to 24 bounded rows and 12,000 characters.
-The full lists stay in
-`skillspector-report-0.json` in the judge workspace and in the scanner's `raw`
-evidence; summarization never changes scanner status, findings, or gates.
+The full lists stay in `scanners/skillspector.json` in the judge workspace and
+in the scanner's `raw` evidence; summarization never changes scanner status,
+findings, or gates. ClawScan applies no prompt-size budget; the judge command
+owns any input limit.
 
-## Prompt size budget
-
-The `clawhub` and `clawhub-aig` judges pipe the rendered prompt to a pinned
-Codex CLI (0.164.0), which rejects input over 1,048,576 characters with
-`input_too_large` before contacting the model. These profiles count the rendered
-prompt's Unicode characters before starting the judge command and refuse prompts
-over 943,718 characters (90% of that limit). A refused prompt never reaches the
-judge: the run fails with `judge.status: "failed"`, `judge.commandStarted:
-false`, no `judge.attempts`, and the error `judge prompt too large: <n> chars
-exceeds budget 943718` on both the judge and the top-level artifact. This is an
-operational failure, not a verdict, and it is not retried. Other profiles keep
-their existing behavior.
-
-## Versioned inspection receipts
-
-The built-in `clawhub` and `clawhub-aig` judges emit version 2 receipts. The
-required file has its own mandatory `required_file` string, constrained by a
-single-value enum in the rendered output schema. `additional_files_inspected`
-records every other inspected artifact file and may be empty. The two fields
-together retain the complete inspected-file record, without requiring the model
-to repeat the selected path inside an unconstrained array.
-
-Additional paths use canonical workspace-relative `artifact/` file paths: no
-empty, `.` or `..` components, artifact root, or trailing slash. The generation
-schema expresses the same lexical rule as the independent Go receipt guard;
-neither infers file existence or file type from a path string. The prompt requires
-files, not directories, and preserves literal spaces, Unicode, and hidden names.
-Workspace challenge, metadata, and scanner-report files outside `artifact/` remain
-judge evidence, not artifact input paths to list in the receipt. Every inspected
-additional artifact file must still be reported; no per-file enum or array cap
-truncates that record. Malformed returned paths still fail and may trigger the
-existing bounded retry; they are never cleaned, removed, or rewritten.
-
-The workspace challenge and independently computed required-file hash are still
-validated exactly. Neither expected value is included in the prompt or schema.
-No receipt is filled in, converted, or repaired after the judge returns it. A
-wrong or missing `required_file`, incorrect hash/challenge, unknown version, or
-hybrid v1/v2 receipt fails closed. The runner continues to validate unversioned
-v1 receipts using their original `files_inspected` membership check.
-
-Schema templates may use `"{{ artifact_inspection.required_file }}"` as a complete
-JSON string value. The runner replaces that string with the JSON-escaped selected
-workspace path before execution and records the rendered schema's SHA-256.
-Templates without this placeholder are unchanged.
-
-**Consumer upgrade required:** consumers enforcing the previous receipt-key
-allowlist must explicitly support v2 before a new built-in profile is deployed.
-Preserve both returned fields as evidence; do not manufacture a v1 receipt or
-normalize a wrong path. Schema/consumer tests are not proof of live provider
-behavior, latency improvement, or production recovery.
-
-## Live inspection check
+## Live judge check
 
 Maintainers can manually run the **CI** workflow with **judge-inspection** enabled,
-or dispatch **Judge Artifact Inspection Smoke** directly. The check uses the
-repository's `OPENAI_API_KEY` and a pinned Codex CLI to inspect a harmless local
-package through the `clawhub` profile. It verifies the completed receipt, the
-package manifest's SHA-256, and the inspected path, then retains the redacted
-report for seven days.
+or dispatch **Live Judge Smoke** directly. The check uses the repository's
+`OPENAI_API_KEY` and a pinned Codex CLI to judge a harmless local package through
+the `clawhub` profile, verifies that the judge completed with a verdict, and
+retains the redacted report for seven days.
 
 This check uses GitHub-hosted Ubuntu 22.04 after a paired GitHub-hosted test found
 a nested bubblewrap setup failure on Ubuntu 24.04. That result does not establish
 that other Ubuntu 24.04 hosts, including Blacksmith, fail or that Ubuntu 22.04
 cannot time out. It preserves the judge's read-only sandbox and uses scanner
-fixtures to isolate artifact inspection. It does not perform a full security
-scan or approve or publish a package. Normal push and pull-request CI do not run
-this paid, live check.
+fixtures to isolate the judge. It does not perform a full security scan or
+approve or publish a package. Normal push and pull-request CI do not run this
+paid, live check.

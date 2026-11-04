@@ -286,21 +286,6 @@ func defaultScannerAdapters() []ScannerAdapter {
 			run: ExternalScannerRunner.runCisco,
 		},
 		scannerAdapter{
-			id:              "clawscan-static",
-			supportsPlugins: true,
-			info: ScannerInfo{
-				DisplayName:   "ClawScan Static",
-				RepositoryURL: "https://github.com/openclaw/clawscan",
-				Description:   "Built-in deterministic text scanner for high-signal risky skill and plugin patterns.",
-			},
-			installPlan: InstallPlan{
-				ScannerID:       "clawscan-static",
-				Name:            "ClawScan Static",
-				NoInstallReason: "built in; no install needed",
-			},
-			run: ExternalScannerRunner.runStatic,
-		},
-		scannerAdapter{
 			id:            "relyable",
 			commandBacked: true,
 			info: ScannerInfo{
@@ -406,22 +391,6 @@ func defaultScannerAdapters() []ScannerAdapter {
 				VerifyCommand: InstallCommand{Command: "socket", Args: []string{"--help"}},
 			},
 			run: ExternalScannerRunner.runSocket,
-		},
-		scannerAdapter{
-			id:              "virustotal",
-			requirements:    staticEnvRequirements("scanner virustotal", "VIRUSTOTAL_API_KEY"),
-			supportsPlugins: true,
-			info: ScannerInfo{
-				DisplayName:   "VirusTotal API",
-				RepositoryURL: "https://docs.virustotal.com/reference/file",
-				Description:   "API-backed local file hash lookup. Skill and OpenClaw plugin directories are scanned as deterministic ZIP archives.",
-			},
-			installPlan: InstallPlan{
-				ScannerID:       "virustotal",
-				Name:            "VirusTotal API",
-				NoInstallReason: "API-backed scanner; configure VIRUSTOTAL_API_KEY at scan time",
-			},
-			run: ExternalScannerRunner.runVirusTotal,
 		},
 	}
 }

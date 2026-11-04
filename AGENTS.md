@@ -34,10 +34,8 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 - `go test -count=1 ./...` - full Go test suite without cached results.
 - `go vet ./...` - Go static checks.
 - `go run ./cmd/clawscan --help` - inspect the public help output.
-- `go run ./cmd/clawscan ./README.md --scanner clawscan-static --json` -
-  secretless smoke test.
-- `go run ./cmd/clawscan benchmark SkillTrustBench --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json`
-  - benchmark smoke test.
+- `printf '{"status":"clean","findings":[]}' > /tmp/skillspector.json && go run ./cmd/clawscan ./README.md --scanner skillspector --scanner-result skillspector=/tmp/skillspector.json --sandbox off --json`
+  - secretless smoke test.
 - `make docs-site` - rebuild the generated docs site under `dist/docs-site`.
 - `make release VERSION=v0.0.0-test` - build local release archives under
   `dist/`.
@@ -56,14 +54,15 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
 
 ## Scanner And Judge Rules
 
-- Public scanner IDs are part of the CLI surface. The built-in static scanner
-  ID is `clawscan-static`; do not reintroduce `static`.
+- Public scanner IDs are part of the CLI surface. The retired `static`,
+  `clawscan-static`, and `virustotal` scanners are gone; do not reintroduce
+  them.
 - Register built-in scanners through the scanner registry instead of adding
   one-off scanner switches.
 - Scanner adapters should declare required environment variables up front so
   ClawScan can fail before doing partial work.
 - Never add API-key CLI flags. Credentials belong in environment variables such
-  as `VIRUSTOTAL_API_KEY`, `SNYK_TOKEN`, and `SOCKET_CLI_API_TOKEN`.
+  as `SNYK_TOKEN` and `SOCKET_CLI_API_TOKEN`.
 - Run artifacts must record only secret-safe env presence, such as `present` or
   `missing`, never secret values.
 - Command-backed scanners and judges run through the Docker sandbox by default,
@@ -73,16 +72,18 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
   `--sandbox-env` or profile `sandbox.env` for judge-specific credentials.
 - `--judge` is an external harness command. Do not add a model-provider
   framework to ClawScan unless the product direction changes.
+- The runner is judge-agnostic. Never key runner, scanner, or judge behavior on
+  a profile name. Judge-specific checks (input limits, inspection proofs) belong
+  in the judge command; a failed judge command keeps its own error.
 - Judge placeholders and prompt interpolation must fail clearly when they
   reference a scanner that was not requested.
-- In the ClawHub profiles, usable partial SkillSpector reports may reach the
+- When a judge is configured, usable partial SkillSpector reports may reach the
   independent judge with `status: partial` and `reportPolicy: judge-gaps`.
   Preserve raw partial status, findings, gaps, and provenance. The judge
-  investigates material gaps in the exact artifact and records inspection and
-  uncertainty; do not add a 100%-coverage or inspect-every-gap gate. Missing,
-  malformed, crashed, or unsuccessful output remains an operational failure.
-  Keep artifact receipts, hashes, sandbox checks, and genuine secret, malicious,
-  and unsafe-bytecode protections. Generic scanner semantics remain unchanged.
+  investigates material gaps in the exact artifact and records uncertainty; do
+  not add a 100%-coverage or inspect-every-gap gate. Missing, malformed,
+  crashed, or unsuccessful output remains an operational failure. Keep sandbox
+  checks and genuine secret, malicious, and unsafe-bytecode protections.
   See `docs/judge.md` and `internal/runner/skillspector_partial_test.go` for the
   consumer contract and regression checks.
 

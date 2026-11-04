@@ -19,18 +19,18 @@ func TestWriteRunTargetsResultBundlePreservesCollidingEvidence(t *testing.T) {
 		{
 			name:     "target suffix used after collision",
 			targets:  []string{"skills/a", "skills/a!", "skills/a-2", "skills/a"},
-			scanners: []string{"clawscan-static"},
+			scanners: []string{fixtureScannerID},
 		},
 		{
 			name:     "target suffix used before collision",
 			targets:  []string{"skills/a-2", "skills/a", "skills/a!", "skills/a"},
-			scanners: []string{"clawscan-static"},
+			scanners: []string{fixtureScannerID},
 		},
 		{
 			name:     "profile names",
 			targets:  []string{"skills/a", "skills/a", "skills/a-2"},
 			profiles: []string{"review", "review!", "review"},
-			scanners: []string{"clawscan-static"},
+			scanners: []string{fixtureScannerID},
 		},
 		{
 			name:     "scanner names",

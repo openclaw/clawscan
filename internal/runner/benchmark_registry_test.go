@@ -51,7 +51,7 @@ func TestRunBenchmarkRejectsUnsupportedBenchmarkThroughRegistry(t *testing.T) {
 			ID:    "skillscan-paper",
 			Split: "benchmark",
 		},
-		Scanners: []string{"clawscan-static"},
+		Scanners: []string{fixtureScannerID},
 	}, RunContext{Env: map[string]string{}})
 	if err == nil || err.Error() != "Unsupported benchmark: skillscan-paper" {
 		t.Fatalf("err = %v", err)

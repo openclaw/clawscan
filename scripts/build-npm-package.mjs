@@ -237,13 +237,22 @@ async function smokePackage(tarballPath, binaryVersion) {
     if (!version.includes(`clawscan ${binaryVersion} `)) {
       throw new Error(`Unexpected clawscan --version output: ${version}`);
     }
+    const skillSpectorFixture = join(prefix, "skillspector.json");
+    await writeFile(skillSpectorFixture, '{"status":"clean","findings":[]}\n');
     const smoke = run(binPath, [
       join(repoRoot, "README.md"),
       "--scanner",
-      "clawscan-static",
+      "skillspector",
+      "--scanner-result",
+      `skillspector=${skillSpectorFixture}`,
+      "--sandbox",
+      "off",
       "--json",
     ]);
-    JSON.parse(smoke.stdout);
+    const artifact = JSON.parse(smoke.stdout);
+    if (artifact.scanners?.skillspector?.status !== "completed") {
+      throw new Error(`Unexpected smoke scan result: ${smoke.stdout}`);
+    }
   } finally {
     await rm(prefix, { recursive: true, force: true });
   }

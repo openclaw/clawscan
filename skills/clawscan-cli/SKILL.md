@@ -34,7 +34,7 @@ Choose the run mode:
 | Scan repo skills with one scanner | `clawscan --scanner skillspector` from a repo with `./skills/<name>/SKILL.md` |
 | Scan repo skills with the ClawHub profile | `clawscan --profile clawhub` from a repo with `./skills/<name>/SKILL.md` |
 | Scan one explicit target with a profile | `clawscan ./my-skill --profile clawhub` |
-| Capture raw scanner evidence only | `clawscan ./my-skill --scanner clawscan-static` |
+| Capture raw scanner evidence only | `clawscan ./my-skill --scanner skillspector` |
 | Print raw JSON to stdout | Add `--json`. |
 | Run all profiles from a config | `clawscan ./my-skill --config ./security/clawscan.yml` |
 | Run one config profile | `clawscan ./my-skill --config ./security/clawscan.yml --profile review` |
@@ -44,8 +44,8 @@ Choose the run mode:
 | List resolved profiles | `clawscan profiles` |
 | Print resolved profile YAML | `clawscan profiles -v` |
 | List benchmark catalog | `clawscan benchmark list` |
-| Run SkillTrustBench | `clawscan benchmark SkillTrustBench --limit 10 --scanner clawscan-static --output run.json` |
-| Run ClawHub Security Signals | `clawscan benchmark clawhub-security-signals --split eval_holdout --limit 10 --scanner clawscan-static --output run.json` |
+| Run SkillTrustBench | `clawscan benchmark SkillTrustBench --limit 10 --scanner skillspector --output run.json` |
+| Run ClawHub Security Signals | `clawscan benchmark clawhub-security-signals --split eval_holdout --limit 10 --scanner skillspector --output run.json` |
 | Use stable scanner evidence | Add `--scanner-result <id=path>` for each fixture-backed scanner. |
 | Add or override a judge harness | Add `--judge '<command with placeholders>'`. |
 | Use host-installed scanner/judge CLIs | Add `--sandbox off` only in an already-isolated environment. |
@@ -81,7 +81,9 @@ Built-in profiles:
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `clawscan-static` | bundled Codex judge with ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `aig` | bundled Codex judge with ClawHub prompt/schema |
+| `clawhub-aig` | `skillspector`, `aig` | bundled Codex judge with ClawHub prompt/schema |
+| `openclaw-install-policy` | `skillspector` | none |
 
 Profiles are loaded from embedded built-ins. Project `.clawscan.yml` /
 `.clawscan.yaml` files are NOT loaded automatically: pass `--config <path>` to
@@ -111,7 +113,7 @@ sandbox:
 profiles:
   review:
     scanners:
-      - clawscan-static
+      - skillspector
     json: true
     judge:
       command: judge --out {{ output }}
@@ -130,7 +132,7 @@ env vars, and install guidance.
 Accepted scanner IDs:
 
 ```text
-agentverus, aig, cisco, clawscan-static, skillspector, snyk, socket, virustotal
+agentverus, aig, cisco, relyable, skillspector, snyk, socket
 ```
 
 Credential rules:
@@ -140,7 +142,6 @@ Credential rules:
 | `aig` | required: `LLM_API_KEY` or `OPENAI_API_KEY`; optional local scanner config: `DEFAULT_MODEL`, `DEFAULT_BASE_URL`, `DEFAULT_MODEL_CONTEXT_WINDOW`, `LOG_LEVEL` |
 | `socket` | required: `SOCKET_CLI_API_TOKEN` |
 | `snyk` | required: `SNYK_TOKEN` |
-| `virustotal` | required: `VIRUSTOTAL_API_KEY` |
 | `skillspector` | optional provider config: `SKILLSPECTOR_PROVIDER`, `SKILLSPECTOR_MODEL`, `NVIDIA_INFERENCE_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_PROXY_ENDPOINT_URL`, `ANTHROPIC_PROXY_API_KEY` |
 | `cisco` | optional upstream analyzers: `SKILL_SCANNER_LLM_*`, `SKILL_SCANNER_META_LLM_*`, `VIRUSTOTAL_API_KEY`, `AI_DEFENSE_API_KEY`, `AI_DEFENSE_API_URL` |
 
@@ -204,7 +205,7 @@ Run SkillTrustBench with the canonical Hugging Face ID or the short alias
 ```bash
 clawscan benchmark SkillTrustBench \
   --limit 10 \
-  --scanner clawscan-static \
+  --scanner skillspector \
   --output /tmp/clawscan-benchmark.json
 ```
 
@@ -263,11 +264,12 @@ prompt and output-schema files.
 
 ## Verification
 
-Use static scanner smokes for local proof because they do not need secrets:
+Use fixture-backed scanner smokes for local proof because they do not need
+secrets, scanner binaries, or Docker:
 
 ```bash
-go run ./cmd/clawscan ./README.md --scanner clawscan-static --output /tmp/clawscan-smoke.json
-go run ./cmd/clawscan benchmark SkillTrustBench --limit 1 --scanner clawscan-static --output /tmp/clawscan-benchmark-smoke.json
+printf '{"status":"clean","findings":[]}' > /tmp/skillspector.json
+go run ./cmd/clawscan ./README.md --scanner skillspector --scanner-result skillspector=/tmp/skillspector.json --sandbox off --output /tmp/clawscan-smoke.json
 go run ./cmd/clawscan --help
 go test -count=1 ./...
 go vet ./...

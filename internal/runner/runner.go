@@ -3,7 +3,6 @@ package runner
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -106,18 +105,17 @@ type EnvRequirement struct {
 }
 
 type RunContext struct {
-	Context              context.Context
-	Progress             io.Writer
-	progress             *runProgress
-	Env                  map[string]string
-	Now                  func() time.Time
-	CommandRunner        CommandRunner
-	HostCommandRunner    CommandRunner
-	DockerAvailability   func() error
-	ScannerRunner        ScannerRunner
-	SkillSpectorCommand  []string
-	VirusTotalHTTPClient VirusTotalHTTPClient
-	BenchmarkClient      BenchmarkClient
+	Context             context.Context
+	Progress            io.Writer
+	progress            *runProgress
+	Env                 map[string]string
+	Now                 func() time.Time
+	CommandRunner       CommandRunner
+	HostCommandRunner   CommandRunner
+	DockerAvailability  func() error
+	ScannerRunner       ScannerRunner
+	SkillSpectorCommand []string
+	BenchmarkClient     BenchmarkClient
 }
 
 type ScannerRunner interface {
@@ -552,17 +550,16 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 			scannerSandboxMode = SandboxModeOff
 		}
 		scannerRunner = ExternalScannerRunner{
-			Context:              ctx.Context,
-			CommandRunner:        commandRunner,
-			Env:                  env,
-			Profile:              opts.Profile,
-			TargetKind:           target.kind,
-			TargetID:             target.id,
-			Registry:             registryForOptions(opts),
-			SandboxMode:          scannerSandboxMode,
-			SkillSpectorCommand:  ctx.SkillSpectorCommand,
-			VirusTotalHTTPClient: ctx.VirusTotalHTTPClient,
-			Timeout:              20 * time.Minute,
+			Context:             ctx.Context,
+			CommandRunner:       commandRunner,
+			Env:                 env,
+			JudgeConfigured:     opts.Judge != nil,
+			TargetKind:          target.kind,
+			TargetID:            target.id,
+			Registry:            registryForOptions(opts),
+			SandboxMode:         scannerSandboxMode,
+			SkillSpectorCommand: ctx.SkillSpectorCommand,
+			Timeout:             20 * time.Minute,
 		}
 	}
 	artifact.Sandbox = sandbox
@@ -890,7 +887,7 @@ func writeScannerOutputFiles(spec outputBundleSpec, artifacts []*Artifact, safet
 	for index, artifact := range artifacts {
 		for scanner, relPath := range paths[index] {
 			result := artifact.Scanners[scanner]
-			if len(result.Raw) == 0 || artifact.Status != "" && result.Status != "completed" && !usablePartialScanner(artifact.Profile, scanner, result) {
+			if len(result.Raw) == 0 || artifact.Status != "" && result.Status != "completed" && !usablePartialScanner(scanner, result) {
 				result.OutputPath = ""
 				artifact.Scanners[scanner] = result
 				continue
@@ -1145,7 +1142,7 @@ func scannerResultContext(ctx context.Context, opts Options, scanner string, tar
 			Raw:         json.RawMessage(raw),
 		}
 		if scanner == "skillspector" {
-			result = validateSkillSpectorReportForProfile(result, opts.Profile)
+			result = validateSkillSpectorReportEvidence(result, opts.Judge != nil)
 		}
 		return result, nil
 	}
@@ -1169,7 +1166,6 @@ const maxTargetFilesBytes = 256 * 1024
 const maxOmittedTargetFileMarkers = 25
 const defaultJudgePromptPath = "./prompt.md"
 const defaultJudgeOutputSchemaPath = "./schema.json"
-const artifactInspectionRequiredFilePlaceholder = "{{ artifact_inspection.required_file }}"
 
 func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
 	return renderPromptTemplateContext(context.Background(), template, artifact)
@@ -1318,7 +1314,7 @@ func renderTargetFilesContext(ctx context.Context, target string) (string, error
 		nulWarning := ""
 		if bytes.IndexByte(content, 0) >= 0 {
 			inspection, _ := inspectNULContent(path, content)
-			if !inspection.reviewable && len(scanStaticInspection(path, inspection)) == 0 {
+			if !inspection.reviewable {
 				addOmission(path, "binary file")
 				continue
 			}
@@ -1456,7 +1452,6 @@ type judgeCommandState struct {
 	outputSchemaSHA  string
 	schemaSource     string
 	files            map[string][]byte
-	inspection       *artifactInspectionChallenge
 }
 
 type judgeShellSpec struct {
@@ -1484,13 +1479,6 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 		outputPath:   filepath.Join(workspace, "judge-output.json"),
 		files:        opts.Files,
 	}
-	if isClawHubParityProfile(artifact.Profile) {
-		state.outputPath = filepath.Join(workspace, "codex-result.json")
-		state.inspection, err = prepareArtifactInspectionChallengeContext(ctx, workspace)
-		if err != nil {
-			return judgeAttemptOutcome{}, err
-		}
-	}
 	shell := judgeShellForGOOS(runtime.GOOS)
 	command, err := renderJudgeCommand(opts.Command, artifact, state, shell.quote)
 	if err != nil {
@@ -1510,9 +1498,14 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 	raw := strings.TrimSpace(output.Stdout)
 	if state.outputUsed {
 		outputBytes, readErr := readContextFile(context.Background(), state.outputPath)
-		if readErr == nil {
+		switch {
+		case readErr == nil:
 			raw = strings.TrimSpace(string(outputBytes))
-		} else if runErr == nil {
+		case runErr == nil && errors.Is(readErr, os.ErrNotExist):
+			// A successful command that never wrote {{ output }} produced no
+			// JSON; that is the retryable unusable-output case.
+			raw = ""
+		case runErr == nil:
 			runErr = readErr
 		}
 	}
@@ -1528,8 +1521,11 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 		Error:            "",
 		Result:           nil,
 	}
-	outcome := judgeAttemptOutcome{result: result, inspection: state.inspection}
+	outcome := judgeAttemptOutcome{result: result}
 	if runErr != nil {
+		// The judge command itself failed (for example a judge that enforces
+		// its own input limit rejected the prompt). Keep the command's error;
+		// partial stdout never replaces it, and the failure is not retried.
 		result.Status = "failed"
 		result.Error = commandError(runErr, output.Stderr, env)
 	}
@@ -1539,40 +1535,26 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 		}
 		result.Status = "failed"
 		result.Error = "Judge command did not produce JSON output."
+		outcome.retryable = true
 		return outcome, nil
 	}
 	var parsed any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		result.Result = redactEnvValues(raw, env)
 		if result.Status == "failed" {
-			result.Result = redactEnvValues(raw, env)
 			return outcome, nil
 		}
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced invalid JSON: %v", err)
-		result.Result = redactEnvValues(raw, env)
+		outcome.retryable = true
 		return outcome, nil
 	}
 	parsed = redactJudgeResult(parsed, env)
-	parsedObject, ok := parsed.(map[string]any)
-	if !ok {
+	result.Result = parsed
+	if _, ok := parsed.(map[string]any); !ok && result.Status != "failed" {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("Judge command produced %s; expected JSON object.", judgeJSONType(parsed))
-		result.Result = parsed
-		return outcome, nil
-	}
-	result.Result = parsed
-	if runErr != nil {
-		// The judge command itself failed (for example Codex rejected the
-		// prompt before contacting the model). Partial stdout such as a
-		// thread.started event is not a receipt; keep the command's error.
-		return outcome, nil
-	}
-	if state.inspection != nil {
-		if err := validateArtifactInspectionReceipt(parsedObject, *state.inspection); err != nil {
-			result.Status = "failed"
-			result.Error = err.Error()
-			outcome.retryable = true
-		}
+		outcome.retryable = true
 	}
 	return outcome, nil
 }
@@ -1582,143 +1564,6 @@ func judgeSandboxMode(outerSandboxMode string) string {
 		return "danger-full-access"
 	}
 	return "read-only"
-}
-
-type artifactInspectionChallenge struct {
-	Challenge      string `json:"challenge"`
-	RequiredFile   string `json:"required_file"`
-	RequiredSHA256 string `json:"-"`
-}
-
-func prepareArtifactInspectionChallenge(workspace string) (*artifactInspectionChallenge, error) {
-	return prepareArtifactInspectionChallengeContext(context.Background(), workspace)
-}
-
-func prepareArtifactInspectionChallengeContext(ctx context.Context, workspace string) (*artifactInspectionChallenge, error) {
-	random := make([]byte, 32)
-	if _, err := rand.Read(random); err != nil {
-		return nil, fmt.Errorf("generate artifact inspection challenge: %w", err)
-	}
-	requiredFile, requiredSHA256, err := selectArtifactInspectionFileContext(ctx, workspace)
-	if err != nil {
-		return nil, err
-	}
-	challenge := &artifactInspectionChallenge{
-		Challenge:      hex.EncodeToString(random),
-		RequiredFile:   requiredFile,
-		RequiredSHA256: requiredSHA256,
-	}
-	raw, err := json.MarshalIndent(challenge, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	raw = append(raw, '\n')
-	if err := os.WriteFile(filepath.Join(workspace, "artifact-inspection.json"), raw, 0o600); err != nil {
-		return nil, fmt.Errorf("write artifact inspection challenge: %w", err)
-	}
-	return challenge, nil
-}
-
-func selectArtifactInspectionFile(workspace string) (string, string, error) {
-	return selectArtifactInspectionFileContext(context.Background(), workspace)
-}
-
-func selectArtifactInspectionFileContext(ctx context.Context, workspace string) (string, string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", "", err
-	}
-	artifactDir := filepath.Join(workspace, "artifact")
-	candidates := []string{}
-	for _, preferred := range []string{"SKILL.md", "package.json"} {
-		info, err := os.Stat(filepath.Join(artifactDir, preferred))
-		if err == nil && info.Mode().IsRegular() {
-			candidates = append(candidates, preferred)
-		}
-	}
-	if len(candidates) == 0 {
-		err := filepath.WalkDir(artifactDir, func(path string, entry os.DirEntry, walkErr error) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.Type().IsRegular() {
-				relative, err := filepath.Rel(artifactDir, path)
-				if err != nil {
-					return err
-				}
-				candidates = append(candidates, relative)
-			}
-			return nil
-		})
-		if err != nil {
-			return "", "", fmt.Errorf("select artifact inspection file: %w", err)
-		}
-	}
-	if len(candidates) == 0 {
-		return "", "", errors.New("artifact inspection requires at least one regular artifact file")
-	}
-	sort.Strings(candidates)
-	relative := candidates[0]
-	file, err := os.Open(filepath.Join(artifactDir, relative))
-	if err != nil {
-		return "", "", fmt.Errorf("open artifact inspection file: %w", err)
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, contextReader{ctx: ctx, reader: file}); err != nil {
-		return "", "", fmt.Errorf("hash artifact inspection file: %w", err)
-	}
-	return "artifact/" + filepath.ToSlash(relative), hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func validateArtifactInspectionReceipt(result map[string]any, expected artifactInspectionChallenge) error {
-	inspection, ok := result["artifact_inspection"].(map[string]any)
-	if !ok {
-		return errors.New("Judge did not provide the required artifact inspection receipt.")
-	}
-	if status, _ := inspection["status"].(string); status != "completed" {
-		return fmt.Errorf("Judge artifact inspection status was %q; expected completed.", status)
-	}
-	challenge, _ := inspection["challenge"].(string)
-	if challenge != expected.Challenge {
-		return errors.New("Judge artifact inspection challenge did not match the workspace challenge.")
-	}
-	requiredSHA256, _ := inspection["required_file_sha256"].(string)
-	if requiredSHA256 != expected.RequiredSHA256 {
-		return errors.New("Judge artifact inspection file hash did not match the required artifact file.")
-	}
-	if version, present := inspection["version"]; present {
-		if version != float64(2) {
-			return errors.New("Judge artifact inspection receipt version was unsupported.")
-		}
-		return validateArtifactInspectionReceiptV2(inspection, expected.RequiredFile)
-	}
-	for _, field := range []string{"required_file", "additional_files_inspected"} {
-		if _, present := inspection[field]; present {
-			return errors.New("Judge artifact inspection v2 fields require receipt version 2.")
-		}
-	}
-	files, ok := inspection["files_inspected"].([]any)
-	if !ok || len(files) == 0 {
-		return errors.New("Judge artifact inspection did not report any inspected artifact files.")
-	}
-	requiredFileInspected := false
-	for _, value := range files {
-		file, ok := value.(string)
-		if !ok {
-			continue
-		}
-		clean := filepath.ToSlash(filepath.Clean(file))
-		if clean == expected.RequiredFile {
-			requiredFileInspected = true
-		}
-	}
-	if !requiredFileInspected {
-		return fmt.Errorf("Judge artifact inspection did not include required file %s.", expected.RequiredFile)
-	}
-	return nil
 }
 
 func judgeJSONType(value any) string {
@@ -1844,32 +1689,9 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 	if err != nil {
 		return "", err
 	}
-	template := string(promptTemplate)
-	if strings.Contains(template, artifactInspectionRequiredFilePlaceholder) {
-		if state.inspection == nil {
-			return "", errors.New("prompt references artifact inspection, but no inspection challenge was prepared")
-		}
-		requiredFileJSON, err := json.Marshal(state.inspection.RequiredFile)
-		if err != nil {
-			return "", err
-		}
-		template = strings.ReplaceAll(template, artifactInspectionRequiredFilePlaceholder, string(requiredFileJSON))
-	}
-	var prompt string
-	if isClawHubParityProfile(artifact.Profile) && judgeSourceKey(source) == "clawhub/prompt.md" {
-		prompt, err = RenderClawHubPrompt(template, artifact)
-	} else {
-		prompt, err = renderPromptTemplateContext(workContext(state.context), template, artifact)
-	}
+	prompt, err := renderJudgePromptSourceContext(workContext(state.context), source, string(promptTemplate), artifact)
 	if err != nil {
 		return "", err
-	}
-	if isClawHubParityProfile(artifact.Profile) {
-		// The ClawHub profiles pipe this prompt to a pinned Codex CLI with a hard
-		// input limit. Refuse oversize prompts before the judge command starts.
-		if err := checkJudgePromptBudget(prompt, clawHubJudgePromptBudgetChars); err != nil {
-			return "", err
-		}
 	}
 	path := filepath.Join(state.workspace, "prompt.md")
 	if err := os.WriteFile(path, []byte(prompt), 0o644); err != nil {
@@ -1881,11 +1703,16 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 	return path, nil
 }
 
-func renderJudgePromptSource(source string, template string, artifact Artifact) (string, error) {
-	if isClawHubParityProfile(artifact.Profile) && judgeSourceKey(source) == "clawhub/prompt.md" {
+// clawHubPromptSourceKey identifies the bundled ClawHub system prompt. The
+// renderer is selected by this prompt file, not by the profile name, so any
+// profile that uses the bundled prompt gets the same ClawHub prompt layout.
+const clawHubPromptSourceKey = "clawhub/prompt.md"
+
+func renderJudgePromptSourceContext(ctx context.Context, source string, template string, artifact Artifact) (string, error) {
+	if judgeSourceKey(source) == clawHubPromptSourceKey {
 		return RenderClawHubPrompt(template, artifact)
 	}
-	return RenderPromptTemplate(template, artifact)
+	return renderPromptTemplateContext(ctx, template, artifact)
 }
 
 func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, error) {
@@ -1908,7 +1735,7 @@ func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, 
 	return clawhubprompt.Build(
 		systemPrompt,
 		clawHubPromptJob(artifact, context),
-		clawHubInjectionSignals(artifact, context),
+		clawHubInjectionSignals(context),
 		skillSpector,
 		supplemental...,
 	)
@@ -1968,55 +1795,22 @@ func clawHubAIGAnalysis(artifact Artifact) any {
 	return clawhubprompt.RawJSON(result.Raw)
 }
 
+// clawHubHasMaliciousSignal derives the pre-scan malicious signal from A.I.G
+// SARIF evidence when no run context supplies it.
 func clawHubHasMaliciousSignal(artifact Artifact) bool {
-	if artifact.Profile == clawHubAIGProfileID {
-		result, ok := artifact.Scanners["aig"]
-		if !ok || len(result.Raw) == 0 {
-			return false
-		}
-		prediction, ok := aigSARIFPrediction(result.Raw)
-		return ok && prediction == "malicious"
-	}
-	staticResult, ok := artifact.Scanners["clawscan-static"]
-	if !ok || len(staticResult.Raw) == 0 {
+	result, ok := artifact.Scanners["aig"]
+	if !ok || len(result.Raw) == 0 {
 		return false
 	}
-	var report staticScannerReport
-	if err := json.Unmarshal(staticResult.Raw, &report); err != nil {
-		return false
-	}
-	for _, finding := range report.Findings {
-		if strings.EqualFold(finding.Severity, "high") {
-			return true
-		}
-	}
-	return false
+	prediction, ok := aigSARIFPrediction(result.Raw)
+	return ok && prediction == "malicious"
 }
 
-func clawHubInjectionSignals(artifact Artifact, context clawHubContext) []string {
+func clawHubInjectionSignals(context clawHubContext) []string {
 	if context.InjectionSignals != nil {
 		return append([]string(nil), context.InjectionSignals...)
 	}
-	staticResult, ok := artifact.Scanners["clawscan-static"]
-	if !ok || len(staticResult.Raw) == 0 {
-		return nil
-	}
-	var report staticScannerReport
-	if err := json.Unmarshal(staticResult.Raw, &report); err != nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	var signals []string
-	for _, finding := range report.Findings {
-		if finding.ID != "static.prompt_injection" {
-			continue
-		}
-		if !seen["html-comment-injection"] {
-			seen["html-comment-injection"] = true
-			signals = append(signals, "html-comment-injection")
-		}
-	}
-	return signals
+	return nil
 }
 
 func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, error) {
@@ -2032,20 +1826,6 @@ func prepareJudgeOutputSchema(source string, state *judgeCommandState) (string, 
 	schema, err := readJudgeSource(source, state)
 	if err != nil {
 		return "", err
-	}
-	if bytes.Contains(schema, []byte(artifactInspectionRequiredFilePlaceholder)) {
-		if state.inspection == nil {
-			return "", errors.New("output schema references artifact inspection, but no inspection challenge was prepared")
-		}
-		placeholderJSON, _ := json.Marshal(artifactInspectionRequiredFilePlaceholder)
-		if bytes.Contains(bytes.ReplaceAll(schema, placeholderJSON, nil), []byte(artifactInspectionRequiredFilePlaceholder)) {
-			return "", errors.New("output schema artifact inspection placeholder must be a complete JSON string")
-		}
-		requiredFileJSON, err := json.Marshal(state.inspection.RequiredFile)
-		if err != nil {
-			return "", err
-		}
-		schema = bytes.ReplaceAll(schema, placeholderJSON, requiredFileJSON)
 	}
 	path := filepath.Join(state.workspace, "schema.json")
 	if err := os.WriteFile(path, schema, 0o644); err != nil {
@@ -2081,31 +1861,11 @@ func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifac
 	if artifact.Target.Kind == "url" {
 		return fmt.Errorf("judge workspace copying is unsupported for URL targets: %s", artifact.Target.Input)
 	}
-	// Every profile receives the complete artifact before its metadata layout is written.
+	// Every profile gets the same layout: the copied artifact, one raw evidence
+	// file per scanner under scanners/, and metadata.json.
 	manifest, err := copyTargetToWorkspaceContext(ctx, artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
 	if err != nil {
 		return err
-	}
-	if isClawHubParityProfile(artifact.Profile) {
-		context, err := parseClawHubContext(artifact.Context)
-		if err != nil {
-			return err
-		}
-		if result, ok := artifact.Scanners["skillspector"]; ok && len(result.Raw) > 0 {
-			if err := os.WriteFile(filepath.Join(workspace, "skillspector-report-0.json"), result.Raw, 0o644); err != nil {
-				return err
-			}
-		}
-		metadata := context.Metadata
-		if len(metadata) == 0 {
-			metadata = json.RawMessage(`{}`)
-		}
-		var formatted bytes.Buffer
-		if err := json.Indent(&formatted, metadata, "", "  "); err != nil {
-			return fmt.Errorf("format clawhub metadata JSON: %w", err)
-		}
-		formatted.WriteByte('\n')
-		return os.WriteFile(filepath.Join(workspace, "metadata.json"), formatted.Bytes(), 0o644)
 	}
 	scannersDir := filepath.Join(workspace, "scanners")
 	if err := os.MkdirAll(scannersDir, 0o755); err != nil {
@@ -2130,6 +1890,9 @@ func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifac
 		"workspace": map[string]any{
 			"artifact": manifest,
 		},
+	}
+	if len(artifact.Context) > 0 {
+		metadata["context"] = artifact.Context
 	}
 	rawMetadata, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
@@ -2348,17 +2111,18 @@ func isSourceReadError(err error, source string) bool {
 }
 
 type ExternalScannerRunner struct {
-	Context              context.Context
-	CommandRunner        CommandRunner
-	Env                  map[string]string
-	Profile              string
-	TargetKind           string
-	TargetID             string
-	Registry             ScannerRegistry
-	SandboxMode          string
-	SkillSpectorCommand  []string
-	VirusTotalHTTPClient VirusTotalHTTPClient
-	Timeout              time.Duration
+	Context       context.Context
+	CommandRunner CommandRunner
+	Env           map[string]string
+	// JudgeConfigured reports that a judge will adjudicate this run, so usable
+	// partial scanner evidence can be handed to it instead of failing the scan.
+	JudgeConfigured     bool
+	TargetKind          string
+	TargetID            string
+	Registry            ScannerRegistry
+	SandboxMode         string
+	SkillSpectorCommand []string
+	Timeout             time.Duration
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {
@@ -2477,20 +2241,15 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		return ScannerResult{}, err
 	}
 	defer os.RemoveAll(resultDir)
+	// SkillSpector scans the target itself for every profile. A filtered copy
+	// would hide paths (such as .git/ or clawscan-results/) from scanners that
+	// gate installs without a judge.
 	scanTarget := target
 	cwd := ""
-	resultName := "skillspector-report.json"
-	if isClawHubParityProfile(runner.Profile) {
-		if _, err := copyTargetToWorkspaceContext(workContext(runner.Context), target, filepath.Join(resultDir, "artifact")); err != nil {
-			return ScannerResult{}, fmt.Errorf("prepare ClawHub SkillSpector workspace: %w", err)
-		}
-		scanTarget = "artifact"
-		cwd = resultDir
-		resultName = "skillspector-report-0.json"
-	} else if runner.SandboxMode == SandboxModeDocker {
+	if runner.SandboxMode == SandboxModeDocker {
 		cwd = resultDir
 	}
-	resultPath := filepath.Join(resultDir, resultName)
+	resultPath := filepath.Join(resultDir, "skillspector-report.json")
 	args = append(args, "scan", scanTarget, "--format", "json", "--output", resultPath)
 	if !skillSpectorLLMEnabled(runner.Env) {
 		args = append(args, "--no-llm")
@@ -2518,7 +2277,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 					Raw:         nil,
 				}, nil
 			}
-			return validateSkillSpectorReportForProfile(ScannerResult{
+			return validateSkillSpectorReportEvidence(ScannerResult{
 				Status:      commandScannerResultStatus(output, runErr),
 				StartedAt:   startedAt,
 				CompletedAt: completedAt,
@@ -2526,7 +2285,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 				Error:       message,
 				ExitCode:    exitCode,
 				Raw:         json.RawMessage(raw),
-			}, runner.Profile), nil
+			}, runner.JudgeConfigured), nil
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -2560,7 +2319,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 			Raw:         nil,
 		}, nil
 	}
-	return validateSkillSpectorReportForProfile(ScannerResult{
+	return validateSkillSpectorReportEvidence(ScannerResult{
 		Status:      "completed",
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
@@ -2568,7 +2327,7 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 		Error:       "",
 		ExitCode:    exitCode,
 		Raw:         json.RawMessage(raw),
-	}, runner.Profile), nil
+	}, runner.JudgeConfigured), nil
 }
 
 func defaultSkillSpectorOpenAIProvider(env map[string]string) {
@@ -2753,7 +2512,7 @@ func evaluateGate(artifact *Artifact, opts Options) {
 		}
 		evaluated[scanner] = true
 		result := artifact.Scanners[scanner]
-		if result.Status != "completed" && !usablePartialScanner(artifact.Profile, scanner, result) {
+		if result.Status != "completed" && !usablePartialScanner(scanner, result) {
 			continue
 		}
 		policy := opts.GateRules[scanner]

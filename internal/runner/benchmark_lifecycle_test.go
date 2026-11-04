@@ -102,7 +102,7 @@ func TestBenchmarkRequiredScannerFailureIsNotCleanPrediction(t *testing.T) {
 			opts := benchmarkTestOptions(t, openClawBenchmarkID, "", 0, 0, "")
 			opts.Sandbox.Mode = SandboxModeOff
 			opts.ScannerRegistry = registry
-			opts.Scanners = []string{"clawscan-static", "generated"}
+			opts.Scanners = []string{fixtureScannerID, "generated"}
 			opts.GateRules = map[string]ScannerGatePolicy{"generated": {BlockOnExitCode: &ExitCodeRule{Nonzero: true}}}
 			artifact, err := RunBenchmark(opts, RunContext{Env: map[string]string{}, BenchmarkClient: staticBenchmarkClient{rows: []OpenClawBenchmarkRow{{ID: "generated", ClawScanVerdict: "clean", SkillMDContent: "# Inert\n"}}}})
 			if len(artifact.Cases) != 1 {
@@ -163,11 +163,11 @@ func TestBenchmarkCancellationRetainsCompletedAndPartialCases(t *testing.T) {
 			if len(artifact.Cases) != 3 || scanner.calls != 2 {
 				t.Fatalf("lost cases or started extra work: cases=%d calls=%d", len(artifact.Cases), scanner.calls)
 			}
-			if !artifact.Cases[0].Run.Complete || artifact.Cases[1].Run.Complete || artifact.Cases[2].Run.Scanners["clawscan-static"].Status != "not_started" {
+			if !artifact.Cases[0].Run.Complete || artifact.Cases[1].Run.Complete || artifact.Cases[2].Run.Scanners[fixtureScannerID].Status != "not_started" {
 				t.Fatal("completed, partial and unstarted states changed")
 			}
 			for _, index := range []int{0, 1} {
-				if len(artifact.Cases[index].Run.Scanners["clawscan-static"].Raw) == 0 {
+				if len(artifact.Cases[index].Run.Scanners[fixtureScannerID].Raw) == 0 {
 					t.Fatalf("case %d lost actual raw evidence", index)
 				}
 			}

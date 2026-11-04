@@ -31,11 +31,11 @@ profiles:
   review:
     scanners:
       - skillspector
-      - id: clawscan-static
+      - id: aig
         gate:
           rules:
             - id: any-finding
-              path: findings[]
+              path: runs[].results[]
               exists: true
               action: warn
       - id: third-party

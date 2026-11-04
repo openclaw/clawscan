@@ -56,9 +56,9 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `clawscan-static`, `aig` | Codex `gpt-6.1-sol`, high reasoning, Standard service, bundled ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `aig` | Codex `gpt-6.1-sol`, high reasoning, Standard service, bundled ClawHub prompt/schema |
 | `clawhub-aig` | `skillspector`, `aig` | Codex `gpt-6.1-sol`, high reasoning, Standard service, bundled ClawHub prompt/schema |
-| `openclaw-install-policy` | `skillspector`, `clawscan-static` | none |
+| `openclaw-install-policy` | `skillspector` | none |
 
 The two ClawHub profiles explicitly configure the OpenAI scanner lanes with
 `scannerEnvDefaults`: SkillSpector uses `SKILLSPECTOR_PROVIDER=openai`,

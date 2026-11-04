@@ -357,8 +357,8 @@ func TestRunDispatchesCompatibleScannersForPluginTarget(t *testing.T) {
 	opts, err := ParseArgs([]string{
 		dir,
 		"--scanner", "skillspector",
-		"--scanner", "virustotal",
-		"--scanner", "clawscan-static",
+		"--scanner", "socket",
+		"--scanner", fixtureScannerID,
 		"--sandbox", "off",
 	})
 	if err != nil {
@@ -366,7 +366,7 @@ func TestRunDispatchesCompatibleScannersForPluginTarget(t *testing.T) {
 	}
 	scannerRunner := &recordingPluginScannerRunner{}
 	artifact, err := Run(opts, RunContext{
-		Env:           map[string]string{"VIRUSTOTAL_API_KEY": "present"},
+		Env:           map[string]string{"SOCKET_CLI_API_TOKEN": "present"},
 		ScannerRunner: scannerRunner,
 	})
 	if err != nil {
@@ -375,7 +375,7 @@ func TestRunDispatchesCompatibleScannersForPluginTarget(t *testing.T) {
 	if artifact.Target.Kind != targetKindPlugin || artifact.Target.ID != "probe-plugin" {
 		t.Fatalf("target = %#v", artifact.Target)
 	}
-	wantScanners := "skillspector,virustotal,clawscan-static"
+	wantScanners := "skillspector,socket,fixture"
 	if got := strings.Join(scannerRunner.scanners, ","); got != wantScanners {
 		t.Fatalf("dispatched scanners = %q, want %q", got, wantScanners)
 	}
@@ -387,15 +387,15 @@ func TestRunDispatchesCompatibleScannersForPluginTarget(t *testing.T) {
 	}
 }
 
-func TestRunPluginTargetRequiresVirusTotalCredential(t *testing.T) {
+func TestRunPluginTargetRequiresSocketCredential(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "probe-plugin")
 	writeProbePlugin(t, dir)
-	opts, err := ParseArgs([]string{dir, "--scanner", "virustotal"})
+	opts, err := ParseArgs([]string{dir, "--scanner", "socket"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = Run(opts, RunContext{Env: map[string]string{}})
-	if err == nil || !strings.Contains(err.Error(), "VIRUSTOTAL_API_KEY required by scanner virustotal") {
+	if err == nil || !strings.Contains(err.Error(), "SOCKET_CLI_API_TOKEN required by scanner socket") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -418,10 +418,10 @@ func TestRunPluginTargetRequiresDockerForSkillSpectorByDefault(t *testing.T) {
 	}
 }
 
-func TestRunStaticScannerCompletesForPluginTarget(t *testing.T) {
+func TestRunInProcessScannerCompletesForPluginTarget(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "probe-plugin")
 	writeProbePlugin(t, dir)
-	opts, err := ParseArgs([]string{dir, "--scanner", "clawscan-static"})
+	opts, err := ParseArgs([]string{dir, "--scanner", fixtureScannerID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,12 +432,12 @@ func TestRunStaticScannerCompletesForPluginTarget(t *testing.T) {
 	if artifact.Target.Kind != targetKindPlugin || artifact.Target.ID != "probe-plugin" {
 		t.Fatalf("target = %#v", artifact.Target)
 	}
-	result := artifact.Scanners["clawscan-static"]
+	result := artifact.Scanners[fixtureScannerID]
 	if result.Status != "completed" || len(result.Raw) == 0 {
 		t.Fatalf("result = %#v", result)
 	}
 	if !strings.Contains(string(result.Raw), "index.js") {
-		t.Fatalf("static scan must cover plugin code, not just the manifest: %s", result.Raw)
+		t.Fatalf("plugin scan must cover plugin code, not just the manifest: %s", result.Raw)
 	}
 }
 
@@ -471,7 +471,7 @@ func TestRunFailsForInvalidPluginManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "openclaw.plugin.json"), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := ParseArgs([]string{dir, "--scanner", "clawscan-static"})
+	opts, err := ParseArgs([]string{dir, "--scanner", fixtureScannerID})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -280,12 +280,6 @@ func scannerEvidenceUsable(scannerID string, raw json.RawMessage) bool {
 	}
 	record, isRecord := decoded.(map[string]any)
 	switch scannerID {
-	case "clawscan-static":
-		if !isRecord || record["schemaVersion"] != "clawscan-static-v1" {
-			return false
-		}
-		_, ok := record["findings"].([]any)
-		return ok
 	case "skillspector":
 		return isRecord && skillSpectorEvidenceUsable(record)
 	default:

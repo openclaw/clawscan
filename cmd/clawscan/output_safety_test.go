@@ -15,7 +15,7 @@ func TestCLIProfilesRejectConfigOutputAlias(t *testing.T) {
 			target := filepath.Join(root, "SKILL.md")
 			config := filepath.Join(root, "config.yml")
 			writeFile(t, target, "# Inert\n")
-			body := []byte("version: 1\nprofiles:\n  first:\n    scanners: [clawscan-static]\n  second:\n    scanners: [clawscan-static]\n")
+			body := []byte("version: 1\nprofiles:\n  first:\n    scanners: [skillspector]\n  second:\n    scanners: [skillspector]\n")
 			if err := os.WriteFile(config, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -40,24 +40,24 @@ func TestCLIPreflightUsesActualResolvedSidecarInventory(t *testing.T) {
 			skill := filepath.Join(root, "skill")
 			writeFile(t, filepath.Join(skill, "SKILL.md"), "# Inert\n")
 			t.Chdir(skill)
-			args := []string{".", "--scanner", "clawscan-static"}
-			relative := "skill/clawscan-static.json"
+			args := []string{".", "--scanner", "skillspector"}
+			relative := "skill/skillspector.json"
 			switch mode {
 			case "dot-slash":
 				args[0] = "./"
 			case "default-single", "default-multiple-collision":
 				args = args[1:]
 				writeFile(t, filepath.Join(skill, "skills", "a", "SKILL.md"), "# Inert a\n")
-				relative = "skills/a/clawscan-static.json"
+				relative = "skills/a/skillspector.json"
 				if mode == "default-multiple-collision" {
 					writeFile(t, filepath.Join(skill, "skills", "a!", "SKILL.md"), "# Inert b\n")
-					relative = "skills/a-2/clawscan-static.json"
+					relative = "skills/a-2/skillspector.json"
 				}
 			case "profile", "all-profiles":
 				config := filepath.Join(root, "config.yml")
-				writeFile(t, config, "version: 1\nprofiles:\n  first:\n    scanners: [clawscan-static]\n  second:\n    scanners: [clawscan-static]\n")
+				writeFile(t, config, "version: 1\nprofiles:\n  first:\n    scanners: [skillspector]\n  second:\n    scanners: [skillspector]\n")
 				args = []string{".", "--config", config}
-				relative = "profiles/first/skill/clawscan-static.json"
+				relative = "profiles/first/skill/skillspector.json"
 				if mode == "profile" {
 					args = append(args, "--profile", "first")
 				}

@@ -22,9 +22,9 @@ Custom scanner names are replaced with `scanner:custom`.
 `command_start` / `command_end` bracket default-runner subprocess execution. The
 PID is the direct child (the Docker client or judge shell when applicable), not
 necessarily its nested tool/model process. Injected command runners need their
-own subprocess instrumentation. The built-in static scanner has phase events,
-not command events. A judge receipt retry produces another command pair in the
-same judge phase. Multiple targets restart the elapsed clock at preparation.
+own subprocess instrumentation. Scanner results supplied with
+`--scanner-result` have phase events, not command events. A judge output retry
+produces another command pair in the same judge phase. Multiple targets restart the elapsed clock at preparation.
 
 For opt-in inner judge diagnostics, also set `CLAWSCAN_CHILD_PROGRESS=1`. The
 default command runner then observes judge stdout as it arrives, projecting

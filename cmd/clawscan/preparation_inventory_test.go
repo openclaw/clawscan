@@ -23,14 +23,14 @@ func TestCLIPreparationFailureRetainsDiscoveredInventory(t *testing.T) {
 					writeFile(t, filepath.Join(root, "skills", ambiguous, "openclaw.plugin.json"), `{"id":"generated-plugin"}`)
 				}
 				config := filepath.Join(root, "config.yml")
-				configBody := "version: 1\nprofiles:\n  first:\n    scanners: [clawscan-static]\n  second:\n    scanners: [clawscan-static]\n"
+				configBody := "version: 1\nprofiles:\n  first:\n    scanners: [skillspector]\n  second:\n    scanners: [skillspector]\n"
 				writeFile(t, config, configBody)
 				output := filepath.Join(root, "reports", "artifact.json")
 				args := []string{"--output", output, "--json", "--sandbox", "off"}
 				wantRuns, wantTargets := 3, 3
 				switch selection {
 				case "scanner":
-					args = append(args, "--scanner", "clawscan-static")
+					args = append(args, "--scanner", "skillspector")
 				case "profile":
 					args = append(args, "--config", config, "--profile", "first")
 				case "all-profiles":
@@ -38,7 +38,7 @@ func TestCLIPreparationFailureRetainsDiscoveredInventory(t *testing.T) {
 					wantRuns = 6
 				case "explicit":
 					args = append([]string{"skills/c"}, args...)
-					args = append(args, "--scanner", "clawscan-static")
+					args = append(args, "--scanner", "skillspector")
 					wantRuns, wantTargets = 1, 1
 				}
 				var runErr error
@@ -65,13 +65,13 @@ func TestCLIPreparationFailureRetainsDiscoveredInventory(t *testing.T) {
 					t.Fatalf("lost selected inventory: want %d runs, got %d", wantRuns, len(runs))
 				}
 				for _, artifact := range runs {
-					stage := artifact.Scanners["clawscan-static"]
+					stage := artifact.Scanners["skillspector"]
 					unstarted := failed && artifact.Target.Input >= "skills/"+ambiguous
 					if unstarted {
 						if artifact.Complete || artifact.Status != "failed" || artifact.Gate != "error" || !strings.Contains(artifact.Error, "contains both SKILL.md and openclaw.plugin.json") || stage.Status != "not_started" || stage.StartedAt != "" || len(stage.Raw) != 0 && string(stage.Raw) != "null" || stage.OutputPath != "" {
 							t.Fatalf("untouched target executed or false evidence persisted: %+v", artifact)
 						}
-					} else if !artifact.Complete || stage.Status != "completed" || !strings.Contains(string(stage.Raw), "static.prompt_injection") {
+					} else if !artifact.Complete || stage.Status != "completed" || !strings.Contains(string(stage.Raw), "stub.prompt_injection") {
 						t.Fatalf("successful scan or earlier raw evidence lost: %+v", artifact)
 					}
 				}
