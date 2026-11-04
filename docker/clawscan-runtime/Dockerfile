@@ -33,7 +33,7 @@ COPY tests/ /tmp/clawscan-adapter-tests/
 # The ClawHub profile's Decisions API judge is a stdlib-only Python command.
 COPY judges/ /opt/clawscan/judges/
 COPY patches/aig-mcp-static-tools.patch /tmp/clawscan-aig-mcp/patches/
-COPY tests/test_aig_mcp_static_tools.py /tmp/clawscan-aig-mcp/tests/
+COPY tests/test_aig_mcp_static_tools.py tests/test_aig_mcp_entry_network.py /tmp/clawscan-aig-mcp/tests/
 COPY --from=bash-parser /out/shfmt /usr/local/bin/shfmt
 RUN test "$(shfmt --version)" = "$SHFMT_VERSION"
 
@@ -68,16 +68,18 @@ RUN ln -sf /root/.local/bin/aig-skill-scan /usr/local/bin/aig-skill-scan
 
 # The plugin-only aig-mcp scanner uses the validated PyPI release in its own
 # tool environment. Its static audit reads untrusted plugin code, so the patch
-# never registers the shell, allow-lists confined read-only tools, and adds
-# bounded chunk/search reads for large files; the build fails closed if the
-# patch stops applying or the tool set changes. The CLI writes logs/ into its
+# never registers the shell, allow-lists confined read-only tools, refuses
+# model-chosen MCP destinations, and adds bounded chunk/search reads for large
+# files. The build fails closed if the patch stops applying, the tool set
+# changes, or a real CLI audit with injected remote MCP calls reaches a
+# loopback canary. The CLI writes logs/ into its
 # working directory, so the checks run from a scratch directory.
 RUN uv tool install "aig-mcp-scan==$AIG_MCP_SCAN_VERSION" --with pytest \
     && site=$(/root/.local/share/uv/tools/aig-mcp-scan/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])') \
     && git -C "$site" apply --check /tmp/clawscan-aig-mcp/patches/aig-mcp-static-tools.patch \
     && git -C "$site" apply /tmp/clawscan-aig-mcp/patches/aig-mcp-static-tools.patch \
     && mkdir -p /tmp/aig-mcp-check && cd /tmp/aig-mcp-check \
-    && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /root/.local/share/uv/tools/aig-mcp-scan/bin/python -m pytest -q -p no:cacheprovider /tmp/clawscan-aig-mcp/tests/test_aig_mcp_static_tools.py \
+    && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /root/.local/share/uv/tools/aig-mcp-scan/bin/python -m pytest -q -p no:cacheprovider /tmp/clawscan-aig-mcp/tests/test_aig_mcp_static_tools.py /tmp/clawscan-aig-mcp/tests/test_aig_mcp_entry_network.py \
     && ln -sf /root/.local/bin/aig-mcp-scan /usr/local/bin/aig-mcp-scan \
     && aig-mcp-scan --help >/dev/null \
     && cd / && rm -rf /tmp/aig-mcp-check /tmp/clawscan-aig-mcp

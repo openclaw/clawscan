@@ -363,3 +363,20 @@ index cc62764..29b39a7 100644
          return {"data": content}
  
      except UnicodeDecodeError:
+diff --git a/mcp_scan/tools/mcp_tool/mcp_tool.py b/mcp_scan/tools/mcp_tool/mcp_tool.py
+index 14fba93..65e7dae 100644
+--- a/mcp_scan/tools/mcp_tool/mcp_tool.py
++++ b/mcp_scan/tools/mcp_tool/mcp_tool.py
+@@ -27,6 +27,12 @@ async def _get_mcp_manager(
+     url: str | None, transport: str, context: ToolContext | None
+ ) -> MCPTools:
+     """Helper to get MCPTools manager, either from context or creating a new one."""
++    # ClawScan: the model never chooses a network destination. Only the server
++    # the operator configured for a dynamic scan is reachable, and a static
++    # audit has none, so this refuses before any transport is created.
++    configured = context.tool_dispatcher.mcp_server_url if context and context.tool_dispatcher else None
++    if url and url != configured:
++        raise ValueError("Remote MCP destinations chosen by the model are not allowed")
+     if url:
+         return MCPTools(url=url, transport=transport)  # type: ignore
+ 
