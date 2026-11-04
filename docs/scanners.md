@@ -381,11 +381,19 @@ upstream error and a bounded stderr tail, and the judge does not start:
 - a non-zero exit, or missing or invalid SARIF;
 - model calls that failed (`LLM chat failed after retries`, `LLM chat error,
   retry 5 times`) or an exhausted iteration budget (`Max iterations (80)
-  reached`), on stdout or stderr;
+  reached`), logged as WARNING or ERROR records on stderr. INFO records and
+  continuation lines that merely quote these words (a model report, a file
+  name) do not count;
 - any run whose `scanNote` is not `complete`, including a missing one.
 
 An imported `--scanner-result aig-mcp=<path>` gets the same SARIF and
-`scanNote` checks.
+`scanNote` checks. Its logs are not available, so an imported report from an
+audit that exhausted its iterations still reads `scanNote: complete` and cannot
+be detected; import only reports whose scanner run ClawScan itself checked. A
+profile's plugin-only scanner accepts `--scanner-result` without `--scanner`,
+and a run against a non-plugin target with such a result fails instead of
+ignoring it. A plugin file over 64 MiB fails staging, matching the read tools'
+per-file limit.
 
 Plugin targets are never auto-discovered. Zero-target discovery still scans only
 child skill directories under `./skills`; pass a plugin directory explicitly to

@@ -483,3 +483,21 @@ func TestClawHubProfileRejectsImportedIncompleteAIGMCPResult(t *testing.T) {
 		t.Fatalf("judge prompt was rendered: %v", err)
 	}
 }
+
+func TestClawHubProfileRejectsPluginScannerResultForSkillTargets(t *testing.T) {
+	harness := newAIGMCPHarness(t)
+	target := filepath.Join(harness.dir, "skill-under-review")
+	writeSkill(t, target, "# Skill\n")
+	imported := filepath.Join(harness.dir, "aig-mcp.sarif.json")
+	writeFile(t, imported, aigMCPStubSARIF)
+
+	args := append(append([]string{target}, harness.baseArgs...), append(harness.skillFixtures, "--scanner-result", "aig-mcp="+imported)...)
+	var runErr error
+	captureStdout(t, func() { runErr = run(args, harness.env("ok")) })
+	if runErr == nil || !strings.Contains(runErr.Error(), "Scanner result for aig-mcp applies only to plugin targets; this target is a skill") {
+		t.Fatalf("run error = %v", runErr)
+	}
+	if _, err := os.Stat(harness.prompt); !os.IsNotExist(err) {
+		t.Fatalf("judge ran: %v", err)
+	}
+}

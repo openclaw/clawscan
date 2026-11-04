@@ -2128,3 +2128,18 @@ func TestProfilePluginScannersRejectUnknownOrSkillOnlyScanners(t *testing.T) {
 		}
 	}
 }
+
+func TestClawHubProfileAttachesPluginOnlyScannerResults(t *testing.T) {
+	dir := t.TempDir()
+	opts, err := ResolveArgs([]string{"./plugin", "--profile", "clawhub", "--scanner-result", "aig-mcp=/tmp/aig-mcp.json"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := opts.ScannerResultPaths["aig-mcp"]; got != "/tmp/aig-mcp.json" || strings.Join(opts.PluginScanners, ",") != "aig-mcp" {
+		t.Fatalf("results = %v plugin scanners = %v", opts.ScannerResultPaths, opts.PluginScanners)
+	}
+	_, err = ResolveArgs([]string{"./plugin", "--profile", "clawhub", "--scanner", "skillspector", "--scanner-result", "aig-mcp=/tmp/aig-mcp.json"}, dir)
+	if err == nil || !strings.Contains(err.Error(), "Scanner result provided for unrequested scanner: aig-mcp") {
+		t.Fatalf("explicit --scanner must still reject other results: %v", err)
+	}
+}

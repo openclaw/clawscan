@@ -270,7 +270,7 @@ func TestAIGMCPPreservesFailures(t *testing.T) {
 		},
 		{
 			name:    "model returned nothing after retries",
-			runner:  &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "ERROR | LLM chat error, retry 5 times, exit\n"},
+			runner:  &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "2026-11-04 00:18:56 | ERROR    | LLM chat error, retry 5 times, exit\n"},
 			want:    []string{"aig-mcp-scan did not finish its audit (model calls failed)", "LLM chat error, retry 5 times"},
 			wantRaw: true,
 		},
@@ -281,7 +281,7 @@ func TestAIGMCPPreservesFailures(t *testing.T) {
 		},
 		{
 			name:    "model calls failed behind a clean exit",
-			runner:  &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "INFO start\nERROR | LLM chat failed after retries: RateLimitError: quota\nINFO done\n"},
+			runner:  &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "2026-11-04 00:18:56 | INFO     | start\n2026-11-04 00:18:56 | ERROR    | LLM chat failed after retries: RateLimitError: quota\n2026-11-04 00:18:57 | INFO     | done\n"},
 			want:    []string{"aig-mcp-scan did not finish its audit (model calls failed)", "LLM chat failed after retries: RateLimitError: quota"},
 			wantRaw: true,
 		},
@@ -443,23 +443,26 @@ func TestAIGMCPStagingIsBounded(t *testing.T) {
 	if err := stagePluginScanTarget(runner, target, filepath.Join(t.TempDir(), "ok")); err != nil {
 		t.Fatal(err)
 	}
-	big := filepath.Join(target, "dist", "bundle.js")
-	if err := os.MkdirAll(filepath.Dir(big), 0o755); err != nil {
+	// Five sparse files, each under the per-file cap, together over the total cap.
+	bigDir := filepath.Join(target, "big")
+	if err := os.MkdirAll(bigDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	file, err := os.Create(big)
-	if err != nil {
-		t.Fatal(err)
+	for i := 0; i < 5; i++ {
+		file, err := os.Create(filepath.Join(bigDir, fmt.Sprintf("chunk%d.js", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Truncate(aigMCPMaxStagedBytes/5 + 1); err != nil {
+			t.Fatal(err)
+		}
+		file.Close()
 	}
-	if err := file.Truncate(aigMCPMaxStagedBytes + 1); err != nil {
-		t.Fatal(err)
-	}
-	file.Close()
-	err = stagePluginScanTarget(runner, target, filepath.Join(t.TempDir(), "big"))
+	err := stagePluginScanTarget(runner, target, filepath.Join(t.TempDir(), "big"))
 	if err == nil || !strings.Contains(err.Error(), "larger than 256 MiB outside node_modules") {
 		t.Fatalf("err = %v", err)
 	}
-	if err := os.Remove(big); err != nil {
+	if err := os.RemoveAll(bigDir); err != nil {
 		t.Fatal(err)
 	}
 	many := filepath.Join(target, "many")
@@ -662,19 +665,19 @@ func TestAIGMCPUnfinishedAuditsNeverStartTheJudge(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "iteration budget exhausted on stderr",
-			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "2026-11-03 | WARNING  | Max iterations (80) reached\n"},
+			name:   "iteration budget exhausted",
+			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "2026-11-04 00:18:56 | WARNING  | Max iterations (80) reached\n"},
 			want:   "aig-mcp-scan did not finish its audit (the agent exhausted its iteration budget)",
 		},
 		{
-			name:   "iteration budget exhausted on stdout",
-			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stdout: "status: Max iterations reached, returning current result\n"},
+			name:   "iteration budget exhausted without a timestamp",
+			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "WARNING | Max iterations (80) reached\n"},
 			want:   "aig-mcp-scan did not finish its audit (the agent exhausted its iteration budget)",
 		},
 		{
-			name:   "model failure on stdout",
-			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stdout: "LLM chat failed after retries: timeout\n"},
-			want:   "aig-mcp-scan did not finish its audit (model calls failed)",
+			name:   "iteration budget exhausted with colored logs",
+			runner: &aigMCPCommandRunner{output: aigMCPSARIF, stderr: "\x1b[32m2026-11-04 00:18:56\x1b[0m | \x1b[33mWARNING \x1b[0m | \x1b[36mMax iterations (80) reached\x1b[0m\r\n"},
+			want:   "aig-mcp-scan did not finish its audit (the agent exhausted its iteration budget)",
 		},
 		{
 			name:   "scanNote missing",
@@ -755,5 +758,60 @@ func TestAIGMCPPromptNamesTheReadTools(t *testing.T) {
 		if !strings.Contains(aigMCPPrompt(nil), want) {
 			t.Fatalf("prompt missing %q", want)
 		}
+	}
+}
+
+func TestAIGMCPQuotedMarkersDoNotFailCompleteAudits(t *testing.T) {
+	// Model reports, file names and tool names reach upstream INFO records or
+	// their continuation lines; only real WARNING/ERROR records count.
+	stderr := strings.Join([]string{
+		"2026-11-04 00:18:56 | INFO     | Custom prompt: ... plugin/dist/Max iterations (1).js",
+		"2026-11-04 00:18:57 | INFO     | Final Output: The agent loop stops when \"Max iterations (80) reached\" is logged.",
+		"Max iterations (80) reached",
+		"2026-11-04 00:18:58 | WARNING  | Blocked tool 'LLM chat failed after retries: x' in static scan mode",
+		"2026-11-04 00:18:59 | INFO     | Scan completed successfully:",
+		" LLM chat error, retry 5 times, exit",
+	}, "\n")
+	commands := &aigMCPCommandRunner{output: aigMCPSARIF, stdout: "Max iterations (80) reached\n", stderr: stderr}
+	artifact := runAIGMCPTest(t, createAIGMCPTestPlugin(t), map[string]string{"LLM_API_KEY": "k"}, commands)
+	if result := artifact.Scanners["aig-mcp"]; result.Status != "completed" {
+		t.Fatalf("quoted marker failed a complete audit: %#v", result)
+	}
+}
+
+func TestAIGMCPStagingRejectsFilesTheReadToolsCannotOpen(t *testing.T) {
+	target := createAIGMCPTestPlugin(t)
+	file, err := os.Create(filepath.Join(target, "dist-huge.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(aigMCPMaxFileBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	err = stagePluginScanTarget(ExternalScannerRunner{}, target, filepath.Join(t.TempDir(), "staged"))
+	if err == nil || !strings.Contains(err.Error(), "plugin file dist-huge.js is larger than 64 MiB") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPluginOnlyScannerResultsRejectNonPluginTargets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aig-mcp.json")
+	if err := os.WriteFile(path, []byte(aigMCPSARIF), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := ParseArgs([]string{createAIGTestSkill(t), "--scanner", "aig", "--sandbox", "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.PluginScanners = []string{"aig-mcp"}
+	opts.ScannerResultPaths = map[string]string{"aig-mcp": path}
+	commands := &aigMCPCommandRunner{output: aigMCPSARIF}
+	_, err = Run(opts, RunContext{Env: map[string]string{"LLM_API_KEY": "k"}, CommandRunner: commands})
+	if err == nil || !strings.Contains(err.Error(), "Scanner result for aig-mcp applies only to plugin targets; this target is a skill") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(commands.calls) != 0 {
+		t.Fatalf("scanners ran: %#v", commands.calls)
 	}
 }

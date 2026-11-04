@@ -156,6 +156,18 @@ class ProductionContractTests(unittest.TestCase):
             "dbb47fa8afb2b7d890d5b0558422b12ceb2d46b013080c167120ad1c5aea960a",
         )
 
+    def test_reviewed_source_is_bound_by_full_commit_ids(self):
+        # actions/checkout treats a short ref as a branch name, and the binding
+        # compares full `git rev-parse HEAD` output.
+        here = Path(contract.__file__)
+        source = json.loads(here.with_name("production-contract.json").read_text())["source"]
+        for key in ("commit", "parent", "tree", "runtime_tree"):
+            self.assertRegex(source[key], r"^[0-9a-f]{40}$", key)
+        workflow = (
+            here.parents[2] / ".github" / "workflows" / "runtime-image-production-contract.yml"
+        ).read_text()
+        self.assertIn("ref: " + source["commit"] + "\n", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

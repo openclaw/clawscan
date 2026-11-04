@@ -541,6 +541,11 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	artifact.Target.ResolvedPath = target.resolvedPath
 	artifact.Target.Kind = target.kind
 	artifact.Target.ID = target.id
+	if target.kind != targetKindPlugin {
+		if err := rejectPluginOnlyScannerResults(opts, target.kind); err != nil {
+			return artifact, err
+		}
+	}
 	if target.kind == targetKindPlugin && len(opts.PluginScanners) > 0 {
 		// The profile's plugin scanner list replaces its skill list entirely, so
 		// skill scanners are neither run nor recorded for plugin targets.
@@ -2602,6 +2607,21 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 		GateRules:   []FiredGateRule{},
 		Judge:       nil,
 	}
+}
+
+// rejectPluginOnlyScannerResults refuses an imported result for a scanner that
+// only runs on plugins when the target is not a plugin, instead of ignoring it.
+func rejectPluginOnlyScannerResults(opts Options, kind string) error {
+	requested := map[string]bool{}
+	for _, scanner := range opts.Scanners {
+		requested[scanner] = true
+	}
+	for _, scanner := range opts.PluginScanners {
+		if opts.ScannerResultPaths[scanner] != "" && !requested[scanner] {
+			return fmt.Errorf("Scanner result for %s applies only to plugin targets; this target is a %s", scanner, kind)
+		}
+	}
+	return nil
 }
 
 // pluginScannerOptions selects a profile's plugin scanner list, keeping only

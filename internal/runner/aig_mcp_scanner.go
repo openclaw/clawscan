@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -42,6 +43,9 @@ const (
 	// plugin over either limit fails the scan rather than being audited partly.
 	aigMCPMaxStagedFiles = 20_000
 	aigMCPMaxStagedBytes = 256 << 20
+	// aigMCPMaxFileBytes matches the patched read tools' per-file limit, so no
+	// staged file is too large for the agent to read.
+	aigMCPMaxFileBytes = 64 << 20
 )
 
 // aigMCPHiddenDirs are directories aig-mcp-scan 0.2.0 leaves out of the repo
@@ -77,16 +81,16 @@ const aigMCPScopePrompt = " The whole plugin artifact is in scope, not only its 
 	"openclaw.plugin.json even when they are compiled. No shell is available: use read_file, " +
 	"read_file_chunk (for any file longer than one read_file result) and search_files."
 
-// aigMCPIncompleteMarkers are upstream log lines written when the audit did
-// not finish: every model call failed, or the agent ran out of iterations.
+// aigMCPIncompleteLog matches the upstream log records written when the audit
+// did not finish: every model call failed, or the agent ran out of iterations.
 // aig-mcp-scan then still exits 0 and writes SARIF that looks complete
-// (scanNote "complete"), so these lines on either output fail the scan.
-var aigMCPIncompleteMarkers = []struct{ marker, reason string }{
-	{"LLM chat failed after retries", "model calls failed"},
-	{"LLM chat error, retry 5 times", "model calls failed"},
-	{"Max iterations (", "the agent exhausted its iteration budget"},
-	{"Max iterations reached", "the agent exhausted its iteration budget"},
-}
+// (scanNote "complete"). Only loguru-shaped WARNING or ERROR records on stderr
+// count (the timestamp is optional, for other log sinks), so INFO records and
+// continuation lines that quote the same words cannot fail a scan.
+var aigMCPIncompleteLog = regexp.MustCompile(`^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \| )?(?:WARNING|ERROR) *\| ` +
+	`(Max iterations \(\d+\) reached$|LLM chat failed after retries: |LLM chat error, retry 5 times, exit$)`)
+
+var ansiEscape = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 var errInvalidAIGMCPSARIF = errors.New("aig-mcp-scan returned invalid SARIF 2.1.0 JSON")
 
@@ -191,7 +195,7 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 	}
 	// Keep the SARIF for inspection, but never let a report from an audit that
 	// did not finish read as a clean scan.
-	if reason, line := aigMCPIncompleteRun(output.Stdout, output.Stderr); reason != "" {
+	if reason, line := aigMCPIncompleteRun(output.Stderr); reason != "" {
 		result.Status = "failed"
 		result.Error = "aig-mcp-scan did not finish its audit (" + reason + "); its SARIF report is not a complete audit: " +
 			redactEnvValues(line, runner.Env)
@@ -229,6 +233,9 @@ func stagePluginScanTarget(runner ExternalScannerRunner, source string, dest str
 			info, err := entry.Info()
 			if err != nil {
 				return false, err
+			}
+			if info.Size() > aigMCPMaxFileBytes {
+				return false, fmt.Errorf("plugin file %s is larger than %d MiB", rel, aigMCPMaxFileBytes>>20)
 			}
 			bytes += info.Size()
 			if bytes > aigMCPMaxStagedBytes {
@@ -350,15 +357,18 @@ func aigMCPRequirements(env map[string]string) []EnvRequirement {
 	return aigAPIKeyRequirements(env, "scanner aig-mcp (set LLM_API_KEY or OPENAI_API_KEY)")
 }
 
-func aigMCPIncompleteRun(outputs ...string) (string, string) {
-	for _, output := range outputs {
-		for _, line := range strings.Split(output, "\n") {
-			for _, marker := range aigMCPIncompleteMarkers {
-				if strings.Contains(line, marker.marker) {
-					return marker.reason, truncateClawHubText(strings.TrimSpace(line), 1000)
-				}
-			}
+func aigMCPIncompleteRun(stderr string) (string, string) {
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimRight(ansiEscape.ReplaceAllString(line, ""), "\r ")
+		match := aigMCPIncompleteLog.FindStringSubmatch(line)
+		if match == nil {
+			continue
 		}
+		reason := "model calls failed"
+		if strings.HasPrefix(match[1], "Max iterations") {
+			reason = "the agent exhausted its iteration budget"
+		}
+		return reason, truncateClawHubText(line, 1000)
 	}
 	return "", ""
 }
