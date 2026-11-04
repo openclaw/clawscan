@@ -17,7 +17,7 @@ func TestCLIPreparationFailureRejectsConfigOutputAlias(t *testing.T) {
 			root := t.TempDir()
 			t.Chdir(root)
 			config := filepath.Join(root, "config.yml")
-			body := []byte("version: 1\nprofiles:\n  first:\n    scanners: [clawscan-static]\n  second:\n    scanners: [clawscan-static]\n")
+			body := []byte("version: 1\nprofiles:\n  first:\n    scanners: [skillspector]\n  second:\n    scanners: [skillspector]\n")
 			if err := os.WriteFile(config, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -42,11 +42,11 @@ func TestCLIPreparationFailureRetainsSafeOutput(t *testing.T) {
 				root := t.TempDir()
 				t.Chdir(root)
 				config := filepath.Join(root, "config.yml")
-				writeFile(t, config, "version: 1\nprofiles:\n  first:\n    scanners: [clawscan-static]\n    judge:\n      command: must-not-run\n  second:\n    scanners: [clawscan-static]\n    judge:\n      command: must-not-run\n")
+				writeFile(t, config, "version: 1\nprofiles:\n  first:\n    scanners: [skillspector]\n    judge:\n      command: must-not-run\n  second:\n    scanners: [skillspector]\n    judge:\n      command: must-not-run\n")
 				args := []string{"--sandbox", "off"}
 				switch selection {
 				case "scanner":
-					args = append(args, "--scanner", "clawscan-static", "--judge", "must-not-run")
+					args = append(args, "--scanner", "skillspector", "--judge", "must-not-run")
 				case "profile":
 					args = append(args, "--config", config, "--profile", "first")
 				case "all-profiles":
@@ -96,7 +96,7 @@ func TestCLIPreparationFailureRetainsSafeOutput(t *testing.T) {
 					runs = []runner.Artifact{artifact}
 				}
 				for _, artifact := range runs {
-					result := artifact.Scanners["clawscan-static"]
+					result := artifact.Scanners["skillspector"]
 					if artifact.Status != "failed" || artifact.Complete || artifact.Gate != "error" || !strings.Contains(artifact.Error, "./skills was not found") || result.Status != "not_started" || result.StartedAt != "" || len(result.Raw) != 0 && string(result.Raw) != "null" || artifact.Judge == nil || artifact.Judge.Status != "not_started" || artifact.Judge.CommandStarted == nil || *artifact.Judge.CommandStarted {
 						t.Fatalf("preparation failure fabricated or lost stage evidence: %+v", artifact)
 					}

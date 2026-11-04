@@ -2,12 +2,12 @@ package runner
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 var discordStaticAnalyzers = []any{
@@ -130,7 +130,6 @@ func clawHubPromptSource(t *testing.T) []byte {
 
 func partialSkillSpectorArtifact(raw []byte) Artifact {
 	return Artifact{
-		Profile: clawHubProfileID,
 		Scanners: map[string]ScannerResult{
 			"skillspector": {Status: "partial", ReportPolicy: judgeGapsReportPolicy, Raw: raw},
 		},
@@ -140,16 +139,16 @@ func partialSkillSpectorArtifact(raw []byte) Artifact {
 func TestClawHubPromptSummarizesLargeAccountingLists(t *testing.T) {
 	ledger, scope := syntheticLedgerAndScope(5_000, 5_000)
 	raw := largePartialReport(t, ledger, scope, nil)
-	if len(raw) <= codexCLIMaxInputChars {
-		t.Fatalf("fixture is too small to exercise the Codex limit: %d chars", len(raw))
+	if len(raw) <= historicalCodexInputLimitChars {
+		t.Fatalf("fixture is too small to exercise summarization: %d chars", len(raw))
 	}
 
 	prompt, err := RenderClawHubPrompt(string(clawHubPromptSource(t)), partialSkillSpectorArtifact(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chars := judgePromptChars(prompt); chars > clawHubJudgePromptBudgetChars || chars > 100_000 {
-		t.Fatalf("summarized prompt is %d chars; budget %d", chars, clawHubJudgePromptBudgetChars)
+	if chars := utf8.RuneCountInString(prompt); chars > 100_000 {
+		t.Fatalf("summarized prompt is %d chars", chars)
 	}
 	for _, want := range []string{
 		`"total": 5000`,
@@ -157,15 +156,12 @@ func TestClawHubPromptSummarizesLargeAccountingLists(t *testing.T) {
 		`"obfuscated_instruction_text": 1250`,
 		`"excluded_directory": 4500`,
 		`"binary_content": 500`,
-		"analysis_completeness.ledger_exceptions in skillspector-report-0.json",
-		"analysis_completeness.scope_exclusions in skillspector-report-0.json",
+		"analysis_completeness.ledger_exceptions in scanners/skillspector.json",
+		"analysis_completeness.scope_exclusions in scanners/skillspector.json",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("summarized prompt lost %q", want)
 		}
-	}
-	if err := checkJudgePromptBudget(prompt, clawHubJudgePromptBudgetChars); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -237,7 +233,12 @@ func TestClawHubPromptSummaryBoundsGroupsAndEntries(t *testing.T) {
 	}
 }
 
-func TestClawHubPromptDiscordSizedPartialReportFitsBudget(t *testing.T) {
+// historicalCodexInputLimitChars is the Codex CLI input limit that made the
+// unsummarized Discord-sized report unusable. ClawScan no longer enforces it;
+// the fixture only proves that the summary keeps the prompt compact.
+const historicalCodexInputLimitChars = 1_048_576
+
+func TestClawHubPromptDiscordSizedPartialReportStaysCompact(t *testing.T) {
 	raw := discordSizedReport(t)
 	var report map[string]any
 	if err := json.Unmarshal(raw, &report); err != nil {
@@ -248,12 +249,12 @@ func TestClawHubPromptDiscordSizedPartialReportFitsBudget(t *testing.T) {
 		t.Fatal("fixture does not match the Discord accounting counts")
 	}
 	// Before summarization the normalized accounting block alone was larger
-	// than the Codex input limit for this report shape.
+	// than the historical Codex input limit for this report shape.
 	uncapped, err := json.MarshalIndent(accounting, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(uncapped) <= codexCLIMaxInputChars {
+	if len(uncapped) <= historicalCodexInputLimitChars {
 		t.Fatalf("fixture is not Discord-sized: uncapped accounting is %d chars", len(uncapped))
 	}
 
@@ -261,16 +262,15 @@ func TestClawHubPromptDiscordSizedPartialReportFitsBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chars := judgePromptChars(prompt)
-	if chars > clawHubJudgePromptBudgetChars || chars > 100_000 {
-		t.Fatalf("Discord-sized prompt is %d chars; budget %d", chars, clawHubJudgePromptBudgetChars)
+	if chars := utf8.RuneCountInString(prompt); chars > 100_000 {
+		t.Fatalf("Discord-sized prompt is %d chars", chars)
 	}
 	for _, want := range []string{
 		`"total": 1638`, `"total": 1578`,
 		`"excluded_executable_content": 1576`, `"opaque_content": 43`, `"static_parse_limit": 10`, `"obfuscated_instruction_text": 9`,
 		`"excluded_directory": 1577`, `"binary_content": 1`,
 		"dist/.setup/opaque_content-chunk-00-C18HNgge.mjs", "assets/icon.png",
-		`"issueCount": 1662`,
+		`"issueCount": 1662`, "scanners/skillspector.json",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("Discord-sized prompt lost %q", want)
@@ -278,7 +278,7 @@ func TestClawHubPromptDiscordSizedPartialReportFitsBudget(t *testing.T) {
 	}
 }
 
-func TestClawHubLargePartialReportReachesJudgeUnderBudget(t *testing.T) {
+func TestClawHubLargePartialReportReachesJudgeWithFullWorkspaceReport(t *testing.T) {
 	ledger, scope := syntheticLedgerAndScope(5_000, 5_000)
 	raw := largePartialReport(t, ledger, scope, nil)
 	path := filepath.Join(t.TempDir(), "report.json")
@@ -295,18 +295,18 @@ func TestClawHubLargePartialReportReachesJudgeUnderBudget(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if chars := judgePromptChars(string(prompt)); chars > clawHubJudgePromptBudgetChars {
-			t.Fatalf("judge received %d chars", chars)
+		if !strings.Contains(string(prompt), `"summarized": true`) {
+			t.Fatal("judge prompt did not summarize the accounting lists")
 		}
-		full, err := os.ReadFile(filepath.Join(workspace, "skillspector-report-0.json"))
+		full, err := os.ReadFile(filepath.Join(workspace, "scanners", "skillspector.json"))
 		if err != nil || string(full) != string(raw) {
 			t.Fatalf("judge workspace lost the complete raw report: err=%v", err)
 		}
-		command.writeOutput = string(judgeRetryOutput(t, map[string]any{"verdict": "benign", "artifact_inspection": partialJudgeReceipt(t, workspace)}).Stdout)
+		command.writeOutput = `{"verdict":"benign"}`
 		return nil
 	}
 	artifact, err := Run(Options{
-		Target: target, Profile: clawHubProfileID, Scanners: []string{"skillspector"},
+		Target: target, Profile: "clawhub", Scanners: []string{"skillspector"},
 		OutputPath:         filepath.Join(t.TempDir(), "run.json"),
 		ScannerResultPaths: map[string]string{"skillspector": path},
 		Judge:              &JudgeOptions{Command: "judge --prompt {{ prompt:clawhub/prompt.md }} --output {{ output }}", Files: map[string][]byte{"clawhub/prompt.md": clawHubPromptSource(t)}},
@@ -319,71 +319,63 @@ func TestClawHubLargePartialReportReachesJudgeUnderBudget(t *testing.T) {
 	}
 }
 
-func TestClawHubOversizeJudgePromptFailsBeforeCommandStarts(t *testing.T) {
-	raw, err := os.ReadFile("testdata/skillspector-usable-partial.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "report.json")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
+// ClawScan has no judge input budget: an oversized prompt reaches the judge
+// command, and a judge that enforces its own input limit fails with its own
+// error, which ClawScan preserves without retrying.
+func TestOversizeJudgePromptReachesJudgeAndKeepsItsError(t *testing.T) {
 	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", "benign"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Multi-byte runes prove the budget counts characters, as Codex does.
-	oversizeSystemPrompt := strings.Repeat("é", clawHubJudgePromptBudgetChars+1)
-	command := &recordingCommandRunner{}
-	artifact, err := Run(Options{
-		Target: target, Profile: clawHubProfileID, Scanners: []string{"skillspector"},
-		OutputPath:         filepath.Join(t.TempDir(), "run.json"),
-		ScannerResultPaths: map[string]string{"skillspector": path},
-		Judge:              &JudgeOptions{Command: "judge --prompt {{ prompt:clawhub/prompt.md }} --output {{ output }}", Files: map[string][]byte{"clawhub/prompt.md": []byte(oversizeSystemPrompt)}},
-	}, RunContext{Env: map[string]string{}, CommandRunner: command})
-	if !errors.Is(err, ErrJudgePromptTooLarge) {
-		t.Fatalf("err = %v, want ErrJudgePromptTooLarge", err)
-	}
-	if len(command.calls) != 0 {
-		t.Fatalf("judge command ran %d times", len(command.calls))
-	}
-	judge := artifact.Judge
-	if judge == nil || judge.Status != "failed" || judge.CommandStarted == nil || *judge.CommandStarted || len(judge.Attempts) != 0 {
-		t.Fatalf("judge = %+v", judge)
-	}
-	pattern := fmt.Sprintf(" chars exceeds budget %d", clawHubJudgePromptBudgetChars)
-	if !strings.HasPrefix(judge.Error, "judge prompt too large: ") || !strings.HasSuffix(judge.Error, pattern) {
-		t.Fatalf("judge error = %q", judge.Error)
-	}
-	if artifact.Status != "failed" || artifact.Complete || artifact.Gate != "error" || artifact.Error != judge.Error {
-		t.Fatalf("artifact status=%s complete=%v gate=%s error=%q", artifact.Status, artifact.Complete, artifact.Gate, artifact.Error)
-	}
-}
-
-func TestJudgePromptBudgetCountsCharacters(t *testing.T) {
-	if err := checkJudgePromptBudget(strings.Repeat("é", 10), 10); err != nil {
-		t.Fatalf("10 two-byte characters exceeded a 10-character budget: %v", err)
-	}
-	err := checkJudgePromptBudget(strings.Repeat("é", 11), 10)
-	if !errors.Is(err, ErrJudgePromptTooLarge) || err.Error() != "judge prompt too large: 11 chars exceeds budget 10" {
-		t.Fatalf("err = %v", err)
-	}
-	if clawHubJudgePromptBudgetChars != 943_718 {
-		t.Fatalf("budget = %d", clawHubJudgePromptBudgetChars)
-	}
-}
-
-func TestGenericJudgePromptHasNoClawHubBudget(t *testing.T) {
-	target := t.TempDir()
-	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Skill\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	command := &recordingCommandRunner{writeOutput: `{"verdict":"benign"}`}
-	artifact, err := Run(Options{
-		Target: target, Scanners: []string{"clawscan-static"},
-		Judge: &JudgeOptions{Command: "judge --prompt {{ prompt:big.md }} --output {{ output }}", Files: map[string][]byte{"big.md": []byte(strings.Repeat("x", codexCLIMaxInputChars+1))}},
-	}, RunContext{Env: map[string]string{}, CommandRunner: command})
-	if err != nil || len(command.calls) != 1 || artifact.Judge == nil || artifact.Judge.Status != "completed" {
-		t.Fatalf("generic judge was blocked: err=%v calls=%d judge=%+v", err, len(command.calls), artifact.Judge)
+	oversizeSystemPrompt := strings.Repeat("é", historicalCodexInputLimitChars+1)
+	for _, test := range []struct {
+		name    string
+		profile string
+		source  string
+	}{
+		{name: "clawhub prompt", profile: "clawhub", source: "clawhub/prompt.md"},
+		{name: "custom prompt", profile: "custom", source: "big.md"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			exitCode := 1
+			command := &recordingCommandRunner{
+				stdout:   `{"type":"thread.started","thread_id":"t"}`,
+				stderr:   `Error: input_too_large: judge input limit exceeded`,
+				err:      errCommandFailed,
+				exitCode: &exitCode,
+			}
+			var promptChars int
+			command.runHook = func(_ string, _ []string, workspace string) error {
+				prompt, err := os.ReadFile(filepath.Join(workspace, "prompt.md"))
+				if err != nil {
+					return err
+				}
+				promptChars = utf8.RuneCount(prompt)
+				return nil
+			}
+			artifact, err := Run(Options{
+				Target: target, Profile: test.profile, Scanners: []string{fixtureScannerID}, ScannerRegistry: fixtureScannerRegistry(t),
+				Judge: &JudgeOptions{
+					Command: "judge --prompt {{ prompt:" + test.source + " }} --output {{ output }}",
+					Files:   map[string][]byte{test.source: []byte(oversizeSystemPrompt)},
+				},
+			}, RunContext{Env: map[string]string{}, CommandRunner: command})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(command.calls) != 1 || promptChars <= historicalCodexInputLimitChars {
+				t.Fatalf("judge calls=%d prompt chars=%d", len(command.calls), promptChars)
+			}
+			judge := artifact.Judge
+			if judge == nil || judge.Status != "failed" || !strings.Contains(judge.Error, "input_too_large") || strings.Contains(judge.Error, "too large:") {
+				t.Fatalf("judge = %+v", judge)
+			}
+			if len(judge.Attempts) != 1 || judge.Attempts[0].Error != judge.Error {
+				t.Fatalf("attempts = %+v", judge.Attempts)
+			}
+			if artifact.Status != "failed" || artifact.Complete || artifact.Gate != "error" {
+				t.Fatalf("artifact status=%s complete=%v gate=%s", artifact.Status, artifact.Complete, artifact.Gate)
+			}
+		})
 	}
 }

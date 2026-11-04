@@ -52,7 +52,7 @@ func (runner *recordingInstallRunner) Run(command string, args []string, cwd str
 }
 
 func TestInstallScannersSkipsNoInstallNeededScanner(t *testing.T) {
-	results, err := InstallScanners([]string{"clawscan-static"}, InstallOptions{
+	results, err := InstallScanners([]string{fixtureScannerID}, InstallOptions{
 		Runner: &recordingInstallRunner{},
 	})
 	if err != nil {
@@ -167,7 +167,7 @@ func TestInstallScannersReportsFailureAndContinues(t *testing.T) {
 		},
 		errs: map[string]error{"uv": errors.New("exit status 1")},
 	}
-	results, err := InstallScanners([]string{"skillspector", "clawscan-static"}, InstallOptions{Runner: fake})
+	results, err := InstallScanners([]string{"skillspector", fixtureScannerID}, InstallOptions{Runner: fake})
 	if err == nil {
 		t.Fatal("expected error")
 	}

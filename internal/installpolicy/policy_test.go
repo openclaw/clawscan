@@ -352,15 +352,15 @@ func TestResponseFromArtifactValidatesBuiltInEvidenceSchemas(t *testing.T) {
 		decision  string
 	}{
 		{
-			name:      "static valid",
-			scannerID: "clawscan-static",
-			raw:       `{"schemaVersion":"clawscan-static-v1","findings":[]}`,
+			name:      "custom scanner object",
+			scannerID: "operator-scanner",
+			raw:       `{"findings":[]}`,
 			decision:  "allow",
 		},
 		{
-			name:      "static missing schema",
-			scannerID: "clawscan-static",
-			raw:       `{"findings":[]}`,
+			name:      "custom scanner scalar",
+			scannerID: "operator-scanner",
+			raw:       `"clean"`,
 			decision:  "block",
 		},
 		{

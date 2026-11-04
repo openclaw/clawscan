@@ -61,7 +61,7 @@ Separate private evidence from public contribution material:
      clawhub:
       scanners:
         - skillspector
-        - clawscan-static
+        - aig
        judge:
          command: >
            # candidate judge command, if changed

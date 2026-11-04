@@ -24,11 +24,11 @@ func TestRunOutputRemainsPrivate(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			artifact, err := Run(Options{Target: target, Scanners: []string{"clawscan-static"}, OutputPath: output}, RunContext{Env: map[string]string{}})
+			artifact, err := Run(Options{Target: target, Scanners: []string{fixtureScannerID}, OutputPath: output}, RunContext{Env: map[string]string{}})
 			if err != nil || !artifact.Complete {
 				t.Fatalf("run: %+v %v", artifact, err)
 			}
-			for _, path := range []string{output, filepath.Join(root, filepath.FromSlash(artifact.Scanners["clawscan-static"].OutputPath))} {
+			for _, path := range []string{output, filepath.Join(root, filepath.FromSlash(artifact.Scanners[fixtureScannerID].OutputPath))} {
 				info, err := os.Stat(path)
 				if err != nil {
 					t.Fatal(err)

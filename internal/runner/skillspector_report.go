@@ -7,8 +7,13 @@ import (
 
 const judgeGapsReportPolicy = "judge-gaps"
 
-func validateSkillSpectorReportForProfile(result ScannerResult, profile string) ScannerResult {
-	if isClawHubParityProfile(profile) && result.Status == "completed" {
+// validateSkillSpectorReportEvidence classifies a SkillSpector report. When a
+// judge is configured, a usable partial report gets status "partial" with
+// report policy "judge-gaps": it counts as complete evidence only after that
+// judge completes. Without a judge, partial coverage fails the scanner. The
+// profile name never changes this classification.
+func validateSkillSpectorReportEvidence(result ScannerResult, judgeConfigured bool) ScannerResult {
+	if judgeConfigured && result.Status == "completed" {
 		var record map[string]any
 		if json.Unmarshal(result.Raw, &record) != nil || len(record) == 0 {
 			result.Status = "failed"
@@ -26,7 +31,7 @@ func validateSkillSpectorReportForProfile(result ScannerResult, profile string) 
 			return result
 		}
 	}
-	if isClawHubParityProfile(profile) && result.Status == "completed" &&
+	if judgeConfigured && result.Status == "completed" &&
 		(result.ExitCode == nil || *result.ExitCode == 0 || *result.ExitCode == 1) &&
 		skillSpectorUsablePartial(result.Raw) {
 		result.Status = "partial"
@@ -153,8 +158,8 @@ func skillSpectorUsablePartial(raw json.RawMessage) bool {
 	return true
 }
 
-func usablePartialScanner(profile, scanner string, result ScannerResult) bool {
-	return isClawHubParityProfile(profile) && scanner == "skillspector" &&
+func usablePartialScanner(scanner string, result ScannerResult) bool {
+	return scanner == "skillspector" &&
 		result.Status == "partial" && result.ReportPolicy == judgeGapsReportPolicy
 }
 

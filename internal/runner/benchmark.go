@@ -155,22 +155,17 @@ type BenchmarkIDSelection struct {
 }
 
 type OpenClawBenchmarkRow struct {
-	ID                        string               `json:"id"`
-	SkillSlug                 string               `json:"skill_slug"`
-	SkillVersion              string               `json:"skill_version"`
-	SkillMDContent            string               `json:"skill_md_content"`
-	SkillBundleContent        []OpenClawBundleFile `json:"skill_bundle_content"`
-	ClawScanVerdict           string               `json:"clawscan_verdict"`
-	ClawScanConfidence        string               `json:"clawscan_confidence"`
-	ClawScanModel             string               `json:"clawscan_model"`
-	ClawScanSummary           string               `json:"clawscan_summary"`
-	ClawScanContext           json.RawMessage      `json:"clawscan_context"`
-	VirusTotalStatus          string               `json:"virustotal_status"`
-	VirusTotalMaliciousCount  int                  `json:"virustotal_malicious_count"`
-	VirusTotalSuspiciousCount int                  `json:"virustotal_suspicious_count"`
-	VirusTotalHarmlessCount   int                  `json:"virustotal_harmless_count"`
-	VirusTotalUndetectedCount int                  `json:"virustotal_undetected_count"`
-	Split                     string               `json:"split"`
+	ID                 string               `json:"id"`
+	SkillSlug          string               `json:"skill_slug"`
+	SkillVersion       string               `json:"skill_version"`
+	SkillMDContent     string               `json:"skill_md_content"`
+	SkillBundleContent []OpenClawBundleFile `json:"skill_bundle_content"`
+	ClawScanVerdict    string               `json:"clawscan_verdict"`
+	ClawScanConfidence string               `json:"clawscan_confidence"`
+	ClawScanModel      string               `json:"clawscan_model"`
+	ClawScanSummary    string               `json:"clawscan_summary"`
+	ClawScanContext    json.RawMessage      `json:"clawscan_context"`
+	Split              string               `json:"split"`
 }
 
 type OpenClawBundleFile struct {
@@ -573,7 +568,7 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 		return "", "", fmt.Errorf("case %s required judge did not complete", benchmarkCase.ID)
 	}
 	for scanner, result := range benchmarkCase.Run.Scanners {
-		adjudicatedPartial := benchmarkCase.Run.Complete && benchmarkCase.Run.Status == "completed" && usablePartialScanner(benchmarkCase.Run.Profile, scanner, result) && benchmarkCase.Run.Judge != nil && benchmarkCase.Run.Judge.Status == "completed"
+		adjudicatedPartial := benchmarkCase.Run.Complete && benchmarkCase.Run.Status == "completed" && usablePartialScanner(scanner, result) && benchmarkCase.Run.Judge != nil && benchmarkCase.Run.Judge.Status == "completed"
 		if result.Status != "completed" && result.Status != "skipped" && !adjudicatedPartial {
 			return "", "", fmt.Errorf("case %s required scanner %s did not complete", benchmarkCase.ID, scanner)
 		}
@@ -584,7 +579,6 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 		}
 	}
 	scannerPredictions := map[string][]string{}
-	var staticResult *ScannerResult
 	scanners := make([]string, 0, len(benchmarkCase.Run.Scanners))
 	for scanner := range benchmarkCase.Run.Scanners {
 		scanners = append(scanners, scanner)
@@ -592,10 +586,6 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 	sort.Strings(scanners)
 	for _, scanner := range scanners {
 		result := benchmarkCase.Run.Scanners[scanner]
-		if scanner == "clawscan-static" {
-			staticCopy := result
-			staticResult = &staticCopy
-		}
 		if result.Status != "completed" || len(result.Raw) == 0 {
 			continue
 		}
@@ -616,11 +606,6 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 	}
 	if len(scannerPredictions) > 1 {
 		return "", "", fmt.Errorf("case %s has conflicting scanner predictions", benchmarkCase.ID)
-	}
-	if staticResult != nil && staticResult.Status == "completed" && len(staticResult.Raw) > 0 {
-		if prediction, ok := staticPrediction(staticResult.Raw); ok {
-			return prediction, "scanner:clawscan-static", nil
-		}
 	}
 	return "", "", fmt.Errorf("case %s has no prediction verdict", benchmarkCase.ID)
 }
@@ -668,24 +653,6 @@ func normalizePredictionLabel(value interface{}) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func staticPrediction(raw json.RawMessage) (string, bool) {
-	var report staticScannerReport
-	if err := json.Unmarshal(raw, &report); err != nil {
-		return "", false
-	}
-	if report.SchemaVersion != staticScannerVersion {
-		return "", false
-	}
-	prediction := "clean"
-	for _, finding := range report.Findings {
-		if strings.EqualFold(finding.Severity, "high") {
-			return "malicious", true
-		}
-		prediction = "suspicious"
-	}
-	return prediction, true
 }
 
 func evaluateBenchmarkCase(benchmarkCase *BenchmarkCase) {

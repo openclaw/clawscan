@@ -108,7 +108,7 @@ func TestBenchmarkCLIRequiredJudgeFailureIsOperational(t *testing.T) {
 			installGeneratedBenchmarkHTTP(t)
 			var runErr error
 			stdout := captureStdout(t, func() {
-				runErr = run([]string{"benchmark", dataset, "--scanner", "clawscan-static", "--sandbox", "off", "--judge", `printf '{"verdict":"clean"}'; exit 1`, "--json"}, nil)
+				runErr = run([]string{"benchmark", dataset, "--scanner", "skillspector", "--sandbox", "off", "--judge", `printf '{"verdict":"clean"}'; exit 1`, "--json"}, nil)
 			})
 			var artifact runner.BenchmarkArtifact
 			if runErr == nil || json.Unmarshal([]byte(stdout), &artifact) != nil || len(artifact.Cases) != 3 || artifact.Summary.Evaluation.Scored != 0 {

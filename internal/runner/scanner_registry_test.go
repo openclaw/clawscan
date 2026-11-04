@@ -55,24 +55,24 @@ func (adapter stubScannerAdapter) Run(_ ExternalScannerRunner, target string, st
 
 func TestScannerRegistryReturnsSortedIDs(t *testing.T) {
 	registry, err := NewScannerRegistry(
-		stubScannerAdapter{id: "virustotal"},
-		stubScannerAdapter{id: "clawscan-static"},
+		stubScannerAdapter{id: "socket"},
+		stubScannerAdapter{id: "aig"},
 		stubScannerAdapter{id: "skillspector"},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(registry.IDs(), ","); got != "clawscan-static,skillspector,virustotal" {
+	if got := strings.Join(registry.IDs(), ","); got != "aig,skillspector,socket" {
 		t.Fatalf("ids = %q", got)
 	}
 }
 
 func TestScannerRegistryRejectsDuplicateIDs(t *testing.T) {
 	_, err := NewScannerRegistry(
-		stubScannerAdapter{id: "clawscan-static"},
-		stubScannerAdapter{id: "clawscan-static"},
+		stubScannerAdapter{id: "skillspector"},
+		stubScannerAdapter{id: "skillspector"},
 	)
-	if err == nil || err.Error() != "Duplicate scanner adapter id: clawscan-static" {
+	if err == nil || err.Error() != "Duplicate scanner adapter id: skillspector" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -85,8 +85,8 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,aig,cisco,clawscan-static,relyable,skillspector,snyk,socket,virustotal"
-	if got := strings.Join(DefaultScannerRegistry().IDs(), ","); got != want {
+	want := "agentverus,aig,cisco,relyable,skillspector,snyk,socket"
+	if got := strings.Join(builtInScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
 	}
 }
@@ -120,7 +120,7 @@ func TestSkillSpectorModelSettingsReachDocker(t *testing.T) {
 }
 
 func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
-	registry := DefaultScannerRegistry()
+	registry := builtInScannerRegistry()
 	for _, id := range registry.IDs() {
 		adapter, ok := registry.Adapter(id)
 		if !ok {
@@ -132,19 +132,13 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 		if !adapter.SupportsTargetKind(targetKindURL) {
 			t.Fatalf("%s should support url targets", id)
 		}
-		wantPlugin := id == "clawscan-static" || id == "skillspector" || id == "socket" || id == "virustotal"
+		wantPlugin := id == "skillspector" || id == "socket"
 		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {
 			t.Fatalf("%s plugin support = %v, want %v", id, got, wantPlugin)
 		}
 	}
-	if !scannerSupportsTargetKind("clawscan-static", targetKindPlugin) {
-		t.Fatal("clawscan-static should support plugin targets")
-	}
 	if !scannerSupportsTargetKind("skillspector", targetKindPlugin) {
 		t.Fatal("skillspector should support plugin targets")
-	}
-	if !scannerSupportsTargetKind("virustotal", targetKindPlugin) {
-		t.Fatal("virustotal should support plugin targets")
 	}
 	if !scannerSupportsTargetKind("socket", targetKindPlugin) {
 		t.Fatal("socket should support plugin targets")
@@ -330,7 +324,7 @@ func TestScannerAdapterRequirementsFeedValidation(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryProvidesInstallPlans(t *testing.T) {
-	registry := DefaultScannerRegistry()
+	registry := builtInScannerRegistry()
 	for _, id := range registry.IDs() {
 		adapter, ok := registry.Adapter(id)
 		if !ok {
@@ -347,7 +341,7 @@ func TestDefaultScannerRegistryProvidesInstallPlans(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryProvidesCatalogInfo(t *testing.T) {
-	registry := DefaultScannerRegistry()
+	registry := builtInScannerRegistry()
 	for _, id := range registry.IDs() {
 		info, ok := registry.Info(id)
 		if !ok {

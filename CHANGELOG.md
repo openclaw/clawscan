@@ -3,7 +3,10 @@
 ## Unreleased
 
 - Run full CodeQL scans daily instead of on every main push, preserve PR and manual analysis, and start scans when draft PRs become ready for review.
-- Summarize per-file SkillSpector accounting lists in the ClawHub judge prompt as counts plus a bounded sample, and refuse ClawHub judge prompts over 90% of the pinned Codex CLI input limit before the judge starts, failing with `judge prompt too large: <n> chars exceeds budget <b>`. The full report stays in the judge workspace.
+- Summarize per-file SkillSpector accounting lists in the ClawHub judge prompt as counts plus a bounded sample. The full report stays in the judge workspace.
+- **Breaking:** make the runner judge-agnostic. Remove the artifact-inspection receipt (challenge file, receipt validation, and the `challenge`, `requiredFile`, and `requiredFileSha256` fields on `judge.attempts`), the runner-level judge prompt budget (`judge prompt too large`), and every profile-name special case. A judge with an input limit enforces it itself; a failed judge command keeps its own error and is never retried. A judge command that exits successfully without a JSON object is retried once, and `judge.attempts` is now recorded for every judge run.
+- **Breaking:** every profile uses one judge workspace layout (`artifact/`, `scanners/<id>.json`, and `metadata.json` with the run `context`), and SkillSpector always scans a private `artifact/` copy. Usable partial SkillSpector evidence reaches any configured judge; without a judge it still fails the scanner.
+- **Breaking:** remove the `virustotal` and `clawscan-static` scanners. The `clawhub` profile now runs `skillspector` and `aig`, and `openclaw-install-policy` runs `skillspector`. The install policy validates npm metadata preflights without scanning and returns a visible `warn` on native Windows instead of a static-only scan. Consumers that read `scanners["clawscan-static"]` must switch to another eligibility signal.
 
 ## 0.3.1 - 2026-11-02
 

@@ -7,8 +7,7 @@
     "summary",
     "dimensions",
     "scan_findings_in_context",
-    "user_guidance",
-    "artifact_inspection"
+    "user_guidance"
   ],
   "properties": {
     "verdict": { "type": "string", "enum": ["benign", "suspicious", "malicious"] },
@@ -85,29 +84,6 @@
         }
       }
     },
-    "user_guidance": { "type": "string" },
-    "artifact_inspection": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["version", "status", "challenge", "required_file", "required_file_sha256", "additional_files_inspected"],
-      "properties": {
-        "version": { "type": "integer", "enum": [2] },
-        "status": { "type": "string", "enum": ["completed"] },
-        "challenge": { "type": "string", "minLength": 1 },
-        "required_file": { "type": "string", "enum": ["{{ artifact_inspection.required_file }}"] },
-        "required_file_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        },
-        "additional_files_inspected": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "description": "Canonical workspace-relative path of an inspected artifact input file, not a directory or workspace report. No empty, dot, or parent components.",
-            "pattern": "^artifact/([^/]{3,}|[^/.][^/]?|[.][^/.])(/([^/]{3,}|[^/.][^/]?|[.][^/.]))*$"
-          }
-        }
-      }
-    }
+    "user_guidance": { "type": "string" }
   }
 }

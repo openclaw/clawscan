@@ -100,12 +100,10 @@
         "agentverus",
         "aig",
         "cisco",
-        "clawscan-static",
         "relyable",
         "skillspector",
         "snyk",
-        "socket",
-        "virustotal"
+        "socket"
       ]
     },
     "builtinScanner": {

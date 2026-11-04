@@ -4,85 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestRunClawHubJudgeRecoversMissingRequiredFileReceipt(t *testing.T) {
-	target := t.TempDir()
-	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	scannerEvidence := json.RawMessage(`{"status":"completed","issues":[{"severity":"HIGH","description":"fixture evidence"}]}`)
-	judgeRunner := &recordingCommandRunner{}
-	attempts := 0
-	judgeRunner.runHook = func(_ string, _ []string, cwd string) error {
-		attempts++
-		raw, err := os.ReadFile(filepath.Join(cwd, "artifact-inspection.json"))
-		if err != nil {
-			return err
-		}
-		var challenge artifactInspectionChallenge
-		if err := json.Unmarshal(raw, &challenge); err != nil {
-			return err
-		}
-		required, err := os.ReadFile(filepath.Join(cwd, filepath.FromSlash(challenge.RequiredFile)))
-		if err != nil {
-			return err
-		}
-		inspected := "artifact/artifact-inspection.json"
-		if attempts == 2 {
-			inspected = challenge.RequiredFile
-		}
-		judgeRunner.writeOutput = fmt.Sprintf(`{"verdict":"suspicious","artifact_inspection":{"status":"completed","challenge":%q,"required_file_sha256":%q,"files_inspected":[%q]}}`, challenge.Challenge, sha256Hex(string(required)), inspected)
-		return nil
-	}
-	artifact, err := Run(Options{
-		Target: target, Profile: "clawhub", Scanners: []string{"skillspector"},
-		Judge: &JudgeOptions{Command: "judge --output {{ output }}"},
-	}, RunContext{
-		Env: map[string]string{"OPENAI_API_KEY": "fixture-only"},
-		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
-			"skillspector": {Status: "completed", Raw: scannerEvidence},
-		}},
-		CommandRunner: judgeRunner,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
-		t.Fatalf("expected validated recovery after omitted required file; attempts=%d judge=%+v", attempts, artifact.Judge)
-	}
-	if attempts != 2 {
-		t.Fatalf("judge attempts = %d; want exactly 2", attempts)
-	}
-	if !bytes.Equal(artifact.Scanners["skillspector"].Raw, scannerEvidence) {
-		t.Fatal("scanner evidence changed during judge recovery")
-	}
-	result := artifact.Judge.Result.(map[string]any)
-	if result["verdict"] != "suspicious" {
-		t.Fatalf("security verdict = %v; want suspicious", result["verdict"])
-	}
-	history := artifact.Judge.Attempts
-	if len(history) != 2 || history[0].Status != "failed" || history[1].Status != "completed" {
-		t.Fatalf("judge attempt evidence = %+v", history)
-	}
-	if history[0].Challenge == history[1].Challenge || history[0].Challenge == "" {
-		t.Fatal("retry must use a fresh challenge")
-	}
-	for _, attempt := range history {
-		if attempt.RequiredFile != "artifact/SKILL.md" || attempt.RequiredSHA256 != sha256Hex("# Demo") {
-			t.Fatalf("required-file evidence = %+v", attempt)
-		}
-	}
-	if !strings.Contains(history[0].Error, "did not include required file artifact/SKILL.md") || history[0].Result == nil {
-		t.Fatal("missing original invalid result and validation error")
-	}
-}
 
 type judgeRetryCommand func(cwd string, timeout time.Duration) (CommandOutput, error)
 
@@ -99,22 +26,6 @@ func judgeRetryArtifact(t *testing.T) Artifact {
 	return NewArtifact(Options{Profile: "clawhub", Target: target}, target, "", "", nil)
 }
 
-func judgeRetryReceipt(t *testing.T, cwd string) map[string]any {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(cwd, "artifact-inspection.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var challenge artifactInspectionChallenge
-	if err := json.Unmarshal(raw, &challenge); err != nil {
-		t.Fatal(err)
-	}
-	return map[string]any{
-		"status": "completed", "challenge": challenge.Challenge,
-		"required_file_sha256": sha256Hex("# Demo"), "files_inspected": []string{challenge.RequiredFile},
-	}
-}
-
 func judgeRetryOutput(t *testing.T, result map[string]any) CommandOutput {
 	t.Helper()
 	raw, err := json.Marshal(result)
@@ -124,56 +35,84 @@ func judgeRetryOutput(t *testing.T, result map[string]any) CommandOutput {
 	return CommandOutput{Stdout: string(raw)}
 }
 
-func TestRunClawHubJudgeReceiptRetryFailsClosed(t *testing.T) {
-	for _, failure := range []string{"missing_receipt", "missing_required_file", "wrong_hash", "stale_challenge", "invalid_json", "command_failure", "no_output"} {
-		t.Run(failure, func(t *testing.T) {
+// The runner owns no artifact-inspection receipt. Any judge JSON object is
+// accepted as the judge result for every profile, including clawhub.
+func TestRunJudgeAcceptsAnyJSONObjectWithoutReceipt(t *testing.T) {
+	for _, profile := range []string{"clawhub", "clawhub-aig", "custom"} {
+		t.Run(profile, func(t *testing.T) {
 			artifact := judgeRetryArtifact(t)
+			artifact.Profile = profile
 			attempts := 0
-			firstChallenge := ""
 			command := judgeRetryCommand(func(cwd string, _ time.Duration) (CommandOutput, error) {
 				attempts++
-				receipt := judgeRetryReceipt(t, cwd)
-				if attempts == 1 {
-					firstChallenge = receipt["challenge"].(string)
+				if _, err := os.Stat(filepath.Join(cwd, "artifact-inspection.json")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("judge workspace still has an inspection challenge: %v", err)
 				}
-				result := map[string]any{"verdict": "benign", "artifact_inspection": receipt}
-				switch failure {
-				case "missing_receipt":
-					delete(result, "artifact_inspection")
-				case "missing_required_file":
-					receipt["files_inspected"] = []string{"artifact/artifact-inspection.json"}
-				case "wrong_hash":
-					receipt["required_file_sha256"] = "wrong"
-				case "stale_challenge":
-					if attempts == 1 {
-						receipt["files_inspected"] = []string{"artifact/artifact-inspection.json"}
-					} else {
-						receipt["challenge"] = firstChallenge
-					}
-				case "invalid_json":
-					return CommandOutput{Stdout: "not json"}, nil
-				case "command_failure":
-					return judgeRetryOutput(t, result), errors.New("command timed out")
-				case "no_output":
-					return CommandOutput{}, nil
-				}
-				return judgeRetryOutput(t, result), nil
+				return CommandOutput{Stdout: `{"verdict":"benign"}`}, nil
 			})
 			result, err := RunJudge(JudgeOptions{Command: "judge"}, artifact, command, time.Second, nil, SandboxModeOff)
+			if err != nil || result.Status != "completed" || attempts != 1 || len(result.Attempts) != 1 || result.Attempts[0].Status != "completed" {
+				t.Fatalf("result = %+v, err = %v, attempts = %d", result, err, attempts)
+			}
+		})
+	}
+}
+
+func TestRunJudgeRetriesOnlyUnusableOutputFromASuccessfulCommand(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		first        func() (CommandOutput, error)
+		wantAttempts int
+		wantError    string
+	}{
+		{name: "no_output", first: func() (CommandOutput, error) { return CommandOutput{}, nil }, wantAttempts: 2, wantError: "did not produce JSON output"},
+		{name: "invalid_json", first: func() (CommandOutput, error) { return CommandOutput{Stdout: "not json"}, nil }, wantAttempts: 2, wantError: "invalid JSON"},
+		{name: "json_array", first: func() (CommandOutput, error) { return CommandOutput{Stdout: `[]`}, nil }, wantAttempts: 2, wantError: "expected JSON object"},
+		{name: "command_failure", first: func() (CommandOutput, error) {
+			return CommandOutput{Stdout: `{"type":"thread.started"}`, Stderr: "input_too_large"}, errors.New("judge exited 1")
+		}, wantAttempts: 1, wantError: "input_too_large"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			attempts := 0
+			command := judgeRetryCommand(func(_ string, _ time.Duration) (CommandOutput, error) {
+				attempts++
+				if attempts == 1 {
+					return test.first()
+				}
+				return CommandOutput{Stdout: `{"verdict":"suspicious"}`}, nil
+			})
+			result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != "failed" || result.Error == "" {
-				t.Fatalf("invalid judge must remain failed: %+v", result)
+			if attempts != test.wantAttempts || len(result.Attempts) != test.wantAttempts {
+				t.Fatalf("attempts = %d, evidence = %d; want %d", attempts, len(result.Attempts), test.wantAttempts)
 			}
-			wantAttempts := 2
-			if failure == "invalid_json" || failure == "command_failure" || failure == "no_output" {
-				wantAttempts = 1
+			if !strings.Contains(result.Attempts[0].Error, test.wantError) {
+				t.Fatalf("first attempt error = %q; want %q", result.Attempts[0].Error, test.wantError)
 			}
-			if attempts != wantAttempts || len(result.Attempts) != wantAttempts {
-				t.Fatalf("attempts = %d, evidence = %d; want %d", attempts, len(result.Attempts), wantAttempts)
+			if test.wantAttempts == 1 {
+				if result.Status != "failed" || !strings.Contains(result.Error, test.wantError) {
+					t.Fatalf("command failure was masked: %+v", result)
+				}
+				return
+			}
+			if result.Status != "completed" || result.Result.(map[string]any)["verdict"] != "suspicious" {
+				t.Fatalf("retry did not recover: %+v", result)
 			}
 		})
+	}
+}
+
+func TestRunJudgeOutputRetryFailsClosed(t *testing.T) {
+	attempts := 0
+	command := judgeRetryCommand(func(_ string, _ time.Duration) (CommandOutput, error) {
+		attempts++
+		return CommandOutput{Stdout: "still not json"}, nil
+	})
+	result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
+	if err != nil || result.Status != "failed" || !strings.Contains(result.Error, "invalid JSON") || attempts != maxJudgeAttempts || len(result.Attempts) != maxJudgeAttempts {
+		t.Fatalf("result = %+v, err = %v, attempts = %d", result, err, attempts)
 	}
 }
 
@@ -181,9 +120,9 @@ func TestRunJudgeDoesNotRetryValidSecurityVerdict(t *testing.T) {
 	for _, verdict := range []string{"benign", "suspicious", "malicious"} {
 		t.Run(verdict, func(t *testing.T) {
 			attempts := 0
-			command := judgeRetryCommand(func(cwd string, _ time.Duration) (CommandOutput, error) {
+			command := judgeRetryCommand(func(_ string, _ time.Duration) (CommandOutput, error) {
 				attempts++
-				return judgeRetryOutput(t, map[string]any{"verdict": verdict, "artifact_inspection": judgeRetryReceipt(t, cwd)}), nil
+				return judgeRetryOutput(t, map[string]any{"verdict": verdict}), nil
 			})
 			result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
 			if err != nil || result.Status != "completed" || result.Result.(map[string]any)["verdict"] != verdict || attempts != 1 {
@@ -193,16 +132,15 @@ func TestRunJudgeDoesNotRetryValidSecurityVerdict(t *testing.T) {
 	}
 }
 
-func TestRunJudgeReceiptRetriesShareDeadline(t *testing.T) {
+func TestRunJudgeOutputRetriesShareDeadline(t *testing.T) {
 	var budgets []time.Duration
-	command := judgeRetryCommand(func(cwd string, timeout time.Duration) (CommandOutput, error) {
+	command := judgeRetryCommand(func(_ string, timeout time.Duration) (CommandOutput, error) {
 		budgets = append(budgets, timeout)
-		receipt := judgeRetryReceipt(t, cwd)
 		if len(budgets) == 1 {
 			time.Sleep(20 * time.Millisecond)
-			receipt["files_inspected"] = []string{"artifact/artifact-inspection.json"}
+			return CommandOutput{}, nil
 		}
-		return judgeRetryOutput(t, map[string]any{"artifact_inspection": receipt}), nil
+		return judgeRetryOutput(t, map[string]any{"verdict": "benign"}), nil
 	})
 	result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
 	if err != nil || result.Status != "completed" || len(budgets) != 2 {
@@ -215,10 +153,10 @@ func TestRunJudgeReceiptRetriesShareDeadline(t *testing.T) {
 
 func TestRunJudgeDoesNotRetryAfterDeadline(t *testing.T) {
 	attempts := 0
-	command := judgeRetryCommand(func(cwd string, timeout time.Duration) (CommandOutput, error) {
+	command := judgeRetryCommand(func(_ string, timeout time.Duration) (CommandOutput, error) {
 		attempts++
 		time.Sleep(timeout + time.Millisecond)
-		return judgeRetryOutput(t, map[string]any{"verdict": "benign"}), nil
+		return CommandOutput{}, nil
 	})
 	result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, 100*time.Millisecond, nil, SandboxModeOff)
 	if err != nil || result.Status != "failed" || attempts != 1 {
@@ -226,9 +164,9 @@ func TestRunJudgeDoesNotRetryAfterDeadline(t *testing.T) {
 	}
 }
 
-func TestRunJudgeReceiptRetriesPreserveRedaction(t *testing.T) {
+func TestRunJudgeOutputRetriesPreserveRedaction(t *testing.T) {
 	command := judgeRetryCommand(func(_ string, _ time.Duration) (CommandOutput, error) {
-		return CommandOutput{Stdout: `{"summary":"fixture-secret"}`}, nil
+		return CommandOutput{Stdout: `"fixture-secret"`}, nil
 	})
 	result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, time.Second, map[string]string{"OPENAI_API_KEY": "fixture-secret"}, SandboxModeOff)
 	if err != nil {
@@ -243,13 +181,13 @@ func TestRunJudgeReceiptRetriesPreserveRedaction(t *testing.T) {
 	}
 }
 
-func TestRunJudgeReceiptRetryPreparationFailurePreservesEvidence(t *testing.T) {
+func TestRunJudgeOutputRetryPreparationFailurePreservesEvidence(t *testing.T) {
 	artifact := judgeRetryArtifact(t)
 	command := judgeRetryCommand(func(_ string, _ time.Duration) (CommandOutput, error) {
 		if err := os.RemoveAll(artifact.Target.ResolvedPath); err != nil {
 			t.Fatal(err)
 		}
-		return CommandOutput{Stdout: `{"verdict":"suspicious"}`}, nil
+		return CommandOutput{Stdout: "not json"}, nil
 	})
 	result, err := RunJudge(JudgeOptions{Command: "judge"}, artifact, command, time.Second, nil, SandboxModeOff)
 	if err != nil || result.Status != "failed" || len(result.Attempts) != 2 || result.Attempts[0].Result == nil {
@@ -260,24 +198,10 @@ func TestRunJudgeReceiptRetryPreparationFailurePreservesEvidence(t *testing.T) {
 	}
 }
 
-func TestRunJudgeCustomProfileRemainsSingleAttempt(t *testing.T) {
-	artifact := judgeRetryArtifact(t)
-	artifact.Profile = "custom"
-	attempts := 0
-	command := judgeRetryCommand(func(_ string, _ time.Duration) (CommandOutput, error) {
-		attempts++
-		return CommandOutput{Stdout: `{"ok":true}`}, nil
-	})
-	result, err := RunJudge(JudgeOptions{Command: "judge"}, artifact, command, time.Second, nil, SandboxModeOff)
-	if err != nil || result.Status != "completed" || attempts != 1 || len(result.Attempts) != 0 {
-		t.Fatalf("result = %+v, err = %v, attempts = %d", result, err, attempts)
-	}
-}
-
-// A failed judge command must keep its own error. Codex prints a
-// thread.started event before rejecting an oversized prompt at turn/start;
-// that partial JSON line is not a receipt and must not replace the real error.
-func TestRunClawHubJudgeKeepsCommandErrorOverReceiptCheck(t *testing.T) {
+// A failed judge command must keep its own error. A judge that enforces its
+// own input limit may print a JSON line before rejecting an oversized prompt;
+// that partial output must not replace the real error or trigger a retry.
+func TestRunClawHubJudgeKeepsCommandError(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "plugin")
 	if err := os.MkdirAll(target, 0o755); err != nil {
@@ -294,15 +218,15 @@ func TestRunClawHubJudgeKeepsCommandErrorOverReceiptCheck(t *testing.T) {
 		exitCode: &exitCode,
 	}
 	artifact, err := Run(Options{
-		Target:   target,
-		Profile:  clawHubProfileID,
-		Scanners: []string{"clawscan-static"},
+		Target:          target,
+		Profile:         "clawhub",
+		Scanners:        []string{fixtureScannerID},
+		ScannerRegistry: fixtureScannerRegistry(t),
 		Judge: &JudgeOptions{
 			Command: "judge --result-file {{ output }}",
 		},
 	}, RunContext{
 		Env:           map[string]string{},
-		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{"clawscan-static": {Status: "completed", Raw: json.RawMessage(`{}`)}}},
 		CommandRunner: commandRunner,
 	})
 	if err != nil {
@@ -314,10 +238,7 @@ func TestRunClawHubJudgeKeepsCommandErrorOverReceiptCheck(t *testing.T) {
 	if !strings.Contains(artifact.Judge.Error, "input_too_large") {
 		t.Fatalf("judge error lost the command failure: %q", artifact.Judge.Error)
 	}
-	if strings.Contains(artifact.Judge.Error, "artifact inspection receipt") {
-		t.Fatalf("judge error was replaced by the receipt check: %q", artifact.Judge.Error)
-	}
-	if len(commandRunner.calls) != 1 {
-		t.Fatalf("command failure must not be retried as a receipt failure: %d calls", len(commandRunner.calls))
+	if len(commandRunner.calls) != 1 || len(artifact.Judge.Attempts) != 1 {
+		t.Fatalf("command failure must not be retried: %d calls", len(commandRunner.calls))
 	}
 }

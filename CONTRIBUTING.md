@@ -21,7 +21,8 @@ go test -count=1 ./...
 go vet ./...
 make docs-site
 go run ./cmd/clawscan --help
-go run ./cmd/clawscan ./README.md --scanner clawscan-static --json
+printf '{"status":"clean","findings":[]}' > /tmp/skillspector.json
+go run ./cmd/clawscan ./README.md --scanner skillspector --scanner-result skillspector=/tmp/skillspector.json --sandbox off --json
 node scripts/build-npm-package.mjs --version v0.0.0 --pack --smoke
 ```
 

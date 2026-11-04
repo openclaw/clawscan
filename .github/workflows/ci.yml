@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       judge-inspection:
-        description: Run the live judge inspection proof (uses OPENAI_API_KEY)
+        description: Run the live judge smoke (uses OPENAI_API_KEY)
         type: boolean
         default: false
 

@@ -4,7 +4,6 @@ profiles:
   clawhub:
     scanners:
       - skillspector
-      - clawscan-static
       - aig
     scannerEnvDefaults:
       SKILLSPECTOR_PROVIDER: openai

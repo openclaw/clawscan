@@ -42,10 +42,3 @@ profiles:
               normalize: identifier
               fallback: root
               action: warn
-      - id: clawscan-static
-        gate:
-          rules:
-            - id: any-finding
-              path: findings[]
-              exists: true
-              action: warn

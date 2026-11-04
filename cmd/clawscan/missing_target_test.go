@@ -17,7 +17,7 @@ func TestCLIMissingTargetCannotBecomeScanInput(t *testing.T) {
 	for attempt := 0; attempt < 2; attempt++ {
 		var runErr error
 		stdout := captureStdout(t, func() {
-			runErr = run([]string{"./missing", "--scanner", "clawscan-static", "--output", "./missing/reports/artifact.json", "--sandbox", "off", "--json"}, []string{})
+			runErr = run([]string{"./missing", "--scanner", "skillspector", "--output", "./missing/reports/artifact.json", "--sandbox", "off", "--json"}, []string{})
 		})
 		if runErr == nil {
 			t.Fatalf("attempt %d accepted missing input: %s", attempt, stdout)
@@ -29,7 +29,7 @@ func TestCLIMissingTargetCannotBecomeScanInput(t *testing.T) {
 		if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
 			t.Fatal(err)
 		}
-		stage := artifact.Scanners["clawscan-static"]
+		stage := artifact.Scanners["skillspector"]
 		if artifact.Complete || artifact.Status != "failed" || artifact.Gate != "error" || artifact.Target.Input != "./missing" || stage.Status != "not_started" || stage.StartedAt != "" || len(stage.Raw) != 0 && string(stage.Raw) != "null" {
 			t.Fatalf("attempt %d invented scan evidence: %+v", attempt, artifact)
 		}
@@ -44,7 +44,7 @@ func TestCLIMissingTargetFailureAcrossProfiles(t *testing.T) {
 					root := t.TempDir()
 					t.Chdir(root)
 					config := filepath.Join(root, "settings.yml")
-					writeFile(t, config, "version: 1\nprofiles:\n  first:\n    scanners: [clawscan-static]\n  second:\n    scanners: [clawscan-static]\n")
+					writeFile(t, config, "version: 1\nprofiles:\n  first:\n    scanners: [skillspector]\n  second:\n    scanners: [skillspector]\n")
 					output := filepath.Join(root, "reports", "artifact.json")
 					if nested {
 						output = filepath.Join(root, "missing", "reports", "artifact.json")
@@ -82,7 +82,7 @@ func TestCLIMissingTargetFailureAcrossProfiles(t *testing.T) {
 							runs = []runner.Artifact{artifact}
 						}
 						for _, artifact := range runs {
-							if artifact.Complete || artifact.Gate != "error" || artifact.Target.Input != "./missing" || artifact.Scanners["clawscan-static"].Status != "not_started" || artifact.Status != map[bool]string{false: "failed", true: "canceled"}[canceled] {
+							if artifact.Complete || artifact.Gate != "error" || artifact.Target.Input != "./missing" || artifact.Scanners["skillspector"].Status != "not_started" || artifact.Status != map[bool]string{false: "failed", true: "canceled"}[canceled] {
 								t.Fatalf("fabricated missing input/stage: %+v", artifact)
 							}
 						}

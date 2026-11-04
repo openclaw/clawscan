@@ -1,4 +1,4 @@
-name: Judge Artifact Inspection Smoke
+name: Live Judge Smoke
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   inspect-package:
-    name: Inspect package (Ubuntu 22.04)
+    name: Judge package (Ubuntu 22.04)
     # Ubuntu 24.04 rejects the judge's nested bubblewrap setup with RTM_NEWADDR.
     # Keep the real read-only judge proof on a runner that supports it.
     runs-on: ubuntu-22.04
@@ -37,12 +37,11 @@ jobs:
           npm install -g @openai/codex@0.164.0
           codex --version
 
-      - name: Verify real judge inspection with worker environment
+      - name: Verify a real judge run with worker environment
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         shell: python
         run: |
-          import hashlib
           import json
           import os
           from pathlib import Path
@@ -81,12 +80,8 @@ jobs:
           artifact = json.loads(report.read_text())
           judge = artifact.get("judge", {})
           print(json.dumps({"status": judge.get("status"), "error": judge.get("error")}))
-          assert judge.get("status") == "completed", "Judge did not complete artifact inspection"
-          receipt = judge["result"]["artifact_inspection"]
-          assert receipt["version"] == 2
-          assert receipt["required_file_sha256"] == hashlib.sha256(manifest).hexdigest()
-          assert receipt["required_file"] == "artifact/package.json"
-          assert isinstance(receipt["additional_files_inspected"], list)
+          assert judge.get("status") == "completed", "Judge did not complete"
+          assert judge["result"]["verdict"] in ("benign", "suspicious", "malicious")
 
       - name: Retain redacted CLI report
         if: always()

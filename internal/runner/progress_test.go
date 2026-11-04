@@ -33,21 +33,21 @@ func readProgressEvents(t *testing.T, output string) []progressEvent {
 	return events
 }
 
-func TestProgressDoesNotChangeStaticArtifactOrInventExternalCommand(t *testing.T) {
+func TestProgressDoesNotChangeInProcessArtifactOrInventExternalCommand(t *testing.T) {
 	target := t.TempDir()
 	writeSkill(t, target, "# Fixture\n")
 	var progress bytes.Buffer
-	artifact, err := Run(Options{Target: target, Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{
+	artifact, err := Run(Options{Target: target, Scanners: []string{fixtureScannerID}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{
 		Env: map[string]string{"OPENAI_API_KEY": "fixture-private-value"}, Progress: &progress,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Scanners["clawscan-static"].Status != "completed" || artifact.Judge != nil {
+	if artifact.Scanners[fixtureScannerID].Status != "completed" || artifact.Judge != nil {
 		t.Fatalf("unexpected artifact: %+v", artifact)
 	}
 	events := readProgressEvents(t, progress.String())
-	if len(events) != 4 || events[2].Event != "phase_start" || events[2].Phase != "scanner:clawscan-static" || events[3].Event != "phase_end" {
+	if len(events) != 4 || events[2].Event != "phase_start" || events[2].Phase != "scanner:custom" || events[3].Event != "phase_end" {
 		t.Fatalf("static progress = %+v", events)
 	}
 	for _, forbidden := range []string{target, "fixture-private-value", "OPENAI_API_KEY", "Fixture", "command_start"} {
@@ -68,7 +68,7 @@ func TestProgressRecordsFailedScannerWithoutErrorContent(t *testing.T) {
 	target := t.TempDir()
 	writeSkill(t, target, "# Fixture\n")
 	var progress bytes.Buffer
-	_, err := Run(Options{Target: target, Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{
+	_, err := Run(Options{Target: target, Scanners: []string{fixtureScannerID}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{
 		Env: map[string]string{}, Progress: &progress, ScannerRunner: errorScannerRunner{},
 	})
 	if err == nil {
@@ -76,7 +76,7 @@ func TestProgressRecordsFailedScannerWithoutErrorContent(t *testing.T) {
 	}
 	events := readProgressEvents(t, progress.String())
 	last := events[len(events)-1]
-	if last.Event != "phase_end" || last.Phase != "scanner:clawscan-static" || !last.Failed {
+	if last.Event != "phase_end" || last.Phase != "scanner:custom" || !last.Failed {
 		t.Fatalf("missing failed scanner phase: %+v", last)
 	}
 	if strings.Contains(progress.String(), err.Error()) {
@@ -147,10 +147,10 @@ func (unavailableProgressWriter) Write([]byte) (int, error) {
 func TestProgressSinkFailureDoesNotCreateOrChangeVerdict(t *testing.T) {
 	target := t.TempDir()
 	writeSkill(t, target, "# Fixture\n")
-	artifact, err := Run(Options{Target: target, Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{
+	artifact, err := Run(Options{Target: target, Scanners: []string{fixtureScannerID}, Sandbox: SandboxOptions{Mode: SandboxModeOff}}, RunContext{
 		Env: map[string]string{}, Progress: unavailableProgressWriter{},
 	})
-	if err != nil || artifact.Scanners["clawscan-static"].Status != "completed" {
+	if err != nil || artifact.Scanners[fixtureScannerID].Status != "completed" {
 		t.Fatalf("diagnostic sink changed scan behavior: %v", err)
 	}
 	if phase := scannerProgressPhase("fixture-private-config-value"); phase != "scanner:custom" {

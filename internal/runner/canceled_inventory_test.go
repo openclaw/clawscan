@@ -42,8 +42,8 @@ func TestProfileBatchCancellationRetainsDiscoveredInventory(t *testing.T) {
 				progress = observer
 			}
 			opts := []Options{
-				{Profile: "first", ConfigSource: "built-in", Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}, Judge: &JudgeOptions{Command: benchmarkVerdictExitCommand(t, 0)}, GateRules: map[string]ScannerGatePolicy{"clawscan-static": {JSONRules: []JSONGateRule{{ID: "retained", Paths: []string{"findings[]"}, Exists: true, Action: "warn"}}}}},
-				{Profile: "second", ConfigSource: "generated-config.yml", Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}},
+				{Profile: "first", ConfigSource: "built-in", Scanners: []string{fixtureScannerID}, Sandbox: SandboxOptions{Mode: SandboxModeOff}, Judge: &JudgeOptions{Command: benchmarkVerdictExitCommand(t, 0)}, GateRules: map[string]ScannerGatePolicy{fixtureScannerID: {JSONRules: []JSONGateRule{{ID: "retained", Paths: []string{"findings[]"}, Exists: true, Action: "warn"}}}}},
+				{Profile: "second", ConfigSource: "generated-config.yml", Scanners: []string{fixtureScannerID}, Sandbox: SandboxOptions{Mode: SandboxModeOff}},
 			}
 			clock := time.Unix(0, 0).UTC()
 			batch, err := RunProfileBatch(opts, RunContext{Context: caller, Env: map[string]string{}, Progress: progress, Now: func() time.Time { return clock }}, root)
@@ -58,9 +58,9 @@ func TestProfileBatchCancellationRetainsDiscoveredInventory(t *testing.T) {
 				if artifact.Profile != want.profile || artifact.Target.Input != want.target || artifact.StartedAt != clock.Format(time.RFC3339Nano) || artifact.CompletedAt != clock.Format(time.RFC3339Nano) || artifact.ConfigSource == nil || *artifact.ConfigSource != opts[index/2].ConfigSource {
 					t.Fatalf("incorrect identity, root clock or provenance: %+v", artifact)
 				}
-				stage := artifact.Scanners["clawscan-static"]
+				stage := artifact.Scanners[fixtureScannerID]
 				if !canceled || index == 0 {
-					if stage.Status != "completed" || !strings.Contains(string(stage.Raw), "static.prompt_injection") {
+					if stage.Status != "completed" || !strings.Contains(string(stage.Raw), "fixture.prompt_injection") {
 						t.Fatalf("lost actual raw finding: %+v", artifact)
 					}
 				} else if stage.Status != "not_started" || stage.StartedAt != "" || len(stage.Raw) != 0 || artifact.Judge != nil && (artifact.Judge.Status != "not_started" || artifact.Judge.CommandStarted == nil || *artifact.Judge.CommandStarted) {
@@ -92,7 +92,7 @@ func TestProfileBatchCancellationRetainsDiscoveredInventory(t *testing.T) {
 			}
 			raw, readErr := os.ReadFile(output)
 			var stored BatchArtifact
-			if readErr != nil || json.Unmarshal(raw, &stored) != nil || stored.Summary.TargetCount != 2 || len(stored.Runs) != 4 || !strings.Contains(string(stored.Runs[0].Scanners["clawscan-static"].Raw), "static.prompt_injection") {
+			if readErr != nil || json.Unmarshal(raw, &stored) != nil || stored.Summary.TargetCount != 2 || len(stored.Runs) != 4 || !strings.Contains(string(stored.Runs[0].Scanners[fixtureScannerID].Raw), "fixture.prompt_injection") {
 				t.Fatalf("persisted inventory/raw evidence lost: %v", readErr)
 			}
 		})
@@ -105,7 +105,7 @@ func TestAlreadyCanceledSelectionsRetainOnlyActualInventory(t *testing.T) {
 			t.Run(selection+"/"+fmt.Sprint(profiles), func(t *testing.T) {
 				root := t.TempDir()
 				t.Chdir(root)
-				opts := Options{Scanners: []string{"clawscan-static"}, Sandbox: SandboxOptions{Mode: SandboxModeOff}, Judge: &JudgeOptions{Command: benchmarkVerdictExitCommand(t, 0)}}
+				opts := Options{Scanners: []string{fixtureScannerID}, Sandbox: SandboxOptions{Mode: SandboxModeOff}, Judge: &JudgeOptions{Command: benchmarkVerdictExitCommand(t, 0)}}
 				wantTargets := []string{}
 				wantDiscoveryError := ""
 				switch selection {
@@ -173,7 +173,7 @@ func TestAlreadyCanceledSelectionsRetainOnlyActualInventory(t *testing.T) {
 					t.Fatalf("invented/lost targets or started canceled work: runs=%d want=%d starts=%d", len(runs), wantRuns, observer.starts)
 				}
 				for index, artifact := range runs {
-					stage := artifact.Scanners["clawscan-static"]
+					stage := artifact.Scanners[fixtureScannerID]
 					if artifact.Target.Input != wantTargets[index%len(wantTargets)] || artifact.Complete || artifact.Status != "canceled" || stage.Status != "not_started" || stage.StartedAt != "" || len(stage.Raw) != 0 || artifact.Judge == nil || artifact.Judge.Status != "not_started" || artifact.Judge.CommandStarted == nil || *artifact.Judge.CommandStarted || !strings.Contains(artifact.Error, wantDiscoveryError) {
 						t.Fatalf("incorrect target/stage/discovery evidence: %+v", artifact)
 					}

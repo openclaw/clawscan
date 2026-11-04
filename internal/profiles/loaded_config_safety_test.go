@@ -17,10 +17,12 @@ func TestLoadedConfigRemainsProtectedWithBuiltinProfile(t *testing.T) {
 			t.Run(selection+"/"+alias, func(t *testing.T) {
 				root := t.TempDir()
 				config := filepath.Join(root, ".clawscan.yml")
-				body := []byte("version: 1\nprofiles:\n  local:\n    scanners: [clawscan-static]\n")
+				body := []byte("version: 1\nprofiles:\n  local:\n    scanners: [skillspector]\n")
 				writeFile(t, config, string(body))
 				target := filepath.Join(root, "target", "SKILL.md")
 				writeFile(t, target, "# Generated inert target\n")
+				fixture := filepath.Join(root, "skillspector.json")
+				writeFile(t, fixture, `{"status":"clean","findings":[]}`)
 				output := config
 				switch alias {
 				case "hardlink":
@@ -37,7 +39,7 @@ func TestLoadedConfigRemainsProtectedWithBuiltinProfile(t *testing.T) {
 				case "external":
 					output = filepath.Join(root, "evidence", "artifact.json")
 				}
-				args := []string{target, "--profile", "clawhub", "--scanner", "clawscan-static", "--sandbox", "off", "--judge", "{{ prompt:" + filepath.Join(root, "missing.md") + " }}", "--output", output}
+				args := []string{target, "--profile", "clawhub", "--scanner", "skillspector", "--scanner-result", "skillspector=" + fixture, "--sandbox", "off", "--judge", "{{ prompt:" + filepath.Join(root, "missing.md") + " }}", "--output", output}
 				if selection == "explicit" {
 					args = append(args, "--config", config)
 				} else {
@@ -66,7 +68,7 @@ func TestLoadedConfigRemainsProtectedWithBuiltinProfile(t *testing.T) {
 				}
 				stored, err := os.ReadFile(output)
 				var artifact runner.Artifact
-				if err != nil || json.Unmarshal(stored, &artifact) != nil || artifact.Complete || artifact.Status != "failed" || artifact.ConfigSource == nil || *artifact.ConfigSource != "built-in" || result.Single == nil || artifact.Scanners["clawscan-static"].Status != "completed" {
+				if err != nil || json.Unmarshal(stored, &artifact) != nil || artifact.Complete || artifact.Status != "failed" || artifact.ConfigSource == nil || *artifact.ConfigSource != "built-in" || result.Single == nil || artifact.Scanners["skillspector"].Status != "completed" {
 					t.Fatalf("external failure evidence lost: %s, %v", stored, err)
 				}
 			})
@@ -77,8 +79,9 @@ func TestLoadedConfigRemainsProtectedWithBuiltinProfile(t *testing.T) {
 func TestAllConfigProfilesRetainLoadedFileForDeferredOutput(t *testing.T) {
 	root := t.TempDir()
 	config := filepath.Join(root, "settings.yml")
-	body := []byte("version: 1\nprofiles:\n  first:\n    scanners: [clawscan-static]\n  second:\n    scanners: [clawscan-static]\n")
+	body := []byte("version: 1\nsandbox:\n  mode: off\nprofiles:\n  first:\n    scanners: [skillspector]\n    scannerResults:\n      skillspector: ./skillspector.json\n  second:\n    scanners: [skillspector]\n    scannerResults:\n      skillspector: ./skillspector.json\n")
 	writeFile(t, config, string(body))
+	writeFile(t, filepath.Join(root, "skillspector.json"), `{"status":"clean","findings":[]}`)
 	target := filepath.Join(root, "SKILL.md")
 	writeFile(t, target, "# Inert generated target\n")
 	resolved, err := ResolveRunSet([]string{target, "--config", config}, root)

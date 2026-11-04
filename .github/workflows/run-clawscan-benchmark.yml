@@ -141,8 +141,6 @@ on:
         required: false
       SOCKET_CLI_API_TOKEN:
         required: false
-      VIRUSTOTAL_API_KEY:
-        required: false
 
 permissions:
   contents: read
@@ -205,7 +203,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
           SOCKET_CLI_API_TOKEN: ${{ secrets.SOCKET_CLI_API_TOKEN }}
-          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$OUTPUT_PATH")"

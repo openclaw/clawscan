@@ -55,8 +55,8 @@ func TestFailedExplicitManifestProtectsUnconsumedRoot(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					artifact, err := Run(Options{Target: manifest, Scanners: []string{"clawscan-static"}, OutputPath: path}, RunContext{Env: map[string]string{}})
-					stage := artifact.Scanners["clawscan-static"]
+					artifact, err := Run(Options{Target: manifest, Scanners: []string{fixtureScannerID}, OutputPath: path}, RunContext{Env: map[string]string{}})
+					stage := artifact.Scanners[fixtureScannerID]
 					if err == nil || artifact.Complete || artifact.Status != "failed" || stage.Status != "not_started" || len(stage.Raw) != 0 || stage.OutputPath != "" {
 						t.Fatalf("incorrect preparation evidence: status=%s stage=%+v, %v", artifact.Status, stage, err)
 					}
@@ -71,7 +71,7 @@ func TestFailedExplicitManifestProtectsUnconsumedRoot(t *testing.T) {
 						}
 					} else {
 						var retained Artifact
-						if readErr != nil || json.Unmarshal(stored, &retained) != nil || retained.Complete || retained.Status != "failed" || retained.Scanners["clawscan-static"].Status != "not_started" {
+						if readErr != nil || json.Unmarshal(stored, &retained) != nil || retained.Complete || retained.Status != "failed" || retained.Scanners[fixtureScannerID].Status != "not_started" {
 							t.Fatalf("safe external preparation failure not retained: %s, %v", stored, readErr)
 						}
 					}
@@ -122,9 +122,9 @@ func TestFailedManifestSymlinksProtectOnlyContainingRoot(t *testing.T) {
 			if err := os.WriteFile(output, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			artifact, err := Run(Options{Target: manifest, Scanners: []string{"clawscan-static"}, OutputPath: output}, RunContext{Env: map[string]string{}})
+			artifact, err := Run(Options{Target: manifest, Scanners: []string{fixtureScannerID}, OutputPath: output}, RunContext{Env: map[string]string{}})
 			after, readErr := os.ReadFile(output)
-			if err == nil || !strings.Contains(err.Error(), "unconsumed") || artifact.Complete || artifact.Scanners["clawscan-static"].Status != "not_started" || len(artifact.Scanners["clawscan-static"].Raw) != 0 || readErr != nil || !bytes.Equal(body, after) {
+			if err == nil || !strings.Contains(err.Error(), "unconsumed") || artifact.Complete || artifact.Scanners[fixtureScannerID].Status != "not_started" || len(artifact.Scanners[fixtureScannerID].Raw) != 0 || readErr != nil || !bytes.Equal(body, after) {
 				t.Fatalf("unsafe symlink preparation: status=%s intact=%v, %v, %v", artifact.Status, bytes.Equal(body, after), err, readErr)
 			}
 		})
@@ -145,7 +145,7 @@ func TestManifestSpellingDoesNotPromoteMissingOrOrdinaryFiles(t *testing.T) {
 				}
 			}
 			output := filepath.Join(t.TempDir(), "artifact.json")
-			artifact, err := Run(Options{Target: path, Scanners: []string{"clawscan-static"}, OutputPath: output}, RunContext{Env: map[string]string{}})
+			artifact, err := Run(Options{Target: path, Scanners: []string{fixtureScannerID}, OutputPath: output}, RunContext{Env: map[string]string{}})
 			if artifact.Target.Kind != targetKindSkill || artifact.Target.ID != "" || artifact.Target.ResolvedPath != path || (err == nil) != (selected == "metadata.json") {
 				t.Fatalf("path spelling promoted target ownership: %+v, %v", artifact.Target, err)
 			}
@@ -177,9 +177,9 @@ func TestCompletedManifestScanStillInspectsAndReplacesSubmittedOutput(t *testing
 				if selection == "directory" {
 					target = root
 				}
-				artifact, err := Run(Options{Target: target, Scanners: []string{"clawscan-static"}, OutputPath: output}, RunContext{Env: map[string]string{}})
-				raw := string(artifact.Scanners["clawscan-static"].Raw)
-				if err != nil || !artifact.Complete || artifact.Target.Kind != targetKindPlugin || !strings.Contains(raw, "index.js") || !strings.Contains(raw, "static.prompt_injection") {
+				artifact, err := Run(Options{Target: target, Scanners: []string{fixtureScannerID}, OutputPath: output}, RunContext{Env: map[string]string{}})
+				raw := string(artifact.Scanners[fixtureScannerID].Raw)
+				if err != nil || !artifact.Complete || artifact.Target.Kind != targetKindPlugin || !strings.Contains(raw, "index.js") || !strings.Contains(raw, "fixture.prompt_injection") {
 					t.Fatalf("legitimate bundle name, inspection or completion changed: %+v, %v", artifact.Target, err)
 				}
 				stored, err := os.ReadFile(output)
@@ -188,7 +188,7 @@ func TestCompletedManifestScanStillInspectsAndReplacesSubmittedOutput(t *testing
 					t.Fatalf("consumed output not replaced with retained evidence: %v", err)
 				}
 				var originalRaw, retainedRaw bytes.Buffer
-				if json.Compact(&originalRaw, artifact.Scanners["clawscan-static"].Raw) != nil || json.Compact(&retainedRaw, retained.Scanners["clawscan-static"].Raw) != nil || !bytes.Equal(originalRaw.Bytes(), retainedRaw.Bytes()) {
+				if json.Compact(&originalRaw, artifact.Scanners[fixtureScannerID].Raw) != nil || json.Compact(&retainedRaw, retained.Scanners[fixtureScannerID].Raw) != nil || !bytes.Equal(originalRaw.Bytes(), retainedRaw.Bytes()) {
 					t.Fatal("submitted-source finding or raw evidence changed on disk")
 				}
 			})

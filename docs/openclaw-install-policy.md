@@ -61,8 +61,8 @@ Use the printed path as `command`, and its containing directory in
 }
 ```
 
-The default `openclaw-install-policy` profile composes SkillSpector and
-`clawscan-static` deterministically and has no judge. ClawScan runs
+The default `openclaw-install-policy` profile runs SkillSpector with
+deterministic gate rules and has no judge. ClawScan runs
 command-backed scanners in Docker by default. `PATH` lets it locate Docker;
 `DOCKER_HOST` is only needed when the local Docker setup uses it.
 
@@ -74,8 +74,7 @@ There are two separate execution boundaries:
    Gateway/install process. The normal OpenClaw agent tool sandbox does not run
    or isolate this command.
 2. ClawScan runs command-backed scanners such as SkillSpector in its own Docker
-   sandbox. The built-in `clawscan-static` scanner runs inside the trusted
-   ClawScan policy process.
+   sandbox.
 
 OpenClaw downloads, clones, uploads, or extracts a candidate into a temporary
 staging location before install commit. It sends the absolute staged
@@ -148,8 +147,11 @@ plugin/npm file-stage shape, then validates the complete host tuple before
 allowing the lightweight path: npm origin, immutable network npm source,
 package content role, matching package names, and the exact metadata filename.
 A malformed metadata-stage tuple fails closed instead of falling through to an
-ordinary file scan. Valid metadata uses the built-in static scanner without
-Docker and is not presented as a scan of plugin code. The later package and
+ordinary file scan. With the built-in profile, valid metadata returns `allow`
+with a `clawscan.npm-metadata-preflight` info finding after validation, without
+running a scanner or Docker; it is not presented as a scan of plugin code.
+Explicit `--scanner`, `--sandbox`, or `--config` arguments scan the metadata
+file with the operator's selection instead. The later package and
 dependency-tree calls keep the full profile. Dependency packages are exposed
 in a dedicated scan view so normal `node_modules` exclusions cannot hide their
 code. Local `plugin-file` requests never match the metadata shortcut. A
@@ -161,12 +163,12 @@ host-validated `node_modules/openclaw` peer symlink; other links escaping the
 staged root fail closed. Safe links within the staged root are dereferenced
 into stable copies so scanners inspect the code the installed package will use.
 
-On native Windows, the default profile visibly degrades to
-`clawscan-static` with the sandbox disabled because the Linux Docker runtime
-cannot consume native Windows staging paths. The response is `warn`, requiring
-OpenClaw to obtain explicit confirmation, and includes a finding for this
-reduced coverage. Explicit `--scanner` or
-`--sandbox` arguments remain operator-owned and disable this automatic fallback.
+On native Windows, the default profile cannot scan: its scanners need the Linux
+Docker runtime, which cannot consume native Windows staging paths. ClawScan does
+not run a scanner and returns `warn` with a `clawscan.windows-unscanned`
+finding, requiring OpenClaw to obtain explicit confirmation. Explicit
+`--scanner`, `--sandbox`, or `--config` arguments remain operator-owned and
+disable this automatic response.
 
 To use an operator-owned profile, add explicit arguments:
 

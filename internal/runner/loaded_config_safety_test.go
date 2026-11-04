@@ -21,7 +21,7 @@ func TestLibraryLoadedConfigIdentitySurvivesRunAndDeferredWrites(t *testing.T) {
 			}
 			config := filepath.Join(root, "settings.yml")
 			if mode == "sidecar" {
-				config = filepath.Join(root, "evidence", "skill", "clawscan-static.json")
+				config = filepath.Join(root, "evidence", "skill", "fixture.json")
 				if err := os.MkdirAll(filepath.Dir(config), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -30,7 +30,7 @@ func TestLibraryLoadedConfigIdentitySurvivesRunAndDeferredWrites(t *testing.T) {
 			if err := os.WriteFile(config, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			opts := Options{Target: target, Scanners: []string{"clawscan-static"}, ConfigSource: "built-in", LoadedConfigPath: config, OutputPath: config}
+			opts := Options{Target: target, Scanners: []string{fixtureScannerID}, ConfigSource: "built-in", LoadedConfigPath: config, OutputPath: config}
 			ctx := RunContext{Env: map[string]string{}}
 			var writeErr error
 			switch mode {

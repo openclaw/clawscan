@@ -77,7 +77,7 @@ func TestGenericScannersKeepProviderDefaults(t *testing.T) {
 		t.Fatalf("generic defaults changed: %#v", env)
 	}
 	env = map[string]string{"OPENAI_API_KEY": "fixture"}
-	applyRuntimeEnvDefaults(Options{Scanners: []string{"clawscan-static"}, ScannerEnvDefaults: productionModelDefaults()}, env)
+	applyRuntimeEnvDefaults(Options{Scanners: []string{fixtureScannerID}, ScannerEnvDefaults: productionModelDefaults()}, env)
 	if !reflect.DeepEqual(env, map[string]string{"OPENAI_API_KEY": "fixture"}) {
 		t.Fatal("unselected scanner defaults applied")
 	}

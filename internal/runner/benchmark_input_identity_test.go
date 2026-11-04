@@ -84,7 +84,7 @@ func TestBenchmarkTrimmedIDsRetainNormalizedIdentity(t *testing.T) {
 				t.Fatalf("read identity or caller options changed: artifact=%q caller=%q", artifact.Benchmark.IDsSource, opts.Benchmark.IDsSource)
 			}
 			if mode == "completed" {
-				if err != nil || !artifact.Complete || len(artifact.Cases) != 1 || artifact.Benchmark.IDsCount != 1 || artifact.Benchmark.IDsSHA256 == "" || artifact.Cases[0].Run.Scanners["clawscan-static"].Status != "completed" {
+				if err != nil || !artifact.Complete || len(artifact.Cases) != 1 || artifact.Benchmark.IDsCount != 1 || artifact.Benchmark.IDsSHA256 == "" || artifact.Cases[0].Run.Scanners[fixtureScannerID].Status != "completed" {
 					t.Fatalf("safe normalized selection did not run: %+v, %v", artifact, err)
 				}
 			} else if err == nil || artifact.Complete || strings.Contains(mode, "canceled") && !errors.Is(err, context.Canceled) {

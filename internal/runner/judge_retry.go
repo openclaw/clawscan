@@ -12,15 +12,16 @@ type JudgeAttempt struct {
 	Error          string      `json:"error"`
 	Result         interface{} `json:"result"`
 	DurationMs     int64       `json:"durationMs"`
-	Challenge      string      `json:"challenge,omitempty"`
-	RequiredFile   string      `json:"requiredFile,omitempty"`
-	RequiredSHA256 string      `json:"requiredFileSha256,omitempty"`
 }
 
+// maxJudgeAttempts bounds judge invocations per run. Only a judge command that
+// exits successfully without a JSON object is retried; a failed judge command
+// keeps its own error and is never retried.
+const maxJudgeAttempts = 2
+
 type judgeAttemptOutcome struct {
-	result     *JudgeResult
-	inspection *artifactInspectionChallenge
-	retryable  bool
+	result    *JudgeResult
+	retryable bool
 }
 
 func RunJudge(opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, timeout time.Duration, env map[string]string, sandboxMode string) (*JudgeResult, error) {
@@ -59,14 +60,7 @@ func RunJudgeContext(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 			Status:         outcome.result.Status, Error: outcome.result.Error, Result: outcome.result.Result,
 			DurationMs: time.Since(startedAt).Milliseconds(),
 		}
-		if outcome.inspection != nil {
-			attempt.Challenge = outcome.inspection.Challenge
-			attempt.RequiredFile = outcome.inspection.RequiredFile
-			attempt.RequiredSHA256 = outcome.inspection.RequiredSHA256
-		}
-		if outcome.inspection != nil {
-			attempts = append(attempts, attempt)
-		}
+		attempts = append(attempts, attempt)
 		outcome.result.Attempts = attempts
 		lastResult = outcome.result
 		if err := errors.Join(commands.failure, ctx.Err()); err != nil {
@@ -74,7 +68,7 @@ func RunJudgeContext(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 			lastResult.Error = commandError(err, lastResult.Error, env)
 			return lastResult, err
 		}
-		if !outcome.retryable || len(attempts) >= 2 || time.Until(deadline) <= 0 {
+		if !outcome.retryable || len(attempts) >= maxJudgeAttempts || time.Until(deadline) <= 0 {
 			return outcome.result, nil
 		}
 	}
