@@ -397,6 +397,24 @@ class DecisionsJudgeTest(unittest.TestCase):
         self.assertEqual(counts["included"] + counts["omitted"], counts["total"])
         return values
 
+    def test_value_limit_clawsweeper_exact_repro(self):
+        # ClawSweeper repro at e1781d2: this evidence measures exactly 10,000
+        # values without trimming, so the old post-loop omitted count sent 10,001.
+        workspace = Path(self.temp.name) / "sweeper"
+        (workspace / "artifact").mkdir(parents=True)
+        (workspace / "scanners").mkdir()
+        (workspace / "artifact" / "SKILL.md").write_text("# Notes\n")
+        issues = [{"id": f"R{index}", "severity": "LOW", "file": f"f{index}.md"} for index in range(1661)]
+        (workspace / "scanners" / "skillspector.json").write_text(json.dumps({"execution_successful": True, "issues": issues}))
+        (workspace / "metadata.json").write_text(json.dumps({
+            "target": {"kind": "skill", "id": "notes"},
+            "scanners": {"skillspector": {"status": "completed"}},
+            "context": {},
+        }))
+        code, result, stderr = self.run_judge(workspace, "--max-findings", "2000")
+        self.assertEqual(code, 0, stderr)
+        self.assert_final_limits(result)
+
     def test_value_limit_exact_boundary_repro(self):
         # Reviewer repro: 1,200 findings and 463 empty files previously sent
         # 10,001 values because findingCounts.omitted was added after the check.
