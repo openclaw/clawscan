@@ -43,7 +43,7 @@ func applyScannerModelDefaults(opts Options, env map[string]string) {
 			}
 		}
 	}
-	if scannerRequested(opts, "aig") && defaults["DEFAULT_MODEL"] != "" {
+	if (scannerRequested(opts, "aig") || scannerRequested(opts, aigMCPScannerID)) && defaults["DEFAULT_MODEL"] != "" {
 		// An explicit non-OpenAI endpoint keeps AIG's provider defaults. Never route
 		// a dedicated third-party key to OpenAI merely because a profile was selected.
 		base := strings.TrimRight(strings.TrimSpace(env["DEFAULT_BASE_URL"]), "/")

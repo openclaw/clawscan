@@ -60,7 +60,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"SkillTrustBench",
 		"clawhub-security-signals",
 		"Accepted scanner IDs:",
-		"agentverus, aig, cisco, relyable, skillspector, snyk, socket",
+		"agentverus, aig, aig-mcp, cisco, relyable, skillspector, snyk, socket",
 		"Required environment variables:",
 		"aig: LLM_API_KEY or OPENAI_API_KEY",
 		"SOCKET_CLI_API_TOKEN",
@@ -525,7 +525,7 @@ profiles:
 		"Scanners",
 		"clawhub",
 		"built-in",
-		"skillspector, aig",
+		"skillspector, aig; plugins: aig-mcp",
 		"clawhub-aig",
 		"skillspector, aig",
 	} {
@@ -567,6 +567,8 @@ profiles:
 		"openclaw-install-policy:",
 		"- skillspector",
 		"- aig",
+		"pluginScanners:",
+		"- aig-mcp",
 		"gate:",
 	} {
 		if !strings.Contains(stdout, want) {

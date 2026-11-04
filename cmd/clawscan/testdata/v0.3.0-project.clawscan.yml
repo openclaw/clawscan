@@ -1,0 +1,37 @@
+# A project config written for ClawScan v0.3.0 (before pluginScanners existed).
+# Its settings must resolve and run unchanged.
+version: 1
+profiles:
+  team-review:
+    scannerEnvDefaults:
+      DEFAULT_MODEL: gpt-5.5
+    scanners:
+      - skillspector
+      - id: aig
+        gate:
+          rules:
+            - id: any-result
+              path: runs[].results[]
+              exists: true
+              action: warn
+      - id: team-grep
+        command: team-grep {{target}}
+        env:
+          - TEAM_MODE
+        targets:
+          - skill
+          - plugin
+        gate:
+          rules:
+            - id: high-risk
+              path: result.risk
+              equals: high
+              action: block
+    scannerResults:
+      skillspector: ./skillspector.json
+      aig: ./aig.sarif.json
+    sandbox:
+      env:
+        - OPENAI_API_KEY
+    judge:
+      command: printf '{"verdict":"benign"}\n' > {{ output }}

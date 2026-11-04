@@ -82,7 +82,7 @@ Built-in profiles:
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `aig` | Decisions API judge (`clawscan-decisions-judge`) plus a Codex overview |
+| `clawhub` | skills: `skillspector`, `aig`; plugins: only `aig-mcp` | Decisions API judge (`clawscan-decisions-judge`) plus a Codex overview |
 | `clawhub-aig` | `skillspector`, `aig` | same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
@@ -133,7 +133,7 @@ env vars, and install guidance.
 Accepted scanner IDs:
 
 ```text
-agentverus, aig, cisco, relyable, skillspector, snyk, socket
+agentverus, aig, aig-mcp, cisco, relyable, skillspector, snyk, socket
 ```
 
 Credential rules:
@@ -141,6 +141,7 @@ Credential rules:
 | Scanner | Env vars |
 | --- | --- |
 | `aig` | required: `LLM_API_KEY` or `OPENAI_API_KEY`; optional local scanner config: `DEFAULT_MODEL`, `DEFAULT_BASE_URL`, `DEFAULT_MODEL_CONTEXT_WINDOW`, `LOG_LEVEL` |
+| `aig-mcp` | plugin targets only; required: `LLM_API_KEY` or `OPENAI_API_KEY`; optional: `DEFAULT_MODEL`, `DEFAULT_BASE_URL` (same defaults as `aig`), `DEFAULT_MODEL_CONTEXT_WINDOW`; `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` for `--sandbox off` |
 | `socket` | required: `SOCKET_CLI_API_TOKEN` |
 | `snyk` | required: `SNYK_TOKEN` |
 | `skillspector` | optional provider config: `SKILLSPECTOR_PROVIDER`, `SKILLSPECTOR_MODEL`, `NVIDIA_INFERENCE_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_PROXY_ENDPOINT_URL`, `ANTHROPIC_PROXY_API_KEY` |
@@ -165,7 +166,12 @@ install docs where they publish an install command, including A.I.G's
 ClawScan verifies `uvx`; built-in and simple API-backed scanners are skipped.
 The `aig` adapter runs `aig-skill-scan --repo <target> --language en -o
 <result.sarif.json>` and stores the SARIF 2.1.0 document as raw scanner
-evidence.
+evidence. The plugin-only `aig-mcp` adapter copies an OpenClaw plugin directory
+without `node_modules` and runs `aig-mcp-scan` 0.2.0 on that copy with an
+OpenClaw plugin audit prompt. The `clawhub` profile runs only `aig-mcp` for
+plugins. It runs in the Docker sandbox, whose runtime image removes the
+scanner agent's shell and file-write tools; `--sandbox off` requires
+`AIG_MCP_SCAN_ALLOW_HOST_EXEC=1`.
 
 Starting in ClawScan `v0.1.2`, `aig` no longer uses the legacy A.I.G Docker/API
 service. Replace `AIG_MODEL` with `DEFAULT_MODEL`, `AIG_MODEL_BASE_URL` with

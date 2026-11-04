@@ -577,6 +577,9 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 		if prediction, ok := predictionFromObject(benchmarkCase.Run.Judge.Result); ok {
 			return prediction, "judge", nil
 		}
+		// A configured judge owns the verdict. Without a recognized one the case
+		// is unscorable; scanner evidence must not stand in for it.
+		return "", "", fmt.Errorf("case %s judge returned no recognized verdict", benchmarkCase.ID)
 	}
 	scannerPredictions := map[string][]string{}
 	scanners := make([]string, 0, len(benchmarkCase.Run.Scanners))
@@ -591,6 +594,12 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 		}
 		if scanner == "aig" {
 			if prediction, ok := aigSARIFPrediction(result.Raw); ok {
+				scannerPredictions[prediction] = append(scannerPredictions[prediction], scanner)
+				continue
+			}
+		}
+		if scanner == aigMCPScannerID {
+			if prediction, ok := aigMCPSARIFPrediction(result.Raw); ok {
 				scannerPredictions[prediction] = append(scannerPredictions[prediction], scanner)
 				continue
 			}

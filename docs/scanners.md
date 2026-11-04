@@ -294,9 +294,9 @@ the result in the artifact `target.kind` field:
 | `plugin` | directory (or selected manifest) holds `openclaw.plugin.json` or a supported bundle marker | Native identity comes from `id`; bundle identity comes from canonical name normalization. Host paths are never used as identity. |
 | `url` | `http`/`https` input | Local file and directory scanners skip URLs. |
 
-The built-in `clawhub` profile runs `skillspector` for `plugin` targets as it
-does for skills. Socket also supports plugins when selected explicitly or
-through a custom profile. Other scanners
+The built-in `clawhub` profile runs only the plugin-only `aig-mcp` scanner for
+`plugin` targets, described below. SkillSpector and Socket also support
+plugins when selected explicitly or through a custom profile. Other scanners
 that assume skill layouts return an explicit `skipped` result naming the
 unsupported kind, and adapters can opt in per kind as upstream tools add plugin
 support. A directory carrying both `SKILL.md` and `openclaw.plugin.json` is
@@ -315,6 +315,101 @@ whole surrounding artifact, not just its marker directory. All companion files
 and suspicious findings remain in scanner and judge scope. Explicit native
 manifest selection and the native identifier grammar are unchanged.
 
+### Plugin code audit with `aig-mcp`
+
+Native OpenClaw plugins run in-process in the gateway with its full
+permissions, so `aig-mcp` audits plugin code with Tencent A.I.G's
+`aig-mcp-scan` (pinned to 0.2.0 in the runtime image). It analyzes only
+`plugin` targets and skips skill, file and URL targets. The built-in `clawhub`
+profile lists it under `pluginScanners`, so a plugin is reviewed by `aig-mcp`
+and the judge only; SkillSpector and the `aig` skill scanner are not run or
+recorded for plugins, and skills keep those scanners. For each
+plugin directory the adapter:
+
+- copies the whole plugin into a private temporary workspace, leaving out only
+  `node_modules` directories (bundled third-party code is out of scope and makes
+  the LLM agent slow and noisy). Embedded skills, hooks, scripts, `dist/` or
+  `build/` output, and `.git/` and `clawscan-results/` content stay in the copy:
+  unlike the judge workspace, scanner staging filters nothing else, so authored
+  code is audited wherever it lives. Symlinks that leave the plugin are refused,
+  and a plugin with more than 20,000 files or 256 MiB outside `node_modules`
+  fails instead of being audited partly;
+- runs `aig-mcp-scan --repo plugin --language en [-m <model>] [-u <base url>]
+  -p <prompt> -o aig-mcp-scan.sarif.json` in that workspace, never in the
+  original target. The prompt explains the in-process plugin runtime
+  (`api.registerTool`, prompt hooks, `registerHttpRoute`), prioritizes
+  malicious or undeclared behavior, and puts embedded skills, hooks, scripts and
+  compiled output in scope. `aig-mcp-scan` leaves `dist/`, `build/`, `.git/`,
+  `__pycache__/`, `.venv/` and `venv/` out of the directory summary it shows
+  the model and truncates that summary at 200 files, so the prompt lists the
+  omitted files (every file for plugins over 200
+  files; up to 400 paths, source files and `SKILL.md` first);
+- passes credentials only through `LLM_API_KEY` or `OPENAI_API_KEY`, and the
+  model and endpoint only through the `aig` settings `DEFAULT_MODEL` and
+  `DEFAULT_BASE_URL`. These default to OpenAI's endpoint for OpenAI or Codex
+  credentials and otherwise to `aig-mcp-scan`'s own defaults, and are always
+  passed as `-m`/`-u` so generic `OPENAI_BASE_URL` or `LLM_MODEL` values meant
+  for other tools never apply;
+- keeps the upstream SARIF unchanged as the scanner's raw evidence. It is the
+  only scanner evidence in the judge workspace (`scanners/aig-mcp.json`); the
+  `clawhub` Decisions judge passes its findings to the model as bounded,
+  normalized evidence, and a `--judge` override that renders
+  `clawhub/prompt.md` receives the raw SARIF. Benchmarks map SARIF
+  levels to severities (`error` high, `warning` or absent medium, `note` low,
+  otherwise info): a high finding predicts `malicious`, any other finding
+  `suspicious`.
+
+`aig-mcp-scan` 0.2.0 gives its agent a shell and file writes during static
+audits, and prompt injection in the audited plugin could reach them; its tool
+lookup is also case-insensitive, and its MCP client tools accept any URL the
+model supplies. The runtime image's patch never registers the shell, limits
+static audits to an allow-list of read-only tools matched on canonical
+(trimmed, lowercase) names, so the MCP tools are rejected before lookup, refuses
+model-chosen MCP destinations before any transport is created, and keeps every
+read confined to the audited directory. Upstream keeps only a 20,000-character prefix of any tool
+result over 40,000 characters in the model's history, so the patch also caps
+`read_file` at 30,000 characters with an explicit continuation and adds
+`read_file_chunk` (character-offset reads) and `search_files` (bounded literal
+search) so the rest of a large or compiled file is visible to the model. The
+image build runs those checks and fails if the patch stops applying or the
+registered tools change. It also runs the real `aig-mcp-scan` CLI against a
+loopback model stub that injects remote MCP calls, and fails if a loopback
+canary (also set as the HTTP(S) proxy) receives any connection. The adapter therefore expects the Docker sandbox: with
+`--sandbox off` it fails unless `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` acknowledges a
+disposable host. A plain `pip install aig-mcp-scan` (and `clawscan install
+aig-mcp`) is unpatched; host consumers such as a ClawHub worker must install
+the patched build from `docker/clawscan-runtime` instead. Adopting a ClawScan
+release with this profile change therefore needs the runtime image published
+first and any host worker updated before its ClawScan pin moves; until then,
+plugin scans fail closed rather than running without `aig-mcp`.
+
+Failures are never reported as clean scans. `aig-mcp-scan` exits 0 and writes
+SARIF marked `scanNote: complete` even when its audit did not finish, so the
+adapter also reads its output. Any of these marks `aig-mcp` failed with the
+upstream error and a bounded stderr tail, and the judge does not start:
+
+- a non-zero exit, or missing or invalid SARIF;
+- model calls that failed (`LLM chat failed after retries`, `LLM chat error,
+  retry 5 times`) or an exhausted iteration budget (`Max iterations (80)
+  reached`), logged as WARNING or ERROR records on stderr. INFO records and
+  continuation lines that merely quote these words (a model report, a file
+  name) do not count;
+- any run whose `scanNote` is not `complete`, including a missing one;
+- an unusable final report. Upstream keeps the last of three format attempts
+  even when none matched, so a refusal or plain prose would otherwise score 100
+  with no findings. The patched runtime exits with an error instead, both for
+  that and when any `<vuln>` finding block cannot be parsed. Only an explicit
+  `<empty>` result, or findings that all parse, produce SARIF.
+
+An imported `--scanner-result aig-mcp=<path>` gets the same SARIF and
+`scanNote` checks. Its logs are not available, so an imported report from an
+audit that exhausted its iterations still reads `scanNote: complete` and cannot
+be detected; import only reports whose scanner run ClawScan itself checked. A
+profile's plugin-only scanner accepts `--scanner-result` without `--scanner`,
+and a run against a non-plugin target with such a result fails instead of
+ignoring it. A plugin file over 64 MiB fails staging, matching the read tools'
+per-file limit.
+
 Plugin targets are never auto-discovered. Zero-target discovery still scans only
 child skill directories under `./skills`; pass a plugin directory explicitly to
 avoid silently scanning arbitrary package directories. Pointing Clawscan at an
@@ -332,6 +427,7 @@ commas, single-quoted strings, and unquoted keys.
 | --- | --- | --- | --- | --- | --- |
 | `agentverus` | AgentVerus | [repo](https://github.com/agentverus/agentverus-scanner) | Local file or directory scanner invoked through agentverus-scanner. | none | `npm install --save-dev agentverus-scanner` |
 | `aig` | Tencent AI-Infra-Guard | [repo](https://github.com/Tencent/AI-Infra-Guard/tree/main/skill-scan) | Tencent Zhuque Lab's local directory scanner invoked through `aig-skill-scan`. Produces SARIF 2.1.0 with SkillTrustBench T01-T09 evidence. | `LLM_API_KEY` or `OPENAI_API_KEY`<br><details><summary>Optional config</summary><code>DEFAULT_MODEL</code>, <code>REASONING_EFFORT</code> (requires the patched runtime), <code>AIG_SERVICE_TIER</code> (Sol only), <code>DEFAULT_BASE_URL</code>, <code>DEFAULT_MODEL_CONTEXT_WINDOW</code>, <code>LOG_LEVEL</code>.</details> | `pip install aig-skill-scan` |
+| `aig-mcp` | Tencent AI-Infra-Guard MCP scanner | [repo](https://github.com/Tencent/AI-Infra-Guard/tree/main/mcp-scan) | Tencent Zhuque Lab's LLM-driven MCP server code audit invoked through `aig-mcp-scan`, run on OpenClaw plugin targets only (skill, file and URL targets are skipped). Audits a bounded temporary copy of the whole plugin without `node_modules`, using an OpenClaw plugin audit prompt, and produces SARIF 2.1.0 with MCP01-MCP10 evidence. Runs in the Docker sandbox, whose runtime image removes the agent's shell and file-write tools. | `LLM_API_KEY` or `OPENAI_API_KEY`<br><details><summary>Optional config</summary><code>DEFAULT_MODEL</code>, <code>DEFAULT_BASE_URL</code> (same defaults as <code>aig</code>), <code>DEFAULT_MODEL_CONTEXT_WINDOW</code>, <code>AIG_MCP_SCAN_ALLOW_HOST_EXEC=1</code> (required with <code>--sandbox off</code>).</details> | runtime image (patched `aig-mcp-scan==0.2.0`); `pip install aig-mcp-scan==0.2.0` is unpatched |
 | `cisco` | Cisco AI Defense skill-scanner | [repo](https://github.com/cisco-ai-defense/skill-scanner) | Local file or directory scanner invoked through `skill-scanner` with JSON report output. Optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers. | none<br><details><summary>Optional config</summary><code>SKILL_SCANNER_LLM_API_KEY</code>, <code>SKILL_SCANNER_LLM_PROVIDER</code>, <code>SKILL_SCANNER_LLM_MODEL</code>, <code>SKILL_SCANNER_LLM_BASE_URL</code>, <code>SKILL_SCANNER_LLM_USER</code>, <code>SKILL_SCANNER_LLM_API_VERSION</code>, <code>SKILL_SCANNER_LLM_FORCE_JSON_OBJECT</code>, <code>SKILL_SCANNER_META_LLM_API_KEY</code>, <code>SKILL_SCANNER_META_LLM_MODEL</code>, <code>SKILL_SCANNER_META_LLM_BASE_URL</code>, <code>SKILL_SCANNER_META_LLM_API_VERSION</code>, <code>AWS_PROFILE</code>, <code>AWS_REGION</code>, <code>GOOGLE_APPLICATION_CREDENTIALS</code>, <code>VIRUSTOTAL_API_KEY</code>, <code>AI_DEFENSE_API_KEY</code>, <code>AI_DEFENSE_API_URL</code>.</details> | `uv pip install cisco-ai-skill-scanner` |
 | `relyable` | Relyable | [repo](https://github.com/veriker/relyable) | Functional re-derivation evidence: does the skill still do what its docs claim, recomputed? Emits the strongest grade that applies. `exogenous`: a declared `rederive.json` property manifest (idempotence / round-trip), with both sides of the relation computed from the skill's own code and the result mutation-tested against vacuity. `self_spec`: re-runs the author's own committed oracle (shipped tests or documented I/O examples). `cold_golden`: when an LLM key is set, a code-blind model infers goldens from SKILL.md alone and abstains unless the docs pin exact behavior; divergences are reported as unconfirmed, never as accusations. `non_rederivable`: the honest floor, never a fabricated pass. Functional axis only; complements the security scanners and does not detect malware or prompt injection. Skill code runs only inside the Docker sandbox (or with an explicit opt-in), in a scrubbed environment, and the scanner fails closed otherwise. Not preinstalled in the `clawscan-runtime` image. | none<br><details><summary>Optional config</summary><code>RELYABLE_SCAN_ALLOW_HOST_EXEC</code> — explicit ack that the host is disposable when running with <code>--sandbox off</code>.<br><br><code>RELYABLE_LLM_API_KEY</code> (+ <code>RELYABLE_LLM_PROVIDER</code> <code>anthropic|openai</code>, <code>RELYABLE_LLM_MODEL</code>, <code>RELYABLE_LLM_BASE_URL</code>) — explicit per-scanner opt-in that enables the <code>cold_golden</code> lane; key presence only is ever recorded in the payload. Generic <code>ANTHROPIC_API_KEY</code>/<code>OPENAI_API_KEY</code> are honored by standalone <code>relyable-scan</code> but are deliberately not auto-forwarded by ClawScan.</details> | `clawscan install relyable` — not preinstalled in the runtime image |
 | `skillspector` | NVIDIA SkillSpector | [repo](https://github.com/NVIDIA/skillspector) | Local skill or OpenClaw plugin file/directory scanner. Uses LLM mode when provider env vars are set; otherwise runs with `--no-llm`. | none<br><details><summary>Optional config</summary><code>SKILLSPECTOR_PROVIDER</code>, <code>SKILLSPECTOR_MODEL</code>, <code>SKILLSPECTOR_REASONING_EFFORT</code>, <code>SKILLSPECTOR_TEMPERATURE</code>, <code>SKILLSPECTOR_SEED</code>, <code>SKILLSPECTOR_SERVICE_TIER</code> (Sol only), <code>SKILLSPECTOR_MODEL_REGISTRY</code>, <code>SKILLSPECTOR_LOG_LEVEL</code>, <code>SKILLSPECTOR_SSL_VERIFY</code>, <code>NVIDIA_INFERENCE_KEY</code>, <code>OPENAI_API_KEY</code>, <code>OPENAI_BASE_URL</code>, <code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_PROXY_ENDPOINT_URL</code>, <code>ANTHROPIC_PROXY_API_KEY</code>, <code>ANTHROPIC_PROXY_API_VERSION</code>.</details> | `uv tool install git+https://github.com/NVIDIA/skillspector.git` |

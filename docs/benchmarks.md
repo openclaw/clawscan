@@ -11,6 +11,11 @@ clawscan benchmark SkillTrustBench \
   --output ./artifacts/skilltrustbench-clawhub.json
 ```
 
+Each case is scored from its judge verdict when a judge is configured. A
+completed judge that returns no recognized verdict makes the case unscorable
+(an error); scanner evidence never stands in for a configured judge. Runs
+without a judge score from scanner evidence alone.
+
 Use `--ids <path-or-url>` with SkillTrustBench to run a fixed subset from a
 plain text ID list or JSONL rows with an `id` field. The loader streams the
 source (file or HTTP) and accepts at most 5,520 unique IDs, the size of the

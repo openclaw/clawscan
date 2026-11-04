@@ -80,6 +80,23 @@ The runtime builds NVIDIA SkillSpector from
 selecting these revisions. Both still use Chat Completions by default. The PyPI
 A.I.G 0.2.2 release also lacks upstream's reasoning-effort support.
 
+The runtime also installs Tencent's `aig-mcp-scan` 0.2.0 from PyPI
+(`AIG_MCP_SCAN_VERSION`) in its own `uv tool` environment for the plugin-only
+`aig-mcp` scanner. Static audits read untrusted plugin code, so
+`patches/aig-mcp-static-tools.patch` never registers the shell tool, allows
+only `read_file`, `read_file_chunk`, `search_files`, `think` and `finish`
+(matched case-insensitively, as upstream resolves names), refuses model-chosen
+MCP destinations, and adds the bounded chunk and search tools so files past
+upstream's history truncation stay model-visible. It also makes an unusable final
+report (no format attempt matched, or unparseable finding blocks) an execution
+error instead of a clean SARIF report. `tests/test_aig_mcp_static_tools.py`
+and `tests/test_aig_mcp_entry_network.py` run in the build. The second drives
+the real CLI with a loopback model stub that injects remote MCP calls and fails
+if a loopback canary sees any connection. The scanner uses Chat Completions
+without a reasoning-effort or service-tier control and receives the model and
+endpoint as explicit `-m`/`-u` flags. Only the top-level package is pinned; its
+dependencies resolve at build time.
+
 The small patches under `docker/clawscan-runtime/patches/` are owned integration
 fixes, not a new ClawScan model-provider framework:
 
@@ -350,8 +367,8 @@ and arm64). Build logs must show exact-pin patch application and all installed
 SkillSpector/AIG SDK wire-contract tests passing. Export the resulting image or
 OCI layout successfully and retain its immutable digest; a cache-only build or
 host-side Python tests are not final-image export proof. From the exported image,
-smoke `skillspector --help`, `aig-skill-scan --help`, `codex --version`, and
-`clawscan-decisions-judge --help`.
+smoke `skillspector --help`, `aig-skill-scan --help`, `aig-mcp-scan --help`,
+`codex --version`, and `clawscan-decisions-judge --help`.
 No credentials or live paid calls are needed for these CI checks.
 
 A consumer deliberately running `--sandbox off` may instead install these same

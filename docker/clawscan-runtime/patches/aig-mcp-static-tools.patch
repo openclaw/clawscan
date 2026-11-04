@@ -1,0 +1,464 @@
+diff --git a/mcp_scan/agent/agent.py b/mcp_scan/agent/agent.py
+index 18aa6c5..abf2ca2 100644
+--- a/mcp_scan/agent/agent.py
++++ b/mcp_scan/agent/agent.py
+@@ -17,10 +17,11 @@
+ # documentation or user interface, as detailed in the NOTICE file.
+ 
+ import os
++import re
+ import time
+ from typing import Any
+ 
+-from mcp_scan.agent.base_agent import BaseAgent
++from mcp_scan.agent.base_agent import AuditOutputError, BaseAgent
+ from mcp_scan.tools.dispatcher import ToolDispatcher
+ from mcp_scan.utils import strip_surrogates
+ from mcp_scan.utils.aig_logger import mcpLogger
+@@ -165,6 +166,24 @@ def is_vuln_review_output(content: str) -> bool:
+     return "<vuln>" in content or "<empty>" in content
+ 
+ 
++def _require_parsed_audit(audit_result: str, vuln_results: list) -> None:
++    """ClawScan: accept only an explicit empty result or fully parsed findings.
++
++    A genuine clean audit returns <empty> and no finding blocks. Any finding
++    block that cannot be parsed, or output with neither form, would otherwise
++    be scored as clean, so the scan fails instead.
++    """
++    blocks = len(re.findall(r"<vuln>", audit_result))
++    if blocks:
++        if len(vuln_results) < blocks:
++            raise AuditOutputError(
++                f"{blocks - len(vuln_results)} of {blocks} finding blocks could not be parsed"
++            )
++        return
++    if "<empty>" not in audit_result:
++        raise AuditOutputError("the report has neither findings nor an explicit <empty> result")
++
++
+ class ScanStage:
+     """定义扫描的一个阶段"""
+ 
+@@ -450,6 +469,7 @@ markdown格式返回
+         # Extract vuln results from the <vuln> XML output
+         extractor = VulnerabilityExtractor()
+         vuln_results = extractor.extract_vulnerabilities(audit_result)
++        _require_parsed_audit(audit_result or "", vuln_results)
+ 
+         # Fallback: if extraction fails, use extract_result as a fallback
+         if not vuln_results:
+diff --git a/mcp_scan/agent/base_agent.py b/mcp_scan/agent/base_agent.py
+index aec07f9..d668b87 100644
+--- a/mcp_scan/agent/base_agent.py
++++ b/mcp_scan/agent/base_agent.py
+@@ -34,6 +34,13 @@ _MAX_HISTORY_TOOL_RESULT_CHARS = 40000
+ _TOOL_RESULT_PREVIEW_CHARS = 20000
+ 
+ 
++class AuditOutputError(RuntimeError):
++    """ClawScan: the audit produced no usable result; never report it as clean."""
++
++    def __init__(self, reason: str):
++        super().__init__(f"ClawScan audit output invalid: {reason}")
++
++
+ class BaseAgent:
+     def __init__(
+         self,
+@@ -414,6 +421,13 @@ class BaseAgent:
+                     break
+             else:
+                 break
++        else:
++            # ClawScan: a report that never matched the required format (a
++            # refusal, error text or prose) is not an audit result. Fail the
++            # scan instead of letting it become a clean SARIF report.
++            raise AuditOutputError(
++                "final report did not match the required output format after 3 attempts"
++            )
+         return final_output
+ 
+     def _build_task_message(self) -> str:
+diff --git a/mcp_scan/tools/__init__.py b/mcp_scan/tools/__init__.py
+index deecaea..38f545c 100644
+--- a/mcp_scan/tools/__init__.py
++++ b/mcp_scan/tools/__init__.py
+@@ -17,8 +17,8 @@
+ # documentation or user interface, as detailed in the NOTICE file.
+ 
+ # 自动导入所有工具模块，触发 @register_tool 装饰器的执行
+-from mcp_scan.tools.execute import execute_actions
+-from mcp_scan.tools.file import read_file
++# ClawScan: the shell tool is never imported, so it is never registered.
++from mcp_scan.tools.file import inspect_file, read_file
+ from mcp_scan.tools.finish import finish_actions
+ from mcp_scan.tools.mcp_tool import call_mcp_tool, list_mcp_prompts, list_mcp_resources, list_mcp_tools
+ from mcp_scan.tools.thinking import thinking_actions
+@@ -27,7 +27,7 @@ __all__ = [
+     "thinking_actions",
+     "finish_actions",
+     "read_file",
+-    "execute_actions",
++    "inspect_file",
+     "call_mcp_tool",
+     "list_mcp_tools",
+     "list_mcp_prompts",
+diff --git a/mcp_scan/tools/dispatcher.py b/mcp_scan/tools/dispatcher.py
+index 14e958a..9cb5faa 100644
+--- a/mcp_scan/tools/dispatcher.py
++++ b/mcp_scan/tools/dispatcher.py
+@@ -28,6 +28,22 @@ from mcp_scan.utils.prompt_manager import prompt_manager
+ if TYPE_CHECKING:  # pragma: no cover
+     from mcp_scan.utils.tool_context import ToolContext
+ 
++# ClawScan: a static audit reads untrusted code. Only these confined read-only
++# tools are offered or callable, matched on canonical (trimmed, lowercase) names
++# because tool lookup is case-insensitive.
++_STATIC_ALLOWED_TOOLS = frozenset({
++    "finish",
++    "think",
++    "read_file",
++    "read_file_chunk",
++    "search_files",
++})
++
++
++def _canonical_tool_name(tool_name: Any) -> str:
++    return str(tool_name or "").strip().lower()
++
++
+ # 动态扫描模式下的安全工具白名单：仅允许只读/元信息工具，禁止 execute_shell / read_file
+ # 等本地操作工具，防止恶意 MCP 工具描述中的 prompt injection 诱导 agent 执行任意命令。
+ _DYNAMIC_SAFE_TOOLS = frozenset({
+@@ -116,8 +132,8 @@ class ToolDispatcher:
+                 logger.error(f"Failed to fetch MCP tools description: {e}")
+                 return prompt
+         else:
+-            # 静态扫描：全部工具可用
+-            prompt = get_tools_prompt([])
++            # ClawScan: static scans offer only the confined read-only tools.
++            prompt = get_tools_prompt(sorted(_STATIC_ALLOWED_TOOLS))
+ 
+         return prompt
+ 
+@@ -128,6 +144,14 @@ class ToolDispatcher:
+         # 动态扫描模式下的工具白名单拦截：
+         # 防止恶意 MCP 工具描述中的 prompt injection 诱导 agent 调用
+         # execute_shell / read_file 等危险本地工具。
++        canonical = _canonical_tool_name(tool_name)
++        if not self.mcp_server_url and canonical not in _STATIC_ALLOWED_TOOLS:
++            logger.warning(f"Blocked tool '{tool_name}' in static scan mode")
++            return (
++                f"Error: Tool '{tool_name}' is not available in static scan mode. "
++                "Use read_file, read_file_chunk or search_files to inspect the audited directory."
++            )
++        tool_name = canonical
+         if self.mcp_server_url and tool_name not in _DYNAMIC_SAFE_TOOLS:
+             logger.warning(
+                 f"Blocked tool '{tool_name}' in dynamic scan mode — not in safe whitelist"
+diff --git a/mcp_scan/tools/execute/execute_actions.py b/mcp_scan/tools/execute/execute_actions.py
+index da78bec..e7f37df 100644
+--- a/mcp_scan/tools/execute/execute_actions.py
++++ b/mcp_scan/tools/execute/execute_actions.py
+@@ -16,59 +16,19 @@
+ # Tencent Zhuque Lab (https://github.com/Tencent/AI-Infra-Guard) in its
+ # documentation or user interface, as detailed in the NOTICE file.
+ 
+-import subprocess
+ from typing import Any
+ 
+-from mcp_scan.tools.registry import register_tool
+-from mcp_scan.utils.loging import logger
+ 
+-
+-@register_tool
+ def execute_shell(command: str, timeout: int = 30, cwd: str | None = None) -> dict[str, Any]:
+-    """执行 Shell 命令
+-
+-    Args:
+-        command: 要执行的 Shell 命令
+-        timeout: 超时时间（秒），默认 30 秒
+-        cwd: 执行命令的工作目录（可选）
++    """ClawScan: shell execution is removed from this build.
+ 
+-    Returns:
+-        包含执行结果的字典
++    Static audits read untrusted code, so this function never runs a command and
++    is not registered as an agent tool.
+     """
+-    try:
+-        # 确保 timeout 是数字，防止 float + str 错误 (subprocess 内部会进行 time.time() + timeout)
+-        try:
+-            timeout = float(timeout) if timeout else 60 * 60 * 6
+-        except Exception:
+-            timeout = 60 * 60 * 6
+-
+-        result = subprocess.run(
+-            str(command), shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd
+-        )
+-
+-        output = {
+-            "success": result.returncode == 0,
+-            "stdout": result.stdout,
+-            "stderr": result.stderr,
+-            "return_code": result.returncode,
+-        }
+-        return output
+-
+-    except subprocess.TimeoutExpired:
+-        logger.error(f"Shell command timeout after {timeout}s")
+-        return {
+-            "success": False,
+-            "message": f"Execution timeout after {timeout} seconds",
+-            "stdout": "",
+-            "stderr": "Timeout",
+-            "return_code": -1,
+-        }
+-    except Exception as e:
+-        logger.error(f"Error executing shell command: {e}")
+-        return {
+-            "success": False,
+-            "message": f"Error executing shell command: {str(e)}",
+-            "stdout": "",
+-            "stderr": str(e),
+-            "return_code": -1,
+-        }
++    return {
++        "success": False,
++        "message": "Shell execution is not available in this build.",
++        "stdout": "",
++        "stderr": "",
++        "return_code": -1,
++    }
+diff --git a/mcp_scan/tools/file/inspect_file.py b/mcp_scan/tools/file/inspect_file.py
+new file mode 100644
+index 0000000..c6b1884
+--- /dev/null
++++ b/mcp_scan/tools/file/inspect_file.py
+@@ -0,0 +1,107 @@
++# ClawScan addition: bounded, read-only inspection tools confined to the
++# audited directory. They let the agent reach every part of a large or
++# compiled file without a shell. Outputs stay below the agent history's
++# truncation limit, so what a tool returns is what the model sees.
++
++import os
++import re
++from typing import Any
++
++from mcp_scan.tools.file.read_file import READ_FILE_MAX_BYTES, READ_FILE_MAX_CHARS, _is_path_allowed
++from mcp_scan.tools.registry import register_tool
++from mcp_scan.utils.tool_context import ToolContext
++
++SEARCH_MAX_RESULTS = 50
++SEARCH_CONTEXT_CHARS = 160
++SEARCH_MAX_OUTPUT_CHARS = 24000
++SEARCH_MAX_FILE_BYTES = READ_FILE_MAX_BYTES
++
++
++def _int_arg(value: Any, default: int) -> int:
++    try:
++        return int(str(value).strip())
++    except (TypeError, ValueError):
++        return default
++
++
++def _read_text(path: str) -> str:
++    with open(path, encoding="utf-8", errors="replace") as f:
++        return f.read()
++
++
++@register_tool
++def read_file_chunk(
++    file_path: str, offset: int = 0, length: int = READ_FILE_MAX_CHARS, context: ToolContext = None
++) -> dict[str, Any]:
++    """Read characters [offset, offset+length) of a file in the audited directory."""
++    if not _is_path_allowed(file_path, context):
++        return {"success": False, "message": f"Path is not allowed: {file_path}, you can only access the given directory"}
++    if not os.path.isfile(file_path):
++        return {"success": False, "message": f"File not found: {file_path}"}
++    if os.path.getsize(file_path) > READ_FILE_MAX_BYTES:
++        return {"success": False, "message": f"File is larger than {READ_FILE_MAX_BYTES >> 20} MiB; use search_files on it instead."}
++    try:
++        content = _read_text(file_path)
++    except Exception as e:
++        return {"success": False, "message": f"Error reading file: {e}"}
++    offset = max(_int_arg(offset, 0), 0)
++    length = min(max(_int_arg(length, READ_FILE_MAX_CHARS), 1), READ_FILE_MAX_CHARS)
++    end = min(offset + length, len(content))
++    next_offset = str(end) if end < len(content) else ""
++    return {
++        "message": f"Characters {offset}-{end} of {len(content)}.",
++        "next_offset": next_offset,
++        "data": content[offset:end],
++    }
++
++
++@register_tool
++def search_files(
++    pattern: str, path: str = "", ignore_case: str = "false", context: ToolContext = None
++) -> dict[str, Any]:
++    """Find a literal string in files under the audited directory."""
++    root = path or (context.folder if context else "")
++    if not root or not _is_path_allowed(root, context):
++        return {"success": False, "message": f"Path is not allowed: {root}, you can only access the given directory"}
++    needle = str(pattern or "")
++    if not needle:
++        return {"success": False, "message": "pattern must be a non-empty literal string"}
++    fold = str(ignore_case).strip().lower() in ("1", "true", "yes")
++    # Matching runs on the original text so reported offsets index the file.
++    matcher = re.compile(re.escape(needle), re.IGNORECASE if fold else 0)
++    files = [root] if os.path.isfile(root) else []
++    if not files:
++        for current, dirs, names in os.walk(root):
++            dirs.sort()
++            for name in sorted(names):
++                files.append(os.path.join(current, name))
++    lines = []
++    total = 0
++    omitted = 0
++    for file_path in files:
++        if not _is_path_allowed(file_path, context) or not os.path.isfile(file_path):
++            continue
++        try:
++            if os.path.getsize(file_path) > SEARCH_MAX_FILE_BYTES:
++                continue
++            content = _read_text(file_path)
++        except Exception:
++            continue
++        for match in matcher.finditer(content):
++            index = match.start()
++            if total >= SEARCH_MAX_RESULTS:
++                omitted += 1
++                continue
++            line = content.count("\n", 0, index) + 1
++            lo = max(index - SEARCH_CONTEXT_CHARS, 0)
++            hi = min(match.end() + SEARCH_CONTEXT_CHARS, len(content))
++            snippet = content[lo:hi].replace("\n", "\\n")
++            lines.append(f"{file_path}:{line} offset={index}: {snippet}")
++            total += 1
++    output = "\n".join(lines)
++    if len(output) > SEARCH_MAX_OUTPUT_CHARS:
++        output = output[:SEARCH_MAX_OUTPUT_CHARS] + "\n... (output limit reached; narrow the search)"
++    message = f"{total} match(es)"
++    if omitted:
++        message += f"; {omitted} more not shown, narrow the search"
++    return {"message": message + ". Read around a match with read_file_chunk(file_path, offset).", "data": output}
+diff --git a/mcp_scan/tools/file/inspect_file_schema.xml b/mcp_scan/tools/file/inspect_file_schema.xml
+new file mode 100644
+index 0000000..c13dbbf
+--- /dev/null
++++ b/mcp_scan/tools/file/inspect_file_schema.xml
+@@ -0,0 +1,47 @@
++<tools>
++    <tool name="read_file_chunk">
++        <description>Read part of a file in the audited directory by character offset. Use it for large or compiled files: read_file returns at most 30000 characters, and anything after that is only visible through this tool.</description>
++        <parameters>
++            <parameter name="file_path" type="string" required="true">
++                <description>Path of the file, as used with read_file.</description>
++            </parameter>
++            <parameter name="offset" type="integer" required="false">
++                <description>Character offset to start at (default 0).</description>
++            </parameter>
++            <parameter name="length" type="integer" required="false">
++                <description>Number of characters to return (default and maximum 30000).</description>
++            </parameter>
++        </parameters>
++        <returns type="Dict[str, Any]">
++            <description>data: the characters read; next_offset: where to continue, empty at end of file.</description>
++        </returns>
++        <examples>
++            <function=read_file_chunk>
++            <parameter=file_path>plugin/dist/index.js</parameter>
++            <parameter=offset>30000</parameter>
++            </function>
++        </examples>
++    </tool>
++    <tool name="search_files">
++        <description>Find a literal string (not a regular expression) in files under the audited directory, or in one file. Returns file, line, character offset and surrounding text for up to 50 matches.</description>
++        <parameters>
++            <parameter name="pattern" type="string" required="true">
++                <description>Literal text to find, for example fetch( or process.env.</description>
++            </parameter>
++            <parameter name="path" type="string" required="false">
++                <description>File or directory to search (default: the audited directory).</description>
++            </parameter>
++            <parameter name="ignore_case" type="boolean" required="false">
++                <description>Set true for a case-insensitive search.</description>
++            </parameter>
++        </parameters>
++        <returns type="Dict[str, Any]">
++            <description>data: one line per match with path:line offset=N and context.</description>
++        </returns>
++        <examples>
++            <function=search_files>
++            <parameter=pattern>child_process</parameter>
++            </function>
++        </examples>
++    </tool>
++</tools>
+diff --git a/mcp_scan/tools/file/read_file.py b/mcp_scan/tools/file/read_file.py
+index cc62764..29b39a7 100644
+--- a/mcp_scan/tools/file/read_file.py
++++ b/mcp_scan/tools/file/read_file.py
+@@ -24,6 +24,10 @@ from mcp_scan.utils.loging import logger
+ from mcp_scan.utils.tool_context import ToolContext
+ 
+ 
++READ_FILE_MAX_CHARS = 30000
++READ_FILE_MAX_BYTES = 64 * 1024 * 1024
++
++
+ def _is_path_allowed(file_path: str, context: ToolContext | None) -> bool:
+     if not context or not context.folder:
+         return False
+@@ -65,11 +69,31 @@ def read_file(file_path: str, context: ToolContext = None) -> dict[str, Any]:
+                 "message": f"Path is not a file: {file_path}",
+             }
+ 
+-        with open(file_path, encoding="utf-8") as f:
++        # ClawScan: bounded size, and invalid UTF-8 is replaced rather than
++        # treated as binary, as Node does when it loads the file.
++        if os.path.getsize(file_path) > READ_FILE_MAX_BYTES:
++            return {
++                "success": False,
++                "message": f"File is larger than {READ_FILE_MAX_BYTES >> 20} MiB; use search_files on it instead.",
++            }
++        with open(file_path, encoding="utf-8", errors="replace") as f:
+             content = f.read()
+ 
+         logger.info(f"Read file: {file_path} ({len(content)} chars)")
+ 
++        # ClawScan: the agent history keeps only a prefix of results over 40000
++        # characters, so a large file is returned in bounded chunks and the
++        # remainder must be read explicitly.
++        if len(content) > READ_FILE_MAX_CHARS:
++            return {
++                "message": (
++                    f"File has {len(content)} characters; this result holds characters "
++                    f"0-{READ_FILE_MAX_CHARS}. The rest is NOT shown. Read it with "
++                    f"read_file_chunk(file_path, offset={READ_FILE_MAX_CHARS}) and continue "
++                    "until next_offset is empty, or use search_files to locate code."
++                ),
++                "data": content[:READ_FILE_MAX_CHARS],
++            }
+         return {"data": content}
+ 
+     except UnicodeDecodeError:
+diff --git a/mcp_scan/tools/mcp_tool/mcp_tool.py b/mcp_scan/tools/mcp_tool/mcp_tool.py
+index 14fba93..65e7dae 100644
+--- a/mcp_scan/tools/mcp_tool/mcp_tool.py
++++ b/mcp_scan/tools/mcp_tool/mcp_tool.py
+@@ -27,6 +27,12 @@ async def _get_mcp_manager(
+     url: str | None, transport: str, context: ToolContext | None
+ ) -> MCPTools:
+     """Helper to get MCPTools manager, either from context or creating a new one."""
++    # ClawScan: the model never chooses a network destination. Only the server
++    # the operator configured for a dynamic scan is reachable, and a static
++    # audit has none, so this refuses before any transport is created.
++    configured = context.tool_dispatcher.mcp_server_url if context and context.tool_dispatcher else None
++    if url and url != configured:
++        raise ValueError("Remote MCP destinations chosen by the model are not allowed")
+     if url:
+         return MCPTools(url=url, transport=transport)  # type: ignore
+ 

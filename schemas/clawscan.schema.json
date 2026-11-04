@@ -34,6 +34,18 @@
             "$ref": "#/$defs/scanner"
           }
         },
+        "pluginScanners": {
+          "type": "array",
+          "description": "Built-in plugin-capable scanners that replace scanners for OpenClaw plugin targets. Explicit --scanner flags override both lists.",
+          "items": {
+            "enum": [
+              "aig-mcp",
+              "skillspector",
+              "socket"
+            ]
+          },
+          "uniqueItems": true
+        },
         "scannerResults": {
           "type": "object",
           "additionalProperties": {
@@ -102,6 +114,7 @@
       "enum": [
         "agentverus",
         "aig",
+        "aig-mcp",
         "cisco",
         "relyable",
         "skillspector",

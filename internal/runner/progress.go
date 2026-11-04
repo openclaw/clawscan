@@ -80,7 +80,7 @@ func (progress *runProgress) endPhase(failed bool) {
 
 func scannerProgressPhase(scanner string) string {
 	switch scanner {
-	case "agentverus", "aig", "cisco", "relyable", "skillspector", "snyk", "socket":
+	case "agentverus", "aig", "aig-mcp", "cisco", "relyable", "skillspector", "snyk", "socket":
 		return "scanner:" + scanner
 	default:
 		return "scanner:custom"

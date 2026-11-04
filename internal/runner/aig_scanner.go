@@ -118,7 +118,12 @@ func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (Sca
 }
 
 func aigRequirements(env map[string]string) []EnvRequirement {
-	reason := "scanner aig (set LLM_API_KEY or OPENAI_API_KEY)"
+	return aigAPIKeyRequirements(env, "scanner aig (set LLM_API_KEY or OPENAI_API_KEY)")
+}
+
+// aigAPIKeyRequirements requires whichever A.I.G credential is present, so a
+// run never demands both LLM_API_KEY and OPENAI_API_KEY.
+func aigAPIKeyRequirements(env map[string]string, reason string) []EnvRequirement {
 	if strings.TrimSpace(env["LLM_API_KEY"]) != "" {
 		return []EnvRequirement{{EnvVar: "LLM_API_KEY", Reason: reason}}
 	}
