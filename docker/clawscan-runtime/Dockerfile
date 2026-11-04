@@ -68,7 +68,8 @@ RUN ln -sf /root/.local/bin/aig-skill-scan /usr/local/bin/aig-skill-scan
 
 # The plugin-only aig-mcp scanner uses the validated PyPI release in its own
 # tool environment. Its static audit reads untrusted plugin code, so the patch
-# removes the agent's shell and file-write tools; the build fails closed if the
+# never registers the shell, allow-lists confined read-only tools, and adds
+# bounded chunk/search reads for large files; the build fails closed if the
 # patch stops applying or the tool set changes. The CLI writes logs/ into its
 # working directory, so the checks run from a scratch directory.
 RUN uv tool install "aig-mcp-scan==$AIG_MCP_SCAN_VERSION" --with pytest \
