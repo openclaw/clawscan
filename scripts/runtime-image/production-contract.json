@@ -1,12 +1,12 @@
 {
   "source": {
-    "commit": "e9bfb7e7409cb2b7a422a8064780289c7d94c07a",
-    "parent": "7dca382c8031318c5baf933af513966b4d0c4d47",
-    "tree": "2874353579ca327fc5bc47ffaed556644abc6ff2",
-    "runtime_tree": "bd1667eb84dc0bfd454717500965724f96a51ba6",
-    "diff_sha256": "6c89eadd9e4e124d96f4477dc09a00f9b8fa0f01ef54b482ca3630a5a52a54c8",
+    "commit": "ca8455038be7451f7a8ae5221008cbffa5de5113",
+    "parent": "fa01a95bcd18eb86fb687edfdccb18828862b8c6",
+    "tree": "472a5b729ad45b84ad308505061d96aafd358eb3",
+    "runtime_tree": "47087a26f6cbbebaf48bad0eab3a1019a9e5058f",
+    "diff_sha256": "0355a2260b8aa26a963348a8263b5c4276f533b337c48e2794772a0dba8ba80d",
     "files": {
-      "docker/clawscan-runtime/Dockerfile": "6f5cfcd4a5f1fc5dd52a886286e15b39d4bf70ed9df66a30c207886b32747640",
+      "docker/clawscan-runtime/Dockerfile": "8017652d8240b837b490cddf0015262c95aa39a54396396f91c2282d251c0b5c",
       "docker/clawscan-runtime/patches/skillspector-responses.patch": "4603a085aee7b1340f4c5906e9420be3282fde1142fe3a3a58e182a203e5bb79",
       "docker/clawscan-runtime/tests/test_skillspector_input_budget.py": "08c0fadef454cd80d0113306306c4ee73d849b48167c6c3be6117778b246e7c1",
       "docker/clawscan-runtime/tests/test_skillspector_semantic_packets.py": "fc12d1b5b3b51431541d82de09e2005d766f59e26ced60bbdbd513867ac3e4b9",
