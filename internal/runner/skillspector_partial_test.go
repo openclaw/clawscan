@@ -320,3 +320,81 @@ func partialJudgeReceipt(t *testing.T, workspace string) map[string]any {
 	}
 	return map[string]any{"status": "completed", "challenge": challenge.Challenge, "required_file_sha256": sha256Hex(string(artifact)), "files_inspected": []string{challenge.RequiredFile}}
 }
+
+// Production shape from @openclaw/discord 2026.10.10: 1,638 ledger exceptions
+// rendered a 1.32M-character judge prompt that Codex rejects at 1,048,576.
+func TestClawHubPartialJudgePromptBoundsLargeLedger(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/skillspector-usable-partial.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptSource, err := os.ReadFile("../profiles/clawhub/prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(fixture, &report); err != nil {
+		t.Fatal(err)
+	}
+	analyzers := make([]any, 12)
+	for index := range analyzers {
+		analyzers[index] = fmt.Sprintf("static_patterns_analyzer_%02d", index)
+	}
+	reasons := []struct {
+		code  string
+		count int
+	}{{"excluded_executable_content", 1576}, {"opaque_content", 43}, {"static_parse_limit", 10}, {"obfuscated_instruction_text", 9}}
+	var exceptions []any
+	for _, reason := range reasons {
+		for index := 0; index < reason.count; index++ {
+			exceptions = append(exceptions, map[string]any{
+				"outcome": "partial", "phase": "static_analysis", "reason_code": reason.code,
+				"message":    "Analyzer excluded this file from complete inspection under the documented scan policy.",
+				"path":       fmt.Sprintf("dist/extensions/discord/%s-%04d.js", reason.code, index),
+				"start_line": nil, "end_line": nil, "fatal": false, "analyzers": analyzers,
+			})
+		}
+	}
+	completeness := report["analysis_completeness"].(map[string]any)
+	completeness["ledger_exceptions"] = exceptions
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", "benign"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompt, fullReport []byte
+	command := &recordingCommandRunner{}
+	command.runHook = func(_ string, _ []string, workspace string) error {
+		if prompt, err = os.ReadFile(filepath.Join(workspace, "prompt.md")); err != nil {
+			return err
+		}
+		fullReport, err = os.ReadFile(filepath.Join(workspace, "skillspector-report-0.json"))
+		return err
+	}
+	if _, err := Run(Options{
+		Target: target, Profile: "clawhub", Scanners: []string{"skillspector"},
+		OutputPath:         filepath.Join(t.TempDir(), "run.json"),
+		ScannerResultPaths: map[string]string{"skillspector": path},
+		Judge:              &JudgeOptions{Command: "judge --prompt {{ prompt:clawhub/prompt.md }} --output {{ output }}", Files: map[string][]byte{"clawhub/prompt.md": promptSource}},
+	}, RunContext{Env: map[string]string{}, CommandRunner: command}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fullReport, raw) {
+		t.Fatal("judge workspace lost the complete raw report")
+	}
+	if len(prompt) > 64_000 {
+		t.Fatalf("judge prompt is %d bytes; large ledgers must stay well under the Codex 1,048,576-character input limit", len(prompt))
+	}
+	for _, evidence := range []string{`"total": 1638`, `"omitted": 1613`, "skillspector-report-0.json", `"excluded_executable_content": 1576`, `"obfuscated_instruction_text": 9`, "static_parse_limit-0000.js", "obfuscated_instruction_text-0000.js"} {
+		if !strings.Contains(string(prompt), evidence) {
+			t.Fatalf("bounded judge prompt lost %s", evidence)
+		}
+	}
+}

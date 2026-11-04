@@ -13,6 +13,10 @@ const (
 	maxClawHubSkillSpectorIssues         = 25
 	maxClawHubSkillSpectorTextChars      = 2_000
 	maxClawHubSkillSpectorShortTextChars = 512
+	// Large partial plugin scans can record thousands of ledger exceptions.
+	// The judge workspace keeps the complete raw report, so the prompt carries
+	// only a bounded sample per list plus totals and reason counts.
+	maxClawHubCompletenessRows = 25
 )
 
 type clawHubContext struct {
@@ -139,7 +143,7 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 	var analysisCompleteness map[string]any
 	if reportError != "" {
 		status = "error"
-		analysisCompleteness = asStringMap(record["analysis_completeness"])
+		analysisCompleteness = boundClawHubAnalysisCompleteness(asStringMap(record["analysis_completeness"]))
 	}
 	return clawHubNormalizedSkillSpectorAnalysis{
 		Status:               status,
@@ -154,6 +158,76 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 		CheckedAt:            checkedAt,
 		AnalysisCompleteness: analysisCompleteness,
 	}, nil
+}
+
+// boundClawHubAnalysisCompleteness keeps scalar coverage fields verbatim and
+// samples long lists. Ledger exceptions are sampled round-robin by reason code
+// so rare reasons stay visible next to bulk exclusions; every list reports its
+// total, and the ledger reports its full reason distribution.
+func boundClawHubAnalysisCompleteness(completeness map[string]any) map[string]any {
+	if completeness == nil {
+		return nil
+	}
+	bounded := make(map[string]any, len(completeness))
+	var omitted map[string]any
+	for key, value := range completeness {
+		rows, ok := value.([]any)
+		if !ok || len(rows) <= maxClawHubCompletenessRows {
+			bounded[key] = value
+			continue
+		}
+		if key == "ledger_exceptions" {
+			bounded[key], bounded["ledger_exception_reason_counts"] = sampleClawHubLedgerExceptions(rows)
+		} else {
+			bounded[key] = rows[:maxClawHubCompletenessRows]
+		}
+		if omitted == nil {
+			omitted = map[string]any{}
+		}
+		omitted[key] = map[string]int{"total": len(rows), "omitted": len(rows) - maxClawHubCompletenessRows}
+	}
+	if omitted != nil {
+		bounded["prompt_truncation"] = map[string]any{
+			"lists":       omitted,
+			"full_report": "skillspector-report-0.json",
+		}
+	}
+	return bounded
+}
+
+func sampleClawHubLedgerExceptions(rows []any) ([]any, map[string]int) {
+	var reasons []string
+	byReason := map[string][]int{}
+	for index, value := range rows {
+		reason, _ := asStringMap(value)["reason_code"].(string)
+		if reason == "" {
+			reason = "unknown"
+		}
+		if byReason[reason] == nil {
+			reasons = append(reasons, reason)
+		}
+		byReason[reason] = append(byReason[reason], index)
+	}
+	selected := make([]bool, len(rows))
+	for taken, depth := 0, 0; taken < maxClawHubCompletenessRows; depth++ {
+		for _, reason := range reasons {
+			if depth < len(byReason[reason]) && taken < maxClawHubCompletenessRows {
+				selected[byReason[reason][depth]] = true
+				taken++
+			}
+		}
+	}
+	sample := make([]any, 0, maxClawHubCompletenessRows)
+	for index, value := range rows {
+		if selected[index] {
+			sample = append(sample, value)
+		}
+	}
+	counts := make(map[string]int, len(reasons))
+	for _, reason := range reasons {
+		counts[reason] = len(byReason[reason])
+	}
+	return sample, counts
 }
 
 func normalizeClawHubSkillSpectorIssue(value any, index int) *clawHubSkillSpectorIssue {

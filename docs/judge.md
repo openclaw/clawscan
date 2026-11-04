@@ -65,6 +65,11 @@ reports to reach the independent judge. These scanner results retain
 saved scanner output retain the original findings, completeness accounting,
 limitations, and provenance. The judge workspace contains the complete raw
 report at `skillspector-report-0.json` and the exact copied artifact in `artifact/`.
+The rendered prompt keeps scalar completeness fields but samples any
+completeness list longer than 25 rows. Ledger exceptions are sampled across
+reason codes with full reason counts, and `prompt_truncation` records each
+list's total and omitted rows, so large plugin scans stay within the judge's
+input limit.
 
 Eligibility requires an unambiguous structured report with explicitly successful
 execution at both report and completeness levels, partial accounting, component

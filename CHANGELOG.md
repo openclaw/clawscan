@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Bound partial SkillSpector completeness lists in the ClawHub judge prompt so large plugin scans stay under the Codex input limit; the judge workspace keeps the complete raw report.
 - Run full CodeQL scans daily instead of on every main push, preserve PR and manual analysis, and start scans when draft PRs become ready for review.
 
 ## 0.3.1 - 2026-11-02
