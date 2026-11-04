@@ -3953,8 +3953,10 @@ func TestRunRejectsInvalidContextJSON(t *testing.T) {
 }
 
 func TestRenderClawHubPromptUsesProductionScannerContextShape(t *testing.T) {
+	// A fixed CompletedAt keeps checkedAt deterministic; without it the
+	// renderer falls back to the current millisecond and renders can differ.
 	scanners := map[string]ScannerResult{
-		"skillspector": {Raw: json.RawMessage(`{"status":"suspicious","score":55}`)},
+		"skillspector": {CompletedAt: "2026-11-03T00:00:00Z", Raw: json.RawMessage(`{"status":"suspicious","score":55}`)},
 		"aig":          {Raw: json.RawMessage(`{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04","level":"error"}]}]}`)},
 	}
 	prompt, err := RenderClawHubPrompt("SYSTEM\n\nAdditional ClawHub policy for this Codex run:\nstale block", Artifact{Profile: "clawhub", Scanners: scanners})
