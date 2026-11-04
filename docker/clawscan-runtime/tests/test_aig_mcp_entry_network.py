@@ -199,3 +199,73 @@ def test_model_cannot_redirect_a_dynamic_mcp_session():
     finally:
         canary.close()
     assert canary.connections == 0
+
+
+FINISH = "<function=finish><parameter=content>done</parameter></function>"
+REFUSAL = "I cannot perform this security scan."
+VALID_FINDING = (
+    "<vuln><title>Credential exfiltration</title><desc>Reads stored credentials and posts them.</desc>"
+    "<risk_type>MCP01: Token Mismanagement</risk_type><level>High</level><file>index.js</file>"
+    "<line_start>1</line_start><line_end>3</line_end><suggestion>Remove it.</suggestion></vuln>"
+)
+MALFORMED_FINDING = "<vuln><title>Something bad</title><level>High</level></vuln>"
+
+
+def run_scripted_audit(staged, script):
+    canary = Canary()
+    model = ModelStub(script)
+    try:
+        result = run_entry(staged, model, canary.port)
+    finally:
+        model.close()
+        canary.close()
+    assert canary.connections == 0
+    sarif_path = staged / "out.sarif.json"
+    sarif = json.loads(sarif_path.read_text()) if sarif_path.exists() else None
+    return result, sarif, model
+
+
+@pytest.mark.parametrize(
+    "name, script",
+    [
+        # The agent finishes with a refusal and every format retry refuses too.
+        ("refusal", [f"{REFUSAL}\n{FINISH}", REFUSAL, REFUSAL, REFUSAL]),
+        # Prose that is neither findings nor an explicit empty result.
+        ("prose", [f"The plugin looks fine to me.\n{FINISH}", "Looks fine.", "Looks fine.", "Looks fine."]),
+        # A finding block the extractor cannot parse must not read as clean.
+        ("malformed finding", [f"{MALFORMED_FINDING}\n{FINISH}"]),
+        # One parsed and one unparseable finding: no silent partial report.
+        ("partly malformed", [f"{VALID_FINDING}\n{MALFORMED_FINDING}\n{FINISH}"]),
+    ],
+)
+def test_unusable_audit_output_fails_the_scan(staged, name, script):
+    result, sarif, model = run_scripted_audit(staged, script)
+    assert result.returncode != 0, f"{name}: upstream exited 0"
+    assert sarif is None, f"{name}: a SARIF report was written: {sarif}"
+    assert "ClawScan audit output invalid" in result.stderr
+    if name == "refusal":
+        # The agent request plus all three format attempts were made.
+        assert len(model.requests) == 4
+
+
+def test_explicit_empty_result_stays_a_clean_scan(staged):
+    result, sarif, _ = run_scripted_audit(staged, [f"<empty>\n{FINISH}"])
+    assert result.returncode == 0, result.stderr[-4000:]
+    run = sarif["runs"][0]
+    assert run["results"] == []
+    assert run["properties"]["scanNote"] == "complete"
+    assert run["properties"]["securityScore"] == 100
+
+
+def test_parsed_finding_reaches_the_sarif(staged):
+    result, sarif, _ = run_scripted_audit(staged, [f"{VALID_FINDING}\n{FINISH}"])
+    assert result.returncode == 0, result.stderr[-4000:]
+    results = sarif["runs"][0]["results"]
+    assert [(r["ruleId"], r["level"]) for r in results] == [("MCP01", "error")]
+
+
+def test_late_format_retry_success_is_accepted(staged):
+    """A report fixed on a later format attempt is a real result, not a failure."""
+    result, sarif, _ = run_scripted_audit(staged, [f"{REFUSAL}\n{FINISH}", REFUSAL, f"<empty>"])
+    assert result.returncode == 0, result.stderr[-4000:]
+    assert sarif["runs"][0]["results"] == []

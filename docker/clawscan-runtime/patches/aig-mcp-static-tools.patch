@@ -1,3 +1,85 @@
+diff --git a/mcp_scan/agent/agent.py b/mcp_scan/agent/agent.py
+index 18aa6c5..abf2ca2 100644
+--- a/mcp_scan/agent/agent.py
++++ b/mcp_scan/agent/agent.py
+@@ -17,10 +17,11 @@
+ # documentation or user interface, as detailed in the NOTICE file.
+ 
+ import os
++import re
+ import time
+ from typing import Any
+ 
+-from mcp_scan.agent.base_agent import BaseAgent
++from mcp_scan.agent.base_agent import AuditOutputError, BaseAgent
+ from mcp_scan.tools.dispatcher import ToolDispatcher
+ from mcp_scan.utils import strip_surrogates
+ from mcp_scan.utils.aig_logger import mcpLogger
+@@ -165,6 +166,24 @@ def is_vuln_review_output(content: str) -> bool:
+     return "<vuln>" in content or "<empty>" in content
+ 
+ 
++def _require_parsed_audit(audit_result: str, vuln_results: list) -> None:
++    """ClawScan: accept only an explicit empty result or fully parsed findings.
++
++    A genuine clean audit returns <empty> and no finding blocks. Any finding
++    block that cannot be parsed, or output with neither form, would otherwise
++    be scored as clean, so the scan fails instead.
++    """
++    blocks = len(re.findall(r"<vuln>", audit_result))
++    if blocks:
++        if len(vuln_results) < blocks:
++            raise AuditOutputError(
++                f"{blocks - len(vuln_results)} of {blocks} finding blocks could not be parsed"
++            )
++        return
++    if "<empty>" not in audit_result:
++        raise AuditOutputError("the report has neither findings nor an explicit <empty> result")
++
++
+ class ScanStage:
+     """定义扫描的一个阶段"""
+ 
+@@ -450,6 +469,7 @@ markdown格式返回
+         # Extract vuln results from the <vuln> XML output
+         extractor = VulnerabilityExtractor()
+         vuln_results = extractor.extract_vulnerabilities(audit_result)
++        _require_parsed_audit(audit_result or "", vuln_results)
+ 
+         # Fallback: if extraction fails, use extract_result as a fallback
+         if not vuln_results:
+diff --git a/mcp_scan/agent/base_agent.py b/mcp_scan/agent/base_agent.py
+index aec07f9..d668b87 100644
+--- a/mcp_scan/agent/base_agent.py
++++ b/mcp_scan/agent/base_agent.py
+@@ -34,6 +34,13 @@ _MAX_HISTORY_TOOL_RESULT_CHARS = 40000
+ _TOOL_RESULT_PREVIEW_CHARS = 20000
+ 
+ 
++class AuditOutputError(RuntimeError):
++    """ClawScan: the audit produced no usable result; never report it as clean."""
++
++    def __init__(self, reason: str):
++        super().__init__(f"ClawScan audit output invalid: {reason}")
++
++
+ class BaseAgent:
+     def __init__(
+         self,
+@@ -414,6 +421,13 @@ class BaseAgent:
+                     break
+             else:
+                 break
++        else:
++            # ClawScan: a report that never matched the required format (a
++            # refusal, error text or prose) is not an audit result. Fail the
++            # scan instead of letting it become a clean SARIF report.
++            raise AuditOutputError(
++                "final report did not match the required output format after 3 attempts"
++            )
+         return final_output
+ 
+     def _build_task_message(self) -> str:
 diff --git a/mcp_scan/tools/__init__.py b/mcp_scan/tools/__init__.py
 index deecaea..38f545c 100644
 --- a/mcp_scan/tools/__init__.py

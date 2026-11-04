@@ -69,8 +69,8 @@ RUN ln -sf /root/.local/bin/aig-skill-scan /usr/local/bin/aig-skill-scan
 # The plugin-only aig-mcp scanner uses the validated PyPI release in its own
 # tool environment. Its static audit reads untrusted plugin code, so the patch
 # never registers the shell, allow-lists confined read-only tools, refuses
-# model-chosen MCP destinations, and adds bounded chunk/search reads for large
-# files. The build fails closed if the patch stops applying, the tool set
+# model-chosen MCP destinations, adds bounded chunk/search reads for large
+# files, and fails the audit when its final report is unusable. The build fails closed if the patch stops applying, the tool set
 # changes, or a real CLI audit with injected remote MCP calls reaches a
 # loopback canary. The CLI writes logs/ into its
 # working directory, so the checks run from a scratch directory.
