@@ -7,6 +7,7 @@ tool environment's Python after applying aig-mcp-static-tools.patch.
 
 import asyncio
 import os
+import re
 
 import pytest
 
@@ -24,13 +25,25 @@ def dispatcher(server_url=None):
     return ToolDispatcher(mcp_server_url=server_url)
 
 
-def test_static_prompt_offers_only_read_tools():
+# Every tool aig-mcp-scan 0.2.0 offers in a static audit once the patch applies.
+# A version bump that adds a tool fails here until the new tool is reviewed.
+STATIC_TOOLS = {
+    "call_mcp_tool",
+    "finish",
+    "list_mcp_prompts",
+    "list_mcp_resources",
+    "list_mcp_tools",
+    "read_file",
+    "think",
+}
+
+
+def test_static_prompt_offers_exactly_the_reviewed_read_tools():
     from mcp_scan.tools.registry import get_tool_names
 
-    assert "execute_shell" in get_tool_names(), "upstream tool set changed; re-review the patch"
+    assert set(get_tool_names()) == STATIC_TOOLS | {"execute_shell"}, "upstream tool set changed; re-review the patch"
     prompt = asyncio.run(dispatcher().get_all_tools_prompt())
-    assert 'name="read_file"' in prompt
-    assert 'name="finish"' in prompt
+    assert set(re.findall(r'<tool name="([^"]+)"', prompt)) == STATIC_TOOLS
     assert "execute_shell" not in prompt
     assert "write_file" not in prompt
 
