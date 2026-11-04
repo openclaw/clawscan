@@ -134,12 +134,33 @@ judge workspace and sends one `POST /v1/decisions` request:
   under `scanners/` is ingested the same way, including a single plugin-wide
   A.I.G SARIF report. The policy treats severity as a hypothesis, never as
   evidence of malice.
+- Gap and provenance evidence: the remote model cannot open
+  `scanners/<id>.json`, so the judge projects it into the request. Every list
+  under `analysis_completeness` (`ledger_exceptions`, `scope_exclusions`,
+  `references`, `limitations`, incomplete `analyzer_statuses`, and so on),
+  top-level limitation/gap lists, components with limitations, incomplete
+  inspection, or executable code (`componentGaps`), and bounded `metadata`
+  provenance become `{total, countsBy, counts, records, omitted}` objects.
+  Records are a group-balanced sample of up to 24 path-aware entries (reason,
+  phase, message, lines); counts cover up to 32 groups plus
+  `otherGroups`/`otherEntries`. `bundled_reports` children keep their `rootPath`,
+  their own completeness gaps, component gaps, provenance, and findings, with
+  child paths prefixed by `rootPath`.
+- Plugin dependencies: for plugin targets, files under `node_modules` at any
+  depth are deliberately excluded from the artifact text, manifest, and budget,
+  matching the plugin scanner, and reported only as
+  `artifactCounts.excludedDependencies` (`files`, `bytes`, `reason`). That is
+  a scope decision, not missing coverage. The copied artifact is not modified,
+  and skill targets keep `node_modules` in scope.
 - `questions`: a `verdict` choice (`benign`, `suspicious`, `malicious`, each
   with a precise description), five `dimension.<name>` choices (`ok`, `note`,
   `concern`), eight `signal.<name>` predicates (exfiltration, tool poisoning,
   backdoor, remote code execution, persistence, credential access, obfuscation,
   destructive actions), and a `finding.<n>` predicate ("expected for the stated
-  purpose?") for up to 25 of the highest-severity findings.
+  purpose?") for up to 25 of the highest-severity findings. Question
+  instructions are static: a finding question names only the finding's stable
+  `index` in the evidence JSON, and no scanner or artifact text is ever
+  interpolated into `questions[].instructions`.
 
 The judge maps the answers onto `clawhub/output.schema.json` and validates its
 own output against that schema before writing it:
@@ -158,11 +179,22 @@ the overview step, not the judge.
 The judge owns its checks. Binary and non-UTF-8 files are listed in the manifest
 but not sent; text files are sent whole up to 120,000 characters each and
 600,000 in total, with larger files excerpted (head and tail) and the remainder
-listed as omitted. Findings are capped at 200 and trimmed further to keep the
-JSON part under 200 KiB. The assembled input must fit `--max-input-chars`
+listed as omitted. Findings are capped at 200 (`--max-findings`). The fully
+assembled evidence object, including the manifest and every count, must fit
+200 KiB, 10,000 JSON values, and depth 32 (the API allows 256 KiB). If it does
+not, the judge trims findings, then the manifest, then gap samples and bundled
+children, recording `findingCounts.omitted`, `artifactCounts.manifestOmitted`,
+and per-list `omitted`. It fails before sending if nothing is left to trim. The
+final size, value count, and depth are recorded in
+`decision.input.evidenceJson`. The assembled input must fit `--max-input-chars`
 (default 1,000,000, overridable with `DECISIONS_MAX_INPUT_CHARS`); otherwise the
 judge exits 2 with `decisions judge input too large: ...` before sending any
-request. Any refused question, HTTP error (with the API's message, type, and
+request. This is a character budget, not a token guarantee; a model context
+rejection still surfaces as a Decisions API error. Answers are validated
+strictly, independent of the output schema. There must be exactly one answer
+per question, with known names, no duplicates, and the asked type. Choices
+must be allowed values. Every probability and confidence must be a finite
+number in [0, 1]. Any refusal anywhere in the response is terminal. Any refused question, HTTP error (with the API's message, type, and
 code), network failure, or malformed answer exits 1 with the real error on
 stderr, so ClawScan records a failed judge and never retries it. HTTP 429 and 5xx
 responses are retried up to twice within the judge's timeout, honoring

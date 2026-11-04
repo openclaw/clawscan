@@ -398,3 +398,60 @@ func TestClawHubProfileOverviewFailureDoesNotChangeVerdict(t *testing.T) {
 		t.Fatalf("verdict = %v", verdict)
 	}
 }
+
+// Bundled plugin dependencies are out of scope for the plugin review: the
+// Decisions judge must not send node_modules content at any depth, must count
+// the exclusion instead of reporting missing coverage, and must leave the
+// copied artifact and standalone skill behavior unchanged.
+func TestClawHubProfileDecisionsJudgeExcludesPluginDependencies(t *testing.T) {
+	requirePython(t)
+	stub, server := newDecisionsStub(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "probe-plugin")
+	writePlugin(t, target, "probe-plugin")
+	const marker = "CLAWSCAN_DEPENDENCY_SHOULD_NOT_ENTER_JUDGE"
+	writeFile(t, filepath.Join(target, "node_modules", "left-pad", "index.js"), marker+strings.Repeat("x", 100000))
+	writeFile(t, filepath.Join(target, "src", "vendor", "node_modules", "dep", "index.js"), marker)
+	writeFile(t, filepath.Join(target, "src", "index.js"), "export const pluginCode = true;\n")
+	fixtures := []string{}
+	for _, scanner := range []string{"skillspector", "aig"} {
+		path := filepath.Join(dir, scanner+".json")
+		writeFile(t, path, `{"version":"2.1.0","runs":[{"results":[]}]}`)
+		fixtures = append(fixtures, "--scanner-result", scanner+"="+path)
+	}
+	args := append([]string{target, "--profile", "clawhub", "--sandbox", "off", "--json", "--no-overview"}, fixtures...)
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = run(args, append(os.Environ(), "DECISIONS_BASE_URL="+server.URL, "DECISIONS_API_KEY="+testDecisionsKey, "DECISIONS_MODEL=", "OPENAI_BASE_URL="))
+	})
+	var artifact runner.Artifact
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if runErr != nil || !artifact.Complete || artifact.Target.Kind != "plugin" {
+		t.Fatalf("run err=%v kind=%q complete=%v judge=%#v", runErr, artifact.Target.Kind, artifact.Complete, artifact.Judge)
+	}
+	if stub.requestCount() != 1 {
+		t.Fatalf("Decisions requests = %d", stub.requestCount())
+	}
+	stub.mu.Lock()
+	input, err := json.Marshal(stub.requests[0].Input)
+	stub.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(input), marker) || strings.Contains(string(input), "left-pad") {
+		t.Fatal("excluded node_modules content reintroduced into judge input")
+	}
+	if !strings.Contains(string(input), "pluginCode") {
+		t.Fatal("plugin source missing from judge input")
+	}
+	counts := judgeResultMap(t, artifact)["decision"].(map[string]any)["input"].(map[string]any)["artifact"].(map[string]any)
+	excluded, ok := counts["excludedDependencies"].(map[string]any)
+	if !ok || excluded["files"] != float64(2) || counts["omitted"] != float64(0) {
+		t.Fatalf("artifact accounting = %#v", counts)
+	}
+	if _, err := os.Stat(filepath.Join(target, "node_modules", "left-pad", "index.js")); err != nil {
+		t.Fatalf("original artifact changed: %v", err)
+	}
+}
