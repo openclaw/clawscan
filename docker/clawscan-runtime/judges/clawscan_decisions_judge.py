@@ -945,6 +945,9 @@ def fit_evidence(evidence):
     """
     counts = evidence["findingCounts"]
     artifact_counts = evidence["artifactCounts"]
+    # Every accounting field exists before measuring, so trimming never adds
+    # keys or values after the limits were checked.
+    counts["omitted"] = counts["total"] - counts["included"]
     artifact_counts.setdefault("manifestOmitted", 0)
 
     def trim_findings(floor):
@@ -1007,8 +1010,20 @@ def fit_evidence(evidence):
                 f"{API_JSON_PART_VALUES}, depth {depth} of {API_JSON_PART_DEPTH}) after trimming",
                 EXIT_INPUT,
             )
-    counts["omitted"] = counts["total"] - counts["included"]
+    assert_evidence_fits(evidence)
     return evidence
+
+
+def assert_evidence_fits(evidence):
+    """Final guard on the exact object that will be sent."""
+    size, count, depth = evidence_stats(evidence)
+    if size > EVIDENCE_JSON_BUDGET_BYTES or count > API_JSON_PART_VALUES or depth > API_JSON_PART_DEPTH:
+        raise JudgeError(
+            "decisions judge evidence JSON exceeds the input_json limits after assembly "
+            f"({size} bytes of {EVIDENCE_JSON_BUDGET_BYTES}, {count} values of "
+            f"{API_JSON_PART_VALUES}, depth {depth} of {API_JSON_PART_DEPTH})",
+            EXIT_INPUT,
+        )
 
 
 def finding_label(finding):
@@ -1081,6 +1096,8 @@ def build_request(workspace, args, env):
     fit_evidence(evidence)
     json_bytes, json_values, json_depth = evidence_stats(evidence)
     evidence_text = compact(evidence)
+    # Nothing below mutates the evidence; re-check anyway before sending.
+    assert_evidence_fits(evidence)
     sizes = {
         "instructionsChars": len(instructions),
         "artifactChars": len(artifact_text),

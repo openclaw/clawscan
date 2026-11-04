@@ -184,7 +184,7 @@ assembled evidence object, including the manifest and every count, must fit
 200 KiB, 10,000 JSON values, and depth 32 (the API allows 256 KiB). If it does
 not, the judge trims findings, then the manifest, then gap samples and bundled
 children, recording `findingCounts.omitted`, `artifactCounts.manifestOmitted`,
-and per-list `omitted`. It fails before sending if nothing is left to trim. The
+and per-list `omitted`. All accounting fields exist before the first measurement, and the exact object is re-checked after every mutation. The judge fails before sending if nothing is left to trim or the final check fails. The
 final size, value count, and depth are recorded in
 `decision.input.evidenceJson`. The assembled input must fit `--max-input-chars`
 (default 1,000,000, overridable with `DECISIONS_MAX_INPUT_CHARS`); otherwise the
