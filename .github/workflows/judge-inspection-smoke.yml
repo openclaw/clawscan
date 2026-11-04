@@ -31,9 +31,11 @@ jobs:
         with:
           node-version: 24.22.1
 
-      - name: Build ClawScan and install pinned judge harness
+      - name: Build ClawScan and install the judge and pinned overview harness
         run: |
           go build -o ./dist/clawscan ./cmd/clawscan
+          ln -sf "$PWD/docker/clawscan-runtime/judges/clawscan_decisions_judge.py" ./dist/clawscan-decisions-judge
+          echo "$PWD/dist" >> "$GITHUB_PATH"
           npm install -g @openai/codex@0.164.0
           codex --version
 
@@ -79,9 +81,18 @@ jobs:
               ], cwd=root, env=env, check=True, timeout=240)
           artifact = json.loads(report.read_text())
           judge = artifact.get("judge", {})
-          print(json.dumps({"status": judge.get("status"), "error": judge.get("error")}))
+          overview = artifact.get("overview") or {}
+          decision = (judge.get("result") or {}).get("decision") or {}
+          print(json.dumps({
+              "judge": judge.get("status"), "error": judge.get("error"),
+              "verdict": (judge.get("result") or {}).get("verdict"),
+              "model": decision.get("model"), "latencyMs": decision.get("latencyMs"),
+              "overview": overview.get("status"), "overviewError": overview.get("error"),
+          }))
           assert judge.get("status") == "completed", "Judge did not complete"
           assert judge["result"]["verdict"] in ("benign", "suspicious", "malicious")
+          assert overview.get("status") == "completed", "Overview did not complete"
+          assert overview["result"]["summary"], "Overview has no summary"
 
       - name: Retain redacted CLI report
         if: always()

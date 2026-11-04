@@ -22,24 +22,42 @@ profiles:
         - DEFAULT_MODEL
         - REASONING_EFFORT
         - DEFAULT_BASE_URL
+        - OPENAI_BASE_URL
+        - DECISIONS_API_KEY
+        - DECISIONS_BASE_URL
+        - DECISIONS_MODEL
+        - DECISIONS_MAX_INPUT_CHARS
+        - OVERVIEW_MODEL
     judge:
+      command: >-
+        clawscan-decisions-judge
+        --workspace {{ workspace }}
+        --instructions {{ prompt:decisions.md }}
+        --output-schema {{ output_schema:output.schema.json }}
+        --output {{ output }}
+    overview:
       command: >-
         [ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY";
         codex exec --cd {{ workspace }}
-        --model gpt-6.1-sol
+        --model "${OVERVIEW_MODEL:-gpt-6-luna}"
         --sandbox {{ judge_sandbox }}
         --skip-git-repo-check
         --ignore-user-config
         -c approval_policy=never
-        -c model_reasoning_effort=high
+        -c model_reasoning_effort=low
         -c 'service_tier="default"'
         -c 'shell_environment_policy.inherit="core"'
         -c shell_environment_policy.ignore_default_excludes=false
-        --output-schema {{ output_schema:output.schema.json }}
+        ${OPENAI_BASE_URL:+-c model_provider=clawscan
+        -c model_providers.clawscan.name=ClawScan
+        -c model_providers.clawscan.base_url=$OPENAI_BASE_URL
+        -c model_providers.clawscan.env_key=CODEX_API_KEY
+        -c model_providers.clawscan.wire_api=responses}
+        --output-schema {{ output_schema:overview.schema.json }}
         --output-last-message {{ output }}
         --ephemeral
         --json
-        - < {{ prompt:prompt.md }}
+        - < {{ prompt:overview.md }}
   clawhub-aig:
     scanners:
       - skillspector
@@ -61,21 +79,39 @@ profiles:
         - DEFAULT_MODEL
         - REASONING_EFFORT
         - DEFAULT_BASE_URL
+        - OPENAI_BASE_URL
+        - DECISIONS_API_KEY
+        - DECISIONS_BASE_URL
+        - DECISIONS_MODEL
+        - DECISIONS_MAX_INPUT_CHARS
+        - OVERVIEW_MODEL
     judge:
+      command: >-
+        clawscan-decisions-judge
+        --workspace {{ workspace }}
+        --instructions {{ prompt:decisions.md }}
+        --output-schema {{ output_schema:output.schema.json }}
+        --output {{ output }}
+    overview:
       command: >-
         [ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY";
         codex exec --cd {{ workspace }}
-        --model gpt-6.1-sol
+        --model "${OVERVIEW_MODEL:-gpt-6-luna}"
         --sandbox {{ judge_sandbox }}
         --skip-git-repo-check
         --ignore-user-config
         -c approval_policy=never
-        -c model_reasoning_effort=high
+        -c model_reasoning_effort=low
         -c 'service_tier="default"'
         -c 'shell_environment_policy.inherit="core"'
         -c shell_environment_policy.ignore_default_excludes=false
-        --output-schema {{ output_schema:output.schema.json }}
+        ${OPENAI_BASE_URL:+-c model_provider=clawscan
+        -c model_providers.clawscan.name=ClawScan
+        -c model_providers.clawscan.base_url=$OPENAI_BASE_URL
+        -c model_providers.clawscan.env_key=CODEX_API_KEY
+        -c model_providers.clawscan.wire_api=responses}
+        --output-schema {{ output_schema:overview.schema.json }}
         --output-last-message {{ output }}
         --ephemeral
         --json
-        - < {{ prompt:prompt.md }}
+        - < {{ prompt:overview.md }}

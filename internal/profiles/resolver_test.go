@@ -16,6 +16,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const clawHubSandboxEnv = "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,LLM_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL,OPENAI_BASE_URL,DECISIONS_API_KEY,DECISIONS_BASE_URL,DECISIONS_MODEL,DECISIONS_MAX_INPUT_CHARS,OVERVIEW_MODEL"
+
 func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	dir := t.TempDir()
 
@@ -39,34 +41,36 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if opts.Judge == nil {
 		t.Fatal("expected embedded clawhub judge")
 	}
-	if !strings.Contains(opts.Judge.Command, "codex exec") {
-		t.Fatalf("judge command = %q", opts.Judge.Command)
+	wantJudge := "clawscan-decisions-judge --workspace {{ workspace }} --instructions {{ prompt:clawhub/decisions.md }} --output-schema {{ output_schema:clawhub/output.schema.json }} --output {{ output }}"
+	if opts.Judge.Command != wantJudge {
+		t.Fatalf("judge command = %q, want %q", opts.Judge.Command, wantJudge)
 	}
-	if !strings.Contains(opts.Judge.Command, `[ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY"; codex exec`) {
-		t.Fatalf("judge command does not alias OPENAI_API_KEY for codex exec: %q", opts.Judge.Command)
+	if opts.Overview == nil {
+		t.Fatal("expected embedded clawhub overview")
 	}
-	if !strings.Contains(opts.Judge.Command, "--sandbox {{ judge_sandbox }}") {
-		t.Fatalf("judge command missing runtime-aware sandbox placeholder: %q", opts.Judge.Command)
+	for _, want := range []string{
+		`[ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY"; codex exec`,
+		"--sandbox {{ judge_sandbox }}",
+		"{{ output_schema:clawhub/overview.schema.json }}",
+		"{{ prompt:clawhub/overview.md }}",
+		"--output-last-message {{ output }}",
+	} {
+		if !strings.Contains(opts.Overview.Command, want) {
+			t.Fatalf("overview command missing %q: %q", want, opts.Overview.Command)
+		}
 	}
-	if strings.Contains(opts.Judge.Command, "{{ prompt:prompt.md }}") {
-		t.Fatalf("judge command kept unresolved profile-local prompt placeholder: %q", opts.Judge.Command)
+	for _, path := range []string{"clawhub/prompt.md", "clawhub/decisions.md", "clawhub/output.schema.json", "clawhub/overview.md", "clawhub/overview.schema.json"} {
+		if len(opts.Judge.Files[path]) == 0 || len(opts.Overview.Files[path]) == 0 {
+			t.Fatalf("expected embedded clawhub file %s", path)
+		}
 	}
-	if !strings.Contains(opts.Judge.Command, "{{ prompt:clawhub/prompt.md }}") {
-		t.Fatalf("judge command missing profile-local embedded prompt placeholder: %q", opts.Judge.Command)
+	for _, path := range []string{"clawhub/output.schema.json", "clawhub/overview.schema.json"} {
+		var schema map[string]any
+		if err := json.Unmarshal(opts.Judge.Files[path], &schema); err != nil {
+			t.Fatalf("%s is not JSON: %v", path, err)
+		}
 	}
-	if strings.Contains(opts.Judge.Command, "{{ output_schema:output.schema.json }}") {
-		t.Fatalf("judge command kept unresolved profile-local schema placeholder: %q", opts.Judge.Command)
-	}
-	if !strings.Contains(opts.Judge.Command, "{{ output_schema:clawhub/output.schema.json }}") {
-		t.Fatalf("judge command missing profile-local embedded schema placeholder: %q", opts.Judge.Command)
-	}
-	if string(opts.Judge.Files["clawhub/prompt.md"]) == "" {
-		t.Fatal("expected embedded clawhub prompt file")
-	}
-	if string(opts.Judge.Files["clawhub/output.schema.json"]) == "" {
-		t.Fatal("expected embedded clawhub output schema file")
-	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,LLM_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != clawHubSandboxEnv {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
@@ -89,69 +93,90 @@ func TestResolveArgsUsesEmbeddedClawHubAIGCandidateProfile(t *testing.T) {
 	if len(candidate.GateRules) != 0 {
 		t.Fatalf("embedded clawhub-aig profile changed its existing gate contract: %#v", candidate.GateRules)
 	}
-	if candidate.Judge == nil || clawhub.Judge == nil {
-		t.Fatal("missing embedded ClawHub judge")
+	if candidate.Judge == nil || clawhub.Judge == nil || candidate.Overview == nil || clawhub.Overview == nil {
+		t.Fatal("missing embedded ClawHub judge or overview")
 	}
 	if candidate.Judge.Command != clawhub.Judge.Command {
 		t.Fatalf("candidate judge command differs from clawhub:\n%s\n---\n%s", candidate.Judge.Command, clawhub.Judge.Command)
 	}
-	for _, path := range []string{"clawhub/prompt.md", "clawhub/output.schema.json"} {
+	if candidate.Overview.Command != clawhub.Overview.Command {
+		t.Fatalf("candidate overview command differs from clawhub:\n%s\n---\n%s", candidate.Overview.Command, clawhub.Overview.Command)
+	}
+	for _, path := range []string{"clawhub/decisions.md", "clawhub/output.schema.json", "clawhub/overview.md", "clawhub/overview.schema.json"} {
 		if string(candidate.Judge.Files[path]) != string(clawhub.Judge.Files[path]) {
 			t.Fatalf("candidate judge file %s differs from clawhub", path)
 		}
 	}
-	if got := strings.Join(candidate.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,LLM_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL" {
+	if got := strings.Join(candidate.Sandbox.Env, ","); got != clawHubSandboxEnv {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }
 
-func TestClawHubProfilesConfigureCodex(t *testing.T) {
+// TestClawHubOverviewConfiguresCheapCodex runs the profile's overview command
+// with a shell function standing in for codex and checks the model, effort,
+// key alias, and optional OPENAI_BASE_URL provider routing.
+func TestClawHubOverviewConfiguresCheapCodex(t *testing.T) {
 	for _, profile := range []string{"clawhub", "clawhub-aig"} {
 		t.Run(profile, func(t *testing.T) {
 			opts, err := ResolveArgs([]string{"./skill", "--profile", profile}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(opts.Judge.Command, "codex exec") {
-				t.Fatalf("judge command missing codex exec: %q", opts.Judge.Command)
-			}
 			command := strings.NewReplacer(
 				"{{ workspace }}", "fixture-workspace",
 				"{{ judge_sandbox }}", "read-only",
-				"{{ output_schema:clawhub/output.schema.json }}", "fixture-schema",
+				"{{ output_schema:clawhub/overview.schema.json }}", "fixture-schema",
 				"{{ output }}", "fixture-output",
-				"{{ prompt:clawhub/prompt.md }}", "/dev/null",
-			).Replace(opts.Judge.Command)
+				"{{ prompt:clawhub/overview.md }}", "/dev/null",
+			).Replace(opts.Overview.Command)
 
 			for _, test := range []struct {
-				name   string
-				openAI string
-				codex  string
-				output string
+				name      string
+				env       []string
+				key       string
+				want      []string
+				forbidden []string
 			}{
-				{name: "openai fallback", openAI: "openai-marker", output: "openai-marker"},
-				{name: "explicit codex key wins", openAI: "openai-marker", codex: "codex-marker", output: "codex-marker"},
+				{
+					name:      "openai default",
+					env:       []string{"OPENAI_API_KEY=openai-marker", "CODEX_API_KEY=", "OVERVIEW_MODEL=", "OPENAI_BASE_URL="},
+					key:       "openai-marker",
+					want:      []string{"--model\x00gpt-6-luna\x00", "-c\x00model_reasoning_effort=low\x00", "--ignore-user-config\x00", "--output-schema\x00fixture-schema\x00"},
+					forbidden: []string{"model_provider="},
+				},
+				{
+					name: "routed through an OpenAI-compatible base URL",
+					env:  []string{"OPENAI_API_KEY=openai-marker", "CODEX_API_KEY=codex-marker", "OVERVIEW_MODEL=openai/gpt-6-luna", "OPENAI_BASE_URL=https://router.example/v1"},
+					key:  "codex-marker",
+					want: []string{
+						"--model\x00openai/gpt-6-luna\x00",
+						"-c\x00model_provider=clawscan\x00",
+						"-c\x00model_providers.clawscan.base_url=https://router.example/v1\x00",
+						"-c\x00model_providers.clawscan.env_key=CODEX_API_KEY\x00",
+						"-c\x00model_providers.clawscan.wire_api=responses\x00",
+					},
+				},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					cmd := exec.Command("sh", "-c", `codex() { printf '%s\n' "$CODEX_API_KEY" "$@"; }; `+command)
-					cmd.Env = append(
-						os.Environ(),
-						strings.Join([]string{"OPENAI_API_KEY", test.openAI}, "="),
-						strings.Join([]string{"CODEX_API_KEY", test.codex}, "="),
-					)
+					cmd.Env = append(os.Environ(), test.env...)
 					output, err := cmd.Output()
 					if err != nil {
 						t.Fatal(err)
 					}
 					lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-					if lines[0] != test.output {
-						t.Fatalf("CODEX_API_KEY = %q, want %q", lines[0], test.output)
+					if lines[0] != test.key {
+						t.Fatalf("CODEX_API_KEY = %q, want %q", lines[0], test.key)
 					}
-					args := strings.Join(lines[1:], "\x00")
-
-					for _, want := range []string{"--model\x00gpt-6.1-sol\x00", "-c\x00model_reasoning_effort=high\x00", "--ignore-user-config\x00", "-c\x00service_tier=\"default\"\x00"} {
+					args := strings.Join(lines[1:], "\x00") + "\x00"
+					for _, want := range test.want {
 						if !strings.Contains(args, want) {
 							t.Fatalf("codex arguments missing %q: %#v", want, lines[1:])
+						}
+					}
+					for _, forbidden := range test.forbidden {
+						if strings.Contains(args, forbidden) {
+							t.Fatalf("codex arguments contain %q: %#v", forbidden, lines[1:])
 						}
 					}
 				})
@@ -160,24 +185,31 @@ func TestClawHubProfilesConfigureCodex(t *testing.T) {
 	}
 }
 
-func TestClawHubJudgeOverrideKeepsExplicitTier(t *testing.T) {
-	command := `codex exec --model gpt-6-luna -c model_reasoning_effort=low -c 'service_tier="priority"'`
-	for _, profile := range []string{"clawhub", "clawhub-aig"} {
-		opts, err := ResolveArgs([]string{"./skill", "--profile", profile, "--judge", command}, t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if opts.Judge.Command != command {
-			t.Fatalf("explicit judge changed: %q", opts.Judge.Command)
-		}
-		cmd := exec.Command("sh", "-c", `codex() { printf '%s\n' "$@"; }; `+opts.Judge.Command)
-		output, err := cmd.Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(output), `service_tier="priority"`+"\n") || strings.Contains(string(output), `service_tier="default"`) {
-			t.Fatalf("explicit tier was overridden: %s", output)
-		}
+func TestResolveArgsOverviewOverrides(t *testing.T) {
+	dir := t.TempDir()
+	override, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--overview", "summarize {{ output }}"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if override.Overview == nil || override.Overview.Command != "summarize {{ output }}" {
+		t.Fatalf("overview = %#v", override.Overview)
+	}
+	disabled, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--no-overview"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Overview != nil || disabled.Judge == nil {
+		t.Fatalf("--no-overview kept overview %#v or dropped judge %#v", disabled.Overview, disabled.Judge)
+	}
+	if _, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--no-overview", "--overview", "x"}, dir); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err = %v", err)
+	}
+	benchmark, err := ResolveBenchmarkRunSet("SkillTrustBench", []string{"--profile", "clawhub"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if benchmark.Options[0].Overview != nil {
+		t.Fatalf("benchmark runs should skip the profile overview: %#v", benchmark.Options[0].Overview)
 	}
 }
 
@@ -728,7 +760,7 @@ func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 	if opts.Sandbox.Image != "ghcr.io/acme/runtime:v1" {
 		t.Fatalf("sandbox image = %q", opts.Sandbox.Image)
 	}
-	if got := strings.Join(opts.Sandbox.Env, ","); got != "OPENAI_API_KEY,CODEX_API_KEY,SKILLSPECTOR_PROVIDER,SKILLSPECTOR_MODEL,SKILLSPECTOR_REASONING_EFFORT,LLM_API_KEY,DEFAULT_MODEL,REASONING_EFFORT,DEFAULT_BASE_URL,ANTHROPIC_API_KEY" {
+	if got := strings.Join(opts.Sandbox.Env, ","); got != clawHubSandboxEnv+",ANTHROPIC_API_KEY" {
 		t.Fatalf("sandbox env = %q", got)
 	}
 }

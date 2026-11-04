@@ -202,16 +202,20 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `aig` | Codex `gpt-6.1-sol`, high reasoning, Standard service, bundled ClawHub prompt/schema |
-| `clawhub-aig` | `skillspector`, `aig` | Codex `gpt-6.1-sol`, high reasoning, Standard service, bundled ClawHub prompt/schema |
+| `clawhub` | `skillspector`, `aig` | OpenAI Decisions API `gpt-6-luna` verdict (`clawscan-decisions-judge`), then a Codex `gpt-6-luna` low-effort overview |
+| `clawhub-aig` | `skillspector`, `aig` | Same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
 The two ClawHub profiles explicitly configure the OpenAI scanner lanes with
 `scannerEnvDefaults`: SkillSpector uses `SKILLSPECTOR_PROVIDER=openai`,
 `SKILLSPECTOR_MODEL=gpt-6.1-sol`, and `SKILLSPECTOR_REASONING_EFFORT=medium`;
 A.I.G uses `DEFAULT_MODEL=gpt-6.1-sol` and `REASONING_EFFORT=medium` with OpenAI
-credentials. The final Codex judge uses `gpt-6.1-sol`, high reasoning, and default
-Standard service (no fast/priority override). Credentials stay in the environment.
+credentials. The verdict comes from the OpenAI Decisions API (`gpt-6-luna`)
+through `clawscan-decisions-judge`, which returns typed answers only; a separate
+Codex overview step (`gpt-6-luna`, low reasoning, Standard service) writes the
+readable summary and never changes the verdict. Credentials stay in the
+environment. See [judge harness](docs/judge.md#clawhub-decisions-judge) for the
+request shape, verdict mapping, and environment variables.
 
 Explicit model/provider/effort environment overrides win. A different
 SkillSpector provider retains its own model defaults. A.I.G with a dedicated
@@ -285,7 +289,9 @@ Supported `--judge` placeholders:
 The judge is any command that reads the prompt and writes a JSON object matching
 the output schema. ClawScan is judge-agnostic: judge-specific checks, such as an
 input-size limit, belong inside the judge command, and a failed judge command
-keeps its own error. See [judge harness](docs/judge.md).
+keeps its own error. A profile can add an `overview.command` that writes a
+readable summary after the verdict; it never changes the verdict or gate. See
+[judge harness](docs/judge.md).
 
 ## Sandbox
 

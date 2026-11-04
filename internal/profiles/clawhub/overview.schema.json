@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "dimensions", "scan_findings_in_context", "user_guidance"],
+  "properties": {
+    "summary": { "type": "string" },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose_capability",
+        "instruction_scope",
+        "install_mechanism",
+        "environment_proportionality",
+        "persistence_privilege"
+      ],
+      "properties": {
+        "purpose_capability": { "type": "string" },
+        "instruction_scope": { "type": "string" },
+        "install_mechanism": { "type": "string" },
+        "environment_proportionality": { "type": "string" },
+        "persistence_privilege": { "type": "string" }
+      }
+    },
+    "scan_findings_in_context": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ruleId", "note"],
+        "properties": {
+          "ruleId": { "type": "string" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "user_guidance": { "type": "string" }
+  }
+}

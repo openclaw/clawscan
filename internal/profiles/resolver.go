@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/output.schema.json openclaw-install-policy/clawscan.yml
+//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/decisions.md clawhub/output.schema.json clawhub/overview.md clawhub/overview.schema.json openclaw-install-policy/clawscan.yml
 var builtinFiles embed.FS
 
 var builtinProfileConfigPaths = []string{
@@ -39,6 +39,7 @@ type Profile struct {
 	JSON               bool              `yaml:"json,omitempty"`
 	Sandbox            *Sandbox          `yaml:"sandbox,omitempty"`
 	Judge              *Judge            `yaml:"judge,omitempty"`
+	Overview           *Overview         `yaml:"overview,omitempty"`
 }
 
 func (profile Profile) ScannerIDs() []string {
@@ -137,6 +138,12 @@ type Judge struct {
 	Command string `yaml:"command"`
 }
 
+// Overview configures the optional overview command that writes a readable
+// summary after a completed judge verdict. It never changes the verdict.
+type Overview struct {
+	Command string `yaml:"command"`
+}
+
 type resolvedProfile struct {
 	profile   Profile
 	sandbox   Sandbox
@@ -159,6 +166,9 @@ type cliIntent struct {
 	json                 bool
 	judge                string
 	judgeSet             bool
+	overview             string
+	overviewSet          bool
+	noOverview           bool
 	sandbox              string
 	sandboxSet           bool
 	sandboxImage         string
@@ -306,6 +316,9 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if opts.Judge != nil {
 		opts.Judge.Files = files
 	}
+	if opts.Overview != nil {
+		opts.Overview.Files = files
+	}
 	if intent.benchmarkSet {
 		opts.Benchmark, err = runner.NewBenchmarkOptions(intent.benchmark, intent.split, intent.limit, intent.offset, intent.predictionsOutput, intent.idsSource)
 		if err != nil {
@@ -411,6 +424,9 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		if opts.Judge != nil {
 			opts.Judge.Files = files
 		}
+		if opts.Overview != nil {
+			opts.Overview.Files = files
+		}
 		resolved.JSON = resolved.JSON || selected.profile.JSON
 		resolved.Options = append(resolved.Options, opts)
 	}
@@ -449,7 +465,10 @@ func loadBuiltinProfiles() (map[string]resolvedProfile, error) {
 func loadBuiltinProfileFiles() (map[string][]byte, error) {
 	paths := []string{
 		"clawhub/prompt.md",
+		"clawhub/decisions.md",
 		"clawhub/output.schema.json",
+		"clawhub/overview.md",
+		"clawhub/overview.schema.json",
 	}
 	files := map[string][]byte{}
 	for _, path := range paths {
@@ -631,6 +650,16 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			intent.judge = value
 			intent.judgeSet = true
 			i = next
+		case "--overview":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			intent.overview = value
+			intent.overviewSet = true
+			i = next
+		case "--no-overview":
+			intent.noOverview = true
 		case "--sandbox":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -720,6 +749,9 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 	if intent.configPath != "" && intent.discoverConfig {
 		return cliIntent{}, errors.New("--config and --discover-config are mutually exclusive")
 	}
+	if intent.overviewSet && intent.noOverview {
+		return cliIntent{}, errors.New("--overview and --no-overview are mutually exclusive")
+	}
 	return intent, nil
 }
 
@@ -799,6 +831,21 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	}
 	if judgeCommand != "" {
 		args = append(args, "--judge", judgeCommand)
+	}
+	overviewCommand := ""
+	// Benchmarks score verdicts only, so they skip the profile's prose
+	// overview unless --overview asks for it.
+	if profile.Overview != nil && shouldUseProfileJudge(intent) && !intent.benchmarkSet {
+		overviewCommand = resolveJudgePaths(profile.Overview.Command, selected.configDir)
+	}
+	if intent.overviewSet {
+		overviewCommand = intent.overview
+	}
+	if intent.noOverview {
+		overviewCommand = ""
+	}
+	if overviewCommand != "" {
+		args = append(args, "--overview", overviewCommand)
 	}
 	if selected.sandbox.Mode != "" {
 		args = append(args, "--sandbox", selected.sandbox.Mode)

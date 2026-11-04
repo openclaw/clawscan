@@ -46,6 +46,9 @@ jobs:
       - name: Test runtime publication contracts with offline command stubs
         run: python3 -m unittest discover -s scripts/runtime-image -p 'test_*.py' -v
 
+      - name: Test the Decisions judge against an offline API stub
+        run: python3 -m unittest discover -s docker/clawscan-runtime/tests -p 'test_decisions_judge.py' -v
+
   test:
     name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}

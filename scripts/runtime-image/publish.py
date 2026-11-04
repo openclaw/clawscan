@@ -12,7 +12,7 @@ import sys
 
 ROOT = Path("runtime-image-proof")
 REVISION = "org.opencontainers.image.revision"
-SMOKE = "skillspector --help\naig-skill-scan --help\ncodex --version\n"
+SMOKE = "skillspector --help\naig-skill-scan --help\ncodex --version\nclawscan-decisions-judge --help\n"
 
 
 def require(condition, message):

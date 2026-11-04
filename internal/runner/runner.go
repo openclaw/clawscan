@@ -42,6 +42,7 @@ type Options struct {
 	OutputPath         string
 	JSON               bool
 	Judge              *JudgeOptions
+	Overview           *OverviewOptions
 	Sandbox            SandboxOptions
 	GateRules          map[string]ScannerGatePolicy
 }
@@ -95,6 +96,14 @@ type BenchmarkOptions struct {
 }
 
 type JudgeOptions struct {
+	Command string
+	Files   map[string][]byte
+}
+
+// OverviewOptions configures the optional overview command that runs after a
+// completed judge verdict and writes a readable summary. It uses the same
+// placeholders and workspace layout as the judge, plus judge.json.
+type OverviewOptions struct {
 	Command string
 	Files   map[string][]byte
 }
@@ -155,6 +164,9 @@ type Artifact struct {
 	Gate         string                   `json:"gate"`
 	GateRules    []FiredGateRule          `json:"gateRules"`
 	Judge        *JudgeResult             `json:"judge"`
+	// Overview is advisory prose about the judge verdict. Its status never
+	// changes the verdict, gate, status, or completeness of the run.
+	Overview *OverviewResult `json:"overview,omitempty"`
 }
 
 type FiredGateRule struct {
@@ -318,6 +330,7 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 		start = 1
 	}
 	var judge string
+	var overview string
 	for i := start; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
@@ -375,6 +388,13 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 			}
 			judge = value
 			i = next
+		case "--overview":
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			overview = value
+			i = next
 		case "--sandbox":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -429,6 +449,9 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 	}
 	if judge != "" {
 		opts.Judge = &JudgeOptions{Command: judge}
+	}
+	if overview != "" {
+		opts.Overview = &OverviewOptions{Command: overview}
 	}
 	return opts, nil
 }
@@ -636,6 +659,11 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 			}
 		}
 		if err != nil {
+			return artifact, err
+		}
+	}
+	if opts.Overview != nil {
+		if err := runOverviewStep(ctx, opts, &artifact, commands, checkpointOpts, env, sandbox.Mode); err != nil {
 			return artifact, err
 		}
 	}
@@ -1158,7 +1186,7 @@ func scannerResultContext(ctx context.Context, opts Options, scanner string, tar
 	return scannerRunner.RunScanner(scanner, target.resolvedPath, startedAt)
 }
 
-var promptPlaceholderPattern = regexp.MustCompile(`\{\{\s*(scanners\.([a-zA-Z0-9_-]+)|target\.files)\s*\}\}`)
+var promptPlaceholderPattern = regexp.MustCompile(`\{\{\s*(scanners\.([a-zA-Z0-9_-]+)|target\.files|judge\.result)\s*\}\}`)
 var judgePlaceholderPattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]+))?\s*\}\}`)
 
 const maxTargetFileBytes = 64 * 1024
@@ -1185,6 +1213,18 @@ func renderPromptTemplateContext(ctx context.Context, template string, artifact 
 		parts := promptPlaceholderPattern.FindStringSubmatch(match)
 		if len(parts) != 3 {
 			return match
+		}
+		if parts[1] == "judge.result" {
+			if artifact.Judge == nil || artifact.Judge.Status != "completed" || artifact.Judge.Result == nil {
+				renderErr = errors.New("prompt references judge.result, but no completed judge verdict is available")
+				return match
+			}
+			formatted, err := json.MarshalIndent(artifact.Judge.Result, "", "  ")
+			if err != nil {
+				renderErr = fmt.Errorf("format judge result JSON: %w", err)
+				return match
+			}
+			return string(formatted)
 		}
 		if parts[1] == "target.files" {
 			if !targetFilesRendered {
@@ -1461,10 +1501,26 @@ type judgeShellSpec struct {
 }
 
 func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
+	return runHarnessAttempt(ctx, judgeHarness, opts.Command, opts.Files, artifact, commandRunner, deadline, env, sandboxMode)
+}
+
+// harnessKind names a command-backed step (judge or overview) that shares the
+// workspace layout, placeholders, and JSON-object output contract.
+type harnessKind struct {
+	label  string
+	prefix string
+}
+
+var (
+	judgeHarness    = harnessKind{label: "Judge", prefix: "judge"}
+	overviewHarness = harnessKind{label: "Overview", prefix: "overview"}
+)
+
+func runHarnessAttempt(ctx context.Context, kind harnessKind, commandTemplate string, files map[string][]byte, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
 	if err := ctx.Err(); err != nil {
 		return judgeAttemptOutcome{}, err
 	}
-	workspace, err := os.MkdirTemp("", "clawscan-judge-*")
+	workspace, err := os.MkdirTemp("", "clawscan-"+kind.prefix+"-*")
 	if err != nil {
 		return judgeAttemptOutcome{}, err
 	}
@@ -1476,11 +1532,11 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 		context:      ctx,
 		workspace:    workspace,
 		judgeSandbox: judgeSandboxMode(sandboxMode),
-		outputPath:   filepath.Join(workspace, "judge-output.json"),
-		files:        opts.Files,
+		outputPath:   filepath.Join(workspace, kind.prefix+"-output.json"),
+		files:        files,
 	}
 	shell := judgeShellForGOOS(runtime.GOOS)
-	command, err := renderJudgeCommand(opts.Command, artifact, state, shell.quote)
+	command, err := renderJudgeCommand(commandTemplate, artifact, state, shell.quote)
 	if err != nil {
 		return judgeAttemptOutcome{}, err
 	}
@@ -1534,7 +1590,7 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 			return outcome, nil
 		}
 		result.Status = "failed"
-		result.Error = "Judge command did not produce JSON output."
+		result.Error = kind.label + " command did not produce JSON output."
 		outcome.retryable = true
 		return outcome, nil
 	}
@@ -1545,7 +1601,7 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 			return outcome, nil
 		}
 		result.Status = "failed"
-		result.Error = fmt.Sprintf("Judge command produced invalid JSON: %v", err)
+		result.Error = fmt.Sprintf("%s command produced invalid JSON: %v", kind.label, err)
 		outcome.retryable = true
 		return outcome, nil
 	}
@@ -1553,7 +1609,7 @@ func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, 
 	result.Result = parsed
 	if _, ok := parsed.(map[string]any); !ok && result.Status != "failed" {
 		result.Status = "failed"
-		result.Error = fmt.Sprintf("Judge command produced %s; expected JSON object.", judgeJSONType(parsed))
+		result.Error = fmt.Sprintf("%s command produced %s; expected JSON object.", kind.label, judgeJSONType(parsed))
 		outcome.retryable = true
 	}
 	return outcome, nil
@@ -1898,7 +1954,19 @@ func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifac
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(workspace, "metadata.json"), append(rawMetadata, '\n'), 0o644)
+	if err := os.WriteFile(filepath.Join(workspace, "metadata.json"), append(rawMetadata, '\n'), 0o644); err != nil {
+		return err
+	}
+	// After a completed judge (the overview step), judge.json carries the
+	// verdict the overview explains.
+	if artifact.Judge != nil && artifact.Judge.Status == "completed" && artifact.Judge.Result != nil {
+		rawJudge, err := json.MarshalIndent(artifact.Judge.Result, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(workspace, "judge.json"), append(rawJudge, '\n'), 0o644)
+	}
+	return nil
 }
 
 func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManifest, error) {

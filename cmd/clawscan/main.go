@@ -168,7 +168,7 @@ func runOpenClawInstallPolicyContext(ctx context.Context, args []string, environ
 	opts.TargetKind = request.TargetType
 	opts.JSON = false
 	opts.OutputPath = ""
-	if opts.Judge != nil {
+	if opts.Judge != nil || opts.Overview != nil {
 		return failClosed(errors.New(
 			"OpenClaw install policy does not support judge-backed profiles; use scanner gate rules",
 		))
@@ -579,6 +579,10 @@ func printRunSummary(w io.Writer, result runner.RunTargetsResult, outputPath str
 			fmt.Fprintf(w, "verdict_unknown: %d\n", summary.VerdictUnknown)
 		}
 	}
+	if summary.HasOverview {
+		fmt.Fprintf(w, "overview_completed: %d\n", summary.OverviewDone)
+		fmt.Fprintf(w, "overview_not_completed: %d\n", summary.OverviewFailed)
+	}
 	fmt.Fprintf(w, "errors: %d\n", summary.Errors)
 	if outputPath != "" {
 		fmt.Fprintf(w, "full_results: %s\n", displayOutputPath(outputPath))
@@ -654,6 +658,9 @@ type runSummary struct {
 	HasJudge         bool
 	JudgeCompleted   int
 	JudgeFailed      int
+	HasOverview      bool
+	OverviewDone     int
+	OverviewFailed   int
 	Clean            int
 	NeedsReview      int
 	Malicious        int
@@ -699,6 +706,14 @@ func (summary *runSummary) addArtifact(artifact runner.Artifact) {
 			summary.ScannerOther++
 		}
 		summary.IssuesFound += scannerIssueCount(result.Raw)
+	}
+	if artifact.Overview != nil {
+		summary.HasOverview = true
+		if artifact.Overview.Status == "completed" {
+			summary.OverviewDone++
+		} else {
+			summary.OverviewFailed++
+		}
 	}
 	if artifact.Judge == nil {
 		return
@@ -834,6 +849,8 @@ Core flags:
                               Explicit .json paths keep the artifact file and write scanner JSON beside it.
   --json                      Print the full artifact JSON to stdout and skip default file writes unless --output is passed.
   --judge <cmd>               Optional external judge harness command.
+  --overview <cmd>            Optional overview command that summarizes a completed judge verdict.
+  --no-overview               Skip the selected profile's overview step for this run.
   --sandbox <docker|off>      Command sandbox mode. Defaults to docker.
   --sandbox-image <image>     Docker runtime image. Defaults to %s or CLAWSCAN_SANDBOX_IMAGE.
   --sandbox-env <name>        Allow an env var through the Docker sandbox. Repeat for multiple vars.
@@ -884,6 +901,10 @@ Required environment variables:
   skillspector: no ClawScan-required env vars; provider env vars enable LLM mode, otherwise --no-llm is used. Use "clawscan scanners skillspector" for provider vars.
   cisco: no ClawScan-required env vars; optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers.
   judge: provider credentials belong to the command passed to --judge.
+         The clawhub judge (clawscan-decisions-judge) uses DECISIONS_API_KEY or OPENAI_API_KEY,
+         DECISIONS_BASE_URL or OPENAI_BASE_URL, and DECISIONS_MODEL (default gpt-6-luna).
+  overview: the clawhub overview runs Codex with CODEX_API_KEY or OPENAI_API_KEY, OVERVIEW_MODEL
+            (default gpt-6-luna), and OPENAI_BASE_URL when set.
   sandbox: CLAWSCAN_SANDBOX=off disables Docker by default; CLAWSCAN_SANDBOX_IMAGE overrides the runtime image.
            Process supervisors can set CLAWSCAN_SANDBOX_RUN_ID to identify only that process's Docker containers for cleanup.
 
@@ -902,5 +923,8 @@ Judge summary:
   If no judge is configured, ClawScan only records scanner evidence.
   If a judge is configured, ClawScan runs it through the platform shell and expects a JSON object on stdout or at {{ output }}.
   Placeholders: {{ workspace }}, {{ prompt[:path] }}, {{ output_schema[:path] }}, {{ output }}.
+  A profile may also configure an overview command; --overview overrides it and --no-overview skips it.
+  The overview runs after a completed verdict with the same placeholders and judge.json in the workspace.
+  Its result is recorded under overview and never changes the verdict, gate, or exit status.
 `, runner.DefaultSandboxImage, strings.Join(runner.ScannerIDs(), ", "), strings.Join(profiles.ProfileIDs(), ", "))
 }

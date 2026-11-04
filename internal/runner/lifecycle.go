@@ -85,6 +85,9 @@ func pendingArtifact(opts Options, startedAt string, env map[string]string) Arti
 	if opts.Judge != nil {
 		artifact.Judge = &JudgeResult{Status: "not_started", CommandStarted: boolPointer(false)}
 	}
+	if opts.Overview != nil {
+		artifact.Overview = &OverviewResult{Status: "not_started", CommandStarted: boolPointer(false)}
+	}
 	return artifact
 }
 

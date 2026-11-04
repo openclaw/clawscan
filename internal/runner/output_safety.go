@@ -35,8 +35,8 @@ func prepareOutputSafety(optsList []Options, outputPath string, cwd string) (out
 		for _, source := range opts.ScannerResultPaths {
 			inputs = append(inputs, source)
 		}
-		if opts.Judge != nil {
-			for _, match := range judgePlaceholderPattern.FindAllStringSubmatch(opts.Judge.Command, -1) {
+		for _, harness := range harnessCommands(opts) {
+			for _, match := range judgePlaceholderPattern.FindAllStringSubmatch(harness.command, -1) {
 				source := strings.TrimSpace(match[2])
 				switch match[1] {
 				case "prompt":
@@ -50,7 +50,7 @@ func prepareOutputSafety(optsList []Options, outputPath string, cwd string) (out
 				default:
 					continue
 				}
-				if _, embedded := opts.Judge.Files[judgeSourceKey(source)]; !embedded {
+				if _, embedded := harness.files[judgeSourceKey(source)]; !embedded {
 					inputs = append(inputs, source)
 				}
 			}
