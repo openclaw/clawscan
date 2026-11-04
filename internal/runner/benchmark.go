@@ -595,6 +595,12 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 				continue
 			}
 		}
+		if scanner == aigMCPScannerID {
+			if prediction, ok := aigMCPSARIFPrediction(result.Raw); ok {
+				scannerPredictions[prediction] = append(scannerPredictions[prediction], scanner)
+				continue
+			}
+		}
 		if prediction, ok := predictionFromObject(result.Raw); ok {
 			scannerPredictions[prediction] = append(scannerPredictions[prediction], scanner)
 		}

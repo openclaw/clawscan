@@ -483,7 +483,11 @@ func printProfileCatalog(w io.Writer, catalog profiles.ProfileCatalog, cwd strin
 		if info.Profile.Judge != nil {
 			judge = "configured"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, displayProfileSource(info.Source, cwd), strings.Join(info.Profile.ScannerIDs(), ", "), judge)
+		scanners := strings.Join(info.Profile.ScannerIDs(), ", ")
+		if len(info.Profile.PluginScanners) > 0 {
+			scanners += "; plugins: " + strings.Join(info.Profile.PluginScanners, ", ")
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", info.ID, displayProfileSource(info.Source, cwd), scanners, judge)
 	}
 	_ = tw.Flush()
 }
@@ -896,6 +900,7 @@ Built-in profiles:
 
 Required environment variables:
   aig: LLM_API_KEY or OPENAI_API_KEY. Use "clawscan scanners aig" for local scanner details and optional model configuration.
+  aig-mcp: LLM_API_KEY or OPENAI_API_KEY, with the same model and endpoint defaults as aig. Use "clawscan scanners aig-mcp" for details.
   socket: SOCKET_CLI_API_TOKEN
   snyk: SNYK_TOKEN
   skillspector: no ClawScan-required env vars; provider env vars enable LLM mode, otherwise --no-llm is used. Use "clawscan scanners skillspector" for provider vars.
@@ -913,8 +918,8 @@ Target notes:
   Plain clawscan without --scanner, --profile, or --config is invalid.
   Most scanners use a local skill file or directory target.
   A directory holding openclaw.plugin.json is scanned as an OpenClaw plugin.
-  The clawhub profile runs SkillSpector for plugins as it does for skills.
   Other skill-only scanners return a skipped result for plugins.
+  The clawhub profile runs only aig-mcp for plugins (profile pluginScanners), on a copy without node_modules.
   Plugins are never auto-discovered; pass the plugin directory explicitly.
   Socket runs the public Socket CLI full-scan path over local dependency manifests.
 

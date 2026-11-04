@@ -37,6 +37,9 @@ type Options struct {
 	ContextPath        string
 	Benchmark          *BenchmarkOptions
 	Scanners           []string
+	// PluginScanners, when non-empty, replaces Scanners for a target resolved
+	// as an OpenClaw plugin. Profiles set it; explicit --scanner flags clear it.
+	PluginScanners     []string
 	ScannerRegistry    ScannerRegistry
 	ScannerResultPaths map[string]string
 	OutputPath         string
@@ -511,7 +514,8 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	if env == nil {
 		env = EnvMap(os.Environ())
 	}
-	env = maps.Clone(env)
+	baseEnv := env
+	env = maps.Clone(baseEnv)
 	applyRuntimeEnvDefaults(opts, env)
 	startedAt := now().UTC().Format(time.RFC3339Nano)
 	artifact = pendingArtifact(opts, startedAt, env)
@@ -536,6 +540,17 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	artifact.Target.ResolvedPath = target.resolvedPath
 	artifact.Target.Kind = target.kind
 	artifact.Target.ID = target.id
+	if target.kind == targetKindPlugin && len(opts.PluginScanners) > 0 {
+		// The profile's plugin scanner list replaces its skill list entirely, so
+		// skill scanners are neither run nor recorded for plugin targets.
+		opts = pluginScannerOptions(opts)
+		env = maps.Clone(baseEnv)
+		applyRuntimeEnvDefaults(opts, env)
+		pending := pendingArtifact(opts, startedAt, env)
+		artifact.Env = pending.Env
+		artifact.Sandbox = pending.Sandbox
+		artifact.Scanners = pending.Scanners
+	}
 	checkpointOpts := opts
 	withinTarget, err := outputWithinTarget(opts, target)
 	if err != nil {
@@ -1788,6 +1803,12 @@ func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, 
 			Value: aigAnalysis,
 		})
 	}
+	if pluginAnalysis := clawHubAIGMCPAnalysis(artifact); pluginAnalysis != nil {
+		supplemental = append(supplemental, clawhubprompt.ScannerEvidence{
+			Label: "A.I.G MCP plugin code audit SARIF supplied to Codex",
+			Value: pluginAnalysis,
+		})
+	}
 	return clawhubprompt.Build(
 		systemPrompt,
 		clawHubPromptJob(artifact, context),
@@ -1845,6 +1866,17 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 
 func clawHubAIGAnalysis(artifact Artifact) any {
 	result, ok := artifact.Scanners["aig"]
+	if !ok || len(result.Raw) == 0 {
+		return nil
+	}
+	return clawhubprompt.RawJSON(result.Raw)
+}
+
+// clawHubAIGMCPAnalysis gives the judge the plugin-code audit as one raw
+// SARIF document. Skill targets do not run aig-mcp, so their prompts are
+// unchanged.
+func clawHubAIGMCPAnalysis(artifact Artifact) any {
+	result, ok := artifact.Scanners[aigMCPScannerID]
 	if !ok || len(result.Raw) == 0 {
 		return nil
 	}
@@ -1974,6 +2006,14 @@ func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManif
 }
 
 func copyTargetToWorkspaceContext(ctx context.Context, source string, destRoot string) (TargetWorkspaceManifest, error) {
+	return copyTargetTreeContext(ctx, source, destRoot, nil)
+}
+
+// copyTargetTreeContext copies a target like copyTargetToWorkspaceContext.
+// visit, when set, sees each entry below the root by target-relative path. It
+// can drop the entry (or a whole directory) from the copy, or stop the copy
+// with an error, for example to enforce size limits.
+func copyTargetTreeContext(ctx context.Context, source string, destRoot string, visit func(rel string, entry os.DirEntry) (bool, error)) (TargetWorkspaceManifest, error) {
 	manifest := TargetWorkspaceManifest{}
 	if err := ctx.Err(); err != nil {
 		return manifest, err
@@ -2012,7 +2052,13 @@ func copyTargetToWorkspaceContext(ctx context.Context, source string, destRoot s
 		if err != nil {
 			return err
 		}
-		if shouldSkipWorkspacePath(source, path) {
+		skip := shouldSkipWorkspacePath(source, path)
+		if !skip && visit != nil && path != source {
+			if skip, err = visit(relativeManifestPath(source, path), entry); err != nil {
+				return err
+			}
+		}
+		if skip {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -2447,7 +2493,7 @@ func applyRuntimeEnvDefaults(opts Options, env map[string]string) {
 	if scannerRequested(opts, "skillspector") {
 		defaultSkillSpectorOpenAIProvider(env)
 	}
-	if scannerRequested(opts, "aig") {
+	if scannerRequested(opts, "aig") || scannerRequested(opts, aigMCPScannerID) {
 		defaultAIGRuntimeEnv(env)
 	}
 }
@@ -2552,6 +2598,22 @@ func NewArtifact(opts Options, resolvedPath string, startedAt string, completedA
 		GateRules:   []FiredGateRule{},
 		Judge:       nil,
 	}
+}
+
+// pluginScannerOptions selects a profile's plugin scanner list, keeping only
+// gate rules for scanners that still run.
+func pluginScannerOptions(opts Options) Options {
+	opts.Scanners = append([]string(nil), opts.PluginScanners...)
+	if len(opts.GateRules) > 0 {
+		gates := make(map[string]ScannerGatePolicy, len(opts.GateRules))
+		for _, scanner := range opts.Scanners {
+			if policy, ok := opts.GateRules[scanner]; ok {
+				gates[scanner] = policy
+			}
+		}
+		opts.GateRules = gates
+	}
+	return opts
 }
 
 func validateGateRuleScanners(opts Options) error {

@@ -34,12 +34,16 @@ type Config struct {
 type Profile struct {
 	ScannerEnvDefaults map[string]string `yaml:"scannerEnvDefaults,omitempty"`
 	Scanners           []ProfileScanner  `yaml:"scanners"`
-	ScannerResults     map[string]string `yaml:"scannerResults,omitempty"`
-	Output             string            `yaml:"output,omitempty"`
-	JSON               bool              `yaml:"json,omitempty"`
-	Sandbox            *Sandbox          `yaml:"sandbox,omitempty"`
-	Judge              *Judge            `yaml:"judge,omitempty"`
-	Overview           *Overview         `yaml:"overview,omitempty"`
+	// PluginScanners, when set, replaces Scanners for OpenClaw plugin targets.
+	// Skill, file and URL targets keep Scanners. An explicit --scanner list
+	// overrides both.
+	PluginScanners []string          `yaml:"pluginScanners,omitempty"`
+	ScannerResults map[string]string `yaml:"scannerResults,omitempty"`
+	Output         string            `yaml:"output,omitempty"`
+	JSON           bool              `yaml:"json,omitempty"`
+	Sandbox        *Sandbox          `yaml:"sandbox,omitempty"`
+	Judge          *Judge            `yaml:"judge,omitempty"`
+	Overview       *Overview         `yaml:"overview,omitempty"`
 }
 
 func (profile Profile) ScannerIDs() []string {
@@ -311,6 +315,9 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	opts.Profile = profileName
 	opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 	opts.ConfigSource = configSource
+	if len(intent.scanners) == 0 {
+		opts.PluginScanners = append([]string(nil), selected.profile.PluginScanners...)
+	}
 	opts.LoadedConfigPath = loadedConfigPath
 	opts.DiscoverConfig = intent.discoverConfig
 	if opts.Judge != nil {
@@ -418,6 +425,9 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		opts.Profile = profileName
 		opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 		opts.ConfigSource = filepath.Clean(projectPath)
+		if len(intent.scanners) == 0 {
+			opts.PluginScanners = append([]string(nil), selected.profile.PluginScanners...)
+		}
 		opts.LoadedConfigPath = filepath.Clean(projectPath)
 		opts.OutputPath = ""
 		opts.JSON = false
@@ -1028,6 +1038,19 @@ func validateProfile(name string, profile Profile) error {
 			return fmt.Errorf("Duplicate scanner in profile %s: %s", name, scanner.ID)
 		}
 		seen[scanner.ID] = true
+	}
+	pluginSeen := map[string]bool{}
+	for _, id := range profile.PluginScanners {
+		if !runner.DefaultScannerRegistry().Contains(id) {
+			return fmt.Errorf("Profile %s pluginScanners must name built-in scanners; unknown scanner: %s", name, id)
+		}
+		if !runner.ScannerSupportsPluginTargets(id) {
+			return fmt.Errorf("Profile %s pluginScanners lists %s, which does not support plugin targets", name, id)
+		}
+		if pluginSeen[id] {
+			return fmt.Errorf("Duplicate plugin scanner in profile %s: %s", name, id)
+		}
+		pluginSeen[id] = true
 	}
 	return nil
 }

@@ -1,0 +1,52 @@
+diff --git a/mcp_scan/tools/dispatcher.py b/mcp_scan/tools/dispatcher.py
+index 14e958a..58ced24 100644
+--- a/mcp_scan/tools/dispatcher.py
++++ b/mcp_scan/tools/dispatcher.py
+@@ -19,7 +19,7 @@
+ import inspect
+ from typing import TYPE_CHECKING, Any, Optional
+ 
+-from mcp_scan.tools.registry import get_tool_by_name, get_tools_prompt, needs_context
++from mcp_scan.tools.registry import get_tool_by_name, get_tool_names, get_tools_prompt, needs_context
+ from mcp_scan.utils import strip_surrogates
+ from mcp_scan.utils.loging import logger
+ from mcp_scan.utils.mcp_tools import MCPTools
+@@ -28,6 +28,11 @@ from mcp_scan.utils.prompt_manager import prompt_manager
+ if TYPE_CHECKING:  # pragma: no cover
+     from mcp_scan.utils.tool_context import ToolContext
+ 
++# ClawScan: a static audit reads untrusted code, so the agent must not run
++# commands or write files on the scanning host. read_file stays confined to the
++# audited directory.
++_STATIC_BLOCKED_TOOLS = frozenset({"execute_shell", "write_file"})
++
+ # 动态扫描模式下的安全工具白名单：仅允许只读/元信息工具，禁止 execute_shell / read_file
+ # 等本地操作工具，防止恶意 MCP 工具描述中的 prompt injection 诱导 agent 执行任意命令。
+ _DYNAMIC_SAFE_TOOLS = frozenset({
+@@ -116,8 +121,10 @@ class ToolDispatcher:
+                 logger.error(f"Failed to fetch MCP tools description: {e}")
+                 return prompt
+         else:
+-            # 静态扫描：全部工具可用
+-            prompt = get_tools_prompt([])
++            # ClawScan: static scans expose only confined read-only tools.
++            prompt = get_tools_prompt(
++                [name for name in get_tool_names() if name not in _STATIC_BLOCKED_TOOLS]
++            )
+ 
+         return prompt
+ 
+@@ -137,6 +144,13 @@ class ToolDispatcher:
+                 f"Only MCP interaction tools are allowed."
+             )
+ 
++        if not self.mcp_server_url and tool_name in _STATIC_BLOCKED_TOOLS:
++            logger.warning(f"Blocked tool '{tool_name}' in static scan mode")
++            return (
++                f"Error: Tool '{tool_name}' is not available in static scan mode. "
++                f"Use read_file to inspect files in the audited directory."
++            )
++
+         # 1. 尝试作为本地工具调用
+         tool_func = get_tool_by_name(tool_name)
+         if tool_func:

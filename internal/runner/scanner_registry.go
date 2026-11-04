@@ -13,7 +13,8 @@ type ScannerAdapter interface {
 	InstallPlan() InstallPlan
 	// SupportsTargetKind reports whether the adapter can analyze a target of the
 	// given kind. Adapters support skill and URL targets by default; only
-	// plugin-aware adapters accept OpenClaw plugin targets.
+	// plugin-aware adapters accept OpenClaw plugin targets, and plugin-only
+	// adapters accept nothing else.
 	SupportsTargetKind(kind string) bool
 	Run(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
@@ -125,7 +126,10 @@ type scannerAdapter struct {
 	// supportsPlugins marks adapters that can analyze OpenClaw plugin
 	// targets. Skill and URL kinds are always supported.
 	supportsPlugins bool
-	run             func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
+	// pluginOnly marks adapters that analyze OpenClaw plugin code and skip
+	// every other target kind.
+	pluginOnly bool
+	run        func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
 
 func (adapter scannerAdapter) ID() string {
@@ -174,6 +178,9 @@ func (adapter scannerAdapter) InstallPlan() InstallPlan {
 }
 
 func (adapter scannerAdapter) SupportsTargetKind(kind string) bool {
+	if adapter.pluginOnly {
+		return kind == targetKindPlugin
+	}
 	if kind == targetKindPlugin {
 		return adapter.supportsPlugins
 	}
@@ -246,6 +253,34 @@ func defaultScannerAdapters() []ScannerAdapter {
 				VerifyCommand: InstallCommand{Command: "aig-skill-scan", Args: []string{"--help"}},
 			},
 			run: ExternalScannerRunner.runAIG,
+		},
+		scannerAdapter{
+			id:            aigMCPScannerID,
+			requirements:  aigMCPRequirements,
+			commandBacked: true,
+			pluginOnly:    true,
+			info: ScannerInfo{
+				DisplayName:   "Tencent AI-Infra-Guard MCP scanner",
+				RepositoryURL: "https://github.com/Tencent/AI-Infra-Guard/tree/main/mcp-scan",
+				Description:   "Tencent Zhuque Lab's LLM-driven MCP server code audit invoked through aig-mcp-scan, applied to OpenClaw plugin targets only; skill, file and URL targets are skipped. Scans a temporary copy of the plugin without node_modules, with an OpenClaw plugin audit prompt, and produces SARIF 2.1.0 with MCP01-MCP10 evidence. Runs in the Docker sandbox, whose patched runtime denies the agent shell and file writes; host runs require AIG_MCP_SCAN_ALLOW_HOST_EXEC=1. Requires LLM_API_KEY or OPENAI_API_KEY.",
+				OptionalEnv: []string{
+					"OPENAI_API_KEY",
+					"DEFAULT_MODEL",
+					"DEFAULT_BASE_URL",
+					"DEFAULT_MODEL_CONTEXT_WINDOW",
+					aigMCPAllowHostExecEnv,
+				},
+			},
+			installPlan: InstallPlan{
+				ScannerID:        aigMCPScannerID,
+				Name:             "Tencent AI-Infra-Guard MCP scanner",
+				CheckExecutables: []string{aigMCPCommand},
+				Commands: []InstallCommand{
+					{Command: "pip", Args: []string{"install", aigMCPCommand + "==" + aigMCPScanVersion}},
+				},
+				VerifyCommand: InstallCommand{Command: aigMCPCommand, Args: []string{"--help"}},
+			},
+			run: ExternalScannerRunner.runAIGMCP,
 		},
 		scannerAdapter{
 			id:            "cisco",

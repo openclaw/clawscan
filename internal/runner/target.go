@@ -453,6 +453,13 @@ func scannerSupportsTargetKind(scanner string, kind string) bool {
 	return scannerSupportsTargetKindInRegistry(DefaultScannerRegistry(), scanner, kind)
 }
 
+// ScannerSupportsPluginTargets reports whether a built-in scanner can analyze
+// OpenClaw plugin targets.
+func ScannerSupportsPluginTargets(scanner string) bool {
+	adapter, ok := DefaultScannerRegistry().Adapter(scanner)
+	return ok && adapter.SupportsTargetKind(targetKindPlugin)
+}
+
 func scannerSupportsTargetKindInRegistry(registry ScannerRegistry, scanner string, kind string) bool {
 	adapter, ok := registry.Adapter(scanner)
 	if !ok {

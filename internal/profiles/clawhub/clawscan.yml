@@ -5,6 +5,10 @@ profiles:
     scanners:
       - skillspector
       - aig
+    # Plugins run in-process in the gateway; audit the whole plugin, including
+    # embedded skills and compiled output, with A.I.G's MCP code audit only.
+    pluginScanners:
+      - aig-mcp
     scannerEnvDefaults:
       SKILLSPECTOR_PROVIDER: openai
       SKILLSPECTOR_MODEL: gpt-6.1-sol

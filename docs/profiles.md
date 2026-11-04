@@ -56,9 +56,18 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `aig` | OpenAI Decisions API `gpt-6-luna` verdict (`clawscan-decisions-judge`), then a Codex `gpt-6-luna` low-effort overview |
+| `clawhub` | skills: `skillspector`, `aig`; plugins: `aig-mcp` | OpenAI Decisions API `gpt-6-luna` verdict (`clawscan-decisions-judge`), then a Codex `gpt-6-luna` low-effort overview |
 | `clawhub-aig` | `skillspector`, `aig` | Same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
+
+Profiles can set `pluginScanners` to replace `scanners` for OpenClaw plugin
+targets. The built-in `clawhub` profile uses it so a plugin is audited as one
+artifact by `aig-mcp` alone: no skill scanner runs or is recorded for it, and
+the judge receives that one raw SARIF result. Skill targets keep the `scanners`
+list unchanged. An explicit `--scanner` replaces both lists for that run.
+`aig-mcp` uses the A.I.G `DEFAULT_MODEL`/`DEFAULT_BASE_URL` defaults below but
+calls Chat Completions without the patched Responses transport, so
+`REASONING_EFFORT` and the Standard-tier guarantees do not apply to it.
 
 The two ClawHub profiles explicitly configure the OpenAI scanner lanes with
 `scannerEnvDefaults`: SkillSpector uses `SKILLSPECTOR_PROVIDER=openai`,

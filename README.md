@@ -162,6 +162,7 @@ clawscan scanners skillspector
 | --- | --- | --- | --- | --- | --- |
 | `agentverus` | AgentVerus | [repo](https://github.com/agentverus/agentverus-scanner) | Local file or directory scanner invoked through agentverus-scanner. | none | `npm install --save-dev agentverus-scanner` |
 | `aig` | Tencent AI-Infra-Guard | [repo](https://github.com/Tencent/AI-Infra-Guard/tree/main/skill-scan) | Tencent Zhuque Lab's local directory scanner invoked through `aig-skill-scan`. Produces SARIF 2.1.0 with SkillTrustBench T01-T09 evidence. | `LLM_API_KEY` or `OPENAI_API_KEY`<br><details><summary>Optional config</summary><code>DEFAULT_MODEL</code>, <code>REASONING_EFFORT</code> (requires the patched runtime), <code>DEFAULT_BASE_URL</code>, <code>DEFAULT_MODEL_CONTEXT_WINDOW</code>, <code>LOG_LEVEL</code>.</details> | `pip install aig-skill-scan` |
+| `aig-mcp` | Tencent AI-Infra-Guard MCP scanner | [repo](https://github.com/Tencent/AI-Infra-Guard/tree/main/mcp-scan) | Tencent Zhuque Lab's LLM-driven MCP server code audit invoked through `aig-mcp-scan`, run on OpenClaw plugin targets only (skill, file and URL targets are skipped). Audits a bounded temporary copy of the whole plugin without `node_modules`, using an OpenClaw plugin audit prompt, and produces SARIF 2.1.0 with MCP01-MCP10 evidence. Runs in the Docker sandbox, whose runtime image removes the agent's shell and file-write tools. | `LLM_API_KEY` or `OPENAI_API_KEY`<br><details><summary>Optional config</summary><code>DEFAULT_MODEL</code>, <code>DEFAULT_BASE_URL</code> (same defaults as <code>aig</code>), <code>DEFAULT_MODEL_CONTEXT_WINDOW</code>, <code>AIG_MCP_SCAN_ALLOW_HOST_EXEC=1</code> (required with <code>--sandbox off</code>).</details> | runtime image (patched `aig-mcp-scan==0.2.0`); `pip install aig-mcp-scan==0.2.0` is unpatched |
 | `cisco` | Cisco AI Defense skill-scanner | [repo](https://github.com/cisco-ai-defense/skill-scanner) | Local file or directory scanner invoked through `skill-scanner` with JSON report output. Optional upstream env vars enable LLM, VirusTotal, and Cisco AI Defense analyzers. | none<br><details><summary>Optional config</summary><code>SKILL_SCANNER_LLM_API_KEY</code>, <code>SKILL_SCANNER_LLM_PROVIDER</code>, <code>SKILL_SCANNER_LLM_MODEL</code>, <code>SKILL_SCANNER_LLM_BASE_URL</code>, <code>SKILL_SCANNER_LLM_USER</code>, <code>SKILL_SCANNER_LLM_API_VERSION</code>, <code>SKILL_SCANNER_LLM_FORCE_JSON_OBJECT</code>, <code>SKILL_SCANNER_META_LLM_API_KEY</code>, <code>SKILL_SCANNER_META_LLM_MODEL</code>, <code>SKILL_SCANNER_META_LLM_BASE_URL</code>, <code>SKILL_SCANNER_META_LLM_API_VERSION</code>, <code>AWS_PROFILE</code>, <code>AWS_REGION</code>, <code>GOOGLE_APPLICATION_CREDENTIALS</code>, <code>VIRUSTOTAL_API_KEY</code>, <code>AI_DEFENSE_API_KEY</code>, <code>AI_DEFENSE_API_URL</code>.</details> | `uv pip install cisco-ai-skill-scanner` |
 | `relyable` | Relyable | [repo](https://github.com/veriker/relyable) | Functional re-derivation evidence: does the skill still do what its docs claim, recomputed? Emits the strongest grade that applies. `exogenous`: a declared `rederive.json` property manifest (idempotence / round-trip), with both sides of the relation computed from the skill's own code and the result mutation-tested against vacuity. `self_spec`: re-runs the author's own committed oracle (shipped tests or documented I/O examples). `cold_golden`: when an LLM key is set, a code-blind model infers goldens from SKILL.md alone and abstains unless the docs pin exact behavior; divergences are reported as unconfirmed, never as accusations. `non_rederivable`: the honest floor, never a fabricated pass. Functional axis only; complements the security scanners and does not detect malware or prompt injection. Skill code runs only inside the Docker sandbox (or with an explicit opt-in), in a scrubbed environment, and the scanner fails closed otherwise. Not preinstalled in the `clawscan-runtime` image. | none<br><details><summary>Optional config</summary><code>RELYABLE_SCAN_ALLOW_HOST_EXEC</code> — explicit ack that the host is disposable when running with <code>--sandbox off</code>.<br><br><code>RELYABLE_LLM_API_KEY</code> (+ <code>RELYABLE_LLM_PROVIDER</code> <code>anthropic|openai</code>, <code>RELYABLE_LLM_MODEL</code>, <code>RELYABLE_LLM_BASE_URL</code>) — explicit per-scanner opt-in that enables the <code>cold_golden</code> lane; key presence only is ever recorded in the payload. Generic <code>ANTHROPIC_API_KEY</code>/<code>OPENAI_API_KEY</code> are honored by standalone <code>relyable-scan</code> but are deliberately not auto-forwarded by ClawScan.</details> | `clawscan install relyable` — not preinstalled in the runtime image |
 | `skillspector` | NVIDIA SkillSpector | [repo](https://github.com/NVIDIA/skillspector) | Local skill or OpenClaw plugin file/directory scanner. Uses LLM mode when provider env vars are set; otherwise runs with `--no-llm`. | none<br><details><summary>Optional config</summary><code>SKILLSPECTOR_PROVIDER</code>, <code>SKILLSPECTOR_MODEL</code>, <code>SKILLSPECTOR_REASONING_EFFORT</code>, <code>SKILLSPECTOR_TEMPERATURE</code>, <code>SKILLSPECTOR_SEED</code>, <code>SKILLSPECTOR_MODEL_REGISTRY</code>, <code>SKILLSPECTOR_LOG_LEVEL</code>, <code>SKILLSPECTOR_SSL_VERIFY</code>, <code>NVIDIA_INFERENCE_KEY</code>, <code>OPENAI_API_KEY</code>, <code>OPENAI_BASE_URL</code>, <code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_PROXY_ENDPOINT_URL</code>, <code>ANTHROPIC_PROXY_API_KEY</code>, <code>ANTHROPIC_PROXY_API_VERSION</code>.</details> | `uv tool install git+https://github.com/NVIDIA/skillspector.git` |
@@ -187,9 +188,11 @@ clawscan ./my-skill --profile clawhub
 ```
 
 The same profile accepts an explicit OpenClaw plugin directory (or its
-`openclaw.plugin.json` manifest), runs the plugin-capable scanners in the
-profile, and renders the bundled judge prompt with `packageRelease` target
-context.
+`openclaw.plugin.json` manifest). For plugins it runs only `aig-mcp`, Tencent
+A.I.G's MCP code audit, over the whole plugin minus `node_modules` (embedded
+skills and `dist/`/`build/` output included), and renders the bundled judge
+prompt with `packageRelease` target context and that one raw SARIF result; see
+[docs/scanners.md](docs/scanners.md#plugin-code-audit-with-aig-mcp).
 
 Inspect the built-in profile catalog:
 
@@ -202,7 +205,7 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | `skillspector`, `aig` | OpenAI Decisions API `gpt-6-luna` verdict (`clawscan-decisions-judge`), then a Codex `gpt-6-luna` low-effort overview |
+| `clawhub` | skills: `skillspector`, `aig`; plugins: `aig-mcp` | OpenAI Decisions API `gpt-6-luna` verdict (`clawscan-decisions-judge`), then a Codex `gpt-6-luna` low-effort overview |
 | `clawhub-aig` | `skillspector`, `aig` | Same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
@@ -210,7 +213,8 @@ The two ClawHub profiles explicitly configure the OpenAI scanner lanes with
 `scannerEnvDefaults`: SkillSpector uses `SKILLSPECTOR_PROVIDER=openai`,
 `SKILLSPECTOR_MODEL=gpt-6.1-sol`, and `SKILLSPECTOR_REASONING_EFFORT=medium`;
 A.I.G uses `DEFAULT_MODEL=gpt-6.1-sol` and `REASONING_EFFORT=medium` with OpenAI
-credentials. The verdict comes from the OpenAI Decisions API (`gpt-6-luna`)
+credentials (`aig-mcp` uses the same model and endpoint defaults, but not
+`REASONING_EFFORT` or the Standard-tier control). The verdict comes from the OpenAI Decisions API (`gpt-6-luna`)
 through `clawscan-decisions-judge`, which returns typed answers only; a separate
 Codex overview step (`gpt-6-luna`, low reasoning, Standard service) writes the
 readable summary and never changes the verdict. Credentials stay in the

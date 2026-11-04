@@ -80,6 +80,16 @@ The runtime builds NVIDIA SkillSpector from
 selecting these revisions. Both still use Chat Completions by default. The PyPI
 A.I.G 0.2.2 release also lacks upstream's reasoning-effort support.
 
+The runtime also installs Tencent's `aig-mcp-scan` 0.2.0 from PyPI
+(`AIG_MCP_SCAN_VERSION`) in its own `uv tool` environment for the plugin-only
+`aig-mcp` scanner. `patches/aig-mcp-static-tools.patch` removes the agent's
+`execute_shell` and `write_file` tools from static audits, which read untrusted
+plugin code; `tests/test_aig_mcp_static_tools.py` runs in the build and fails it
+if the patch or the upstream tool set drifts. The scanner uses Chat Completions
+without a reasoning-effort or service-tier control and receives the model and
+endpoint as explicit `-m`/`-u` flags. Only the top-level package is pinned; its
+dependencies resolve at build time.
+
 The small patches under `docker/clawscan-runtime/patches/` are owned integration
 fixes, not a new ClawScan model-provider framework:
 
@@ -350,8 +360,8 @@ and arm64). Build logs must show exact-pin patch application and all installed
 SkillSpector/AIG SDK wire-contract tests passing. Export the resulting image or
 OCI layout successfully and retain its immutable digest; a cache-only build or
 host-side Python tests are not final-image export proof. From the exported image,
-smoke `skillspector --help`, `aig-skill-scan --help`, `codex --version`, and
-`clawscan-decisions-judge --help`.
+smoke `skillspector --help`, `aig-skill-scan --help`, `aig-mcp-scan --help`,
+`codex --version`, and `clawscan-decisions-judge --help`.
 No credentials or live paid calls are needed for these CI checks.
 
 A consumer deliberately running `--sandbox off` may instead install these same

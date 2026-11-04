@@ -247,7 +247,7 @@ class PublicationTests(unittest.TestCase):
         publish.verify()
         call = next(call for call in self.registry.calls if call[:2] == ["docker", "run"])
         self.assertEqual(call, ["docker", "run", "--rm", "--network", "none", self.registry.loaded["Id"],
-                                "/bin/sh", "-ec", "skillspector --help\naig-skill-scan --help\ncodex --version\nclawscan-decisions-judge --help\n"])
+                                "/bin/sh", "-ec", "skillspector --help\naig-skill-scan --help\naig-mcp-scan --help\ncodex --version\nclawscan-decisions-judge --help\n"])
         self.assertEqual(json.loads(publish.proof_path().read_text())["smoke"], "passed")
 
     def test_failed_smoke_or_wrong_loaded_identity_never_emits_proof(self):

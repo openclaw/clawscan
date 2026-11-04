@@ -85,7 +85,7 @@ func TestScannerRegistryRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestDefaultScannerRegistryContainsAllBuiltIns(t *testing.T) {
-	want := "agentverus,aig,cisco,relyable,skillspector,snyk,socket"
+	want := "agentverus,aig,aig-mcp,cisco,relyable,skillspector,snyk,socket"
 	if got := strings.Join(builtInScannerRegistry().IDs(), ","); got != want {
 		t.Fatalf("ids = %q, want %q", got, want)
 	}
@@ -126,13 +126,14 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing adapter for %s", id)
 		}
-		if !adapter.SupportsTargetKind(targetKindSkill) {
-			t.Fatalf("%s should support skill targets", id)
+		pluginOnly := id == aigMCPScannerID
+		if got := adapter.SupportsTargetKind(targetKindSkill); got == pluginOnly {
+			t.Fatalf("%s skill support = %v, want %v", id, got, !pluginOnly)
 		}
-		if !adapter.SupportsTargetKind(targetKindURL) {
-			t.Fatalf("%s should support url targets", id)
+		if got := adapter.SupportsTargetKind(targetKindURL); got == pluginOnly {
+			t.Fatalf("%s url support = %v, want %v", id, got, !pluginOnly)
 		}
-		wantPlugin := id == "skillspector" || id == "socket"
+		wantPlugin := pluginOnly || id == "skillspector" || id == "socket"
 		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {
 			t.Fatalf("%s plugin support = %v, want %v", id, got, wantPlugin)
 		}

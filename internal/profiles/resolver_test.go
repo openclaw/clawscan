@@ -2089,3 +2089,42 @@ func TestProfileRejectsSecretEnvDefaults(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestClawHubProfileSelectsAIGMCPForPluginTargets(t *testing.T) {
+	dir := t.TempDir()
+	opts, err := ResolveArgs([]string{"./plugin", "--profile", "clawhub"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(opts.PluginScanners, ","); got != "aig-mcp" {
+		t.Fatalf("plugin scanners = %q", got)
+	}
+	opts, err = ResolveArgs([]string{"./plugin", "--profile", "clawhub", "--scanner", "skillspector"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.PluginScanners) != 0 || strings.Join(opts.Scanners, ",") != "skillspector" {
+		t.Fatalf("explicit --scanner must replace both lists: scanners=%v plugin=%v", opts.Scanners, opts.PluginScanners)
+	}
+}
+
+func TestProfilePluginScannersRejectUnknownOrSkillOnlyScanners(t *testing.T) {
+	for _, test := range []struct {
+		list string
+		want string
+	}{
+		{list: "[nope]", want: "pluginScanners must name built-in scanners; unknown scanner: nope"},
+		{list: "[aig]", want: "pluginScanners lists aig, which does not support plugin targets"},
+		{list: "[aig-mcp, aig-mcp]", want: "Duplicate plugin scanner in profile local: aig-mcp"},
+	} {
+		dir := t.TempDir()
+		config := filepath.Join(dir, ".clawscan.yml")
+		if err := os.WriteFile(config, []byte("version: 1\nprofiles:\n  local:\n    scanners: [skillspector]\n    pluginScanners: "+test.list+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ResolveArgs([]string{"./plugin", "--profile", "local", "--config", config}, dir)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("%s: err = %v", test.list, err)
+		}
+	}
+}
