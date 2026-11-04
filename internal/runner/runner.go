@@ -1864,6 +1864,13 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 	if err != nil {
 		return "", err
 	}
+	if isClawHubParityProfile(artifact.Profile) {
+		// The ClawHub profiles pipe this prompt to a pinned Codex CLI with a hard
+		// input limit. Refuse oversize prompts before the judge command starts.
+		if err := checkJudgePromptBudget(prompt, clawHubJudgePromptBudgetChars); err != nil {
+			return "", err
+		}
+	}
 	path := filepath.Join(state.workspace, "prompt.md")
 	if err := os.WriteFile(path, []byte(prompt), 0o644); err != nil {
 		return "", err

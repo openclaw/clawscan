@@ -139,7 +139,7 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 	var analysisCompleteness map[string]any
 	if reportError != "" {
 		status = "error"
-		analysisCompleteness = asStringMap(record["analysis_completeness"])
+		analysisCompleteness = summarizeClawHubAnalysisCompleteness(asStringMap(record["analysis_completeness"]))
 	}
 	return clawHubNormalizedSkillSpectorAnalysis{
 		Status:               status,
