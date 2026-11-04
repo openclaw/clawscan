@@ -102,6 +102,30 @@ results. Continue enforcing artifact identity, sandbox requirements, and genuine
 secret, malicious, and unsafe-bytecode checks. A receipt authenticates inspection
 evidence; it does not establish complete coverage or justify a verdict by itself.
 
+Partial reports can carry one accounting row per excluded or partially inspected
+file. In the ClawHub prompt, `analysis_completeness.ledger_exceptions` and
+`scope_exclusions` (grouped by `reason_code`) and `references` (grouped by
+`status`) are summarized as `{summarized, total, counts_by_<key>, sample,
+sample_omitted, note}`. Counts cover up to 32 groups, with any remainder in
+`other_<key>_groups` and `other_<key>_entries`. The sample takes the first three
+rows of each group in count order, up to 24 bounded rows and 12,000 characters.
+The full lists stay in
+`skillspector-report-0.json` in the judge workspace and in the scanner's `raw`
+evidence; summarization never changes scanner status, findings, or gates.
+
+## Prompt size budget
+
+The `clawhub` and `clawhub-aig` judges pipe the rendered prompt to a pinned
+Codex CLI (0.164.0), which rejects input over 1,048,576 characters with
+`input_too_large` before contacting the model. These profiles count the rendered
+prompt's Unicode characters before starting the judge command and refuse prompts
+over 943,718 characters (90% of that limit). A refused prompt never reaches the
+judge: the run fails with `judge.status: "failed"`, `judge.commandStarted:
+false`, no `judge.attempts`, and the error `judge prompt too large: <n> chars
+exceeds budget 943718` on both the judge and the top-level artifact. This is an
+operational failure, not a verdict, and it is not retried. Other profiles keep
+their existing behavior.
+
 ## Versioned inspection receipts
 
 The built-in `clawhub` and `clawhub-aig` judges emit version 2 receipts. The

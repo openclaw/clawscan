@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Run full CodeQL scans daily instead of on every main push, preserve PR and manual analysis, and start scans when draft PRs become ready for review.
+- Summarize per-file SkillSpector accounting lists in the ClawHub judge prompt as counts plus a bounded sample, and refuse ClawHub judge prompts over 90% of the pinned Codex CLI input limit before the judge starts, failing with `judge prompt too large: <n> chars exceeds budget <b>`. The full report stays in the judge workspace.
 
 ## 0.3.1 - 2026-11-02
 
