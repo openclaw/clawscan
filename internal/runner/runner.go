@@ -520,7 +520,8 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	startedAt := now().UTC().Format(time.RFC3339Nano)
 	artifact = pendingArtifact(opts, startedAt, env)
 	artifact.outputSafety = safety
-	defer finishArtifact(&artifact, opts, ctx.Context, now, &runErr)
+	// A closure, so the final gate sees the plugin scanner list when it applies.
+	defer func() { finishArtifact(&artifact, opts, ctx.Context, now, &runErr) }()
 	if err := ctx.Context.Err(); err != nil {
 		return artifact, err
 	}

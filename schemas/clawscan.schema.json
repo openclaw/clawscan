@@ -36,9 +36,13 @@
         },
         "pluginScanners": {
           "type": "array",
-          "description": "Built-in scanners that replace scanners for OpenClaw plugin targets. Explicit --scanner flags override both lists.",
+          "description": "Built-in plugin-capable scanners that replace scanners for OpenClaw plugin targets. Explicit --scanner flags override both lists.",
           "items": {
-            "$ref": "#/$defs/builtinScannerID"
+            "enum": [
+              "aig-mcp",
+              "skillspector",
+              "socket"
+            ]
           },
           "uniqueItems": true
         },

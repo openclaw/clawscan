@@ -336,14 +336,17 @@ plugin directory the adapter:
   -p <prompt> -o aig-mcp-scan.sarif.json` in that workspace, never in the
   original target. The prompt explains the in-process plugin runtime
   (`api.registerTool`, prompt hooks, `registerHttpRoute`), prioritizes
-  malicious or undeclared behavior, puts embedded skills, hooks, scripts and
-  compiled output in scope, and lists the `dist/` and `build/` files that
-  `aig-mcp-scan` leaves out of its own directory summary;
+  malicious or undeclared behavior, and puts embedded skills, hooks, scripts and
+  compiled output in scope. `aig-mcp-scan` leaves `dist/` and `build/` out of
+  the directory summary it shows the model and truncates that summary at 200
+  files, so the prompt lists the omitted files (every file for plugins over 200
+  files; up to 400 paths, source files and `SKILL.md` first);
 - passes credentials only through `LLM_API_KEY` or `OPENAI_API_KEY`, and the
   model and endpoint only through the `aig` settings `DEFAULT_MODEL` and
-  `DEFAULT_BASE_URL`, which default to OpenAI's endpoint for OpenAI or Codex
-  credentials. Generic `OPENAI_BASE_URL` or `LLM_MODEL` values meant for other
-  tools are ignored;
+  `DEFAULT_BASE_URL`. These default to OpenAI's endpoint for OpenAI or Codex
+  credentials and otherwise to `aig-mcp-scan`'s own defaults, and are always
+  passed as `-m`/`-u` so generic `OPENAI_BASE_URL` or `LLM_MODEL` values meant
+  for other tools never apply;
 - keeps the upstream SARIF unchanged as the scanner's raw evidence. The ClawHub
   judge prompt receives that one raw SARIF document. Benchmarks map SARIF
   levels to severities (`error` high, `warning` or absent medium, `note` low,
@@ -355,7 +358,12 @@ audits, and prompt injection in the audited plugin could reach them. The
 runtime image patches both tools out and its build fails if that patch stops
 applying. The adapter therefore expects the Docker sandbox: with
 `--sandbox off` it fails unless `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` acknowledges a
-disposable host. A plain `pip install aig-mcp-scan` is unpatched.
+disposable host. A plain `pip install aig-mcp-scan` (and `clawscan install
+aig-mcp`) is unpatched; host consumers such as a ClawHub worker must install
+the patched build from `docker/clawscan-runtime` instead. Adopting a ClawScan
+release with this profile change therefore needs the runtime image published
+first and any host worker updated before its ClawScan pin moves; until then,
+plugin scans fail closed rather than running without `aig-mcp`.
 
 Failures are never reported as clean scans. A non-zero exit, missing or invalid
 SARIF, model calls that failed behind a clean exit (`LLM chat failed after

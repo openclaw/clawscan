@@ -273,7 +273,7 @@ func TestClawHubProfileRunsOnlyAIGMCPOnStagedPluginWithoutNodeModules(t *testing
 		"This directory is an OpenClaw plugin, not a standalone MCP server.",
 		"Third-party dependencies (node_modules) were removed and are out of scope.",
 		"also audit embedded skills (SKILL.md files and the instructions, references and scripts they ship)",
-		"(paths relative to the audited directory): dist/index.js.",
+		"using these paths: plugin/dist/index.js.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("plugin audit prompt missing %q: %q", want, prompt)

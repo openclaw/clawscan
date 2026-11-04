@@ -162,8 +162,10 @@ func TestAIGMCPModelAndEndpointFollowAIGConventions(t *testing.T) {
 			wantURL:   defaultAIGOpenAIBaseURL,
 		},
 		{
-			name: "a dedicated key keeps A.I.G's own defaults",
-			env:  map[string]string{"LLM_API_KEY": "k", "OPENAI_BASE_URL": "https://proxy.example/v1"},
+			name:      "a dedicated key keeps A.I.G's own defaults, passed explicitly over host LLM_/OPENAI_ settings",
+			env:       map[string]string{"LLM_API_KEY": "k", "LLM_MODEL": "other-model", "OPENAI_BASE_URL": "https://proxy.example/v1"},
+			wantModel: aigMCPUpstreamModel,
+			wantURL:   aigMCPUpstreamBaseURL,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -522,7 +524,7 @@ func TestAIGMCPPromptListsFilesTheUpstreamSummaryHides(t *testing.T) {
 	runAIGMCPTest(t, target, map[string]string{"LLM_API_KEY": "k"}, commands)
 	prompt := argValue(commands.calls[0].args, "-p")
 	if !strings.HasPrefix(prompt, aigMCPPluginPrompt+aigMCPScopePrompt) ||
-		!strings.HasSuffix(prompt, "(paths relative to the audited directory): build/tool.js, dist/chunks/a.js, dist/index.js.") {
+		!strings.HasSuffix(prompt, "using these paths: plugin/build/tool.js, plugin/dist/chunks/a.js, plugin/dist/index.js.") {
 		t.Fatalf("prompt = %q", prompt)
 	}
 
@@ -532,11 +534,11 @@ func TestAIGMCPPromptListsFilesTheUpstreamSummaryHides(t *testing.T) {
 		t.Fatalf("prompt without hidden files changed: %q", got)
 	}
 
-	many := make([]string, aigMCPMaxHiddenFiles+3)
+	many := make([]string, aigMCPMaxListedFiles+3)
 	for i := range many {
 		many[i] = fmt.Sprintf("dist/f%03d.js", i)
 	}
-	if got := aigMCPPrompt(many); !strings.HasSuffix(got, "dist/f099.js (and 3 more).") {
+	if got := aigMCPPrompt(many); !strings.HasSuffix(got, "plugin/dist/f399.js (and 3 more lower-priority files).") {
 		t.Fatalf("bounded prompt suffix = %q", got[len(got)-80:])
 	}
 }
@@ -561,5 +563,78 @@ func TestAIGMCPStagingRefusesEscapingSymlinks(t *testing.T) {
 	}
 	if result := artifact.Scanners["aig-mcp"]; result.Status != "failed" || len(commands.calls) != 0 {
 		t.Fatalf("result = %#v calls = %#v", result, commands.calls)
+	}
+}
+
+func TestAIGMCPInventoriesLargePluginsSourceFirst(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel string) {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < aigMCPUpstreamTreeFiles; i++ {
+		write(fmt.Sprintf("assets/a%03d.png", i))
+	}
+	write("lib/z-late.js")
+	write("lib/types.d.ts")
+	write("lib/z-late.js.map")
+	write("skills/helper/SKILL.md")
+	listed, err := aigMCPListedFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != aigMCPUpstreamTreeFiles+4 {
+		t.Fatalf("listed %d files", len(listed))
+	}
+	if got := strings.Join(listed[:2], ","); got != "lib/z-late.js,skills/helper/SKILL.md" {
+		t.Fatalf("source files must come first: %q", got)
+	}
+	if got := strings.Join(listed[len(listed)-2:], ","); got != "lib/types.d.ts,lib/z-late.js.map" {
+		t.Fatalf("declaration and map files must come last: %q", got)
+	}
+
+	small := t.TempDir()
+	if err := os.WriteFile(filepath.Join(small, "index.js"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := aigMCPListedFiles(small); err != nil || len(listed) != 0 {
+		t.Fatalf("a plugin within the upstream summary needs no inventory: %v %v", listed, err)
+	}
+}
+
+func TestSchemaPluginScannersMatchPluginCapableBuiltIns(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "clawscan.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Defs struct {
+			Profile struct {
+				Properties struct {
+					PluginScanners struct {
+						Items struct {
+							Enum []string `json:"enum"`
+						} `json:"items"`
+					} `json:"pluginScanners"`
+				} `json:"properties"`
+			} `json:"profile"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, id := range builtInScannerRegistry().IDs() {
+		if ScannerSupportsPluginTargets(id) {
+			want = append(want, id)
+		}
+	}
+	if got := strings.Join(schema.Defs.Profile.Properties.PluginScanners.Items.Enum, ","); got != strings.Join(want, ",") {
+		t.Fatalf("schema pluginScanners enum = %q, plugin-capable built-ins = %q", got, strings.Join(want, ","))
 	}
 }

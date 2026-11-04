@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,9 +27,17 @@ const (
 	// Docker sandbox. Upstream aig-mcp-scan gives its LLM agent a shell while it
 	// reads untrusted plugin code; the runtime image patches that tool out.
 	aigMCPAllowHostExecEnv = "AIG_MCP_SCAN_ALLOW_HOST_EXEC"
-	// aigMCPMaxHiddenFiles bounds the inventory of files the upstream repo
-	// summary hides (see aigMCPHiddenDirs).
-	aigMCPMaxHiddenFiles = 100
+	// aigMCPUpstreamTreeFiles is where aig-mcp-scan 0.2.0 truncates the
+	// directory summary it shows the model. Without a shell, the agent cannot
+	// discover files past it, so larger plugins get a full inventory.
+	aigMCPUpstreamTreeFiles = 200
+	// aigMCPMaxListedFiles bounds that inventory; source files come first.
+	aigMCPMaxListedFiles = 400
+	// aigMCPUpstreamModel and aigMCPUpstreamBaseURL are aig-mcp-scan 0.2.0's own
+	// defaults. They are passed explicitly so generic LLM_*/OPENAI_* model and
+	// endpoint variables in a host environment never pair with the key.
+	aigMCPUpstreamModel   = "deepseek/deepseek-v3.2-exp"
+	aigMCPUpstreamBaseURL = "https://openrouter.ai/api/v1"
 	// The staged copy is bounded so one artifact cannot exhaust the host. A
 	// plugin over either limit fails the scan rather than being audited partly.
 	aigMCPMaxStagedFiles = 20_000
@@ -123,12 +132,12 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 	if err := stagePluginScanTarget(runner, target, staged); err != nil {
 		return ScannerResult{}, fmt.Errorf("prepare aig-mcp-scan plugin copy: %w", err)
 	}
-	hidden, err := aigMCPHiddenFiles(staged)
+	listed, err := aigMCPListedFiles(staged)
 	if err != nil {
 		return ScannerResult{}, fmt.Errorf("prepare aig-mcp-scan plugin copy: %w", err)
 	}
 
-	args := aigMCPArgs(runner.Env, hidden)
+	args := aigMCPArgs(runner.Env, listed)
 	fullCommand := append([]string{aigMCPCommand}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
@@ -228,41 +237,56 @@ func stagePluginScanTarget(runner ExternalScannerRunner, source string, dest str
 }
 
 // aigMCPArgs follows the aig conventions exactly: DEFAULT_MODEL and
-// DEFAULT_BASE_URL, already defaulted to OpenAI for OpenAI or Codex keys. They
-// are passed as flags so the recorded command shows the effective model and
-// endpoint. Generic OPENAI_BASE_URL or LLM_MODEL settings meant for other tools
-// are deliberately ignored so a key is never paired with another tool's
-// endpoint. Credentials stay in the environment and never reach argv.
-func aigMCPArgs(env map[string]string, hiddenFiles []string) []string {
-	args := []string{"--repo", aigMCPStagedTarget, "--language", "en"}
-	if model := strings.TrimSpace(env["DEFAULT_MODEL"]); model != "" {
-		args = append(args, "-m", model)
+// DEFAULT_BASE_URL, already defaulted to OpenAI for OpenAI or Codex keys, and
+// otherwise aig-mcp-scan's own defaults. Both are always passed as flags: the
+// recorded command shows the effective model and endpoint, and generic
+// OPENAI_BASE_URL or LLM_MODEL settings meant for other tools can never pair
+// with the key. Credentials stay in the environment and never reach argv.
+func aigMCPArgs(env map[string]string, listedFiles []string) []string {
+	model := strings.TrimSpace(env["DEFAULT_MODEL"])
+	if model == "" {
+		model = aigMCPUpstreamModel
 	}
-	if baseURL := strings.TrimSpace(env["DEFAULT_BASE_URL"]); baseURL != "" {
-		args = append(args, "-u", baseURL)
+	baseURL := strings.TrimSpace(env["DEFAULT_BASE_URL"])
+	if baseURL == "" {
+		baseURL = aigMCPUpstreamBaseURL
 	}
-	return append(args, "-p", aigMCPPrompt(hiddenFiles), "-o", aigMCPOutputName)
+	return []string{
+		"--repo", aigMCPStagedTarget, "--language", "en",
+		"-m", model, "-u", baseURL,
+		"-p", aigMCPPrompt(listedFiles),
+		"-o", aigMCPOutputName,
+	}
 }
 
-// aigMCPPrompt is the validated plugin prompt, plus an inventory of in-scope
-// files that the upstream repo summary would otherwise hide.
-func aigMCPPrompt(hiddenFiles []string) string {
+// aigMCPPrompt is the validated plugin prompt, the whole-artifact scope note,
+// and an inventory of in-scope files the upstream directory summary omits.
+// Paths carry the plugin/ prefix because read_file resolves them against the
+// scanner's working directory.
+func aigMCPPrompt(listedFiles []string) string {
 	prompt := aigMCPPluginPrompt + aigMCPScopePrompt
-	if len(hiddenFiles) == 0 {
+	if len(listedFiles) == 0 {
 		return prompt
 	}
-	listed := hiddenFiles
+	listed := listedFiles
 	more := ""
-	if len(listed) > aigMCPMaxHiddenFiles {
-		more = fmt.Sprintf(" (and %d more)", len(listed)-aigMCPMaxHiddenFiles)
-		listed = listed[:aigMCPMaxHiddenFiles]
+	if len(listed) > aigMCPMaxListedFiles {
+		more = fmt.Sprintf(" (and %d more lower-priority files)", len(listed)-aigMCPMaxListedFiles)
+		listed = listed[:aigMCPMaxListedFiles]
+	}
+	paths := make([]string, len(listed))
+	for i, file := range listed {
+		paths[i] = aigMCPStagedTarget + "/" + file
 	}
 	return prompt + " The directory summary you are given omits these in-scope files; read them with read_file " +
-		"(paths relative to the audited directory): " + strings.Join(listed, ", ") + more + "."
+		"using these paths: " + strings.Join(paths, ", ") + more + "."
 }
 
-func aigMCPHiddenFiles(root string) ([]string, error) {
-	var files []string
+// aigMCPListedFiles returns the staged files the model would otherwise not
+// see: files under directories the upstream summary skips and, when the plugin
+// exceeds the summary's file cap, every file. Source files sort first.
+func aigMCPListedFiles(root string) ([]string, error) {
+	var all, hidden []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -275,16 +299,47 @@ func aigMCPHiddenFiles(root string) ([]string, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		all = append(all, rel)
 		parts := strings.Split(rel, "/")
 		for _, part := range parts[:len(parts)-1] {
 			if aigMCPHiddenDirs[part] {
-				files = append(files, rel)
+				hidden = append(hidden, rel)
 				break
 			}
 		}
 		return nil
 	})
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+	listed := hidden
+	if len(all) > aigMCPUpstreamTreeFiles {
+		listed = all
+	}
+	sort.SliceStable(listed, func(i, j int) bool {
+		left, right := aigMCPFilePriority(listed[i]), aigMCPFilePriority(listed[j])
+		if left != right {
+			return left < right
+		}
+		return listed[i] < listed[j]
+	})
+	return listed, nil
+}
+
+func aigMCPFilePriority(path string) int {
+	lower := strings.ToLower(path)
+	switch {
+	case strings.HasSuffix(lower, ".map") || strings.HasSuffix(lower, ".d.ts") ||
+		strings.HasSuffix(lower, ".d.mts") || strings.HasSuffix(lower, ".d.cts"):
+		return 2
+	case strings.HasSuffix(lower, "/skill.md") || lower == "skill.md":
+		return 0
+	}
+	switch filepath.Ext(lower) {
+	case ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx", ".py", ".sh", ".bash", ".ps1", ".json":
+		return 0
+	}
+	return 1
 }
 
 func aigMCPRequirements(env map[string]string) []EnvRequirement {
