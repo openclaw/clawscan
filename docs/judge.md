@@ -123,10 +123,17 @@ A profile can set `evidenceOnly: true` on its `judge` or `overview`. That
 command then gets scanner evidence only:
 
 - its workspace has no `artifact/` copy, and `metadata.json` omits the copied
-  file manifest and the target's host path;
+  file manifest, the target input and its resolved host path, keeping only the
+  target `kind` and `id`;
 - `{{ target.files }}` and the ClawHub parity prompt (`clawhub/prompt.md`) fail
   before the command starts;
-- scanner reports stay unchanged under `scanners/` and in `{{ scanner_results }}`.
+- scanner reports stay unchanged under `scanners/` and in `{{ scanner_results }}`,
+  including any paths the scanners recorded.
+
+The ClawHub evidence judge treats publisher trust as provenance: only a
+publisher verified by ClawHub in the job `context` can make an @openclaw
+package trusted by default. A name, README, manifest or publisher claim quoted
+in scanner results never does.
 
 The setting applies only while the profile's own command runs. A `--judge` or
 `--overview` override is the general interface and keeps the full workspace.

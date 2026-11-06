@@ -2031,7 +2031,8 @@ func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifac
 // prepareHarnessWorkspaceContext lays out a judge or overview workspace. By
 // default it holds the copied artifact, one raw evidence file per scanner
 // under scanners/, and metadata.json. An evidence-only workspace omits the
-// artifact copy, its file manifest and the target's host path.
+// artifact copy, its file manifest and the target's input and host path,
+// keeping only its kind and id.
 func prepareHarnessWorkspaceContext(ctx context.Context, workspace string, artifact Artifact, evidenceOnly bool) error {
 	if artifact.Target.Kind == "url" && !evidenceOnly {
 		return fmt.Errorf("judge workspace copying is unsupported for URL targets: %s", artifact.Target.Input)
@@ -2069,8 +2070,12 @@ func prepareHarnessWorkspaceContext(ctx context.Context, workspace string, artif
 		},
 	}
 	if evidenceOnly {
-		target := artifact.Target
-		target.ResolvedPath = ""
+		// Only the host-path-free identity: the target input is often an
+		// absolute host path, like its resolved path.
+		target := map[string]any{"kind": artifact.Target.Kind}
+		if artifact.Target.ID != "" {
+			target["id"] = artifact.Target.ID
+		}
 		metadata["target"] = target
 		metadata["workspace"] = map[string]any{"evidenceOnly": true}
 	}

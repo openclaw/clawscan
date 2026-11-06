@@ -28,6 +28,8 @@ func evidenceArtifact(t *testing.T) Artifact {
 
 func TestEvidenceOnlyWorkspaceHoldsNoArtifact(t *testing.T) {
 	artifact := evidenceArtifact(t)
+	// A real CLI target input is usually an absolute host path.
+	artifact.Target.Input = artifact.Target.ResolvedPath
 	for _, evidenceOnly := range []bool{false, true} {
 		workspace := t.TempDir()
 		if err := prepareHarnessWorkspaceContext(context.Background(), workspace, artifact, evidenceOnly); err != nil {
@@ -41,6 +43,15 @@ func TestEvidenceOnlyWorkspaceHoldsNoArtifact(t *testing.T) {
 		if evidenceOnly {
 			if !os.IsNotExist(statErr) || strings.Contains(string(metadata), artifact.Target.ResolvedPath) || strings.Contains(string(metadata), `"copied"`) {
 				t.Fatalf("evidence-only workspace exposes the artifact (stat=%v):\n%s", statErr, metadata)
+			}
+			var parsed struct {
+				Target map[string]any `json:"target"`
+			}
+			if err := json.Unmarshal(metadata, &parsed); err != nil {
+				t.Fatal(err)
+			}
+			if want := map[string]any{"kind": "plugin", "id": "probe-plugin"}; !jsonEqual(parsed.Target, want) {
+				t.Fatalf("evidence-only target = %v, want only %v", parsed.Target, want)
 			}
 		} else if statErr != nil {
 			t.Fatalf("general judge workspace lost its artifact copy: %v", statErr)
