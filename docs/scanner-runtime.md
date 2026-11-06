@@ -315,7 +315,8 @@ not detached or given a fresh request deadline. Python cannot forcibly terminate
 an uncooperative thread/finalizer. Process budgets belong to the caller: ClawHub's
 external consumer supplies a 900-second process budget plus a 60-second cleanup
 allowance. The public CLI instead uses the external-command runner's configured
-timeout (20 minutes by default), cancelling the direct command via Go's
+timeout (20 minutes per scanner by default; 30 minutes for scanners run against
+an OpenClaw plugin target, which is audited as one whole artifact), cancelling the direct command via Go's
 `exec.CommandContext` without a separate 60-second cleanup phase. That cancellation
 does not guarantee process-tree termination or a strict wall-clock bound on pipe
 cleanup.

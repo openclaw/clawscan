@@ -156,7 +156,7 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 	fullCommand := append([]string{aigMCPCommand}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
-		timeout = 20 * time.Minute
+		timeout = pluginScannerTimeout
 	}
 	output, runErr := runner.CommandRunner.Run(aigMCPCommand, args, workDir, timeout)
 	exitCode := gateEligibleExitCode(output.ExitCode)
