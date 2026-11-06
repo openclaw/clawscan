@@ -397,6 +397,10 @@
       "properties": {
         "command": {
           "type": "string"
+        },
+        "evidenceOnly": {
+          "type": "boolean",
+          "description": "Give the profile's own judge command scanner evidence only: no artifact copy in its workspace and no {{ target.files }}. A --judge override keeps the full workspace."
         }
       }
     },
@@ -407,6 +411,10 @@
       "properties": {
         "command": {
           "type": "string"
+        },
+        "evidenceOnly": {
+          "type": "boolean",
+          "description": "Give the profile's own overview command scanner evidence and the verdict only, with no artifact copy."
         }
       }
     }

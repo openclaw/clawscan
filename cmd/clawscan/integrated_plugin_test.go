@@ -30,7 +30,9 @@ func TestIntegratedPluginAIGDecisionsOverview(t *testing.T) {
 		"CLAWSCAN_TEST_OVERVIEW_JSON="+testOverviewJSON,
 	)
 	var runErr error
-	stdout := captureStdout(t, func() { runErr = run([]string{target, "--profile", "clawhub", "--sandbox", "off", "--json"}, env) })
+	stdout := captureStdout(t, func() {
+		runErr = run([]string{target, "--profile", "clawhub", "--judge", decisionsJudgeCommand, "--sandbox", "off", "--json"}, env)
+	})
 	var artifact runner.Artifact
 	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
 		t.Fatal(err)

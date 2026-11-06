@@ -82,7 +82,7 @@ Built-in profiles:
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | skills: `skillspector`, `aig`; plugins: only `aig-mcp` | Decisions API judge (`clawscan-decisions-judge`) plus a Codex overview |
+| `clawhub` | skills: `skillspector`, `aig`; plugins: only `aig-mcp` | evidence-only Codex judge plus an evidence-only Codex overview |
 | `clawhub-aig` | `skillspector`, `aig` | same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
@@ -267,11 +267,12 @@ Prompt files can reference requested scanner JSON:
 
 If a prompt references an unrequested scanner, ClawScan should fail clearly.
 The built-in `clawhub` profile uses this same judge mechanism with embedded
-policy and output-schema files: `clawscan-decisions-judge` asks the OpenAI
-Decisions API typed questions and writes `judge.result` (verdict, confidence,
-dimension statuses, finding predicates, and a `decision` record). Its
-`overview.command` then runs Codex with `{{ judge.result }}` and `judge.json`
-and writes readable prose to `overview.result`. Overview failures are recorded
+policy and output-schema files: an evidence-only Codex run (`evidenceOnly:
+true`, no artifact copy, file/shell/web/code tools disabled) decides from `{{ scanner_results }}` and
+writes `judge.result` (verdict, confidence, dimension statuses and finding
+predicates). Its evidence-only `overview.command` then runs Codex with
+`{{ judge.result }}` and the scanner results and writes readable prose to
+`overview.result`. Overview failures are recorded
 but never change the verdict, gate, or exit status.
 
 ## Verification

@@ -56,7 +56,7 @@ clawscan profiles -v
 
 | Profile | Scanners | Judge |
 | --- | --- | --- |
-| `clawhub` | skills: `skillspector`, `aig`; plugins: `aig-mcp` | OpenAI Decisions API `gpt-6-luna` verdict (`clawscan-decisions-judge`), then a Codex `gpt-6-luna` low-effort overview |
+| `clawhub` | skills: `skillspector`, `aig`; plugins: `aig-mcp` | Evidence-only Codex `gpt-6.1-sol` verdict from scanner results (no artifact copy; file, shell, web and code-execution tools disabled), then an evidence-only Codex `gpt-6-luna` low-effort overview |
 | `clawhub-aig` | `skillspector`, `aig` | Same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
@@ -73,12 +73,13 @@ The two ClawHub profiles explicitly configure the OpenAI scanner lanes with
 `scannerEnvDefaults`: SkillSpector uses `SKILLSPECTOR_PROVIDER=openai`,
 `SKILLSPECTOR_MODEL=gpt-6.1-sol`, and `SKILLSPECTOR_REASONING_EFFORT=medium`;
 A.I.G uses `DEFAULT_MODEL=gpt-6.1-sol` and `REASONING_EFFORT=medium` with OpenAI
-credentials. The verdict comes from the OpenAI Decisions API (`gpt-6-luna`)
-through `clawscan-decisions-judge`, which returns typed answers only; a separate
-Codex overview step (`gpt-6-luna`, low reasoning, Standard service) writes the
-readable summary and never changes the verdict. Credentials stay in the
-environment. See [judge harness](judge.md#clawhub-decisions-judge) for the
-request shape, verdict mapping, and environment variables.
+credentials. The verdict comes from an evidence-only Codex run (`gpt-6.1-sol`,
+high reasoning) that sees scanner results only: no artifact copy, no file,
+shell or web tools. A separate evidence-only Codex overview step (`gpt-6-luna`,
+low reasoning, Standard service) writes the readable summary and never changes
+the verdict. Credentials stay in the environment. See
+[judge harness](judge.md#clawhub-judge); the Decisions API judge remains
+available through `--judge`.
 
 Explicit model/provider/effort environment overrides win. A different
 SkillSpector provider retains its own model defaults. A.I.G with a dedicated
