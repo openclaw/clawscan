@@ -81,7 +81,7 @@ func RunOverviewContext(ctx context.Context, opts OverviewOptions, artifact Arti
 	if _, contextual := inner.(ContextCommandRunner); contextual {
 		scoped.ctx = overviewCtx
 	}
-	outcome, err := runHarnessAttempt(overviewCtx, overviewHarness, opts.Command, opts.Files, artifact, scoped, deadline, env, sandboxMode)
+	outcome, err := runHarnessAttempt(overviewCtx, overviewHarness, opts.Command, opts.Files, opts.EvidenceOnly, artifact, scoped, deadline, env, sandboxMode)
 	if wrapped && scoped.attempted {
 		outer.attempted = true
 	}

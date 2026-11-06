@@ -49,6 +49,11 @@ type decisionsRequest struct {
 
 const testDecisionsKey = "decisions-fixture-secret-0123456789"
 
+// decisionsJudgeCommand runs the bundled Decisions API judge harness through
+// the general --judge interface. The shipped clawhub profiles use the
+// evidence-only Codex judge; the Decisions harness stays supported.
+const decisionsJudgeCommand = "clawscan-decisions-judge --workspace {{ workspace }} --instructions {{ prompt:clawhub/decisions.md }} --output-schema {{ output_schema:clawhub/output.schema.json }} --output {{ output }}"
+
 func newDecisionsStub(t *testing.T) (*decisionsStub, *httptest.Server) {
 	stub := &decisionsStub{t: t, verdict: "benign", conf: 0.91}
 	server := httptest.NewServer(http.HandlerFunc(stub.serve))
@@ -149,7 +154,7 @@ func runClawHubProfile(t *testing.T, server *httptest.Server, skillText string, 
 	writeSkill(t, target, skillText)
 	aigFixture := filepath.Join(dir, "aig.sarif.json")
 	writeFile(t, aigFixture, `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"A.I.G"}},"results":[{"ruleId":"aig.network","level":"warning","message":{"text":"Calls an HTTP API"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"SKILL.md"},"region":{"startLine":2}}}]}]}]}`)
-	args := append([]string{target, "--profile", "clawhub", "--scanner-result", "aig=" + aigFixture, "--sandbox", "off", "--json"}, extraArgs...)
+	args := append([]string{target, "--profile", "clawhub", "--judge", decisionsJudgeCommand, "--scanner-result", "aig=" + aigFixture, "--sandbox", "off", "--json"}, extraArgs...)
 	env := append([]string{
 		"DECISIONS_BASE_URL=" + server.URL,
 		"DECISIONS_API_KEY=" + testDecisionsKey,
@@ -416,7 +421,7 @@ func TestClawHubProfileDecisionsJudgeExcludesPluginDependencies(t *testing.T) {
 	path := filepath.Join(dir, "aig-mcp.json")
 	writeFile(t, path, `{"version":"2.1.0","runs":[{"results":[],"properties":{"scanNote":"complete"}}]}`)
 	fixtures := []string{"--scanner-result", "aig-mcp=" + path}
-	args := append([]string{target, "--profile", "clawhub", "--sandbox", "off", "--json", "--no-overview"}, fixtures...)
+	args := append([]string{target, "--profile", "clawhub", "--judge", decisionsJudgeCommand, "--sandbox", "off", "--json", "--no-overview"}, fixtures...)
 	var runErr error
 	stdout := captureStdout(t, func() {
 		runErr = run(args, append(os.Environ(), "DECISIONS_BASE_URL="+server.URL, "DECISIONS_API_KEY="+testDecisionsKey, "DECISIONS_MODEL=", "OPENAI_BASE_URL="))

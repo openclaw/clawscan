@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/decisions.md clawhub/output.schema.json clawhub/overview.md clawhub/overview.schema.json openclaw-install-policy/clawscan.yml
+//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/decisions.md clawhub/output.schema.json clawhub/overview.md clawhub/overview.schema.json clawhub/evidence-judge.md clawhub/evidence-judge.schema.json clawhub/evidence-overview.md openclaw-install-policy/clawscan.yml
 var builtinFiles embed.FS
 
 var builtinProfileConfigPaths = []string{
@@ -140,12 +140,17 @@ type SandboxMount struct {
 
 type Judge struct {
 	Command string `yaml:"command"`
+	// EvidenceOnly gives the command scanner evidence only: no artifact copy
+	// in its workspace and no {{ target.files }}. It applies only while the
+	// profile's own command runs; a --judge override keeps the full workspace.
+	EvidenceOnly bool `yaml:"evidenceOnly,omitempty"`
 }
 
 // Overview configures the optional overview command that writes a readable
 // summary after a completed judge verdict. It never changes the verdict.
 type Overview struct {
-	Command string `yaml:"command"`
+	Command      string `yaml:"command"`
+	EvidenceOnly bool   `yaml:"evidenceOnly,omitempty"`
 }
 
 type resolvedProfile struct {
@@ -327,6 +332,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if opts.Overview != nil {
 		opts.Overview.Files = files
 	}
+	applyEvidenceOnly(&opts, intent, selected.profile)
 	if intent.benchmarkSet {
 		opts.Benchmark, err = runner.NewBenchmarkOptions(intent.benchmark, intent.split, intent.limit, intent.offset, intent.predictionsOutput, intent.idsSource)
 		if err != nil {
@@ -439,6 +445,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		if opts.Overview != nil {
 			opts.Overview.Files = files
 		}
+		applyEvidenceOnly(&opts, intent, selected.profile)
 		resolved.JSON = resolved.JSON || selected.profile.JSON
 		resolved.Options = append(resolved.Options, opts)
 	}
@@ -481,6 +488,9 @@ func loadBuiltinProfileFiles() (map[string][]byte, error) {
 		"clawhub/output.schema.json",
 		"clawhub/overview.md",
 		"clawhub/overview.schema.json",
+		"clawhub/evidence-judge.md",
+		"clawhub/evidence-judge.schema.json",
+		"clawhub/evidence-overview.md",
 	}
 	files := map[string][]byte{}
 	for _, path := range paths {
@@ -923,6 +933,18 @@ func appendSandboxMountArgs(args []string, mounts []SandboxMount) ([]string, err
 		args = append(args, "--sandbox-mount", value)
 	}
 	return args, nil
+}
+
+// applyEvidenceOnly carries a profile's evidenceOnly setting to the judge and
+// overview it actually runs. Commands supplied with --judge or --overview keep
+// the general workspace.
+func applyEvidenceOnly(opts *runner.Options, intent cliIntent, profile Profile) {
+	if opts.Judge != nil && profile.Judge != nil && profile.Judge.EvidenceOnly && shouldUseProfileJudge(intent) && !intent.judgeSet {
+		opts.Judge.EvidenceOnly = true
+	}
+	if opts.Overview != nil && profile.Overview != nil && profile.Overview.EvidenceOnly && shouldUseProfileJudge(intent) && !intent.overviewSet {
+		opts.Overview.EvidenceOnly = true
+	}
 }
 
 func shouldUseProfileJudge(intent cliIntent) bool {

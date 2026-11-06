@@ -1,0 +1,110 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "confidence",
+    "dimensions",
+    "scan_findings_in_context"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "benign",
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose_capability",
+        "instruction_scope",
+        "install_mechanism",
+        "environment_proportionality",
+        "persistence_privilege"
+      ],
+      "properties": {
+        "purpose_capability": {
+          "$ref": "#/$defs/dimension"
+        },
+        "instruction_scope": {
+          "$ref": "#/$defs/dimension"
+        },
+        "install_mechanism": {
+          "$ref": "#/$defs/dimension"
+        },
+        "environment_proportionality": {
+          "$ref": "#/$defs/dimension"
+        },
+        "persistence_privilege": {
+          "$ref": "#/$defs/dimension"
+        }
+      }
+    },
+    "scan_findings_in_context": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ruleId",
+          "scanner",
+          "expected_for_purpose",
+          "probability"
+        ],
+        "properties": {
+          "ruleId": {
+            "type": "string"
+          },
+          "scanner": {
+            "type": "string"
+          },
+          "expected_for_purpose": {
+            "type": "boolean"
+          },
+          "probability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "confidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "note",
+            "concern"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}

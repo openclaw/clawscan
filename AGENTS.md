@@ -82,9 +82,10 @@ separate commands, but do not add ClawHub-specific flags to `cmd/clawscan`.
   completeness, or exit status.
 - When a judge is configured, usable partial SkillSpector reports may reach the
   independent judge with `status: partial` and `reportPolicy: judge-gaps`.
-  Preserve raw partial status, findings, gaps, and provenance. The judge
-  investigates material gaps in the exact artifact and records uncertainty; do
-  not add a 100%-coverage or inspect-every-gap gate. Missing, malformed,
+  Preserve raw partial status, findings, gaps, and provenance. An
+  artifact-capable judge investigates material gaps in the exact artifact; an
+  evidence-only judge (the bundled ClawHub profiles) treats them as uncertainty.
+  Both record that uncertainty; do not add a 100%-coverage or inspect-every-gap gate. Missing, malformed,
   crashed, or unsuccessful output remains an operational failure. Keep sandbox
   checks and genuine secret, malicious, and unsafe-bytecode protections.
   See `docs/judge.md` and `internal/runner/skillspector_partial_test.go` for the

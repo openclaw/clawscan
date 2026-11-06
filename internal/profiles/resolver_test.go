@@ -41,23 +41,38 @@ func TestResolveArgsUsesEmbeddedClawHubProfile(t *testing.T) {
 	if opts.Judge == nil {
 		t.Fatal("expected embedded clawhub judge")
 	}
-	wantJudge := "clawscan-decisions-judge --workspace {{ workspace }} --instructions {{ prompt:clawhub/decisions.md }} --output-schema {{ output_schema:clawhub/output.schema.json }} --output {{ output }}"
-	if opts.Judge.Command != wantJudge {
-		t.Fatalf("judge command = %q, want %q", opts.Judge.Command, wantJudge)
+	if !opts.Judge.EvidenceOnly || opts.Overview == nil || !opts.Overview.EvidenceOnly {
+		t.Fatalf("clawhub judge and overview must be evidence-only: judge=%+v overview=%+v", opts.Judge, opts.Overview)
 	}
-	if opts.Overview == nil {
-		t.Fatal("expected embedded clawhub overview")
-	}
-	for _, want := range []string{
-		`[ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY"; codex exec`,
-		"--sandbox {{ judge_sandbox }}",
-		"{{ output_schema:clawhub/overview.schema.json }}",
-		"{{ prompt:clawhub/overview.md }}",
-		"--output-last-message {{ output }}",
-	} {
-		if !strings.Contains(opts.Overview.Command, want) {
-			t.Fatalf("overview command missing %q: %q", want, opts.Overview.Command)
+	for name, command := range map[string]string{"judge": opts.Judge.Command, "overview": opts.Overview.Command} {
+		want := []string{
+			`[ -n "$CODEX_API_KEY" ] || export CODEX_API_KEY="$OPENAI_API_KEY"; codex exec`,
+			"--sandbox read-only",
+			"--disable shell_tool --disable unified_exec",
+			"-c web_search=disabled",
+			"--output-last-message {{ output }}",
 		}
+		if name == "judge" {
+			want = append(want, "--model gpt-6.1-sol", "{{ output_schema:clawhub/evidence-judge.schema.json }}", "{{ prompt:clawhub/evidence-judge.md }}")
+		} else {
+			want = append(want, "{{ output_schema:clawhub/overview.schema.json }}", "{{ prompt:clawhub/evidence-overview.md }}")
+		}
+		for _, w := range want {
+			if !strings.Contains(command, w) {
+				t.Fatalf("%s command missing %q: %q", name, w, command)
+			}
+		}
+		if strings.Contains(command, "judge_sandbox") || strings.Contains(command, "decisions") {
+			t.Fatalf("%s command keeps a tool-capable or Decisions route: %q", name, command)
+		}
+	}
+	// A --judge override is the general interface and keeps the full workspace.
+	override, err := ResolveArgs([]string{"./skill", "--profile", "clawhub", "--judge", "cat {{ prompt:clawhub/prompt.md }}"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if override.Judge.EvidenceOnly || !override.Overview.EvidenceOnly {
+		t.Fatalf("override judge=%+v overview=%+v", override.Judge, override.Overview)
 	}
 	for _, path := range []string{"clawhub/prompt.md", "clawhub/decisions.md", "clawhub/output.schema.json", "clawhub/overview.md", "clawhub/overview.schema.json"} {
 		if len(opts.Judge.Files[path]) == 0 || len(opts.Overview.Files[path]) == 0 {
@@ -127,7 +142,7 @@ func TestClawHubOverviewConfiguresCheapCodex(t *testing.T) {
 				"{{ judge_sandbox }}", "read-only",
 				"{{ output_schema:clawhub/overview.schema.json }}", "fixture-schema",
 				"{{ output }}", "fixture-output",
-				"{{ prompt:clawhub/overview.md }}", "/dev/null",
+				"{{ prompt:clawhub/evidence-overview.md }}", "/dev/null",
 			).Replace(opts.Overview.Command)
 
 			for _, test := range []struct {

@@ -32,8 +32,10 @@ Supported `--judge` placeholders:
 | `{{ output }}` | File path where the judge should write its final JSON object. |
 
 Prompt templates rendered through `{{ prompt:<path> }}` can reference
-`{{ scanners.<id> }}` (raw scanner JSON), `{{ target.files }}` (bounded target
-file text), and, in an overview prompt, `{{ judge.result }}` (the completed
+`{{ scanners.<id> }}` (raw scanner JSON), `{{ scanner_results }}` (every
+scanner's `status`, `error` and unchanged raw report, keyed by scanner id),
+`{{ run_context }}` (target kind and id, plus the `--context` JSON),
+`{{ target.files }}` (bounded target file text), and, in an overview prompt, `{{ judge.result }}` (the completed
 verdict as JSON). Referencing `{{ judge.result }}` without a completed verdict
 fails the command before it starts.
 
@@ -115,9 +117,73 @@ output, or timeout (five minutes, separate from the judge budget) is recorded as
 the judge did not complete, the overview is recorded as `status: "skipped"` and
 its command never runs. Caller cancellation still cancels the whole run.
 
+## Evidence-only judges
+
+A profile can set `evidenceOnly: true` on its `judge` or `overview`. That
+command then gets scanner evidence only:
+
+- its workspace has no `artifact/` copy, and `metadata.json` omits the copied
+  file manifest, the target input and its resolved host path, keeping only the
+  target `kind` and `id`;
+- `{{ target.files }}` and the ClawHub parity prompt (`clawhub/prompt.md`) fail
+  before the command starts;
+- scanner reports stay unchanged under `scanners/` and in `{{ scanner_results }}`,
+  including any paths the scanners recorded.
+
+The ClawHub evidence judge treats publisher trust as provenance: only a
+publisher verified by ClawHub in the job `context` can make an @openclaw
+package trusted by default. A name, README, manifest or publisher claim quoted
+in scanner results never does.
+
+The setting applies only while the profile's own command runs. A `--judge` or
+`--overview` override is the general interface and keeps the full workspace.
+
+## ClawHub judge
+
+The `clawhub` and `clawhub-aig` profiles judge skills and plugins with an
+evidence-only Codex run (`gpt-6.1-sol`, high reasoning, Standard service). The
+bundled `clawhub/evidence-judge.md` prompt carries `{{ run_context }}` and
+`{{ scanner_results }}`, frames every scanner report (including artifact text a
+scanner quoted) as untrusted data, and treats missing, failed or partial
+coverage as uncertainty rather than evidence of safety. The verdict matches
+`clawhub/evidence-judge.schema.json`: the typed `verdict`, `confidence`,
+`dimensions` and `scan_findings_in_context`. The overview uses
+`clawhub/evidence-overview.md` the same way, adding `{{ judge.result }}`.
+
+Codex cannot read the artifact, run commands, write files or search the web.
+The profile passes `--sandbox read-only`, `-c web_search=disabled`,
+`-c skills.include_instructions=false`, and `--disable` for `shell_tool`,
+`unified_exec`, `view_image`, `multi_agent`, `goals`, `apps`, `plugins`,
+`browser_use`, `computer_use`, `image_generation`, `hooks`, `code_mode_host`,
+`multi_agent_v2` and `sleep_tool`. Checked against codex-cli 0.164.0 by
+capturing its actual Responses requests on a loopback stub:
+
+- The shell, exec, image, web-search and goal tools are no longer offered. A
+  forced `exec_command`, `shell` or `local_shell` call is rejected as
+  `unsupported call` and does not run.
+- GPT-6 models are still offered `functions.exec` (code mode, which nests
+  `apply_patch` and the MCP resource tools). With `code_mode_host` disabled a
+  call returns `code-mode host is disabled` and runs nothing; even with it
+  enabled, `apply_patch` is rejected by the read-only sandbox, no MCP server is
+  configured, and the JavaScript isolate has no file or process access.
+- `request_user_input`, `wait` and the `collaboration` agent tools remain
+  offered; no supported 0.164 setting removes them for GPT-6 models. A spawned
+  agent inherits the same disabled tools and the same evidence-only workspace,
+  so it reaches nothing the judge cannot; it can only add model calls inside the
+  judge's time budget.
+
+Recheck the offered tools whenever the pinned Codex CLI changes.
+
 ## ClawHub Decisions judge
 
-The `clawhub` and `clawhub-aig` profiles use `clawscan-decisions-judge`, a
+The Decisions API harness stays supported through `--judge`:
+
+```bash
+clawscan ./my-skill --profile clawhub --judge \
+  'clawscan-decisions-judge --workspace {{ workspace }} --instructions {{ prompt:clawhub/decisions.md }} --output-schema {{ output_schema:clawhub/output.schema.json }} --output {{ output }}'
+```
+
+`clawscan-decisions-judge` is a
 standard-library Python command shipped in the runtime image
 (`docker/clawscan-runtime/judges/clawscan_decisions_judge.py`). It reads the
 judge workspace and sends one `POST /v1/decisions` request:
@@ -209,16 +275,17 @@ Configuration is environment-only:
 | `DECISIONS_MODEL` | `gpt-6-luna` | Decisions model. ClawRouter uses `openai/gpt-6-luna`. |
 | `DECISIONS_MAX_INPUT_CHARS` | `1000000` | Default input limit. |
 
-The ClawHub overview runs Codex with `gpt-6-luna` (override with
-`OVERVIEW_MODEL`) and low reasoning effort, using `CODEX_API_KEY` or
-`OPENAI_API_KEY`. When `OPENAI_BASE_URL` is set, it routes Codex through that
+The ClawHub judge and overview run Codex with `CODEX_API_KEY` or
+`OPENAI_API_KEY`; the overview uses `gpt-6-luna` (override with
+`OVERVIEW_MODEL`) and low reasoning effort. When `OPENAI_BASE_URL` is set, both
+route Codex through that
 OpenAI-compatible Responses endpoint, such as ClawRouter
 (`OPENAI_BASE_URL=https://clawrouter.openclaw.ai/v1`,
 `OVERVIEW_MODEL=openai/gpt-6-luna`).
 
-The previous Codex judge prompt, `clawhub/prompt.md`, stays embedded for
-`cmd/verify-clawhub-prompt` parity tooling and for `--judge` comparisons, but
-the bundled profiles no longer use it.
+The ClawHub parity prompt, `clawhub/prompt.md`, asks the judge to inspect the
+artifact. It stays embedded for `cmd/verify-clawhub-prompt` parity tooling and
+`--judge` comparisons, but the bundled profiles do not use it.
 
 ## Partial SkillSpector evidence
 
@@ -227,8 +294,8 @@ judge instead of failing the scan. These scanner results retain
 `status: "partial"` and add `reportPolicy: "judge-gaps"`. Their `raw` report and
 saved scanner output retain the original findings, completeness accounting,
 limitations, and provenance. The judge workspace contains the complete raw
-report at `scanners/skillspector.json` and the exact copied artifact in
-`artifact/`. Without a judge, partial coverage fails the scanner as before. The
+report at `scanners/skillspector.json` and, unless the judge is
+`evidenceOnly`, the exact copied artifact in `artifact/`. Without a judge, partial coverage fails the scanner as before. The
 profile name does not change this classification. When a judge is configured,
 SkillSpector reports must also be nonempty JSON objects, and bundled reports
 qualify only through the bundled-partial checks below.
@@ -251,12 +318,15 @@ that accounting. Legacy complete reports outside this wrapper are unchanged.
 Nested aggregates, duplicate keys or roots,
 conflicting control aliases, invalid paths, and failed children reject the wrapper.
 Aggregate risk status and findings stay unchanged; the wrapper's execution flags
-and partial accounting do not synthesize completed coverage. The judge resolves
-original child component paths beneath each `artifact/<rootPath>/`.
+and partial accounting do not synthesize completed coverage. An
+artifact-capable judge resolves original child component paths beneath each
+`artifact/<rootPath>/`.
 
-The judge weighs material gaps against the exact artifact. A prose-writing judge
-explains investigation and residual uncertainty in its own output; with the
-bundled ClawHub profiles the overview step writes that explanation. The judge
+An artifact-capable judge weighs material gaps against the exact artifact and
+explains its investigation and residual uncertainty in its own output. An
+evidence-only judge, such as the bundled ClawHub profiles' judge, cannot inspect
+the artifact: it treats material gaps as uncertainty only, and the overview step
+names the missing coverage. The judge
 may return benign, suspicious, or malicious; partial evidence alone
 determines none of these. Neither complete scanner coverage nor inspecting every
 gap is required.

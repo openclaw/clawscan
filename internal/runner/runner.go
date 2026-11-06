@@ -101,14 +101,19 @@ type BenchmarkOptions struct {
 type JudgeOptions struct {
 	Command string
 	Files   map[string][]byte
+	// EvidenceOnly limits the command to scanner evidence: its workspace
+	// holds no copy of the target and target files cannot be rendered into
+	// its prompt. See docs/judge.md.
+	EvidenceOnly bool
 }
 
 // OverviewOptions configures the optional overview command that runs after a
 // completed judge verdict and writes a readable summary. It uses the same
 // placeholders and workspace layout as the judge, plus judge.json.
 type OverviewOptions struct {
-	Command string
-	Files   map[string][]byte
+	Command      string
+	Files        map[string][]byte
+	EvidenceOnly bool
 }
 
 type EnvRequirement struct {
@@ -1210,7 +1215,7 @@ func scannerResultContext(ctx context.Context, opts Options, scanner string, tar
 	return scannerRunner.RunScanner(scanner, target.resolvedPath, startedAt)
 }
 
-var promptPlaceholderPattern = regexp.MustCompile(`\{\{\s*(scanners\.([a-zA-Z0-9_-]+)|target\.files|judge\.result)\s*\}\}`)
+var promptPlaceholderPattern = regexp.MustCompile(`\{\{\s*(scanners\.([a-zA-Z0-9_-]+)|scanner_results|run_context|target\.files|judge\.result)\s*\}\}`)
 var judgePlaceholderPattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]+))?\s*\}\}`)
 
 const maxTargetFileBytes = 64 * 1024
@@ -1220,10 +1225,49 @@ const defaultJudgePromptPath = "./prompt.md"
 const defaultJudgeOutputSchemaPath = "./schema.json"
 
 func RenderPromptTemplate(template string, artifact Artifact) (string, error) {
-	return renderPromptTemplateContext(context.Background(), template, artifact)
+	return renderPromptTemplateContext(context.Background(), template, artifact, false)
 }
 
-func renderPromptTemplateContext(ctx context.Context, template string, artifact Artifact) (string, error) {
+// scannerResultsJSON renders every scanner's status, error and unchanged raw
+// report, keyed by scanner id. Missing or failed coverage stays visible.
+func scannerResultsJSON(artifact Artifact) (string, error) {
+	type entry struct {
+		Status string          `json:"status"`
+		Error  string          `json:"error,omitempty"`
+		Raw    json.RawMessage `json:"raw"`
+	}
+	results := make(map[string]entry, len(artifact.Scanners))
+	for id, result := range artifact.Scanners {
+		raw := result.Raw
+		if len(raw) == 0 {
+			raw = json.RawMessage("null")
+		}
+		results[id] = entry{Status: result.Status, Error: result.Error, Raw: raw}
+	}
+	formatted, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("format scanner results JSON: %w", err)
+	}
+	return string(formatted), nil
+}
+
+// runContextJSON renders the non-code run context: target kind and identity
+// (never its host path) and the caller-supplied --context JSON, if any.
+func runContextJSON(artifact Artifact) (string, error) {
+	value := map[string]any{
+		"target": map[string]any{"kind": artifact.Target.Kind, "id": artifact.Target.ID},
+	}
+	if len(artifact.Context) > 0 {
+		value["context"] = artifact.Context
+	}
+	formatted, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("format run context JSON: %w", err)
+	}
+	return string(formatted), nil
+}
+
+func renderPromptTemplateContext(ctx context.Context, template string, artifact Artifact, evidenceOnly bool) (string, error) {
 	var renderErr error
 	var targetFiles string
 	targetFilesRendered := false
@@ -1250,7 +1294,27 @@ func renderPromptTemplateContext(ctx context.Context, template string, artifact 
 			}
 			return string(formatted)
 		}
+		if parts[1] == "run_context" {
+			rendered, err := runContextJSON(artifact)
+			if err != nil {
+				renderErr = err
+				return match
+			}
+			return rendered
+		}
+		if parts[1] == "scanner_results" {
+			rendered, err := scannerResultsJSON(artifact)
+			if err != nil {
+				renderErr = err
+				return match
+			}
+			return rendered
+		}
 		if parts[1] == "target.files" {
+			if evidenceOnly {
+				renderErr = errors.New("{{ target.files }} is unavailable to an evidence-only command; use {{ scanner_results }}, or set evidenceOnly: false if this command should read the artifact")
+				return match
+			}
 			if !targetFilesRendered {
 				targetFiles, renderErr = renderTargetFilesContext(ctx, artifact.Target.ResolvedPath)
 				targetFilesRendered = true
@@ -1504,6 +1568,7 @@ func sha256Hex(value string) string {
 }
 
 type judgeCommandState struct {
+	evidenceOnly     bool
 	context          context.Context
 	workspace        string
 	judgeSandbox     string
@@ -1525,7 +1590,7 @@ type judgeShellSpec struct {
 }
 
 func runJudgeAttempt(ctx context.Context, opts JudgeOptions, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
-	return runHarnessAttempt(ctx, judgeHarness, opts.Command, opts.Files, artifact, commandRunner, deadline, env, sandboxMode)
+	return runHarnessAttempt(ctx, judgeHarness, opts.Command, opts.Files, opts.EvidenceOnly, artifact, commandRunner, deadline, env, sandboxMode)
 }
 
 // harnessKind names a command-backed step (judge or overview) that shares the
@@ -1540,7 +1605,7 @@ var (
 	overviewHarness = harnessKind{label: "Overview", prefix: "overview"}
 )
 
-func runHarnessAttempt(ctx context.Context, kind harnessKind, commandTemplate string, files map[string][]byte, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
+func runHarnessAttempt(ctx context.Context, kind harnessKind, commandTemplate string, files map[string][]byte, evidenceOnly bool, artifact Artifact, commandRunner CommandRunner, deadline time.Time, env map[string]string, sandboxMode string) (judgeAttemptOutcome, error) {
 	if err := ctx.Err(); err != nil {
 		return judgeAttemptOutcome{}, err
 	}
@@ -1549,10 +1614,11 @@ func runHarnessAttempt(ctx context.Context, kind harnessKind, commandTemplate st
 		return judgeAttemptOutcome{}, err
 	}
 	defer os.RemoveAll(workspace)
-	if err := prepareJudgeWorkspaceContext(ctx, workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(ctx, workspace, artifact, evidenceOnly); err != nil {
 		return judgeAttemptOutcome{}, err
 	}
 	state := &judgeCommandState{
+		evidenceOnly: evidenceOnly,
 		context:      ctx,
 		workspace:    workspace,
 		judgeSandbox: judgeSandboxMode(sandboxMode),
@@ -1769,7 +1835,7 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 	if err != nil {
 		return "", err
 	}
-	prompt, err := renderJudgePromptSourceContext(workContext(state.context), source, string(promptTemplate), artifact)
+	prompt, err := renderJudgePromptSourceContext(workContext(state.context), source, string(promptTemplate), artifact, state.evidenceOnly)
 	if err != nil {
 		return "", err
 	}
@@ -1788,11 +1854,15 @@ func prepareJudgePrompt(source string, artifact Artifact, state *judgeCommandSta
 // profile that uses the bundled prompt gets the same ClawHub prompt layout.
 const clawHubPromptSourceKey = "clawhub/prompt.md"
 
-func renderJudgePromptSourceContext(ctx context.Context, source string, template string, artifact Artifact) (string, error) {
+func renderJudgePromptSourceContext(ctx context.Context, source string, template string, artifact Artifact, evidenceOnly bool) (string, error) {
 	if judgeSourceKey(source) == clawHubPromptSourceKey {
+		if evidenceOnly {
+			// The parity prompt tells the judge to read artifact/ files.
+			return "", errors.New("the ClawHub parity prompt requires the artifact and cannot be used by an evidence-only command; use a prompt built on {{ scanner_results }}, or set evidenceOnly: false if this command should read the artifact")
+		}
 		return RenderClawHubPrompt(template, artifact)
 	}
-	return renderPromptTemplateContext(ctx, template, artifact)
+	return renderPromptTemplateContext(ctx, template, artifact, evidenceOnly)
 }
 
 func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, error) {
@@ -1955,14 +2025,25 @@ func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
 }
 
 func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifact Artifact) error {
-	if artifact.Target.Kind == "url" {
+	return prepareHarnessWorkspaceContext(ctx, workspace, artifact, false)
+}
+
+// prepareHarnessWorkspaceContext lays out a judge or overview workspace. By
+// default it holds the copied artifact, one raw evidence file per scanner
+// under scanners/, and metadata.json. An evidence-only workspace omits the
+// artifact copy, its file manifest and the target's input and host path,
+// keeping only its kind and id.
+func prepareHarnessWorkspaceContext(ctx context.Context, workspace string, artifact Artifact, evidenceOnly bool) error {
+	if artifact.Target.Kind == "url" && !evidenceOnly {
 		return fmt.Errorf("judge workspace copying is unsupported for URL targets: %s", artifact.Target.Input)
 	}
-	// Every profile gets the same layout: the copied artifact, one raw evidence
-	// file per scanner under scanners/, and metadata.json.
-	manifest, err := copyTargetToWorkspaceContext(ctx, artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
-	if err != nil {
-		return err
+	var manifest TargetWorkspaceManifest
+	if !evidenceOnly {
+		var err error
+		manifest, err = copyTargetToWorkspaceContext(ctx, artifact.Target.ResolvedPath, filepath.Join(workspace, "artifact"))
+		if err != nil {
+			return err
+		}
 	}
 	scannersDir := filepath.Join(workspace, "scanners")
 	if err := os.MkdirAll(scannersDir, 0o755); err != nil {
@@ -1987,6 +2068,16 @@ func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifac
 		"workspace": map[string]any{
 			"artifact": manifest,
 		},
+	}
+	if evidenceOnly {
+		// Only the host-path-free identity: the target input is often an
+		// absolute host path, like its resolved path.
+		target := map[string]any{"kind": artifact.Target.Kind}
+		if artifact.Target.ID != "" {
+			target["id"] = artifact.Target.ID
+		}
+		metadata["target"] = target
+		metadata["workspace"] = map[string]any{"evidenceOnly": true}
 	}
 	if len(artifact.Context) > 0 {
 		metadata["context"] = artifact.Context
