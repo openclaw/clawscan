@@ -603,7 +603,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 			Registry:            registryForOptions(opts),
 			SandboxMode:         scannerSandboxMode,
 			SkillSpectorCommand: ctx.SkillSpectorCommand,
-			Timeout:             20 * time.Minute,
+			Timeout:             scannerTimeoutForTarget(target.kind),
 		}
 	}
 	artifact.Sandbox = sandbox
@@ -2248,6 +2248,25 @@ type ExternalScannerRunner struct {
 	SandboxMode         string
 	SkillSpectorCommand []string
 	Timeout             time.Duration
+}
+
+const (
+	// defaultScannerTimeout bounds one scanner command for skill, file and URL
+	// targets.
+	defaultScannerTimeout = 20 * time.Minute
+	// pluginScannerTimeout bounds one scanner command for an OpenClaw plugin
+	// target. A plugin is audited as one whole artifact (compiled output,
+	// embedded skills and hooks), so it gets a larger budget.
+	pluginScannerTimeout = 30 * time.Minute
+)
+
+// scannerTimeoutForTarget returns the per-scanner command budget for a target
+// kind. Only plugin targets differ; every other kind keeps the default.
+func scannerTimeoutForTarget(kind string) time.Duration {
+	if kind == targetKindPlugin {
+		return pluginScannerTimeout
+	}
+	return defaultScannerTimeout
 }
 
 func (runner ExternalScannerRunner) RunScanner(name string, target string, startedAt string) (ScannerResult, error) {

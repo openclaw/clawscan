@@ -383,6 +383,11 @@ release with this profile change therefore needs the runtime image published
 first and any host worker updated before its ClawScan pin moves; until then,
 plugin scans fail closed rather than running without `aig-mcp`.
 
+Each scanner command against a plugin target gets a 30-minute budget, instead
+of the 20 minutes used for skills, because the whole plugin is audited as one
+artifact. A run that hits the budget is cancelled and fails like any other
+command failure.
+
 Failures are never reported as clean scans. `aig-mcp-scan` exits 0 and writes
 SARIF marked `scanNote: complete` even when its audit did not finish, so the
 adapter also reads its output. Any of these marks `aig-mcp` failed with the

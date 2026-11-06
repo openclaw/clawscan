@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Give scanner commands run against OpenClaw plugin targets a 30-minute budget (was 20 minutes); skill, file and URL targets keep 20 minutes. The judge and overview budgets are unchanged.
 - Refresh Node setup to 7.1.0, use Node 24.22.2 for CI and docs, and Node 26.13.0 for release packaging.
 
 - **Breaking for plugin targets:** add the plugin-only `aig-mcp` scanner (Tencent A.I.G `aig-mcp-scan` 0.2.0, patched in the runtime image to allow only confined read-only tools, refuse model-chosen MCP destinations and fail unusable reports) and the profile field `pluginScanners`. The `clawhub` profile now runs only `aig-mcp` for OpenClaw plugins, over a bounded copy without `node_modules`; skills keep `skillspector` and `aig`. Consumers that read `scanners.skillspector` or `scanners.aig` for plugin runs must read `scanners["aig-mcp"]` instead. Host runs need `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` ([#149](https://github.com/openclaw/clawscan/pull/149)).
