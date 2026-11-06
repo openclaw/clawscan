@@ -13,6 +13,8 @@ const (
 	maxClawHubSkillSpectorIssues         = 25
 	maxClawHubSkillSpectorTextChars      = 2_000
 	maxClawHubSkillSpectorShortTextChars = 512
+	maxClawHubSkillSpectorCaveats        = 10
+	maxClawHubSkillSpectorTags           = 8
 )
 
 type clawHubContext struct {
@@ -37,21 +39,33 @@ type clawHubNormalizedSkillSpectorAnalysis struct {
 	Error                string                     `json:"error,omitempty"`
 	CheckedAt            int64                      `json:"checkedAt"`
 	AnalysisCompleteness map[string]any             `json:"analysisCompleteness,omitempty"`
+	InspectionCaveats    *clawHubInspectionCaveats  `json:"inspectionCaveats,omitempty"`
+}
+
+type clawHubInspectionCaveats struct {
+	Status           string           `json:"status"`
+	ReferenceCount   int              `json:"referenceCount"`
+	References       []map[string]any `json:"references"`
+	ExceptionCount   int              `json:"exceptionCount"`
+	LedgerExceptions []map[string]any `json:"ledgerExceptions"`
 }
 
 type clawHubSkillSpectorIssue struct {
-	IssueID     string   `json:"issueId"`
-	Category    string   `json:"category,omitempty"`
-	Pattern     string   `json:"pattern,omitempty"`
-	Severity    string   `json:"severity"`
-	Confidence  *float64 `json:"confidence,omitempty"`
-	File        string   `json:"file,omitempty"`
-	StartLine   *float64 `json:"startLine,omitempty"`
-	EndLine     *float64 `json:"endLine,omitempty"`
-	Explanation string   `json:"explanation"`
-	Remediation string   `json:"remediation,omitempty"`
-	Finding     string   `json:"finding,omitempty"`
-	CodeSnippet string   `json:"codeSnippet,omitempty"`
+	IssueID          string   `json:"issueId"`
+	Category         string   `json:"category,omitempty"`
+	Pattern          string   `json:"pattern,omitempty"`
+	Severity         string   `json:"severity"`
+	Confidence       *float64 `json:"confidence,omitempty"`
+	File             string   `json:"file,omitempty"`
+	StartLine        *float64 `json:"startLine,omitempty"`
+	EndLine          *float64 `json:"endLine,omitempty"`
+	Explanation      string   `json:"explanation"`
+	Remediation      string   `json:"remediation,omitempty"`
+	Finding          string   `json:"finding,omitempty"`
+	CodeSnippet      string   `json:"codeSnippet,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	ReviewOutcome    string   `json:"reviewOutcome,omitempty"`
+	ReviewConfidence *float64 `json:"reviewConfidence,omitempty"`
 }
 
 func parseClawHubContext(raw json.RawMessage) (clawHubContext, error) {
@@ -103,6 +117,12 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 			CheckedAt:  checkedAt,
 		}, nil
 	}
+	if analysis, completeBundle := deriveClawHubCompleteBundleEvidence(raw, record, checkedAt); completeBundle {
+		if len(analysis.Issues) > maxClawHubSkillSpectorIssues {
+			analysis.Issues = analysis.Issues[:maxClawHubSkillSpectorIssues]
+		}
+		return analysis, nil
+	}
 	rawIssues := readMapValue(record, "filtered_findings", "filteredFindings", "findings", "issues", "vulnerabilities")
 	issueValues, _ := rawIssues.([]any)
 	issueCount := len(issueValues)
@@ -153,6 +173,7 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 		Error:                reportError,
 		CheckedAt:            checkedAt,
 		AnalysisCompleteness: analysisCompleteness,
+		InspectionCaveats:    normalizeClawHubReportInspectionCaveats(record),
 	}, nil
 }
 
@@ -173,10 +194,7 @@ func normalizeClawHubSkillSpectorIssue(value any, index int) *clawHubSkillSpecto
 		issueID,
 	)
 	confidence := normalizeClawHubConfidence(readMapNumber(record, "confidence", "score"))
-	file := firstNonEmpty(
-		readMapString(record, "file", "file_path", "filePath", "path"),
-		readNestedMapString(record, []string{"location"}, "file", "path"),
-	)
+	file := clawHubSkillSpectorFindingFile(record)
 	startLine := firstMapNumber(
 		readMapNumber(record, "line", "line_number", "lineNumber", "start_line", "startLine"),
 		readNestedMapNumber(record, []string{"location"}, "line", "start_line", "startLine"),
@@ -186,19 +204,141 @@ func normalizeClawHubSkillSpectorIssue(value any, index int) *clawHubSkillSpecto
 		readNestedMapNumber(record, []string{"location"}, "end_line", "endLine"),
 	)
 	return &clawHubSkillSpectorIssue{
-		IssueID:     firstNonEmpty(truncateClawHubText(issueID, maxClawHubSkillSpectorShortTextChars), "skillspector-issue"),
-		Category:    truncateClawHubText(readMapString(record, "category", "analyzer", "type"), maxClawHubSkillSpectorShortTextChars),
-		Pattern:     truncateClawHubText(pattern, maxClawHubSkillSpectorShortTextChars),
-		Severity:    firstNonEmpty(truncateClawHubText(severity, maxClawHubSkillSpectorShortTextChars), "UNKNOWN"),
-		Confidence:  confidence,
-		File:        truncateClawHubText(file, maxClawHubSkillSpectorShortTextChars),
-		StartLine:   startLine,
-		EndLine:     endLine,
-		Explanation: firstNonEmpty(truncateClawHubText(explanation, maxClawHubSkillSpectorTextChars), "SkillSpector reported this issue without additional explanation."),
-		Remediation: truncateClawHubText(readMapString(record, "remediation", "recommendation", "fix", "mitigation"), maxClawHubSkillSpectorTextChars),
-		Finding:     truncateClawHubText(readMapString(record, "finding", "match", "evidence"), maxClawHubSkillSpectorTextChars),
-		CodeSnippet: truncateClawHubText(readMapString(record, "code_snippet", "codeSnippet", "snippet"), maxClawHubSkillSpectorTextChars),
+		IssueID:          firstNonEmpty(truncateClawHubText(issueID, maxClawHubSkillSpectorShortTextChars), "skillspector-issue"),
+		Category:         truncateClawHubText(readMapString(record, "category", "analyzer", "type"), maxClawHubSkillSpectorShortTextChars),
+		Pattern:          truncateClawHubText(pattern, maxClawHubSkillSpectorShortTextChars),
+		Severity:         firstNonEmpty(truncateClawHubText(severity, maxClawHubSkillSpectorShortTextChars), "UNKNOWN"),
+		Confidence:       confidence,
+		File:             truncateClawHubText(file, maxClawHubSkillSpectorShortTextChars),
+		StartLine:        startLine,
+		EndLine:          endLine,
+		Explanation:      firstNonEmpty(truncateClawHubText(explanation, maxClawHubSkillSpectorTextChars), "SkillSpector reported this issue without additional explanation."),
+		Remediation:      truncateClawHubText(readMapString(record, "remediation", "recommendation", "fix", "mitigation"), maxClawHubSkillSpectorTextChars),
+		Finding:          truncateClawHubText(readMapString(record, "finding", "match", "evidence"), maxClawHubSkillSpectorTextChars),
+		CodeSnippet:      truncateClawHubText(readMapString(record, "code_snippet", "codeSnippet", "snippet"), maxClawHubSkillSpectorTextChars),
+		Tags:             clawHubSkillSpectorTags(record["tags"]),
+		ReviewOutcome:    truncateClawHubText(firstNonEmpty(readMapString(record, "reviewOutcome"), readNestedMapString(record, []string{"evidence"}, "llm_review_outcome")), maxClawHubSkillSpectorShortTextChars),
+		ReviewConfidence: normalizeClawHubConfidence(firstMapNumber(readMapNumber(record, "reviewConfidence"), readNestedMapNumber(record, []string{"evidence"}, "llm_review_confidence"))),
 	}
+}
+
+func clawHubSkillSpectorFindingFile(record map[string]any) string {
+	return firstNonEmpty(
+		readMapPathString(record, "file", "file_path", "filePath", "path"),
+		readMapPathString(asStringMap(record["location"]), "file", "path"),
+	)
+}
+
+func clawHubSkillSpectorTags(value any) []string {
+	values, _ := value.([]any)
+	var tags []string
+	for _, value := range values {
+		if tag, ok := value.(string); ok && strings.TrimSpace(tag) != "" {
+			tags = append(tags, truncateClawHubText(strings.TrimSpace(tag), 128))
+			if len(tags) == maxClawHubSkillSpectorTags {
+				break
+			}
+		}
+	}
+	return tags
+}
+
+// Keep the bounded summary separate from risk; complete caveats never clear findings.
+// Full references and exceptions remain in the immutable raw scanner report.
+func normalizeClawHubInspectionCaveats(accounting map[string]any) *clawHubInspectionCaveats {
+	if accounting == nil || accounting["status"] != "complete_with_caveats" || accounting["is_complete"] != true {
+		return nil
+	}
+	references, _ := accounting["references"].([]any)
+	exceptions, _ := accounting["ledger_exceptions"].([]any)
+	result := &clawHubInspectionCaveats{
+		Status: "complete_with_caveats", ReferenceCount: len(references), ExceptionCount: len(exceptions),
+		References: []map[string]any{}, LedgerExceptions: []map[string]any{},
+	}
+	for _, value := range references[:min(len(references), maxClawHubSkillSpectorCaveats)] {
+		row := asStringMap(value)
+		if row == nil {
+			continue
+		}
+		normalized := map[string]any{}
+		for key, source := range map[string]string{"sourcePath": "source_path", "evidence": "evidence", "targetPath": "target_path", "status": "status", "disposition": "disposition", "referenceKind": "reference_kind"} {
+			text := readMapString(row, source)
+			if source == "source_path" || source == "target_path" {
+				text = readMapPathString(row, source)
+			}
+			if text != "" {
+				normalized[key] = truncateClawHubText(text, maxClawHubSkillSpectorShortTextChars)
+			}
+		}
+		for _, key := range []string{"line", "column"} {
+			if number := readMapNumber(row, key); number != nil {
+				normalized[key] = *number
+			}
+		}
+		result.References = append(result.References, normalized)
+	}
+	for _, value := range exceptions[:min(len(exceptions), maxClawHubSkillSpectorCaveats)] {
+		row := asStringMap(value)
+		if row == nil {
+			continue
+		}
+		normalized := map[string]any{}
+		for key, source := range map[string]string{"phase": "phase", "reasonCode": "reason_code", "path": "path", "message": "message"} {
+			text := readMapString(row, source)
+			if source == "path" {
+				text = readMapPathString(row, source)
+			}
+			if text != "" {
+				normalized[key] = truncateClawHubText(text, maxClawHubSkillSpectorShortTextChars)
+			}
+		}
+		result.LedgerExceptions = append(result.LedgerExceptions, normalized)
+	}
+	return result
+}
+
+func normalizeClawHubReportInspectionCaveats(record map[string]any) *clawHubInspectionCaveats {
+	accounting := asStringMap(record["analysis_completeness"])
+	if accounting["status"] != "complete_with_caveats" || accounting["is_complete"] != true {
+		return nil
+	}
+	entries, bundled := record["bundled_reports"].([]any)
+	if !bundled {
+		return normalizeClawHubInspectionCaveats(accounting)
+	}
+	references, exceptions := []any{}, []any{}
+	for _, value := range entries {
+		entry := asStringMap(value)
+		root, ok := entry["rootPath"].(string)
+		if !ok {
+			continue
+		}
+		child := asStringMap(entry["report"])
+		caveats := asStringMap(child["analysis_completeness"])
+		if caveats["status"] != "complete_with_caveats" || caveats["is_complete"] != true {
+			continue
+		}
+		for field, paths := range map[string][]string{"references": {"source_path", "target_path"}, "ledger_exceptions": {"path"}} {
+			rows, _ := caveats[field].([]any)
+			for _, value := range rows {
+				row := map[string]any{}
+				for key, value := range asStringMap(value) {
+					row[key] = value
+				}
+				for _, key := range paths {
+					if path, ok := row[key].(string); ok && path != "" {
+						row[key] = root + "/" + path
+					}
+				}
+				if field == "references" {
+					references = append(references, row)
+				} else {
+					exceptions = append(exceptions, row)
+				}
+			}
+		}
+	}
+	return normalizeClawHubInspectionCaveats(map[string]any{"status": "complete_with_caveats", "is_complete": true, "references": references, "ledger_exceptions": exceptions})
 }
 
 func normalizeClawHubSkillSpectorStatus(rawStatus string, recommendation string, score *float64, issueCount int) string {
@@ -256,6 +396,15 @@ func readMapValue(record map[string]any, names ...string) any {
 		}
 	}
 	return nil
+}
+
+// Paths carry file identity: display-text whitespace normalization can name a
+// different inventoried file. Preserve strings while keeping legacy coercions.
+func readMapPathString(record map[string]any, names ...string) string {
+	if value, ok := readMapValue(record, names...).(string); ok {
+		return value
+	}
+	return readMapString(record, names...)
 }
 
 func readMapString(record map[string]any, names ...string) string {
