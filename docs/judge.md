@@ -294,8 +294,8 @@ judge instead of failing the scan. These scanner results retain
 `status: "partial"` and add `reportPolicy: "judge-gaps"`. Their `raw` report and
 saved scanner output retain the original findings, completeness accounting,
 limitations, and provenance. The judge workspace contains the complete raw
-report at `scanners/skillspector.json` and the exact copied artifact in
-`artifact/`. Without a judge, partial coverage fails the scanner as before. The
+report at `scanners/skillspector.json` and, unless the judge is
+`evidenceOnly`, the exact copied artifact in `artifact/`. Without a judge, partial coverage fails the scanner as before. The
 profile name does not change this classification. When a judge is configured,
 SkillSpector reports must also be nonempty JSON objects, and bundled reports
 qualify only through the bundled-partial checks below.
@@ -318,12 +318,15 @@ that accounting. Legacy complete reports outside this wrapper are unchanged.
 Nested aggregates, duplicate keys or roots,
 conflicting control aliases, invalid paths, and failed children reject the wrapper.
 Aggregate risk status and findings stay unchanged; the wrapper's execution flags
-and partial accounting do not synthesize completed coverage. The judge resolves
-original child component paths beneath each `artifact/<rootPath>/`.
+and partial accounting do not synthesize completed coverage. An
+artifact-capable judge resolves original child component paths beneath each
+`artifact/<rootPath>/`.
 
-The judge weighs material gaps against the exact artifact. A prose-writing judge
-explains investigation and residual uncertainty in its own output; with the
-bundled ClawHub profiles the overview step writes that explanation. The judge
+An artifact-capable judge weighs material gaps against the exact artifact and
+explains its investigation and residual uncertainty in its own output. An
+evidence-only judge, such as the bundled ClawHub profiles' judge, cannot inspect
+the artifact: it treats material gaps as uncertainty only, and the overview step
+names the missing coverage. The judge
 may return benign, suspicious, or malicious; partial evidence alone
 determines none of these. Neither complete scanner coverage nor inspecting every
 gap is required.

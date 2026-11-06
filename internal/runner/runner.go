@@ -1312,7 +1312,7 @@ func renderPromptTemplateContext(ctx context.Context, template string, artifact 
 		}
 		if parts[1] == "target.files" {
 			if evidenceOnly {
-				renderErr = errors.New("{{ target.files }} is unavailable to an evidence-only command")
+				renderErr = errors.New("{{ target.files }} is unavailable to an evidence-only command; use {{ scanner_results }}, or set evidenceOnly: false if this command should read the artifact")
 				return match
 			}
 			if !targetFilesRendered {
@@ -1858,7 +1858,7 @@ func renderJudgePromptSourceContext(ctx context.Context, source string, template
 	if judgeSourceKey(source) == clawHubPromptSourceKey {
 		if evidenceOnly {
 			// The parity prompt tells the judge to read artifact/ files.
-			return "", errors.New("the ClawHub parity prompt requires the artifact and cannot be used by an evidence-only command")
+			return "", errors.New("the ClawHub parity prompt requires the artifact and cannot be used by an evidence-only command; use a prompt built on {{ scanner_results }}, or set evidenceOnly: false if this command should read the artifact")
 		}
 		return RenderClawHubPrompt(template, artifact)
 	}

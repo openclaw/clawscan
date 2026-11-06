@@ -94,10 +94,10 @@ func TestEvidenceOnlyPromptRendersScannerResultsAndRefusesArtifactText(t *testin
 		t.Fatalf("run context = %s", parts[0])
 	}
 
-	if _, err := renderPromptTemplateContext(context.Background(), "{{ target.files }}", artifact, true); err == nil || !strings.Contains(err.Error(), "unavailable to an evidence-only command") {
+	if _, err := renderPromptTemplateContext(context.Background(), "{{ target.files }}", artifact, true); err == nil || !strings.Contains(err.Error(), "unavailable to an evidence-only command") || !strings.Contains(err.Error(), "use {{ scanner_results }}, or set evidenceOnly: false") {
 		t.Fatalf("target.files err = %v", err)
 	}
-	if _, err := renderJudgePromptSourceContext(context.Background(), clawHubPromptSourceKey, "SYSTEM", artifact, true); err == nil || !strings.Contains(err.Error(), "cannot be used by an evidence-only command") {
+	if _, err := renderJudgePromptSourceContext(context.Background(), clawHubPromptSourceKey, "SYSTEM", artifact, true); err == nil || !strings.Contains(err.Error(), "cannot be used by an evidence-only command") || !strings.Contains(err.Error(), "or set evidenceOnly: false") {
 		t.Fatalf("parity prompt err = %v", err)
 	}
 	if rendered, err := renderPromptTemplateContext(context.Background(), "{{ target.files }}", artifact, false); err != nil || !strings.Contains(rendered, "ARTIFACT_ONLY_SOURCE") {
