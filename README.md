@@ -299,6 +299,23 @@ keeps its own error. A profile can add an `overview.command` that writes a
 readable summary after the verdict; it never changes the verdict or gate. See
 [judge harness](docs/judge.md).
 
+### OpenAI-compatible providers
+
+`OPENAI_BASE_URL` points the bundled Codex judge, overview, Decisions, A.I.G and
+SkillSpector lanes at any OpenAI-compatible endpoint. Put the provider's own key
+in an environment variable; never pass credentials as CLI flags. For example,
+[OrcaRouter](https://www.orcarouter.ai):
+
+| Variable | Value |
+| --- | --- |
+| `OPENAI_BASE_URL` | `https://api.orcarouter.ai/v1` |
+| `OPENAI_API_KEY` | your `sk-orca-…` OrcaRouter API key |
+| `OVERVIEW_MODEL` | an OrcaRouter model ID from its model catalog, keeping the `vendor/model` namespace |
+
+`OPENAI_BASE_URL` applies the endpoint to every OpenAI lane in the run; use a
+project `.clawscan.yml` profile with `--judge` when only one lane should use it.
+See [judge harness](docs/judge.md#openai-compatible-providers) for per-lane details.
+
 ## Sandbox
 
 ClawScan runs command-backed scanners and judges in
