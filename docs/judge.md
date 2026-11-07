@@ -287,6 +287,23 @@ The ClawHub parity prompt, `clawhub/prompt.md`, asks the judge to inspect the
 artifact. It stays embedded for `cmd/verify-clawhub-prompt` parity tooling and
 `--judge` comparisons, but the bundled profiles do not use it.
 
+## OpenAI-compatible providers
+
+The overview, Decisions, and Codex lanes take an OpenAI-compatible endpoint from
+an environment variable, so a named gateway can front them. As an example,
+[OrcaRouter](https://www.orcarouter.ai) is an OpenAI-compatible gateway:
+
+| Lane | Endpoint variable | Key variable | Model variable |
+| --- | --- | --- | --- |
+| Codex judge and overview | `OPENAI_BASE_URL=https://api.orcarouter.ai/v1` | `CODEX_API_KEY` or `OPENAI_API_KEY` (`sk-orca-…`) | `OVERVIEW_MODEL` |
+| Decisions | `DECISIONS_BASE_URL` (defaults to `OPENAI_BASE_URL`) | `DECISIONS_API_KEY` | `DECISIONS_MODEL` |
+
+Use model IDs exactly as the provider lists them, including the `vendor/model`
+namespace; ClawScan never rewrites them. A.I.G and SkillSpector scanners accept
+the same gateway through their own settings (`DEFAULT_BASE_URL` and
+`SKILLSPECTOR_PROVIDER=openai` with `OPENAI_BASE_URL`). Keys stay in the
+environment; profiles record presence only, never values.
+
 ## Partial SkillSpector evidence
 
 When a judge is configured, a usable partial SkillSpector report reaches the

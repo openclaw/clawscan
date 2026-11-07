@@ -147,6 +147,11 @@ Credential rules:
 | `skillspector` | optional provider config: `SKILLSPECTOR_PROVIDER`, `SKILLSPECTOR_MODEL`, `NVIDIA_INFERENCE_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_PROXY_ENDPOINT_URL`, `ANTHROPIC_PROXY_API_KEY` |
 | `cisco` | optional upstream analyzers: `SKILL_SCANNER_LLM_*`, `SKILL_SCANNER_META_LLM_*`, `VIRUSTOTAL_API_KEY`, `AI_DEFENSE_API_KEY`, `AI_DEFENSE_API_URL` |
 
+Any OpenAI-compatible gateway works through these variables. For example,
+[OrcaRouter](https://www.orcarouter.ai) uses `OPENAI_BASE_URL=https://api.orcarouter.ai/v1`
+with an `sk-orca-…` key in `OPENAI_API_KEY` or `CODEX_API_KEY`, and model IDs
+kept verbatim with their `vendor/model` namespace.
+
 Artifact env fields record only `present` or `missing`; they must never contain
 secret values. GenDigital/Gen Agent Trust Hub is not a built-in scanner because
 there is no local CLI for ClawScan to invoke.
