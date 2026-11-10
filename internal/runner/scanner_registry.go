@@ -126,8 +126,8 @@ type scannerAdapter struct {
 	// supportsPlugins marks adapters that can analyze OpenClaw plugin
 	// targets. Skill and URL kinds are always supported.
 	supportsPlugins bool
-	// pluginOnly marks adapters that analyze OpenClaw plugin code and skip
-	// every other target kind.
+	// pluginOnly marks the whole-artifact adapter for plugins and Templates;
+	// skill and URL targets remain unsupported.
 	pluginOnly bool
 	run        func(runner ExternalScannerRunner, target string, startedAt string) (ScannerResult, error)
 }
@@ -179,7 +179,10 @@ func (adapter scannerAdapter) InstallPlan() InstallPlan {
 
 func (adapter scannerAdapter) SupportsTargetKind(kind string) bool {
 	if adapter.pluginOnly {
-		return kind == targetKindPlugin
+		return kind == targetKindPlugin || kind == targetKindTemplate
+	}
+	if kind == targetKindTemplate {
+		return false
 	}
 	if kind == targetKindPlugin {
 		return adapter.supportsPlugins
@@ -262,7 +265,7 @@ func defaultScannerAdapters() []ScannerAdapter {
 			info: ScannerInfo{
 				DisplayName:   "Tencent AI-Infra-Guard MCP scanner",
 				RepositoryURL: "https://github.com/Tencent/AI-Infra-Guard/tree/main/mcp-scan",
-				Description:   "Tencent Zhuque Lab's LLM-driven MCP server code audit invoked through aig-mcp-scan, applied to OpenClaw plugin targets only; skill, file and URL targets are skipped. Scans a temporary copy of the plugin without node_modules, with an OpenClaw plugin audit prompt, and produces SARIF 2.1.0 with MCP01-MCP10 evidence. Runs in the Docker sandbox, whose patched runtime denies the agent shell and file writes; host runs require AIG_MCP_SCAN_ALLOW_HOST_EXEC=1. Requires LLM_API_KEY or OPENAI_API_KEY.",
+				Description:   "Tencent Zhuque Lab's LLM-driven MCP server code audit invoked through aig-mcp-scan, applied to OpenClaw plugin and Template targets; skill, file and URL targets are skipped. Scans a temporary copy with a target-aware prompt (only plugin targets omit node_modules), and produces SARIF 2.1.0 with MCP01-MCP10 evidence. Runs in the Docker sandbox, whose patched runtime denies the agent shell and file writes; host runs require AIG_MCP_SCAN_ALLOW_HOST_EXEC=1. Requires LLM_API_KEY or OPENAI_API_KEY.",
 				OptionalEnv: []string{
 					"OPENAI_API_KEY",
 					"DEFAULT_MODEL",

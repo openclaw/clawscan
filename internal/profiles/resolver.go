@@ -17,10 +17,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed clawhub/clawscan.yml clawhub/prompt.md clawhub/decisions.md clawhub/output.schema.json clawhub/overview.md clawhub/overview.schema.json clawhub/evidence-judge.md clawhub/evidence-judge.schema.json clawhub/evidence-overview.md openclaw-install-policy/clawscan.yml
+//go:embed clawhub-template/clawscan.yml clawhub/clawscan.yml clawhub/prompt.md clawhub/decisions.md clawhub/output.schema.json clawhub/overview.md clawhub/overview.schema.json clawhub/evidence-judge.md clawhub/evidence-judge.schema.json clawhub/evidence-overview.md openclaw-install-policy/clawscan.yml
 var builtinFiles embed.FS
 
 var builtinProfileConfigPaths = []string{
+	"clawhub-template/clawscan.yml",
 	"clawhub/clawscan.yml",
 	"openclaw-install-policy/clawscan.yml",
 }
@@ -1059,7 +1060,7 @@ func validateProfile(name string, profile Profile) error {
 		}
 		for _, target := range scanner.Targets {
 			switch target {
-			case "skill", "plugin", "url":
+			case "skill", "plugin", "template", "url":
 			default:
 				return fmt.Errorf("User-defined scanner %s in profile %s has unsupported target kind: %s", scanner.ID, name, target)
 			}

@@ -2346,15 +2346,15 @@ const (
 	// targets.
 	defaultScannerTimeout = 20 * time.Minute
 	// pluginScannerTimeout bounds one scanner command for an OpenClaw plugin
-	// target. A plugin is audited as one whole artifact (compiled output,
+	// or Template target. Each is audited as one whole artifact (compiled output,
 	// embedded skills and hooks), so it gets a larger budget.
 	pluginScannerTimeout = 30 * time.Minute
 )
 
 // scannerTimeoutForTarget returns the per-scanner command budget for a target
-// kind. Only plugin targets differ; every other kind keeps the default.
+// kind. Whole plugin and Template artifacts receive the larger budget.
 func scannerTimeoutForTarget(kind string) time.Duration {
-	if kind == targetKindPlugin {
+	if kind == targetKindPlugin || kind == targetKindTemplate {
 		return pluginScannerTimeout
 	}
 	return defaultScannerTimeout

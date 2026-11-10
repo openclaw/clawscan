@@ -173,6 +173,7 @@
             "enum": [
               "skill",
               "plugin",
+              "template",
               "url"
             ]
           }

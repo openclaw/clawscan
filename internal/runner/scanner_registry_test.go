@@ -133,6 +133,9 @@ func TestScannerAdaptersDeclareTargetKindSupport(t *testing.T) {
 		if got := adapter.SupportsTargetKind(targetKindURL); got == pluginOnly {
 			t.Fatalf("%s url support = %v, want %v", id, got, !pluginOnly)
 		}
+		if got := adapter.SupportsTargetKind(targetKindTemplate); got != pluginOnly {
+			t.Fatalf("%s template support = %v", id, got)
+		}
 		wantPlugin := pluginOnly || id == "skillspector" || id == "socket"
 		if got := adapter.SupportsTargetKind(targetKindPlugin); got != wantPlugin {
 			t.Fatalf("%s plugin support = %v, want %v", id, got, wantPlugin)

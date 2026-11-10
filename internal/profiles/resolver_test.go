@@ -347,7 +347,7 @@ profiles:
 	if err == nil {
 		t.Fatal("expected unknown profile error")
 	}
-	want := "Unknown profile: custom (available: clawhub, clawhub-aig, openclaw-install-policy)"
+	want := "Unknown profile: custom (available: clawhub, clawhub-aig, clawhub-template, openclaw-install-policy)"
 	if err.Error() != want {
 		t.Fatalf("error = %q, want %q", err, want)
 	}

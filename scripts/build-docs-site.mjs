@@ -11,6 +11,7 @@ const pages = [
   ['index.md', 'Introduction'],
   ['scanners.md', 'Scanners'],
   ['profiles.md', 'Profiles'],
+  ['template-audit.md', 'Template audit'],
   ['openclaw-install-policy.md', 'OpenClaw install policy'],
   ['judge.md', 'Judge'],
   ['sandbox.md', 'Sandbox'],
@@ -20,7 +21,7 @@ const pages = [
 
 const navSections = [
   ['Start', ['index.md']],
-  ['Workflow', ['scanners.md', 'profiles.md', 'openclaw-install-policy.md', 'judge.md', 'sandbox.md', 'scanner-runtime.md']],
+  ['Workflow', ['scanners.md', 'profiles.md', 'template-audit.md', 'openclaw-install-policy.md', 'judge.md', 'sandbox.md', 'scanner-runtime.md']],
   ['Evaluate', ['benchmarks.md']],
 ];
 
