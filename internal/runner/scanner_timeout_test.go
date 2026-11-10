@@ -57,9 +57,10 @@ func TestPluginScannersGetThirtyMinutesAndSkillScannersKeepTwenty(t *testing.T) 
 
 func TestScannerTimeoutDependsOnlyOnTargetKind(t *testing.T) {
 	for kind, want := range map[string]time.Duration{
-		targetKindPlugin: 30 * time.Minute,
-		targetKindSkill:  20 * time.Minute,
-		targetKindURL:    20 * time.Minute,
+		targetKindPlugin:   30 * time.Minute,
+		targetKindTemplate: 30 * time.Minute,
+		targetKindSkill:    20 * time.Minute,
+		targetKindURL:      20 * time.Minute,
 	} {
 		if got := scannerTimeoutForTarget(kind); got != want {
 			t.Fatalf("%s timeout = %s, want %s", kind, got, want)

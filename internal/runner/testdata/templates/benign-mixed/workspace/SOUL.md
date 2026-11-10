@@ -1,0 +1,1 @@
+Keep private notes local.

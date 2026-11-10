@@ -61,9 +61,10 @@ func validPluginID(id string) bool {
 // skill and url preserve the historical Clawscan behavior; plugin is the
 // first-class OpenClaw plugin target added alongside them.
 const (
-	targetKindSkill  = "skill"
-	targetKindPlugin = "plugin"
-	targetKindURL    = "url"
+	targetKindSkill    = "skill"
+	targetKindPlugin   = "plugin"
+	targetKindURL      = "url"
+	targetKindTemplate = "template"
 )
 
 // maxPluginManifestBytes matches OpenClaw's MAX_PLUGIN_MANIFEST_BYTES so a
@@ -128,7 +129,7 @@ func resolveTargetForOptions(opts Options) (resolvedTarget, error) {
 	if opts.TargetKind == "" {
 		return resolveTarget(opts.Target)
 	}
-	if opts.TargetKind != targetKindSkill && opts.TargetKind != targetKindPlugin {
+	if opts.TargetKind != targetKindSkill && opts.TargetKind != targetKindPlugin && opts.TargetKind != targetKindTemplate {
 		return resolvedTarget{}, fmt.Errorf("unsupported target kind override: %s", opts.TargetKind)
 	}
 	if isURLTarget(opts.Target) {
@@ -141,6 +142,15 @@ func resolveTargetForOptions(opts Options) (resolvedTarget, error) {
 	if info, err := os.Lstat(resolved); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		if evaluated, evalErr := filepath.EvalSymlinks(resolved); evalErr == nil {
 			resolved = evaluated
+		}
+	}
+	if opts.TargetKind == targetKindTemplate {
+		ok, _, err := templateTarget(resolved)
+		if err != nil {
+			return resolvedTarget{}, err
+		}
+		if !ok {
+			return resolvedTarget{}, errors.New("template target requires package.json.openclaw.template")
 		}
 	}
 	return resolvedTarget{
@@ -207,7 +217,7 @@ func failedLocalTarget(input string, resolved string) resolvedTarget {
 }
 
 // classifyLocalTarget decides whether a resolved local path is a skill or an
-// OpenClaw plugin. It defaults to skill so existing skill scans, single-file
+// OpenClaw plugin or Template. It defaults to skill so existing skill scans, single-file
 // targets, and missing paths behave exactly as before; only an explicit plugin
 // manifest promotes the target to a plugin. A directory carrying both manifests
 // is rejected as ambiguous, but an explicitly selected manifest disambiguates
@@ -216,6 +226,15 @@ func classifyLocalTarget(resolvedPath string, input string) (kind string, id str
 	info, statErr := os.Stat(resolvedPath)
 	if statErr != nil {
 		return targetKindSkill, "", nil
+	}
+	if info.IsDir() {
+		isTemplate, id, err := templateTarget(resolvedPath)
+		if err != nil {
+			return "", "", err
+		}
+		if isTemplate {
+			return targetKindTemplate, id, nil
+		}
 	}
 	dir := resolvedPath
 	explicitPluginManifest := false

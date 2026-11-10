@@ -55,7 +55,7 @@ const (
 // lists those files explicitly.
 var aigMCPHiddenDirs = map[string]bool{
 	"dist": true, "build": true, ".next": true, ".nuxt": true,
-	".git": true, "__pycache__": true, ".venv": true, "venv": true,
+	".git": true, "node_modules": true, "__pycache__": true, ".venv": true, "venv": true,
 }
 
 var aigMCPHiddenFiles = map[string]bool{"_VERDICT.txt": true, "_GROUND_TRUTH.txt": true, "_EVAL.txt": true}
@@ -131,7 +131,7 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 			StartedAt:   startedAt,
 			CompletedAt: completedAt(),
 			Command:     []string{aigMCPCommand, "--repo", target},
-			Error:       "aig-mcp-scan runs an LLM agent over untrusted plugin code; run it in the Docker sandbox, or set " + aigMCPAllowHostExecEnv + "=1 to accept host execution on a disposable host.",
+			Error:       "aig-mcp-scan runs an LLM agent over untrusted artifact content; run it in the Docker sandbox, or set " + aigMCPAllowHostExecEnv + "=1 to accept host execution on a disposable host.",
 		}, nil
 	}
 
@@ -143,16 +143,20 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 		return ScannerResult{}, err
 	}
 	defer os.RemoveAll(workDir)
-	staged := filepath.Join(workDir, aigMCPStagedTarget)
-	if err := stagePluginScanTarget(runner, target, staged); err != nil {
-		return ScannerResult{}, fmt.Errorf("prepare aig-mcp-scan plugin copy: %w", err)
+	stagedName := aigMCPStagedTarget
+	if runner.TargetKind == targetKindTemplate {
+		stagedName = "template"
+	}
+	staged := filepath.Join(workDir, stagedName)
+	if err := stageAIGMCPScanTarget(runner, target, staged, runner.TargetKind != targetKindTemplate); err != nil {
+		return ScannerResult{}, fmt.Errorf("prepare aig-mcp-scan artifact copy: %w", err)
 	}
 	listed, err := aigMCPListedFiles(staged)
 	if err != nil {
-		return ScannerResult{}, fmt.Errorf("prepare aig-mcp-scan plugin copy: %w", err)
+		return ScannerResult{}, fmt.Errorf("prepare aig-mcp-scan artifact copy: %w", err)
 	}
 
-	args := aigMCPArgs(runner.Env, listed)
+	args := aigMCPArgsForTarget(runner.Env, listed, runner.TargetKind)
 	fullCommand := append([]string{aigMCPCommand}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
@@ -224,11 +228,21 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 // scanners do by reading the original target. The copy keeps scanner-side
 // writes away from the original target.
 func stagePluginScanTarget(runner ExternalScannerRunner, source string, dest string) error {
+	return stageAIGMCPScanTarget(runner, source, dest, true)
+}
+
+// Templates retain every shipped file, including bundled dependencies. No
+// dependency is resolved or downloaded; bounds fail rather than truncate.
+func stageAIGMCPScanTarget(runner ExternalScannerRunner, source string, dest string, omitNodeModules bool) error {
 	files := 0
+	fileKind, scope := "artifact", "in staged files"
+	if omitNodeModules {
+		fileKind, scope = "plugin", "outside node_modules"
+	}
 	var bytes int64
 	_, err := copyTargetTreeContext(workContext(runner.Context), source, dest, func(rel string, entry os.DirEntry) (bool, error) {
 		for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
-			if part == "node_modules" {
+			if omitNodeModules && part == "node_modules" {
 				return true, nil
 			}
 		}
@@ -237,7 +251,7 @@ func stagePluginScanTarget(runner ExternalScannerRunner, source string, dest str
 		}
 		files++
 		if files > aigMCPMaxStagedFiles {
-			return false, fmt.Errorf("plugin has more than %d files outside node_modules", aigMCPMaxStagedFiles)
+			return false, fmt.Errorf("%s has more than %d files %s", fileKind, aigMCPMaxStagedFiles, scope)
 		}
 		if entry.Type().IsRegular() {
 			info, err := entry.Info()
@@ -245,11 +259,11 @@ func stagePluginScanTarget(runner ExternalScannerRunner, source string, dest str
 				return false, err
 			}
 			if info.Size() > aigMCPMaxFileBytes {
-				return false, fmt.Errorf("plugin file %s is larger than %d MiB", rel, aigMCPMaxFileBytes>>20)
+				return false, fmt.Errorf("%s file %s is larger than %d MiB", fileKind, rel, aigMCPMaxFileBytes>>20)
 			}
 			bytes += info.Size()
 			if bytes > aigMCPMaxStagedBytes {
-				return false, fmt.Errorf("plugin is larger than %d MiB outside node_modules", aigMCPMaxStagedBytes>>20)
+				return false, fmt.Errorf("%s is larger than %d MiB %s", fileKind, aigMCPMaxStagedBytes>>20, scope)
 			}
 		}
 		return false, nil
@@ -264,6 +278,10 @@ func stagePluginScanTarget(runner ExternalScannerRunner, source string, dest str
 // OPENAI_BASE_URL or LLM_MODEL settings meant for other tools can never pair
 // with the key. Credentials stay in the environment and never reach argv.
 func aigMCPArgs(env map[string]string, listedFiles []string) []string {
+	return aigMCPArgsForTarget(env, listedFiles, targetKindPlugin)
+}
+
+func aigMCPArgsForTarget(env map[string]string, listedFiles []string, kind string) []string {
 	model := strings.TrimSpace(env["DEFAULT_MODEL"])
 	if model == "" {
 		model = aigMCPUpstreamModel
@@ -272,10 +290,14 @@ func aigMCPArgs(env map[string]string, listedFiles []string) []string {
 	if baseURL == "" {
 		baseURL = aigMCPUpstreamBaseURL
 	}
+	stagedName, prompt := aigMCPStagedTarget, aigMCPPrompt(listedFiles)
+	if kind == targetKindTemplate {
+		stagedName, prompt = "template", aigMCPTemplatePrompt(listedFiles)
+	}
 	return []string{
-		"--repo", aigMCPStagedTarget, "--language", "en",
+		"--repo", stagedName, "--language", "en",
 		"-m", model, "-u", baseURL,
-		"-p", aigMCPPrompt(listedFiles),
+		"-p", prompt,
 		"-o", aigMCPOutputName,
 	}
 }
@@ -285,7 +307,10 @@ func aigMCPArgs(env map[string]string, listedFiles []string) []string {
 // Paths carry the plugin/ prefix because read_file resolves them against the
 // scanner's working directory.
 func aigMCPPrompt(listedFiles []string) string {
-	prompt := aigMCPPluginPrompt + aigMCPScopePrompt
+	return aigMCPInventoryPrompt(aigMCPPluginPrompt+aigMCPScopePrompt, aigMCPStagedTarget, listedFiles)
+}
+
+func aigMCPInventoryPrompt(prompt, stagedName string, listedFiles []string) string {
 	if len(listedFiles) == 0 {
 		return prompt
 	}
@@ -297,7 +322,7 @@ func aigMCPPrompt(listedFiles []string) string {
 	}
 	paths := make([]string, len(listed))
 	for i, file := range listed {
-		paths[i] = aigMCPStagedTarget + "/" + file
+		paths[i] = stagedName + "/" + file
 	}
 	return prompt + " The directory summary you are given omits these in-scope files (including dist/, build/ and .git/ content); read them with read_file " +
 		"using these paths: " + strings.Join(paths, ", ") + more + "."

@@ -83,6 +83,7 @@ Built-in profiles:
 | Profile | Scanners | Judge |
 | --- | --- | --- |
 | `clawhub` | skills: `skillspector`, `aig`; plugins: only `aig-mcp` | evidence-only Codex judge plus an evidence-only Codex overview |
+| `clawhub-template` | `aig-mcp` over the whole shipped Template | unchanged evidence-only verdict judge plus optional overview; see `docs/template-audit.md` |
 | `clawhub-aig` | `skillspector`, `aig` | same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
@@ -141,7 +142,7 @@ Credential rules:
 | Scanner | Env vars |
 | --- | --- |
 | `aig` | required: `LLM_API_KEY` or `OPENAI_API_KEY`; optional local scanner config: `DEFAULT_MODEL`, `DEFAULT_BASE_URL`, `DEFAULT_MODEL_CONTEXT_WINDOW`, `LOG_LEVEL` |
-| `aig-mcp` | plugin targets only; required: `LLM_API_KEY` or `OPENAI_API_KEY`; optional: `DEFAULT_MODEL`, `DEFAULT_BASE_URL` (same defaults as `aig`), `DEFAULT_MODEL_CONTEXT_WINDOW`; `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` for `--sandbox off` |
+| `aig-mcp` | plugin and Template targets; required: `LLM_API_KEY` or `OPENAI_API_KEY`; optional: `DEFAULT_MODEL`, `DEFAULT_BASE_URL` (same defaults as `aig`), `DEFAULT_MODEL_CONTEXT_WINDOW`; `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` for `--sandbox off` |
 | `socket` | required: `SOCKET_CLI_API_TOKEN` |
 | `snyk` | required: `SNYK_TOKEN` |
 | `skillspector` | optional provider config: `SKILLSPECTOR_PROVIDER`, `SKILLSPECTOR_MODEL`, `NVIDIA_INFERENCE_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_PROXY_ENDPOINT_URL`, `ANTHROPIC_PROXY_API_KEY` |
@@ -166,7 +167,7 @@ install docs where they publish an install command, including A.I.G's
 ClawScan verifies `uvx`; built-in and simple API-backed scanners are skipped.
 The `aig` adapter runs `aig-skill-scan --repo <target> --language en -o
 <result.sarif.json>` and stores the SARIF 2.1.0 document as raw scanner
-evidence. The plugin-only `aig-mcp` adapter copies an OpenClaw plugin directory
+evidence. The `aig-mcp` adapter copies an OpenClaw plugin directory
 without `node_modules` and runs `aig-mcp-scan` 0.2.0 on that copy with an
 OpenClaw plugin audit prompt. The `clawhub` profile runs only `aig-mcp` for
 plugins. It runs in the Docker sandbox, whose runtime image removes the
@@ -306,3 +307,5 @@ go vet ./...
   `clawhub-security-signals`.
 - Do not assume scanner failures are final policy verdicts; scanner output is
   raw evidence for comparison or judging.
+
+For Template auditing, pass the validated extracted package directory to `clawscan ./package --profile clawhub-template`. Identity comes from the safe `package.json.openclaw.template` CLAW.md selector (which may be nested); all shipped files including node_modules are staged. Do not resolve/download external dependencies or fetch their ClawHub audits. Only AIG reads the artifact; the unchanged evidence-only judge converts scanner evidence to the publication verdict. New profile/prompt code needs a candidate Go binary and a verified source/runtime binding, not the old image. See `docs/template-audit.md` for the consumer and rollout contract.

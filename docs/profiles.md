@@ -57,6 +57,7 @@ clawscan profiles -v
 | Profile | Scanners | Judge |
 | --- | --- | --- |
 | `clawhub` | skills: `skillspector`, `aig`; plugins: `aig-mcp` | Evidence-only Codex `gpt-6.1-sol` verdict from scanner results (no artifact copy; file, shell, web and code-execution tools disabled), then an evidence-only Codex `gpt-6-luna` low-effort overview |
+| `clawhub-template` | `aig-mcp` only, entire shipped Template | Same existing evidence-only verdict judge and optional overview; see [Template contract](template-audit.md) |
 | `clawhub-aig` | `skillspector`, `aig` | Same judge and overview as `clawhub` |
 | `openclaw-install-policy` | `skillspector` | none |
 
