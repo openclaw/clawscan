@@ -1520,24 +1520,31 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatal(err)
 	}
 	os.Stdout = write
-	t.Cleanup(func() {
+	defer func() {
 		os.Stdout = original
-	})
+		_ = write.Close()
+		_ = read.Close()
+	}()
 
+	// JSON artifacts can exceed pipe capacity; drain while the CLI writes.
+	type captured struct {
+		out []byte
+		err error
+	}
+	done := make(chan captured, 1)
+	go func() {
+		out, err := io.ReadAll(read)
+		done <- captured{out, err}
+	}()
 	fn()
-
 	if err := write.Close(); err != nil {
 		t.Fatal(err)
 	}
-	out, err := io.ReadAll(read)
-	if err != nil {
-		t.Fatal(err)
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
 	}
-	if err := read.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = original
-	return string(out)
+	return string(result.out)
 }
 
 func captureOutput(t *testing.T, fn func()) (string, string) {
