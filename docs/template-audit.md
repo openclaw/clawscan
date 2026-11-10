@@ -122,21 +122,34 @@ proof a live scan completed. No partial report is silently accepted as clean.
 ## Source and runtime rollout
 
 The new profile, target classification and Template prompt are **embedded in the
-ClawScan Go binary**. They are not present in source commit
-`80d11a34a97a9181213c806fc3013123360f9012` or an image embedding that binary.
-Passing `--profile clawhub-template` to that old binary cannot activate this
+ClawScan Go binary**. They are not present in the Go binary built from source
+commit `80d11a34a97a9181213c806fc3013123360f9012`. Passing
+`--profile clawhub-template` to that old binary cannot activate this
 implementation. Supplying a new YAML profile alone also cannot add the target
 classification, full staging or scanner prompt.
 
+ClawHub’s current native path qualifies and executes a **host Go binary** at
+`RUNNER_TEMP/clawscan-bin/clawscan`; the Go runner then launches `aig-mcp-scan`
+and Codex commands inside the qualified immutable scanner-tools image. It does
+not re-enter an older Go CLI inside that image. The source contract is visible
+in ClawHub’s `scripts/security/prepublicationScannerSource.ts` and ClawScan’s
+`internal/runner/sandbox.go`.
+
 No scanner Python patch or runtime tool-version change is required by this
-implementation. A candidate host Go binary can dispatch AIG/Codex commands into
-an independently qualified existing patched immutable scanner runtime. However,
-a worker that re-enters `clawscan` inside its immutable image needs a new,
-reviewed source-to-image/binary binding before advancing its ClawScan source pin.
-Do not merely relabel the old image or weaken qualification to admit a new pin.
-Build/publication, image smoke, credentialed provider smoke and deployment are
-separate authorized rollout gates; tests with recorded Docker commands are not
-a substitute for actual container qualification.
+implementation. The `docker/clawscan-runtime` tree is unchanged from the base
+(`ddfec1285eaf19beb3043e9e5ad043a0d274cb53`). A reviewed candidate host Go binary
+can therefore use the existing qualified immutable scanner runtime after the
+source/binary binding and actual runtime compatibility checks pass; the new
+profile alone does **not** require a scanner-image rebuild or publication.
+
+Advancing ClawHub’s source pin and qualification allowlist still requires the
+reviewed candidate host installation, exact source/binary verification and
+authorized rollout. Do not relabel the old host binary or weaken qualification
+to admit a new pin. If another consumer embeds the Go CLI in its own image, that
+consumer must replace its embedded binary, but that is not the current ClawHub
+native execution path. Podman OCI tests are useful compatibility evidence, not
+a substitute for production Docker qualification or live-model detection tests.
+No image publication or deployment is implied by local compatibility proof.
 
 Fixture-backed tests cover benign mixed content, malicious shipped bootstrap,
 automation and download instructions, external ClawHub references without
