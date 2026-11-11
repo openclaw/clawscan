@@ -2783,7 +2783,11 @@ func evaluateGate(artifact *Artifact, opts Options) {
 		}
 		policy := opts.GateRules[scanner]
 		if len(policy.JSONRules) > 0 {
-			evaluateJSONGateRules(artifact, scanner, result.Raw, policy.JSONRules)
+			if isClawHubParityProfile(artifact.Profile) && scanner == "skillspector" {
+				evaluateClawHubCompleteBundleGateRules(artifact, scanner, result.Raw, policy.JSONRules)
+			} else {
+				evaluateJSONGateRules(artifact, scanner, result.Raw, policy.JSONRules)
+			}
 		}
 		if result.ExitCode == nil {
 			continue
