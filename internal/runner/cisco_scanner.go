@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 var errInvalidCiscoJSON = errors.New("Cisco skill-scanner returned invalid JSON")
@@ -22,62 +21,16 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 	resultPath := filepath.Join(resultDir, "cisco-skill-scanner.json")
 	args := []string{"scan", target, "--format", "json", "--output", resultPath}
 	args = append(args, ciscoAnalyzerArgs(runner.Env)...)
-	fullCommand := append([]string{command}, args...)
-	timeout := runner.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-
 	cwd := ""
 	if runner.SandboxMode == SandboxModeDocker {
 		cwd = resultDir
 	}
-	output, runErr := runner.CommandRunner.Run(command, args, cwd, timeout)
-	exitCode := gateEligibleExitCode(output.ExitCode)
-	raw, readErr := os.ReadFile(resultPath)
-	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	if readErr != nil {
-		message := "Cisco skill-scanner did not write JSON output."
-		if runErr != nil {
-			message = commandError(runErr, output.Stderr, runner.Env) + ": " + message
+	return runner.runReportFile(command, args, cwd, startedAt, resultPath, "Cisco skill-scanner did not write JSON output.", func(raw []byte) error {
+		if !json.Valid(raw) {
+			return errInvalidCiscoJSON
 		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       message,
-			Raw:         nil,
-		}, nil
-	}
-	if !json.Valid(raw) {
-		message := errInvalidCiscoJSON.Error()
-		if runErr != nil {
-			message = commandError(runErr, output.Stderr, runner.Env) + ": " + message
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       message,
-			Raw:         nil,
-		}, nil
-	}
-	result := ScannerResult{
-		Status:      "completed",
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Command:     fullCommand,
-		Error:       "",
-		ExitCode:    exitCode,
-		Raw:         json.RawMessage(raw),
-	}
-	if runErr != nil {
-		result.Error = commandError(runErr, output.Stderr, runner.Env)
-		result.Status = commandScannerResultStatus(output, runErr)
-	}
-	return result, nil
+		return nil
+	}), nil
 }
 
 func ciscoAnalyzerArgs(env map[string]string) []string {
