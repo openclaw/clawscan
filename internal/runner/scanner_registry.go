@@ -77,12 +77,7 @@ func (registry ScannerRegistry) Contains(id string) bool {
 }
 
 func (registry ScannerRegistry) IDs() []string {
-	ids := make([]string, 0, len(registry.adapters))
-	for id := range registry.adapters {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return sortedKeys(registry.adapters)
 }
 
 func (registry ScannerRegistry) Infos() []ScannerInfo {

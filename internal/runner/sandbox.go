@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 )
@@ -143,11 +142,7 @@ func effectiveSandboxMounts(mounts []SandboxMount) []SandboxMount {
 		}
 		permissions[path] = mount.Write
 	}
-	paths := make([]string, 0, len(permissions))
-	for path := range permissions {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	paths := sortedKeys(permissions)
 	effective := make([]SandboxMount, 0, len(paths))
 	for _, path := range paths {
 		effective = append(effective, SandboxMount{Path: path, Write: permissions[path]})
@@ -256,11 +251,7 @@ func dockerMounts(cwd string, args []string, extra []SandboxMount) []string {
 		}
 		mounts[clean] = !mount.Write
 	}
-	sources := make([]string, 0, len(mounts))
-	for source := range mounts {
-		sources = append(sources, source)
-	}
-	sort.Strings(sources)
+	sources := sortedKeys(mounts)
 	out := make([]string, 0, len(sources))
 	for _, source := range sources {
 		out = append(out, dockerMountSpec(source, mounts[source]))
@@ -314,12 +305,7 @@ func sandboxEnvNames(opts Options, env map[string]string) []string {
 			}
 		}
 	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return sortedKeys(seen)
 }
 
 func requiresCommandExecution(opts Options) bool {

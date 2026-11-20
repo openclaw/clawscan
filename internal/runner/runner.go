@@ -972,11 +972,7 @@ func scannerOutputPaths(spec outputBundleSpec, artifacts []*Artifact) []map[stri
 	for index, artifact := range artifacts {
 		paths[index] = map[string]string{}
 		runPath := uniqueOutputPath(scannerRunOutputPath(*artifact), usedRunPaths)
-		scanners := make([]string, 0, len(artifact.Scanners))
-		for scanner := range artifact.Scanners {
-			scanners = append(scanners, scanner)
-		}
-		sort.Strings(scanners)
+		scanners := sortedKeys(artifact.Scanners)
 		usedScannerPaths := map[string]int{}
 		for _, scanner := range scanners {
 			scannerPath := uniqueOutputPath(safeOutputPathSegment(scanner), usedScannerPaths)
@@ -3086,11 +3082,7 @@ func EnvMap(environ []string) map[string]string {
 }
 
 func envMapToEnviron(env map[string]string) []string {
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := sortedKeys(env)
 	environ := make([]string, 0, len(keys))
 	for _, key := range keys {
 		environ = append(environ, key+"="+env[key])

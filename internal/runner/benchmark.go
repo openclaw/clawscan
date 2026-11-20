@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -582,11 +581,7 @@ func benchmarkCasePrediction(benchmarkCase BenchmarkCase) (string, string, error
 		return "", "", fmt.Errorf("case %s judge returned no recognized verdict", benchmarkCase.ID)
 	}
 	scannerPredictions := map[string][]string{}
-	scanners := make([]string, 0, len(benchmarkCase.Run.Scanners))
-	for scanner := range benchmarkCase.Run.Scanners {
-		scanners = append(scanners, scanner)
-	}
-	sort.Strings(scanners)
+	scanners := sortedKeys(benchmarkCase.Run.Scanners)
 	for _, scanner := range scanners {
 		result := benchmarkCase.Run.Scanners[scanner]
 		if result.Status != "completed" || len(result.Raw) == 0 {

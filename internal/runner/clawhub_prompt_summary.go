@@ -147,11 +147,7 @@ func boundedClawHubCompletenessEntry(value any) any {
 	if record == nil {
 		return boundedClawHubCompletenessScalar(value, maxClawHubSkillSpectorShortTextChars)
 	}
-	keys := make([]string, 0, len(record))
-	for key := range record {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := sortedKeys(record)
 	bounded := map[string]any{}
 	for index, key := range keys {
 		if index >= maxClawHubCompletenessEntryFields {
