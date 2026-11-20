@@ -63,8 +63,8 @@ func ValidateSecuritySignalsSubmission(dir string, client BenchmarkClient) (Secu
 	if metadata.SchemaVersion != securitySignalsSubmissionSchema {
 		validationErrors = append(validationErrors, fmt.Sprintf("metadata schemaVersion must be %s", securitySignalsSubmissionSchema))
 	}
-	if metadata.Benchmark.Dataset != openClawBenchmarkID {
-		validationErrors = append(validationErrors, fmt.Sprintf("metadata benchmark.dataset must be %s", openClawBenchmarkID))
+	if metadata.Benchmark.Dataset != openClawBenchmarkID && metadata.Benchmark.Dataset != openClawBenchmarkDataset {
+		validationErrors = append(validationErrors, fmt.Sprintf("metadata benchmark.dataset must be %s or %s", openClawBenchmarkID, openClawBenchmarkDataset))
 	}
 	if metadata.Benchmark.Revision == "" {
 		validationErrors = append(validationErrors, "metadata benchmark.revision is required")

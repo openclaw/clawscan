@@ -1,4 +1,4 @@
 ---
 name: Research assistant
 ---
-Help organize notes with explicit user consent.
+Use optional skill clawhub:example/notes@1.2.3 and plugin @example/search. These are references, not bundled files.

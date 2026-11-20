@@ -29,14 +29,11 @@ type aigSARIFResult struct {
 
 func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (ScannerResult, error) {
 	command := "aig-skill-scan"
-	completedAt := func() string {
-		return time.Now().UTC().Format(time.RFC3339Nano)
-	}
 	skipped := func(message string) ScannerResult {
 		return ScannerResult{
 			Status:      "skipped",
 			StartedAt:   startedAt,
-			CompletedAt: completedAt(),
+			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Command:     []string{command, "--repo", target, "--language", "en"},
 			Error:       message,
 			Raw:         nil,
@@ -62,59 +59,10 @@ func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (Sca
 
 	resultPath := filepath.Join(resultDir, "aig-skill-scan.sarif.json")
 	args := []string{"--repo", target, "--language", "en", "-o", resultPath}
-	fullCommand := append([]string{command}, args...)
-	timeout := runner.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-
-	output, runErr := runner.CommandRunner.Run(command, args, resultDir, timeout)
-	exitCode := gateEligibleExitCode(output.ExitCode)
-	raw, readErr := os.ReadFile(resultPath)
-	finishedAt := completedAt()
-	if readErr != nil {
-		message := "aig-skill-scan did not write SARIF output."
-		if runErr != nil {
-			message = scannerCommandError(runErr, output.Stderr, runner.Env) + ": " + message
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: finishedAt,
-			Command:     fullCommand,
-			Error:       message,
-			Raw:         nil,
-		}, nil
-	}
-	if _, err := parseAIGSARIF(raw); err != nil {
-		message := err.Error()
-		if runErr != nil {
-			message = scannerCommandError(runErr, output.Stderr, runner.Env) + ": " + message
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: finishedAt,
-			Command:     fullCommand,
-			Error:       message,
-			Raw:         nil,
-		}, nil
-	}
-
-	result := ScannerResult{
-		Status:      "completed",
-		StartedAt:   startedAt,
-		CompletedAt: finishedAt,
-		Command:     fullCommand,
-		Error:       "",
-		ExitCode:    exitCode,
-		Raw:         json.RawMessage(raw),
-	}
-	if runErr != nil {
-		result.Error = scannerCommandError(runErr, output.Stderr, runner.Env)
-		result.Status = commandScannerResultStatus(output, runErr)
-	}
-	return result, nil
+	return runner.runReportFile(command, args, resultDir, startedAt, resultPath, "aig-skill-scan did not write SARIF output.", func(raw []byte) error {
+		_, err := parseAIGSARIF(raw)
+		return err
+	}), nil
 }
 
 func aigRequirements(env map[string]string) []EnvRequirement {

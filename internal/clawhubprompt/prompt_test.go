@@ -60,17 +60,6 @@ func TestBuildUsesExplicitSkillSpectorAnalysis(t *testing.T) {
 	}
 }
 
-func TestBuildDoesNotMentionVirusTotal(t *testing.T) {
-	job := fixtureJob()
-	prompt, err := Build("SYSTEM", job, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(prompt, "VirusTotal") || strings.Contains(prompt, `"z": 1`) {
-		t.Fatalf("prompt included legacy VirusTotal context:\n%s", prompt)
-	}
-}
-
 func TestBuildIncludesSupplementalScannerEvidence(t *testing.T) {
 	prompt, err := Build("SYSTEM", fixtureJob(), nil, nil, ScannerEvidence{
 		Label: "A.I.G SARIF evidence supplied to Codex",

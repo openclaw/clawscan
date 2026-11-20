@@ -52,12 +52,12 @@ func (profile Profile) ScannerIDs() []string {
 }
 
 type ProfileScanner struct {
-	ID        string
-	Command   string
-	Env       []string
-	SecretEnv []string
-	Targets   []string
-	Gate      *ProfileScannerGate
+	ID        string              `yaml:"id"`
+	Command   string              `yaml:"command,omitempty"`
+	Env       []string            `yaml:"env,omitempty"`
+	SecretEnv []string            `yaml:"secretEnv,omitempty"`
+	Targets   []string            `yaml:"targets,omitempty"`
+	Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
 	custom    bool
 	mapping   bool
 }
@@ -305,35 +305,13 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		}
 	}
 
-	finalArgs, files, err := buildRunnerArgs(intent, selected, profileName)
+	opts, err := resolveProfileOptions(intent, selected, profileName)
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
-	scannerRegistry, err := profileScannerRegistry(selected.profile.Scanners)
-	if err != nil {
-		return ResolvedRunSet{}, err
-	}
-	opts, err := runner.ParseArgsWithRegistry(finalArgs, scannerRegistry)
-	if err != nil {
-		return ResolvedRunSet{}, err
-	}
-	opts.ScannerEnvDefaults = selected.profile.ScannerEnvDefaults
-	opts.Profile = profileName
-	opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 	opts.ConfigSource = configSource
-	if len(intent.scanners) == 0 {
-		opts.PluginScanners = append([]string(nil), selected.profile.PluginScanners...)
-		attachPluginOnlyScannerResults(&opts, intent, selected)
-	}
 	opts.LoadedConfigPath = loadedConfigPath
 	opts.DiscoverConfig = intent.discoverConfig
-	if opts.Judge != nil {
-		opts.Judge.Files = files
-	}
-	if opts.Overview != nil {
-		opts.Overview.Files = files
-	}
-	applyEvidenceOnly(&opts, intent, selected.profile)
 	if intent.benchmarkSet {
 		opts.Benchmark, err = runner.NewBenchmarkOptions(intent.benchmark, intent.split, intent.limit, intent.offset, intent.predictionsOutput, intent.idsSource)
 		if err != nil {
@@ -345,6 +323,36 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 		OutputPath: opts.OutputPath,
 		JSON:       opts.JSON,
 	}, nil
+}
+
+func resolveProfileOptions(intent cliIntent, selected resolvedProfile, profileName string) (runner.Options, error) {
+	finalArgs, files, err := buildRunnerArgs(intent, selected, profileName)
+	if err != nil {
+		return runner.Options{}, err
+	}
+	scannerRegistry, err := profileScannerRegistry(selected.profile.Scanners)
+	if err != nil {
+		return runner.Options{}, err
+	}
+	opts, err := runner.ParseArgsWithRegistry(finalArgs, scannerRegistry)
+	if err != nil {
+		return runner.Options{}, err
+	}
+	opts.ScannerEnvDefaults = selected.profile.ScannerEnvDefaults
+	opts.Profile = profileName
+	opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
+	if len(intent.scanners) == 0 {
+		opts.PluginScanners = append([]string(nil), selected.profile.PluginScanners...)
+		attachPluginOnlyScannerResults(&opts, intent, selected)
+	}
+	if opts.Judge != nil {
+		opts.Judge.Files = files
+	}
+	if opts.Overview != nil {
+		opts.Overview.Files = files
+	}
+	applyEvidenceOnly(&opts, intent, selected.profile)
+	return opts, nil
 }
 
 func hasExplicitRunSelection(intent cliIntent) bool {
@@ -417,36 +425,14 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 		if !ok {
 			return ResolvedRunSet{}, unknownProfileError(profileName, registry.IDs())
 		}
-		finalArgs, files, err := buildRunnerArgs(intent, selected, profileName)
+		opts, err := resolveProfileOptions(intent, selected, profileName)
 		if err != nil {
 			return ResolvedRunSet{}, err
 		}
-		scannerRegistry, err := profileScannerRegistry(selected.profile.Scanners)
-		if err != nil {
-			return ResolvedRunSet{}, err
-		}
-		opts, err := runner.ParseArgsWithRegistry(finalArgs, scannerRegistry)
-		if err != nil {
-			return ResolvedRunSet{}, err
-		}
-		opts.ScannerEnvDefaults = selected.profile.ScannerEnvDefaults
-		opts.Profile = profileName
-		opts.GateRules = profileGateRules(selected.profile.Scanners, opts.Scanners)
 		opts.ConfigSource = filepath.Clean(projectPath)
-		if len(intent.scanners) == 0 {
-			opts.PluginScanners = append([]string(nil), selected.profile.PluginScanners...)
-			attachPluginOnlyScannerResults(&opts, intent, selected)
-		}
-		opts.LoadedConfigPath = filepath.Clean(projectPath)
+		opts.LoadedConfigPath = opts.ConfigSource
 		opts.OutputPath = ""
 		opts.JSON = false
-		if opts.Judge != nil {
-			opts.Judge.Files = files
-		}
-		if opts.Overview != nil {
-			opts.Overview.Files = files
-		}
-		applyEvidenceOnly(&opts, intent, selected.profile)
 		resolved.JSON = resolved.JSON || selected.profile.JSON
 		resolved.Options = append(resolved.Options, opts)
 	}

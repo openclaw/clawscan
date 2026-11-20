@@ -285,7 +285,7 @@ func TestClawHubLargePartialReportReachesJudgeWithFullWorkspaceReport(t *testing
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", "benign"))
+	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestClawHubLargePartialReportReachesJudgeWithFullWorkspaceReport(t *testing
 // command, and a judge that enforces its own input limit fails with its own
 // error, which ClawScan preserves without retrying.
 func TestOversizeJudgePromptReachesJudgeAndKeepsItsError(t *testing.T) {
-	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", "benign"))
+	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge"))
 	if err != nil {
 		t.Fatal(err)
 	}

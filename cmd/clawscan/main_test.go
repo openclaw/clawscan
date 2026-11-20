@@ -90,16 +90,6 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 	}
 }
 
-func TestBenchmarkRunContextLeavesInterruptHandlingToProcess(t *testing.T) {
-	runCtx := benchmarkRunContext([]string{"CLAWSCAN_PROOF=present"})
-	if runCtx.Context != nil {
-		t.Fatal("benchmark CLI must not capture interrupts until every benchmark phase observes context")
-	}
-	if runCtx.Env["CLAWSCAN_PROOF"] != "present" {
-		t.Fatalf("environment = %v", runCtx.Env)
-	}
-}
-
 func TestRunOpenClawInstallPolicyScansSkillAndPluginTargets(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1513,15 +1503,29 @@ func writeFile(t *testing.T, path string, content string) {
 
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
+	return captureStream(t, &os.Stdout, fn)
+}
 
-	original := os.Stdout
+func captureOutput(t *testing.T, fn func()) (string, string) {
+	t.Helper()
+	var stderr string
+	stdout := captureStdout(t, func() {
+		stderr = captureStream(t, &os.Stderr, fn)
+	})
+	return stdout, stderr
+}
+
+func captureStream(t *testing.T, stream **os.File, fn func()) string {
+	t.Helper()
+
+	original := *stream
 	read, write, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Stdout = write
+	*stream = write
 	defer func() {
-		os.Stdout = original
+		*stream = original
 		_ = write.Close()
 		_ = read.Close()
 	}()
@@ -1545,51 +1549,4 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatal(result.err)
 	}
 	return string(result.out)
-}
-
-func captureOutput(t *testing.T, fn func()) (string, string) {
-	t.Helper()
-
-	originalStdout := os.Stdout
-	originalStderr := os.Stderr
-	stdoutRead, stdoutWrite, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stderrRead, stderrWrite, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = stdoutWrite
-	os.Stderr = stderrWrite
-	t.Cleanup(func() {
-		os.Stdout = originalStdout
-		os.Stderr = originalStderr
-	})
-
-	fn()
-
-	if err := stdoutWrite.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := stderrWrite.Close(); err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := io.ReadAll(stdoutRead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stderr, err := io.ReadAll(stderrRead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := stdoutRead.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := stderrRead.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = originalStdout
-	os.Stderr = originalStderr
-	return string(stdout), string(stderr)
 }

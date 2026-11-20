@@ -856,10 +856,6 @@ func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]boo
 	}
 }
 
-func WriteJSONFile(path string, value interface{}) error {
-	return writeJSONFile(path, value)
-}
-
 func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) error {
 	if outputPath == "" {
 		return errors.New("output path is required")
@@ -882,7 +878,7 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 		if mainErr != nil {
 			return outputErr
 		}
-		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Single))
+		return errors.Join(outputErr, WriteJSONFile(spec.ArtifactPath, result.Single))
 	case result.Batch != nil:
 		runs := make([]*Artifact, 0, len(result.Batch.Runs))
 		for i := range result.Batch.Runs {
@@ -898,7 +894,7 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 		if mainErr != nil {
 			return outputErr
 		}
-		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Batch))
+		return errors.Join(outputErr, WriteJSONFile(spec.ArtifactPath, result.Batch))
 	default:
 		return errors.New("run targets result is empty")
 	}
@@ -1128,7 +1124,8 @@ func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
 	return targets, nil
 }
 
-func writeJSONFile(path string, value interface{}) error {
+// WriteJSONFile writes indented JSON using the same private file permissions as scan artifacts.
+func WriteJSONFile(path string, value interface{}) error {
 	var buffer bytes.Buffer
 	if err := WriteJSON(&buffer, value); err != nil {
 		return err
@@ -1341,10 +1338,6 @@ func renderPromptTemplateContext(ctx context.Context, template string, artifact 
 		return "", renderErr
 	}
 	return rendered, nil
-}
-
-func renderTargetFiles(target string) (string, error) {
-	return renderTargetFilesContext(context.Background(), target)
 }
 
 func renderTargetFilesContext(ctx context.Context, target string) (string, error) {
@@ -2020,14 +2013,6 @@ func judgeSourceKey(source string) string {
 	return filepath.ToSlash(filepath.Clean(source))
 }
 
-func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
-	return prepareJudgeWorkspaceContext(context.Background(), workspace, artifact)
-}
-
-func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifact Artifact) error {
-	return prepareHarnessWorkspaceContext(ctx, workspace, artifact, false)
-}
-
 // prepareHarnessWorkspaceContext lays out a judge or overview workspace. By
 // default it holds the copied artifact, one raw evidence file per scanner
 // under scanners/, and metadata.json. An evidence-only workspace omits the
@@ -2099,10 +2084,6 @@ func prepareHarnessWorkspaceContext(ctx context.Context, workspace string, artif
 		return os.WriteFile(filepath.Join(workspace, "judge.json"), append(rawJudge, '\n'), 0o644)
 	}
 	return nil
-}
-
-func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManifest, error) {
-	return copyTargetToWorkspaceContext(context.Background(), source, destRoot)
 }
 
 func copyTargetToWorkspaceContext(ctx context.Context, source string, destRoot string) (TargetWorkspaceManifest, error) {
@@ -2291,10 +2272,6 @@ func relativeManifestPath(root string, path string) string {
 	return rel
 }
 
-func copyFile(source string, dest string) error {
-	return copyFileContext(context.Background(), source, dest)
-}
-
 func copyFileContext(ctx context.Context, source string, dest string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -2390,6 +2367,37 @@ func (runner ExternalScannerRunner) RunScannerContext(ctx context.Context, name 
 	return runner.RunScanner(name, target, startedAt)
 }
 
+func (runner ExternalScannerRunner) runJSONStdout(command string, args []string, startedAt, scannerName, invalidJSON string) ScannerResult {
+	timeout := runner.Timeout
+	if timeout == 0 {
+		timeout = 20 * time.Minute
+	}
+	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	result := ScannerResult{
+		Status:      "failed",
+		StartedAt:   startedAt,
+		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Command:     append([]string{command}, args...),
+	}
+	raw := json.RawMessage(strings.TrimSpace(output.Stdout))
+	if runErr != nil {
+		result.Error = commandError(runErr, output.Stderr, runner.Env)
+	}
+	if !json.Valid(raw) {
+		if runErr == nil {
+			result.Error = invalidJSON
+			if len(raw) == 0 {
+				result.Error = scannerName + " scanner did not return JSON on stdout."
+			}
+		}
+		return result
+	}
+	result.Status = commandScannerResultStatus(output, runErr)
+	result.ExitCode = gateEligibleExitCode(output.ExitCode)
+	result.Raw = raw
+	return result
+}
+
 func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt string) (ScannerResult, error) {
 	command := "npx"
 	args := []string{"--yes", "agentverus-scanner", "scan", target, "--json"}
@@ -2397,66 +2405,7 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 		command = "agentverus-scanner"
 		args = []string{"scan", target, "--json"}
 	}
-	fullCommand := append([]string{command}, args...)
-	timeout := runner.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
-	exitCode := gateEligibleExitCode(output.ExitCode)
-	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	raw := strings.TrimSpace(output.Stdout)
-	if runErr != nil {
-		message := commandError(runErr, output.Stderr, runner.Env)
-		if json.Valid([]byte(raw)) {
-			return ScannerResult{
-				Status:      commandScannerResultStatus(output, runErr),
-				StartedAt:   startedAt,
-				CompletedAt: completedAt,
-				Command:     fullCommand,
-				Error:       message,
-				ExitCode:    exitCode,
-				Raw:         json.RawMessage(raw),
-			}, nil
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       message,
-			Raw:         nil,
-		}, nil
-	}
-	if raw == "" {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "AgentVerus scanner did not return JSON on stdout.",
-			Raw:         nil,
-		}, nil
-	}
-	if !json.Valid([]byte(raw)) {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "AgentVerus scanner returned invalid JSON",
-			Raw:         nil,
-		}, nil
-	}
-	return ScannerResult{
-		Status:      "completed",
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Command:     fullCommand,
-		Error:       "",
-		ExitCode:    exitCode,
-		Raw:         json.RawMessage(raw),
-	}, nil
+	return runner.runJSONStdout(command, args, startedAt, "AgentVerus", "AgentVerus scanner returned invalid JSON"), nil
 }
 
 func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt string) (ScannerResult, error) {
@@ -2479,90 +2428,48 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	// SkillSpector scans the target itself for every profile. A filtered copy
 	// would hide paths (such as .git/ or clawscan-results/) from scanners that
 	// gate installs without a judge.
-	scanTarget := target
 	cwd := ""
 	if runner.SandboxMode == SandboxModeDocker {
 		cwd = resultDir
 	}
 	resultPath := filepath.Join(resultDir, "skillspector-report.json")
-	args = append(args, "scan", scanTarget, "--format", "json", "--output", resultPath)
+	args = append(args, "scan", target, "--format", "json", "--output", resultPath)
 	if !skillSpectorLLMEnabled(runner.Env) {
 		args = append(args, "--no-llm")
 	}
 	fullCommand := append([]string{command}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
-		timeout = 20 * time.Minute
+		timeout = defaultScannerTimeout
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, cwd, timeout)
-	exitCode := gateEligibleExitCode(output.ExitCode)
 	raw, readErr := os.ReadFile(resultPath)
-	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	result := ScannerResult{
+		Status:      "failed",
+		StartedAt:   startedAt,
+		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Command:     fullCommand,
+		ExitCode:    gateEligibleExitCode(output.ExitCode),
+	}
 	if runErr != nil {
-		message := commandError(runErr, output.Stderr, runner.Env)
-		if readErr == nil {
-			if !json.Valid(raw) {
-				return ScannerResult{
-					Status:      "failed",
-					StartedAt:   startedAt,
-					CompletedAt: completedAt,
-					Command:     fullCommand,
-					Error:       message + ": SkillSpector scanner returned invalid JSON",
-					ExitCode:    exitCode,
-					Raw:         nil,
-				}, nil
-			}
-			return validateSkillSpectorReportEvidence(ScannerResult{
-				Status:      commandScannerResultStatus(output, runErr),
-				StartedAt:   startedAt,
-				CompletedAt: completedAt,
-				Command:     fullCommand,
-				Error:       message,
-				ExitCode:    exitCode,
-				Raw:         json.RawMessage(raw),
-			}, runner.JudgeConfigured), nil
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       message,
-			ExitCode:    exitCode,
-			Raw:         nil,
-		}, nil
+		result.Error = commandError(runErr, output.Stderr, runner.Env)
 	}
 	if readErr != nil {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "SkillSpector scanner did not write JSON output.",
-			ExitCode:    exitCode,
-			Raw:         nil,
-		}, nil
+		if runErr == nil {
+			result.Error = "SkillSpector scanner did not write JSON output."
+		}
+		return result, nil
 	}
 	if !json.Valid(raw) {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "SkillSpector scanner returned invalid JSON",
-			ExitCode:    exitCode,
-			Raw:         nil,
-		}, nil
+		if runErr != nil {
+			result.Error += ": "
+		}
+		result.Error += "SkillSpector scanner returned invalid JSON"
+		return result, nil
 	}
-	return validateSkillSpectorReportEvidence(ScannerResult{
-		Status:      "completed",
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Command:     fullCommand,
-		Error:       "",
-		ExitCode:    exitCode,
-		Raw:         json.RawMessage(raw),
-	}, runner.JudgeConfigured), nil
+	result.Status = commandScannerResultStatus(output, runErr)
+	result.Raw = raw
+	return validateSkillSpectorReportEvidence(result, runner.JudgeConfigured), nil
 }
 
 func defaultSkillSpectorOpenAIProvider(env map[string]string) {
@@ -3099,13 +3006,7 @@ func envMapToEnviron(env map[string]string) []string {
 }
 
 func commandError(runErr error, stderr string, env map[string]string) string {
-	names := make([]string, 0)
-	for key := range env {
-		if isSecretEnvKey(key) {
-			names = append(names, key)
-		}
-	}
-	return commandErrorForEnvNames(runErr, stderr, env, names)
+	return commandErrorForEnvNames(runErr, stderr, env, secretEnvNames(env))
 }
 
 func commandErrorForEnvNames(runErr error, stderr string, env map[string]string, names []string) string {
@@ -3118,13 +3019,7 @@ func commandErrorForEnvNames(runErr error, stderr string, env map[string]string,
 }
 
 func redactEnvValues(value string, env map[string]string) string {
-	names := make([]string, 0)
-	for key := range env {
-		if isSecretEnvKey(key) {
-			names = append(names, key)
-		}
-	}
-	return redactEnvValuesForNames(value, env, names)
+	return redactEnvValuesForNames(value, env, secretEnvNames(env))
 }
 
 func redactEnvValuesForNames(value string, env map[string]string, names []string) string {
@@ -3174,6 +3069,16 @@ func redactJudgeResult(value any, env map[string]string) any {
 	default:
 		return value
 	}
+}
+
+func secretEnvNames(env map[string]string) []string {
+	names := make([]string, 0)
+	for key := range env {
+		if isSecretEnvKey(key) {
+			names = append(names, key)
+		}
+	}
+	return names
 }
 
 func isSecretEnvKey(key string) bool {

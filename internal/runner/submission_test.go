@@ -14,49 +14,53 @@ import (
 )
 
 func TestValidateSecuritySignalsSubmissionComputesLooseNonCleanMetrics(t *testing.T) {
-	dir := writeSecuritySignalsSubmission(t, SecuritySignalsSubmissionMetadata{
-		SchemaVersion: "clawscan-security-signals-submission-v1",
-		Benchmark: SecuritySignalsSubmissionBenchmark{
-			Dataset:  "clawhub-security-signals",
-			Split:    "eval_holdout",
-			Revision: "fixture-sha",
-		},
-		System: SecuritySignalsSubmissionSystem{
-			Name: "fixture-system",
-			Role: "community",
-		},
-		VerificationStatus: "artifact-validated",
-	}, []BenchmarkPrediction{
-		{ID: "clean-correct", Prediction: "clean"},
-		{ID: "clean-false-positive", Prediction: "suspicious"},
-		{ID: "suspicious-true-positive", Prediction: "malicious"},
-		{ID: "malicious-false-negative", Prediction: "clean"},
-	})
+	for _, dataset := range []string{"clawhub-security-signals", "OpenClaw/clawhub-security-signals"} {
+		t.Run(dataset, func(t *testing.T) {
+			dir := writeSecuritySignalsSubmission(t, SecuritySignalsSubmissionMetadata{
+				SchemaVersion: "clawscan-security-signals-submission-v1",
+				Benchmark: SecuritySignalsSubmissionBenchmark{
+					Dataset:  dataset,
+					Split:    "eval_holdout",
+					Revision: "fixture-sha",
+				},
+				System: SecuritySignalsSubmissionSystem{
+					Name: "fixture-system",
+					Role: "community",
+				},
+				VerificationStatus: "artifact-validated",
+			}, []BenchmarkPrediction{
+				{ID: "clean-correct", Prediction: "clean"},
+				{ID: "clean-false-positive", Prediction: "suspicious"},
+				{ID: "suspicious-true-positive", Prediction: "malicious"},
+				{ID: "malicious-false-negative", Prediction: "clean"},
+			})
 
-	result, err := ValidateSecuritySignalsSubmission(dir, submissionBenchmarkClient{
-		rows: []OpenClawBenchmarkRow{
-			{ID: "clean-correct", ClawScanVerdict: "clean"},
-			{ID: "clean-false-positive", ClawScanVerdict: "clean"},
-			{ID: "suspicious-true-positive", ClawScanVerdict: "suspicious"},
-			{ID: "malicious-false-negative", ClawScanVerdict: "malicious"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+			result, err := ValidateSecuritySignalsSubmission(dir, submissionBenchmarkClient{
+				rows: []OpenClawBenchmarkRow{
+					{ID: "clean-correct", ClawScanVerdict: "clean"},
+					{ID: "clean-false-positive", ClawScanVerdict: "clean"},
+					{ID: "suspicious-true-positive", ClawScanVerdict: "suspicious"},
+					{ID: "malicious-false-negative", ClawScanVerdict: "malicious"},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	if result.SchemaVersion != "clawscan-security-signals-score-v1" {
-		t.Fatalf("schema version = %q", result.SchemaVersion)
-	}
-	if result.Benchmark.Dataset != "clawhub-security-signals" || result.Benchmark.Split != "eval_holdout" || result.Benchmark.Revision != "fixture-sha" {
-		t.Fatalf("benchmark = %#v", result.Benchmark)
-	}
-	metrics := result.Metrics
-	if metrics.CaseCount != 4 || metrics.TruePositive != 1 || metrics.FalsePositive != 1 || metrics.TrueNegative != 1 || metrics.FalseNegative != 1 {
-		t.Fatalf("metrics counts = %#v", metrics)
-	}
-	if metrics.Precision != 0.5 || metrics.Recall != 0.5 || metrics.F1 != 0.5 || metrics.FalsePositiveRate != 0.5 {
-		t.Fatalf("metric rates = %#v", metrics)
+			if result.SchemaVersion != "clawscan-security-signals-score-v1" {
+				t.Fatalf("schema version = %q", result.SchemaVersion)
+			}
+			if result.Benchmark.Dataset != dataset || result.Benchmark.Split != "eval_holdout" || result.Benchmark.Revision != "fixture-sha" {
+				t.Fatalf("benchmark = %#v", result.Benchmark)
+			}
+			metrics := result.Metrics
+			if metrics.CaseCount != 4 || metrics.TruePositive != 1 || metrics.FalsePositive != 1 || metrics.TrueNegative != 1 || metrics.FalseNegative != 1 {
+				t.Fatalf("metrics counts = %#v", metrics)
+			}
+			if metrics.Precision != 0.5 || metrics.Recall != 0.5 || metrics.F1 != 0.5 || metrics.FalsePositiveRate != 0.5 {
+				t.Fatalf("metric rates = %#v", metrics)
+			}
+		})
 	}
 }
 

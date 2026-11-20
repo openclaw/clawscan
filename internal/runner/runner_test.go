@@ -43,16 +43,6 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
-func TestParseArgsAcceptsAgentVerusScanner(t *testing.T) {
-	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "agentverus"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
-		t.Fatalf("scanners = %q", got)
-	}
-}
-
 func TestParseArgsRequiresExplicitScanner(t *testing.T) {
 	_, err := ParseArgs(nil)
 	if err == nil || err.Error() != "At least one --scanner is required" {
@@ -3966,6 +3956,9 @@ func TestRenderClawHubPromptUsesProductionScannerContextShape(t *testing.T) {
 	for _, want := range []string{
 		"SYSTEM\n\nAdditional ClawHub policy for this Codex run:",
 		`"status": "suspicious"`,
+		"SkillSpector findings supplied to Codex:",
+		"A.I.G SARIF evidence supplied to Codex:",
+		`"ruleId": "T04"`,
 		"- pre-scan malicious signal present: yes",
 		"- pre-scan artifact injection signals: none",
 	} {
@@ -3983,54 +3976,6 @@ func TestRenderClawHubPromptUsesProductionScannerContextShape(t *testing.T) {
 		other, err := RenderClawHubPrompt("SYSTEM\n\nAdditional ClawHub policy for this Codex run:\nstale block", Artifact{Profile: profile, Scanners: scanners})
 		if err != nil || other != prompt {
 			t.Fatalf("profile %q changed the ClawHub prompt: err=%v", profile, err)
-		}
-	}
-}
-
-func TestRenderClawHubAIGPromptIncludesAIGEvidence(t *testing.T) {
-	prompt, err := RenderClawHubPrompt("SYSTEM", Artifact{
-		Profile: "clawhub-aig",
-		Scanners: map[string]ScannerResult{
-			"skillspector": {Raw: json.RawMessage(`{"status":"clean"}`)},
-			"aig":          {Raw: json.RawMessage(`{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04","level":"error"}]}]}`)},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"SkillSpector findings supplied to Codex:",
-		"A.I.G SARIF evidence supplied to Codex:",
-		`"ruleId": "T04"`,
-		"- pre-scan malicious signal present: yes",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
-		}
-	}
-}
-
-func TestRenderClawHubPromptIncludesAIGEvidenceForProductionProfile(t *testing.T) {
-	// The production "clawhub" profile runs aig alongside skillspector, so its
-	// SARIF evidence must reach the judge whenever it produced a result,
-	// regardless of which profile label requested the run.
-	prompt, err := RenderClawHubPrompt("SYSTEM", Artifact{
-		Profile: "clawhub",
-		Scanners: map[string]ScannerResult{
-			"skillspector": {Raw: json.RawMessage(`{"status":"clean"}`)},
-			"aig":          {Raw: json.RawMessage(`{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04","level":"error"}]}]}`)},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"SkillSpector findings supplied to Codex:",
-		"A.I.G SARIF evidence supplied to Codex:",
-		`"ruleId": "T04"`,
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
 	}
 }
@@ -4249,7 +4194,7 @@ func TestPrepareJudgeWorkspaceCopiesCompleteArtifact(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4313,7 +4258,7 @@ func TestPrepareJudgeWorkspaceLayoutIsProfileIndependent(t *testing.T) {
 				"skillspector": {Raw: skillSpectorRaw},
 				"aig":          {Raw: aigRaw},
 			}
-			if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+			if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
@@ -4367,7 +4312,7 @@ func TestPrepareJudgeWorkspaceExcludesHostVCSAndPriorResults(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
@@ -4399,7 +4344,7 @@ func TestPrepareJudgeWorkspacePreservesNestedArtifactDirectoriesNamedLikeHostMet
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	for rel, want := range files {
@@ -4428,7 +4373,7 @@ func TestPrepareJudgeWorkspaceExcludesWorktreeGitPointer(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", ".git")); !errors.Is(err, os.ErrNotExist) {
@@ -4453,7 +4398,7 @@ func TestPrepareJudgeWorkspaceCopiesPreviouslyFilteredTargetFiles(t *testing.T) 
 	}
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "node_modules", "pkg", "payload.js")); err != nil {
@@ -4491,7 +4436,7 @@ func TestPrepareJudgeWorkspacePrioritizesSkillFileWithinBudget(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
@@ -4513,7 +4458,7 @@ func TestPrepareJudgeWorkspacePrioritizesPluginManifestWithinBudget(t *testing.T
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
 	artifact.Target.Kind = targetKindPlugin
 	artifact.Target.ID = "probe-plugin"
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", pluginManifestName)); err != nil {
@@ -4543,7 +4488,7 @@ func TestPrepareJudgeWorkspaceFailsOnUnreadableFile(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err == nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err == nil {
 		t.Fatal("expected incomplete judge workspace to fail")
 	}
 }
@@ -4567,7 +4512,7 @@ func TestPrepareJudgeWorkspaceFailsOnUnreadableDirectory(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err == nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err == nil {
 		t.Fatal("expected incomplete judge workspace to fail")
 	}
 }
@@ -4590,7 +4535,7 @@ func TestPrepareJudgeWorkspacePreservesInternalSymlinks(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(workspace, "artifact", "node_modules", ".bin", "pkg")
@@ -4626,7 +4571,7 @@ func TestPrepareJudgeWorkspaceRejectsExternalSymlinks(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	err := prepareJudgeWorkspace(workspace, artifact)
+	err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false)
 	if err == nil || !strings.Contains(err.Error(), "symlink outside target") {
 		t.Fatalf("err = %v", err)
 	}
@@ -4641,7 +4586,7 @@ func TestPrepareJudgeWorkspaceCreatesArtifactDirForEmptyTarget(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(filepath.Join(workspace, "artifact"))
@@ -4733,92 +4678,32 @@ func TestRunJudgeDoesNotPersistRenderedCommand(t *testing.T) {
 }
 
 func TestRunJudgeRedactsSecretEnvValuesFromFailedStderr(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	target := filepath.Join(dir, "skill")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	opts, err := ParseArgs([]string{
-		target,
-		"--scanner", "skillspector",
-		"--judge", "judge",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{"OPENAI_API_KEY": "present", "SNYK_TOKEN": "secret-token"},
-		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
-			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
-		}},
-		CommandRunner: &recordingCommandRunner{err: errCommandFailed, stderr: "failed with secret-token"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if artifact.Judge == nil || artifact.Judge.Status != "failed" {
-		t.Fatalf("judge = %#v", artifact.Judge)
-	}
-	raw, err := json.Marshal(artifact)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(raw, []byte("secret-token")) {
-		t.Fatalf("artifact leaked judge stderr secret: %s", raw)
-	}
-	if !strings.Contains(artifact.Judge.Error, "[redacted]") {
-		t.Fatalf("judge error was not redacted: %q", artifact.Judge.Error)
+	judge := runJudgeRedactionCase(t, &recordingCommandRunner{err: errCommandFailed, stderr: "failed with secret-token"}, "failed")
+	if !strings.Contains(judge.Error, "[redacted]") {
+		t.Fatalf("judge error was not redacted: %q", judge.Error)
 	}
 }
 
 func TestRunJudgeRedactsSecretEnvValuesFromFailedStdoutResult(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	target := filepath.Join(dir, "skill")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Demo"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	opts, err := ParseArgs([]string{
-		target,
-		"--scanner", "skillspector",
-		"--judge", "judge",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
-		Env: map[string]string{"OPENAI_API_KEY": "present", "SNYK_TOKEN": "secret-token"},
-		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
-			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
-		}},
-		CommandRunner: &recordingCommandRunner{err: errCommandFailed, stdout: "secret-token"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if artifact.Judge == nil || artifact.Judge.Status != "failed" {
-		t.Fatalf("judge = %#v", artifact.Judge)
-	}
-	raw, err := json.Marshal(artifact)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(raw, []byte("secret-token")) {
-		t.Fatalf("artifact leaked judge stdout secret: %s", raw)
-	}
-	if artifact.Judge.Result != "[redacted]" {
-		t.Fatalf("judge result was not redacted: %#v", artifact.Judge.Result)
+	judge := runJudgeRedactionCase(t, &recordingCommandRunner{err: errCommandFailed, stdout: "secret-token"}, "failed")
+	if judge.Result != "[redacted]" {
+		t.Fatalf("judge result was not redacted: %#v", judge.Result)
 	}
 }
 
 func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
+	judge := runJudgeRedactionCase(t, &recordingCommandRunner{stdout: `{"secret-token":"secret-token"}`}, "completed")
+	result, ok := judge.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("judge result = %#v", judge.Result)
+	}
+	if result["[redacted]"] != "[redacted]" {
+		t.Fatalf("judge result was not redacted: %#v", result)
+	}
+}
+
+func runJudgeRedactionCase(t *testing.T, command *recordingCommandRunner, wantStatus string) *JudgeResult {
+	t.Helper()
 	dir := t.TempDir()
 	t.Chdir(dir)
 	target := filepath.Join(dir, "skill")
@@ -4841,12 +4726,12 @@ func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
 		ScannerRunner: staticScannerRunner{results: map[string]ScannerResult{
 			"skillspector": {Status: "completed", Raw: json.RawMessage(`{"status":"clean"}`)},
 		}},
-		CommandRunner: &recordingCommandRunner{stdout: `{"secret-token":"secret-token"}`},
+		CommandRunner: command,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if artifact.Judge == nil || artifact.Judge.Status != "completed" {
+	if artifact.Judge == nil || artifact.Judge.Status != wantStatus {
 		t.Fatalf("judge = %#v", artifact.Judge)
 	}
 	raw, err := json.Marshal(artifact)
@@ -4854,15 +4739,9 @@ func TestRunJudgeRedactsSecretEnvValuesFromJSONKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	if bytes.Contains(raw, []byte("secret-token")) {
-		t.Fatalf("artifact leaked judge JSON key secret: %s", raw)
+		t.Fatalf("artifact leaked judge secret: %s", raw)
 	}
-	result, ok := artifact.Judge.Result.(map[string]any)
-	if !ok {
-		t.Fatalf("judge result = %#v", artifact.Judge.Result)
-	}
-	if result["[redacted]"] != "[redacted]" {
-		t.Fatalf("judge result was not redacted: %#v", result)
-	}
+	return artifact.Judge
 }
 
 func TestRunJudgeQuotesGeneratedPlaceholderPaths(t *testing.T) {
