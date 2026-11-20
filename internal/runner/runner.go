@@ -856,10 +856,6 @@ func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]boo
 	}
 }
 
-func WriteJSONFile(path string, value interface{}) error {
-	return writeJSONFile(path, value)
-}
-
 func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) error {
 	if outputPath == "" {
 		return errors.New("output path is required")
@@ -1341,10 +1337,6 @@ func renderPromptTemplateContext(ctx context.Context, template string, artifact 
 		return "", renderErr
 	}
 	return rendered, nil
-}
-
-func renderTargetFiles(target string) (string, error) {
-	return renderTargetFilesContext(context.Background(), target)
 }
 
 func renderTargetFilesContext(ctx context.Context, target string) (string, error) {
@@ -2020,14 +2012,6 @@ func judgeSourceKey(source string) string {
 	return filepath.ToSlash(filepath.Clean(source))
 }
 
-func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
-	return prepareJudgeWorkspaceContext(context.Background(), workspace, artifact)
-}
-
-func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifact Artifact) error {
-	return prepareHarnessWorkspaceContext(ctx, workspace, artifact, false)
-}
-
 // prepareHarnessWorkspaceContext lays out a judge or overview workspace. By
 // default it holds the copied artifact, one raw evidence file per scanner
 // under scanners/, and metadata.json. An evidence-only workspace omits the
@@ -2099,10 +2083,6 @@ func prepareHarnessWorkspaceContext(ctx context.Context, workspace string, artif
 		return os.WriteFile(filepath.Join(workspace, "judge.json"), append(rawJudge, '\n'), 0o644)
 	}
 	return nil
-}
-
-func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManifest, error) {
-	return copyTargetToWorkspaceContext(context.Background(), source, destRoot)
 }
 
 func copyTargetToWorkspaceContext(ctx context.Context, source string, destRoot string) (TargetWorkspaceManifest, error) {
@@ -2289,10 +2269,6 @@ func relativeManifestPath(root string, path string) string {
 		return path
 	}
 	return rel
-}
-
-func copyFile(source string, dest string) error {
-	return copyFileContext(context.Background(), source, dest)
 }
 
 func copyFileContext(ctx context.Context, source string, dest string) error {
