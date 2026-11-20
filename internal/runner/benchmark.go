@@ -324,7 +324,7 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 		if opts.OutputPath != "" {
 			outputErr := safety.validateWrite(opts.OutputPath)
 			if outputErr == nil {
-				outputErr = writeJSONFile(opts.OutputPath, artifact)
+				outputErr = WriteJSONFile(opts.OutputPath, artifact)
 			}
 			if err := outputErr; err != nil {
 				runErr = errors.Join(runErr, err)
