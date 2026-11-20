@@ -968,35 +968,25 @@ def fit_evidence(evidence):
         evidence["artifactManifest"] = manifest[:keep]
         return True
 
-    def trim_gaps(floor):
-        candidates = [item for item in gap_lists(evidence["scanners"]) if len(item["records"]) > floor]
-        if not candidates:
+    def trim_largest(items, key, floor):
+        largest = max(items, key=lambda item: len(item[key]), default=None)
+        if largest is None or len(largest[key]) <= floor:
             return False
-        largest = max(candidates, key=lambda item: len(item["records"]))
-        keep = shrink(len(largest["records"]), floor)
-        largest["omitted"] += len(largest["records"]) - keep
-        largest["records"] = largest["records"][:keep]
-        return True
-
-    def trim_children(floor):
-        candidates = [item for item in bundled_lists(evidence) if len(item["children"]) > floor]
-        if not candidates:
-            return False
-        largest = max(candidates, key=lambda item: len(item["children"]))
-        keep = shrink(len(largest["children"]), floor)
-        largest["omitted"] += len(largest["children"]) - keep
-        largest["children"] = largest["children"][:keep]
+        values = largest[key]
+        keep = shrink(len(values), floor)
+        largest["omitted"] += len(values) - keep
+        largest[key] = values[:keep]
         return True
 
     stages = [
         lambda: trim_findings(DEFAULT_MAX_FINDING_QUESTIONS),
         lambda: trim_manifest(50),
-        lambda: trim_gaps(6),
-        lambda: trim_children(10),
+        lambda: trim_largest(gap_lists(evidence["scanners"]), "records", 6),
+        lambda: trim_largest(bundled_lists(evidence), "children", 10),
         lambda: trim_findings(0),
         lambda: trim_manifest(0),
-        lambda: trim_gaps(0),
-        lambda: trim_children(0),
+        lambda: trim_largest(gap_lists(evidence["scanners"]), "records", 0),
+        lambda: trim_largest(bundled_lists(evidence), "children", 0),
     ]
     stage = 0
     while not evidence_fits(evidence):

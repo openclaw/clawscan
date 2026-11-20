@@ -64,7 +64,7 @@ func TestValidateRequirementsRejectsAIGWithoutAPIKey(t *testing.T) {
 
 func TestAIGScannerRunsLocalCLIAndPreservesSARIF(t *testing.T) {
 	target := createAIGTestSkill(t)
-	commandRunner := &aigRecordingCommandRunner{output: aigSARIF}
+	commandRunner := &reportFileCommandRunner{outputFlag: "-o", output: aigSARIF}
 	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestAIGScannerRecordsOpenAIKeyFallback(t *testing.T) {
 	}
 	artifact, err := Run(opts, RunContext{
 		Env:           map[string]string{"OPENAI_API_KEY": "secret-openai-key"},
-		CommandRunner: &aigRecordingCommandRunner{output: aigSARIF},
+		CommandRunner: &reportFileCommandRunner{outputFlag: "-o", output: aigSARIF},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -182,11 +182,12 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 func TestAIGScannerCompletesNonZeroExitWithValidSARIF(t *testing.T) {
 	target := createAIGTestSkill(t)
 	exitCode := 1
-	commandRunner := &aigRecordingCommandRunner{
-		output:   aigSARIF,
-		stderr:   "findings require review",
-		err:      errors.New("exit status 1"),
-		exitCode: &exitCode,
+	commandRunner := &reportFileCommandRunner{
+		outputFlag: "-o",
+		output:     aigSARIF,
+		stderr:     "findings require review",
+		err:        errors.New("exit status 1"),
+		exitCode:   &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
 	if err != nil {
@@ -232,7 +233,7 @@ func TestAIGScannerFailsMissingOrInvalidSARIF(t *testing.T) {
 			}
 			artifact, err := Run(opts, RunContext{
 				Env:           map[string]string{"LLM_API_KEY": "present"},
-				CommandRunner: &aigRecordingCommandRunner{output: test.output},
+				CommandRunner: &reportFileCommandRunner{outputFlag: "-o", output: test.output},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -263,7 +264,7 @@ func TestAIGScannerSkipsUnsupportedTargets(t *testing.T) {
 		}
 		artifact, err := Run(opts, RunContext{
 			Env:           map[string]string{"LLM_API_KEY": "present"},
-			CommandRunner: &aigRecordingCommandRunner{output: aigSARIF},
+			CommandRunner: &reportFileCommandRunner{outputFlag: "-o", output: aigSARIF},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -347,18 +348,19 @@ func createAIGTestSkill(t *testing.T) string {
 	return target
 }
 
-type aigRecordingCommandRunner struct {
-	calls    []commandCall
-	output   string
-	stderr   string
-	err      error
-	exitCode *int
+type reportFileCommandRunner struct {
+	outputFlag string
+	calls      []commandCall
+	output     string
+	stderr     string
+	err        error
+	exitCode   *int
 }
 
-func (runner *aigRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
+func (runner *reportFileCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
 	runner.calls = append(runner.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
 	if runner.output != "" {
-		outputPath := argValue(args, "-o")
+		outputPath := argValue(args, runner.outputFlag)
 		if outputPath != "" {
 			if err := os.WriteFile(outputPath, []byte(runner.output), 0o644); err != nil {
 				return CommandOutput{Stderr: runner.stderr}, err

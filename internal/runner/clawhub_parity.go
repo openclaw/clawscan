@@ -118,21 +118,22 @@ func normalizeClawHubSkillSpector(raw json.RawMessage, checkedAt int64) (clawHub
 			issues = append(issues, *issue)
 		}
 	}
+	risk := asStringMap(readMapValue(record, "risk_assessment", "riskAssessment"))
 	score := firstMapNumber(
 		readMapNumber(record, "risk_score", "riskScore", "score"),
-		readNestedMapNumber(record, []string{"risk_assessment", "riskAssessment"}, "score"),
+		readMapNumber(risk, "score"),
 	)
 	severity := firstNonEmpty(
 		readMapString(record, "risk_severity", "riskSeverity", "severity"),
-		readNestedMapString(record, []string{"risk_assessment", "riskAssessment"}, "severity"),
+		readMapString(risk, "severity"),
 	)
 	recommendation := firstNonEmpty(
 		readMapString(record, "risk_recommendation", "riskRecommendation", "recommendation"),
-		readNestedMapString(record, []string{"risk_assessment", "riskAssessment"}, "recommendation", "risk_recommendation", "riskRecommendation"),
+		readMapString(risk, "recommendation", "risk_recommendation", "riskRecommendation"),
 	)
 	scannerVersion := firstNonEmpty(
 		readMapString(record, "scanner_version", "scannerVersion", "version"),
-		readNestedMapString(record, []string{"metadata"}, "skillspector_version", "skillspectorVersion", "version"),
+		readMapString(asStringMap(record["metadata"]), "skillspector_version", "skillspectorVersion", "version"),
 	)
 	status := normalizeClawHubSkillSpectorStatus(readMapString(record, "status"), recommendation, score, issueCount)
 	reportError := skillSpectorReportError(record)
@@ -173,17 +174,18 @@ func normalizeClawHubSkillSpectorIssue(value any, index int) *clawHubSkillSpecto
 		issueID,
 	)
 	confidence := normalizeClawHubConfidence(readMapNumber(record, "confidence", "score"))
+	location := asStringMap(record["location"])
 	file := firstNonEmpty(
 		readMapString(record, "file", "file_path", "filePath", "path"),
-		readNestedMapString(record, []string{"location"}, "file", "path"),
+		readMapString(location, "file", "path"),
 	)
 	startLine := firstMapNumber(
 		readMapNumber(record, "line", "line_number", "lineNumber", "start_line", "startLine"),
-		readNestedMapNumber(record, []string{"location"}, "line", "start_line", "startLine"),
+		readMapNumber(location, "line", "start_line", "startLine"),
 	)
 	endLine := firstMapNumber(
 		readMapNumber(record, "end_line", "endLine"),
-		readNestedMapNumber(record, []string{"location"}, "end_line", "endLine"),
+		readMapNumber(location, "end_line", "endLine"),
 	)
 	return &clawHubSkillSpectorIssue{
 		IssueID:     firstNonEmpty(truncateClawHubText(issueID, maxClawHubSkillSpectorShortTextChars), "skillspector-issue"),
@@ -284,22 +286,6 @@ func readMapNumber(record map[string]any, names ...string) *float64 {
 		}
 	}
 	return nil
-}
-
-func readNestedMapString(record map[string]any, nestedNames []string, names ...string) string {
-	nested := asStringMap(readMapValue(record, nestedNames...))
-	if nested == nil {
-		return ""
-	}
-	return readMapString(nested, names...)
-}
-
-func readNestedMapNumber(record map[string]any, nestedNames []string, names ...string) *float64 {
-	nested := asStringMap(readMapValue(record, nestedNames...))
-	if nested == nil {
-		return nil
-	}
-	return readMapNumber(nested, names...)
 }
 
 func firstNonEmpty(values ...string) string {

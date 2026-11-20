@@ -43,7 +43,7 @@ func TestTemplateSelectorAcceptsRootAndNestedAndDoesNotTrustMarkerAlone(t *testi
 			if err := os.WriteFile(selected, []byte("Agent instructions"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "package.json"), mustTemplateJSON(t, map[string]any{"openclaw": map[string]string{"template": selector}}), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "package.json"), mustMarshalJSON(t, map[string]any{"openclaw": map[string]string{"template": selector}}), 0600); err != nil {
 				t.Fatal(err)
 			}
 			target, err := resolveTarget(root)

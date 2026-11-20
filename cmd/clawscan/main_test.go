@@ -1469,26 +1469,14 @@ func TestRunCommandDoesNotLeakPresentSecrets(t *testing.T) {
 
 func writeSkill(t *testing.T, dir string, content string) {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeFile(t, filepath.Join(dir, "SKILL.md"), content)
 }
 
 func writePlugin(t *testing.T, dir string, id string) {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	manifest := `{"id":"` + id + `","name":"Probe Plugin","contracts":{"tools":["probe_tool"]}}`
-	if err := os.WriteFile(filepath.Join(dir, "openclaw.plugin.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "index.js"), []byte("// synthetic probe\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeFile(t, filepath.Join(dir, "openclaw.plugin.json"), manifest)
+	writeFile(t, filepath.Join(dir, "index.js"), "// synthetic probe\n")
 }
 
 func writeFile(t *testing.T, path string, content string) {

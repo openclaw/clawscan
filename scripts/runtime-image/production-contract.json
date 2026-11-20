@@ -1,10 +1,10 @@
 {
   "source": {
-    "commit": "040f4fa1322145047a1280a2aae828627ad9ebfa",
-    "parent": "1669d62991f905a392fd996b34a73198bd664f06",
-    "tree": "e253545a57c03f9188d33c0e028bbe751fcabd84",
-    "runtime_tree": "ddfec1285eaf19beb3043e9e5ad043a0d274cb53",
-    "diff_sha256": "ca85c136a979af1b1c82969f6c71f98ee338a203396e4f210db4ff1076af7005",
+    "commit": "3b382df8f8b77e10e342585f24b0ef25bc401790",
+    "parent": "7b51dc85c23f330a12672f17c13c15d654573f1f",
+    "tree": "1b850558550f45521e3133638cfc2758c5bac98d",
+    "runtime_tree": "9f1aa0ad7bba119153550651bb74c1ab4576808a",
+    "diff_sha256": "0c2b3c99bfcb132a45f9dba98299935332d3724c8240d2449f0321eaca105d44",
     "files": {
       "docker/clawscan-runtime/Dockerfile": "7b6afa82489bdc447161c9e6344966e0f964e20ae5da72d14ebf4c5d24018e42",
       "docker/clawscan-runtime/patches/skillspector-responses.patch": "4603a085aee7b1340f4c5906e9420be3282fde1142fe3a3a58e182a203e5bb79",

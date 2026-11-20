@@ -149,6 +149,7 @@ func TestClawHubPartialRejectsInvalidReport(t *testing.T) {
 		{"missing-issues", "root", "issues", nil},
 		{"invalid-issue", "root", "issues", []any{false}},
 		{"missing-components", "root", "components", nil},
+		{"empty-components", "root", "components", []any{}},
 		{"missing-completeness", "root", "analysis_completeness", nil},
 		{"malformed-metadata", "root", "metadata", false},
 		{"nested-failure", "accounting", "execution_successful", false},

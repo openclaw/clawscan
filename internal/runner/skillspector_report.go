@@ -96,29 +96,9 @@ func skillSpectorUsablePartial(raw json.RawMessage) bool {
 	if status, exists := record["status"]; exists && status != "partial" {
 		return false
 	}
-	components, ok := record["components"].([]any)
-	if !ok || len(components) == 0 {
+	components, _ := record["components"].([]any)
+	if len(components) == 0 || !skillSpectorValidComponents(components) || !skillSpectorValidIssues(record["issues"]) {
 		return false
-	}
-	for _, value := range components {
-		component, ok := value.(map[string]any)
-		if !ok {
-			return false
-		}
-		name, _ := component["path"].(string)
-		kind, _ := component["type"].(string)
-		if !skillSpectorComponentPath(name) || kind == "" {
-			return false
-		}
-	}
-	issues, ok := record["issues"].([]any)
-	if !ok {
-		return false
-	}
-	for _, value := range issues {
-		if issue, ok := value.(map[string]any); !ok || len(issue) == 0 {
-			return false
-		}
 	}
 	var counts [4]int
 	for i, field := range []string{"total_components", "fully_inspected_files", "partially_inspected_files", "entirely_uninspected_files"} {
@@ -153,6 +133,31 @@ func skillSpectorUsablePartial(raw json.RawMessage) bool {
 					}
 				}
 			}
+		}
+	}
+	return true
+}
+
+func skillSpectorValidComponents(components []any) bool {
+	for _, value := range components {
+		component := asStringMap(value)
+		name, _ := component["path"].(string)
+		kind, _ := component["type"].(string)
+		if !skillSpectorComponentPath(name) || kind == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func skillSpectorValidIssues(value any) bool {
+	issues, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, issue := range issues {
+		if len(asStringMap(issue)) == 0 {
+			return false
 		}
 	}
 	return true
