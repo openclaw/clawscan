@@ -81,23 +81,27 @@ find_all_submission_dirs() {
 
 find_changed_submission_dirs() {
   local base_ref="${GITHUB_BASE_REF:-}"
-  if [ -z "$base_ref" ]; then
+  local comparison
+  if [ -n "${CLAWSCAN_SUBMISSION_BASE:-}" ]; then
+    comparison="$CLAWSCAN_SUBMISSION_BASE..HEAD"
+  elif [ -n "$base_ref" ] && git fetch --no-tags --depth=1 origin "$base_ref"; then
+    comparison="FETCH_HEAD...HEAD"
+  else
     find_all_submission_dirs
     return
   fi
-  git fetch --no-tags --depth=1 origin "$base_ref" >/dev/null 2>&1 || true
-  local base="origin/$base_ref"
-  if ! git rev-parse --verify "$base" >/dev/null 2>&1; then
-    find_all_submission_dirs
-    return
-  fi
-  while IFS= read -r file; do
+
+  # Complete the diff before treating an empty path list as a successful check.
+  changed_paths="$(mktemp)"
+  trap 'rm -f "$changed_paths"' EXIT
+  git diff --name-only -z "$comparison" -- "$submission_root" > "$changed_paths"
+  while IFS= read -r -d '' file; do
     case "$file" in
       "$submission_root"/*/*)
         add_submission_dir "$(dirname "$file")"
         ;;
     esac
-  done < <(git diff --name-only "$base"...HEAD -- "$submission_root" || true)
+  done < "$changed_paths"
 }
 
 if [ "${#explicit_dirs[@]}" -gt 0 ]; then

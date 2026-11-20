@@ -135,5 +135,5 @@ jobs:
       - name: Test runtime update branch push
         run: node --test scripts/push-runtime-tool-update-branch.test.mjs
 
-      - name: Test Security Signals publishing
-        run: node --test scripts/publish-security-signals-results.test.mjs
+      - name: Test Security Signals publishing and validation
+        run: node --test scripts/publish-security-signals-results.test.mjs scripts/validate-security-signals-submissions.test.mjs
