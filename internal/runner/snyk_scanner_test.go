@@ -189,7 +189,7 @@ func TestSnykScannerFailsSuccessWithInvalidJSONStdout(t *testing.T) {
 	if result.Status != "failed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Error, errInvalidSnykJSON.Error()) {
+	if !strings.Contains(result.Error, "Snyk scanner returned invalid JSON") {
 		t.Fatalf("error = %q", result.Error)
 	}
 	if result.Raw != nil {

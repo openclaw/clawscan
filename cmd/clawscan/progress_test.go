@@ -16,7 +16,7 @@ import (
 
 func TestProgressRequiresExplicitOptIn(t *testing.T) {
 	for _, value := range []string{"", "0", "true", "1"} {
-		ctx := scanRunContext([]string{"CLAWSCAN_PROGRESS=" + value})
+		ctx := scanRunContext(t.Context(), []string{"CLAWSCAN_PROGRESS=" + value})
 		if (ctx.Progress != nil) != (value == "1") {
 			t.Fatalf("unexpected progress opt-in for %q", value)
 		}

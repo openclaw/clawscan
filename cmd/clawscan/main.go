@@ -89,32 +89,7 @@ func runContext(ctx context.Context, args []string, environ []string) error {
 	if !opts.JSON && opts.OutputPath == "" {
 		opts.OutputPath = defaultOutputPath
 	}
-	if opts.Benchmark != nil {
-		artifact, err := runner.RunBenchmark(opts, scanRunContextWithCaller(ctx, environ))
-		if err != nil {
-			if opts.JSON && artifact.SchemaVersion != "" {
-				err = errors.Join(err, runner.WriteJSON(os.Stdout, artifact))
-			}
-			return err
-		}
-		if opts.JSON {
-			return runner.WriteJSON(os.Stdout, artifact)
-		}
-		if opts.OutputPath != "" {
-			printBenchmarkSummary(os.Stdout, artifact, opts.OutputPath)
-			if predictionsPath := runner.BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
-				fmt.Fprintf(os.Stdout, "predictions_results: %s\n", displayOutputPath(predictionsPath))
-			}
-			return nil
-		}
-		if predictionsPath := runner.BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
-			fmt.Fprintf(os.Stdout, "predictions_results: %s\n", displayOutputPath(predictionsPath))
-			return nil
-		}
-		printBenchmarkSummary(os.Stdout, artifact, "")
-		return nil
-	}
-	result, err := runner.RunTargets(opts, scanRunContextWithCaller(ctx, environ), cwd)
+	result, err := runner.RunTargets(opts, scanRunContext(ctx, environ), cwd)
 	err = errors.Join(err, result.OperationalError())
 	if err != nil {
 		if opts.JSON && result.JSONValue() != nil {
@@ -125,11 +100,7 @@ func runContext(ctx context.Context, args []string, environ []string) error {
 	if opts.JSON {
 		return runner.WriteJSON(os.Stdout, result.JSONValue())
 	}
-	if opts.OutputPath != "" {
-		printRunSummary(os.Stdout, result, opts.OutputPath)
-		return nil
-	}
-	printRunSummary(os.Stdout, result, "")
+	printRunSummary(os.Stdout, result, opts.OutputPath)
 	return nil
 }
 
@@ -207,7 +178,7 @@ func runOpenClawInstallPolicyContext(ctx context.Context, args []string, environ
 	if installPolicyWindowsUnscanned(opts, args, runtime.GOOS) {
 		return installpolicy.WriteResponse(output, windowsUnscannedResponse())
 	}
-	result, err := runner.RunTargets(opts, scanRunContextWithCaller(ctx, environ), cwd)
+	result, err := runner.RunTargets(opts, scanRunContext(ctx, environ), cwd)
 	if err != nil {
 		return failClosed(err)
 	}
@@ -299,15 +270,7 @@ func hasInstallPolicyConfigOverride(args []string) bool {
 	return false
 }
 
-func benchmarkRunContext(environ []string) runner.RunContext {
-	return scanRunContext(environ)
-}
-
-func scanRunContext(environ []string) runner.RunContext {
-	return scanRunContextWithCaller(nil, environ)
-}
-
-func scanRunContextWithCaller(caller context.Context, environ []string) runner.RunContext {
+func scanRunContext(caller context.Context, environ []string) runner.RunContext {
 	ctx := runner.RunContext{Context: caller, Env: runner.EnvMap(environ)}
 	if ctx.Env["CLAWSCAN_PROGRESS"] == "1" {
 		ctx.Progress = os.Stderr
@@ -334,14 +297,11 @@ func runBenchmarkCommand(ctx context.Context, args []string, environ []string) e
 	if err != nil {
 		return err
 	}
-	if resolved.AllProfiles {
-		return errors.New("clawscan benchmark does not support --config without --profile")
-	}
 	opts := resolved.Options[0]
 	if !opts.JSON && opts.OutputPath == "" {
 		opts.OutputPath = defaultOutputPath
 	}
-	artifact, err := runner.RunBenchmark(opts, scanRunContextWithCaller(ctx, environ))
+	artifact, err := runner.RunBenchmark(opts, scanRunContext(ctx, environ))
 	if err != nil {
 		if opts.JSON && artifact.SchemaVersion != "" {
 			err = errors.Join(err, runner.WriteJSON(os.Stdout, artifact))
@@ -351,18 +311,10 @@ func runBenchmarkCommand(ctx context.Context, args []string, environ []string) e
 	if opts.JSON {
 		return runner.WriteJSON(os.Stdout, artifact)
 	}
-	if opts.OutputPath != "" {
-		printBenchmarkSummary(os.Stdout, artifact, opts.OutputPath)
-		if predictionsPath := runner.BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
-			fmt.Fprintf(os.Stdout, "predictions_results: %s\n", displayOutputPath(predictionsPath))
-		}
-		return nil
-	}
+	printBenchmarkSummary(os.Stdout, artifact, opts.OutputPath)
 	if predictionsPath := runner.BenchmarkPredictionsOutputPath(opts); predictionsPath != "" {
 		fmt.Fprintf(os.Stdout, "predictions_results: %s\n", displayOutputPath(predictionsPath))
-		return nil
 	}
-	printBenchmarkSummary(os.Stdout, artifact, "")
 	return nil
 }
 
@@ -373,11 +325,12 @@ func runAllProfiles(ctx context.Context, resolved profiles.ResolvedRunSet, envir
 	if err := runner.ValidateOutputPaths(resolved.Options, resolved.OutputPath, cwd); err != nil {
 		return err
 	}
-	batch, err := runner.RunProfileBatch(resolved.Options, scanRunContextWithCaller(ctx, environ), cwd)
-	err = errors.Join(err, (runner.RunTargetsResult{Batch: &batch}).OperationalError())
+	batch, err := runner.RunProfileBatch(resolved.Options, scanRunContext(ctx, environ), cwd)
+	result := runner.RunTargetsResult{Batch: &batch}
+	err = errors.Join(err, result.OperationalError())
 	if err != nil {
 		if resolved.OutputPath != "" {
-			err = errors.Join(err, runner.WriteRunTargetsResultBundle(resolved.OutputPath, runner.RunTargetsResult{Batch: &batch}))
+			err = errors.Join(err, runner.WriteRunTargetsResultBundle(resolved.OutputPath, result))
 		}
 		if resolved.JSON {
 			err = errors.Join(err, runner.WriteJSON(os.Stdout, batch))
@@ -387,14 +340,10 @@ func runAllProfiles(ctx context.Context, resolved profiles.ResolvedRunSet, envir
 	if resolved.JSON {
 		return runner.WriteJSON(os.Stdout, batch)
 	}
-	if resolved.OutputPath != "" {
-		if err := runner.WriteRunTargetsResultBundle(resolved.OutputPath, runner.RunTargetsResult{Batch: &batch}); err != nil {
-			return err
-		}
-		printRunSummary(os.Stdout, runner.RunTargetsResult{Batch: &batch}, resolved.OutputPath)
-		return nil
+	if err := runner.WriteRunTargetsResultBundle(resolved.OutputPath, result); err != nil {
+		return err
 	}
-	printRunSummary(os.Stdout, runner.RunTargetsResult{Batch: &batch}, "")
+	printRunSummary(os.Stdout, result, resolved.OutputPath)
 	return nil
 }
 
