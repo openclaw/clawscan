@@ -18,6 +18,8 @@
 - **Breaking:** every profile uses one judge workspace layout (`artifact/`, `scanners/<id>.json`, and `metadata.json` with the run `context`), and SkillSpector scans the target itself for every profile (the ClawHub-only `artifact/` scan copy is gone). Usable partial SkillSpector evidence reaches any configured judge; without a judge it still fails the scanner. With a judge, SkillSpector reports must be nonempty JSON objects.
 - **Breaking:** remove the `virustotal` and `clawscan-static` scanners. The `clawhub` profile now runs `skillspector` and `aig` (for skills; see `aig-mcp` above for plugins), and `openclaw-install-policy` runs `skillspector`. The install policy validates npm metadata preflights without scanning and returns a visible `warn` on native Windows instead of a static-only scan. Consumers that read `scanners["clawscan-static"]` must switch to another eligibility signal.
 
+- Security Signals submission validation accepts the Hugging Face dataset name used in the submission guide and seeded leaderboard entries.
+
 ## 0.3.1 - 2026-11-02
 
 - Refresh the frozen SkillSpector certificate bundle to certifi 2026.10.23, preserving the Responses adapter patch. Runtime Python delivery remains a separate requirement for incident-key rejection. Thanks @joshavant. (#94)
