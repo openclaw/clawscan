@@ -668,6 +668,11 @@ func TestRunCommandPrintsBatchJSONForDiscoveredSkills(t *testing.T) {
 		}
 	})
 
+	assertDiscoveredSkillBatch(t, stdout, "", "skillspector", "socket")
+}
+
+func assertDiscoveredSkillBatch(t *testing.T, stdout, profile string, scanners ...string) {
+	t.Helper()
 	var artifact struct {
 		SchemaVersion string `json:"schemaVersion"`
 		Profile       string `json:"profile"`
@@ -684,8 +689,8 @@ func TestRunCommandPrintsBatchJSONForDiscoveredSkills(t *testing.T) {
 	if artifact.SchemaVersion != "clawscan-batch-v1" {
 		t.Fatalf("schema = %q", artifact.SchemaVersion)
 	}
-	if artifact.Profile != "" {
-		t.Fatalf("profile = %q", artifact.Profile)
+	if artifact.Profile != profile {
+		t.Fatalf("profile = %q, want %q", artifact.Profile, profile)
 	}
 	if len(artifact.Runs) != 2 {
 		t.Fatalf("runs = %#v", artifact.Runs)
@@ -694,7 +699,7 @@ func TestRunCommandPrintsBatchJSONForDiscoveredSkills(t *testing.T) {
 		t.Fatalf("targets = %q", got)
 	}
 	for _, run := range artifact.Runs {
-		for _, scanner := range []string{"skillspector", "socket"} {
+		for _, scanner := range scanners {
 			if _, ok := run.Scanners[scanner]; !ok {
 				t.Fatalf("missing %s scanner for %s: %#v", scanner, run.Target.Input, run.Scanners)
 			}
@@ -1161,38 +1166,7 @@ func TestRunCommandDiscoversSkillsWithExplicitProfile(t *testing.T) {
 		}
 	})
 
-	var artifact struct {
-		SchemaVersion string `json:"schemaVersion"`
-		Profile       string `json:"profile"`
-		Runs          []struct {
-			Target struct {
-				Input string `json:"input"`
-			} `json:"target"`
-			Scanners map[string]interface{} `json:"scanners"`
-		} `json:"runs"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
-		t.Fatal(err)
-	}
-	if artifact.SchemaVersion != "clawscan-batch-v1" {
-		t.Fatalf("schema = %q", artifact.SchemaVersion)
-	}
-	if artifact.Profile != "clawhub" {
-		t.Fatalf("profile = %q", artifact.Profile)
-	}
-	if len(artifact.Runs) != 2 {
-		t.Fatalf("runs = %#v", artifact.Runs)
-	}
-	if got := artifact.Runs[0].Target.Input + "," + artifact.Runs[1].Target.Input; got != "skills/bar,skills/foo" {
-		t.Fatalf("targets = %q", got)
-	}
-	for _, run := range artifact.Runs {
-		for _, scanner := range []string{"skillspector", "aig"} {
-			if _, ok := run.Scanners[scanner]; !ok {
-				t.Fatalf("missing %s scanner for %s: %#v", scanner, run.Target.Input, run.Scanners)
-			}
-		}
-	}
+	assertDiscoveredSkillBatch(t, stdout, "clawhub", "skillspector", "aig")
 }
 
 // stubJudgeCommand is a judge that writes a schema-shaped verdict and nothing
@@ -1289,21 +1263,7 @@ profiles:
 		}
 	})
 
-	var artifact struct {
-		ConfigSource *string `json:"configSource"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
-		t.Fatal(err)
-	}
-	if artifact.ConfigSource == nil {
-		t.Fatalf("config source = nil, want %q", config)
-	}
-	if *artifact.ConfigSource != config {
-		t.Fatalf("config source = %q, want %q", *artifact.ConfigSource, config)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr = %q", stderr)
-	}
+	assertConfigSourceWithoutNotice(t, stdout, stderr, config)
 }
 
 func TestRunWithExplicitConfigLoadsConfig_NoNotice(t *testing.T) {
@@ -1328,6 +1288,11 @@ profiles:
 		}
 	})
 
+	assertConfigSourceWithoutNotice(t, stdout, stderr, explicit)
+}
+
+func assertConfigSourceWithoutNotice(t *testing.T, stdout, stderr, config string) {
+	t.Helper()
 	var artifact struct {
 		ConfigSource *string `json:"configSource"`
 	}
@@ -1335,10 +1300,10 @@ profiles:
 		t.Fatal(err)
 	}
 	if artifact.ConfigSource == nil {
-		t.Fatalf("config source = nil, want %q", explicit)
+		t.Fatalf("config source = nil, want %q", config)
 	}
-	if *artifact.ConfigSource != explicit {
-		t.Fatalf("config source = %q, want %q", *artifact.ConfigSource, explicit)
+	if *artifact.ConfigSource != config {
+		t.Fatalf("config source = %q, want %q", *artifact.ConfigSource, config)
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q", stderr)
