@@ -204,5 +204,5 @@ func checkpointArtifact(opts Options, artifact *Artifact, ctx context.Context) e
 	if err := artifact.outputSafety.validateWrite(opts.OutputPath); err != nil {
 		return err
 	}
-	return writeJSONFile(outputBundleSpecFor(opts.OutputPath).ArtifactPath, artifact)
+	return WriteJSONFile(outputBundleSpecFor(opts.OutputPath).ArtifactPath, artifact)
 }

@@ -7,21 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
-
-type relyableRecordingCommandRunner struct {
-	calls    []commandCall
-	stdout   string
-	stderr   string
-	err      error
-	exitCode *int
-}
-
-func (r *relyableRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
-	r.calls = append(r.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
-	return CommandOutput{Stdout: r.stdout, Stderr: r.stderr, ExitCode: r.exitCode}, r.err
-}
 
 func TestRunExecutesRelyableScannerWithoutHostExecOutsideSandbox(t *testing.T) {
 	dir := t.TempDir()
@@ -30,7 +16,7 @@ func TestRunExecutesRelyableScannerWithoutHostExecOutsideSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	const relyableJSON = `{"schemaVersion":"relyable-scan-v1","axis":"functional-rederivation","skills":[]}`
-	runner := &relyableRecordingCommandRunner{stdout: relyableJSON}
+	runner := &stdoutCommandRunner{stdout: relyableJSON}
 	opts, err := ParseArgs([]string{target, "--scanner", "relyable", "--sandbox", "off"})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +52,7 @@ func TestRunExecutesRelyableScannerWithoutHostExecOutsideSandbox(t *testing.T) {
 
 func TestRelyableScannerPassesHostExecAckInDockerSandbox(t *testing.T) {
 	runner := ExternalScannerRunner{
-		CommandRunner: &relyableRecordingCommandRunner{stdout: `{"ok":true}`},
+		CommandRunner: &stdoutCommandRunner{stdout: `{"ok":true}`},
 		SandboxMode:   SandboxModeDocker,
 	}
 	result, err := runner.runRelyable("/workspace/skill", "2026-01-01T00:00:00Z")
@@ -86,7 +72,7 @@ func TestRelyableScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 	const relyableJSON = `{"schemaVersion":"relyable-scan-v1","error":"no SKILL.md found in target or its immediate children"}`
 	exitCode := 2
 	runner := ExternalScannerRunner{
-		CommandRunner: &relyableRecordingCommandRunner{
+		CommandRunner: &stdoutCommandRunner{
 			stdout:   relyableJSON,
 			stderr:   "",
 			err:      errors.New("exit status 2"),
@@ -114,7 +100,7 @@ func TestRelyableScannerCompletesNonZeroExitWithJSONStdout(t *testing.T) {
 func TestRelyableScannerFailsOnEmptyOrInvalidStdout(t *testing.T) {
 	for name, stdout := range map[string]string{"empty": "", "invalid": "not json"} {
 		runner := ExternalScannerRunner{
-			CommandRunner: &relyableRecordingCommandRunner{stdout: stdout},
+			CommandRunner: &stdoutCommandRunner{stdout: stdout},
 		}
 		result, err := runner.runRelyable("/workspace/skill", "2026-01-01T00:00:00Z")
 		if err != nil {
@@ -134,7 +120,7 @@ func TestRelyableScannerHintsWhenExecutableMissing(t *testing.T) {
 	// the not-found failure is the one operators will actually hit; it must
 	// point at the derived-image / clawscan install paths.
 	runner := ExternalScannerRunner{
-		CommandRunner: &relyableRecordingCommandRunner{
+		CommandRunner: &stdoutCommandRunner{
 			stderr: `exec: "relyable-scan": executable file not found in $PATH`,
 			err:    errors.New("exit status 127"),
 		},
@@ -155,7 +141,7 @@ func TestRelyableScannerHintsWhenExecutableMissing(t *testing.T) {
 
 	// Any other failure must stay un-hinted.
 	plain := ExternalScannerRunner{
-		CommandRunner: &relyableRecordingCommandRunner{err: errors.New("exit status 1"), stderr: "boom"},
+		CommandRunner: &stdoutCommandRunner{err: errors.New("exit status 1"), stderr: "boom"},
 	}
 	plainResult, err := plain.runRelyable("/workspace/skill", "2026-01-01T00:00:00Z")
 	if err != nil {
