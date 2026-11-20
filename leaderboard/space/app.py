@@ -183,7 +183,11 @@ def score_loose_non_clean(expected: dict[str, str], predicted: dict[str, str]) -
 def divide(numerator: float, denominator: float) -> float:
     if denominator == 0:
         return 0
-    return round(numerator / denominator, 4)
+    # Match Go's math.Round for nonnegative metrics, including exact half steps.
+    whole, fraction = divmod(numerator / denominator * 10000, 1)
+    if fraction >= 0.5:
+        whole += 1
+    return whole / 10000
 
 
 def filter_options(results: list[dict[str, Any]], key: str) -> list[str]:
