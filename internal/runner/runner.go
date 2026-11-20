@@ -856,10 +856,6 @@ func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]boo
 	}
 }
 
-func WriteJSONFile(path string, value interface{}) error {
-	return writeJSONFile(path, value)
-}
-
 func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) error {
 	if outputPath == "" {
 		return errors.New("output path is required")
@@ -1341,10 +1337,6 @@ func renderPromptTemplateContext(ctx context.Context, template string, artifact 
 		return "", renderErr
 	}
 	return rendered, nil
-}
-
-func renderTargetFiles(target string) (string, error) {
-	return renderTargetFilesContext(context.Background(), target)
 }
 
 func renderTargetFilesContext(ctx context.Context, target string) (string, error) {
@@ -2020,14 +2012,6 @@ func judgeSourceKey(source string) string {
 	return filepath.ToSlash(filepath.Clean(source))
 }
 
-func prepareJudgeWorkspace(workspace string, artifact Artifact) error {
-	return prepareJudgeWorkspaceContext(context.Background(), workspace, artifact)
-}
-
-func prepareJudgeWorkspaceContext(ctx context.Context, workspace string, artifact Artifact) error {
-	return prepareHarnessWorkspaceContext(ctx, workspace, artifact, false)
-}
-
 // prepareHarnessWorkspaceContext lays out a judge or overview workspace. By
 // default it holds the copied artifact, one raw evidence file per scanner
 // under scanners/, and metadata.json. An evidence-only workspace omits the
@@ -2099,10 +2083,6 @@ func prepareHarnessWorkspaceContext(ctx context.Context, workspace string, artif
 		return os.WriteFile(filepath.Join(workspace, "judge.json"), append(rawJudge, '\n'), 0o644)
 	}
 	return nil
-}
-
-func copyTargetToWorkspace(source string, destRoot string) (TargetWorkspaceManifest, error) {
-	return copyTargetToWorkspaceContext(context.Background(), source, destRoot)
 }
 
 func copyTargetToWorkspaceContext(ctx context.Context, source string, destRoot string) (TargetWorkspaceManifest, error) {
@@ -2291,10 +2271,6 @@ func relativeManifestPath(root string, path string) string {
 	return rel
 }
 
-func copyFile(source string, dest string) error {
-	return copyFileContext(context.Background(), source, dest)
-}
-
 func copyFileContext(ctx context.Context, source string, dest string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -2390,6 +2366,37 @@ func (runner ExternalScannerRunner) RunScannerContext(ctx context.Context, name 
 	return runner.RunScanner(name, target, startedAt)
 }
 
+func (runner ExternalScannerRunner) runJSONStdout(command string, args []string, startedAt, scannerName, invalidJSON string) ScannerResult {
+	timeout := runner.Timeout
+	if timeout == 0 {
+		timeout = 20 * time.Minute
+	}
+	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
+	result := ScannerResult{
+		Status:      "failed",
+		StartedAt:   startedAt,
+		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Command:     append([]string{command}, args...),
+	}
+	raw := json.RawMessage(strings.TrimSpace(output.Stdout))
+	if runErr != nil {
+		result.Error = commandError(runErr, output.Stderr, runner.Env)
+	}
+	if !json.Valid(raw) {
+		if runErr == nil {
+			result.Error = invalidJSON
+			if len(raw) == 0 {
+				result.Error = scannerName + " scanner did not return JSON on stdout."
+			}
+		}
+		return result
+	}
+	result.Status = commandScannerResultStatus(output, runErr)
+	result.ExitCode = gateEligibleExitCode(output.ExitCode)
+	result.Raw = raw
+	return result
+}
+
 func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt string) (ScannerResult, error) {
 	command := "npx"
 	args := []string{"--yes", "agentverus-scanner", "scan", target, "--json"}
@@ -2397,66 +2404,7 @@ func (runner ExternalScannerRunner) runAgentVerus(target string, startedAt strin
 		command = "agentverus-scanner"
 		args = []string{"scan", target, "--json"}
 	}
-	fullCommand := append([]string{command}, args...)
-	timeout := runner.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
-	exitCode := gateEligibleExitCode(output.ExitCode)
-	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	raw := strings.TrimSpace(output.Stdout)
-	if runErr != nil {
-		message := commandError(runErr, output.Stderr, runner.Env)
-		if json.Valid([]byte(raw)) {
-			return ScannerResult{
-				Status:      commandScannerResultStatus(output, runErr),
-				StartedAt:   startedAt,
-				CompletedAt: completedAt,
-				Command:     fullCommand,
-				Error:       message,
-				ExitCode:    exitCode,
-				Raw:         json.RawMessage(raw),
-			}, nil
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       message,
-			Raw:         nil,
-		}, nil
-	}
-	if raw == "" {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "AgentVerus scanner did not return JSON on stdout.",
-			Raw:         nil,
-		}, nil
-	}
-	if !json.Valid([]byte(raw)) {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "AgentVerus scanner returned invalid JSON",
-			Raw:         nil,
-		}, nil
-	}
-	return ScannerResult{
-		Status:      "completed",
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Command:     fullCommand,
-		Error:       "",
-		ExitCode:    exitCode,
-		Raw:         json.RawMessage(raw),
-	}, nil
+	return runner.runJSONStdout(command, args, startedAt, "AgentVerus", "AgentVerus scanner returned invalid JSON"), nil
 }
 
 func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt string) (ScannerResult, error) {

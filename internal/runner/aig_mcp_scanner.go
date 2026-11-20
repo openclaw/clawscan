@@ -167,7 +167,7 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 	finishedAt := completedAt()
 	failed := func(message string) ScannerResult {
 		if runErr != nil {
-			message = scannerCommandError(runErr, aigMCPStderrTail(output.Stderr), runner.Env) + ": " + message
+			message = commandError(runErr, aigMCPStderrTail(output.Stderr), runner.Env) + ": " + message
 		} else if stderr := strings.TrimSpace(aigMCPStderrTail(output.Stderr)); stderr != "" {
 			message += " Scanner output: " + redactEnvValues(stderr, runner.Env)
 		}
@@ -201,7 +201,7 @@ func (runner ExternalScannerRunner) runAIGMCP(target string, startedAt string) (
 	}
 	if runErr != nil {
 		result.Status = "failed"
-		result.Error = scannerCommandError(runErr, aigMCPStderrTail(output.Stderr), runner.Env)
+		result.Error = commandError(runErr, aigMCPStderrTail(output.Stderr), runner.Env)
 		return result, nil
 	}
 	// Keep the SARIF for inspection, but never let a report from an audit that
