@@ -142,8 +142,7 @@ for dir in "${submission_dirs[@]}"; do
   safe_name="$(echo "$dir" | tr '/ ' '__')"
   score_path="$score_dir/$safe_name.score.json"
   echo "Validating $dir"
-  "${validator_cmd[@]}" "$dir" --json >"$score_path"
-  summary="$("${validator_cmd[@]}" "$dir")"
+  summary="$("${validator_cmd[@]}" "$dir" --score-file "$score_path")"
   echo "$summary"
 
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
