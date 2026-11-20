@@ -22,8 +22,8 @@ func TestDefaultBenchmarkRegistryResolvesBuiltInsAndAliases(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Resolve(%q): %v", input, err)
 		}
-		if adapter.ID() != canonicalBenchmarkIDForTest(input) {
-			t.Fatalf("Resolve(%q) id = %q", input, adapter.ID())
+		if adapter.Info().ID != canonicalBenchmarkIDForTest(input) {
+			t.Fatalf("Resolve(%q) id = %q", input, adapter.Info().ID)
 		}
 	}
 }
@@ -127,43 +127,18 @@ func (panicBenchmarkClient) MaterializeSkillTrustBenchRow(string, SkillTrustBenc
 type stubBenchmarkAdapter struct {
 	id      string
 	aliases []string
-	info    DatasetInfo
-}
-
-func (adapter stubBenchmarkAdapter) ID() string {
-	return adapter.id
-}
-
-func (adapter stubBenchmarkAdapter) Aliases() []string {
-	return append([]string(nil), adapter.aliases...)
 }
 
 func (adapter stubBenchmarkAdapter) Info() DatasetInfo {
-	return adapter.info
-}
-
-func (adapter stubBenchmarkAdapter) Source() string {
-	return "fixture"
+	return DatasetInfo{ID: adapter.id, Aliases: adapter.aliases}
 }
 
 func (adapter stubBenchmarkAdapter) Config() string {
 	return "default"
 }
 
-func (adapter stubBenchmarkAdapter) DefaultSplit() string {
-	return "benchmark"
-}
-
-func (adapter stubBenchmarkAdapter) Splits() []string {
-	return []string{"benchmark"}
-}
-
 func (adapter stubBenchmarkAdapter) RunCases(Options, RunContext, map[string]string, func() time.Time, BenchmarkClient) ([]BenchmarkCase, error) {
 	return nil, nil
-}
-
-func (adapter stubBenchmarkAdapter) SupportsPredictionsOutput() bool {
-	return false
 }
 
 func TestDefaultBenchmarkRegistryProvidesDatasetCatalogInfo(t *testing.T) {

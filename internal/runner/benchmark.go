@@ -226,8 +226,9 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 	if err != nil {
 		return BenchmarkArtifact{}, err
 	}
+	info := adapter.Info()
 	benchmarkOpts := *opts.Benchmark
-	benchmarkOpts.ID = adapter.ID()
+	benchmarkOpts.ID = info.ID
 	hasIDsSource := benchmarkOpts.IDsSource != ""
 	benchmarkOpts.IDsSource = normalizeBenchmarkIDSource(benchmarkOpts.IDsSource)
 	opts.Benchmark = &benchmarkOpts
@@ -238,7 +239,7 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 	if err := validateGateRuleScanners(opts); err != nil {
 		return BenchmarkArtifact{}, err
 	}
-	if opts.Benchmark.PredictionsOutputPath != "" && !adapter.SupportsPredictionsOutput() {
+	if opts.Benchmark.PredictionsOutputPath != "" && !info.SupportsPredictionsOutput {
 		return BenchmarkArtifact{}, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
 	}
 	env := ctx.Env
@@ -273,7 +274,7 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 		SchemaVersion: "clawscan-benchmark-v1",
 		Benchmark: BenchmarkMetadata{
 			ID:        opts.Benchmark.ID,
-			Source:    adapter.Source(),
+			Source:    info.Source,
 			Config:    adapter.Config(),
 			Split:     opts.Benchmark.Split,
 			Offset:    opts.Benchmark.Offset,
@@ -792,7 +793,7 @@ func canonicalBenchmarkID(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return adapter.ID(), nil
+	return adapter.Info().ID, nil
 }
 
 func validateBenchmarkSplit(id string, split string) error {
@@ -800,13 +801,14 @@ func validateBenchmarkSplit(id string, split string) error {
 	if err != nil {
 		return err
 	}
-	validSplits := adapter.Splits()
+	info := adapter.Info()
+	validSplits := info.Splits
 	for _, validSplit := range validSplits {
 		if split == validSplit {
 			return nil
 		}
 	}
-	return fmt.Errorf("Unsupported split for %s: %s (valid: %s)", adapter.ID(), split, strings.Join(validSplits, ", "))
+	return fmt.Errorf("Unsupported split for %s: %s (valid: %s)", info.ID, split, strings.Join(validSplits, ", "))
 }
 
 func defaultBenchmarkSplit(id string) string {
@@ -814,7 +816,7 @@ func defaultBenchmarkSplit(id string) string {
 	if err != nil {
 		return defaultOpenClawBenchmarkSplit
 	}
-	return adapter.DefaultSplit()
+	return adapter.Info().DefaultSplit
 }
 
 func normalizedRawMessage(raw json.RawMessage) json.RawMessage {
