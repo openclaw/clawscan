@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/openclaw/clawscan/internal/runner"
 )
 
 const (
@@ -19,6 +21,8 @@ const (
 )
 
 type benchmarkArtifact struct {
+	Status    string            `json:"status"`
+	Complete  *bool             `json:"complete"`
 	Benchmark benchmarkMetadata `json:"benchmark"`
 	Summary   benchmarkSummary  `json:"summary"`
 	Cases     []benchmarkCase   `json:"cases"`
@@ -26,29 +30,19 @@ type benchmarkArtifact struct {
 
 type benchmarkMetadata struct {
 	ID        string `json:"id"`
-	Split     string `json:"split"`
-	Rows      int    `json:"rows"`
+	Rows      *int   `json:"rows"`
 	IDsSource string `json:"idsSource"`
 	IDsCount  int    `json:"idsCount"`
 	IDsSHA256 string `json:"idsSha256"`
 }
 
 type benchmarkSummary struct {
-	CaseCount  int                        `json:"caseCount"`
-	Evaluation benchmarkEvaluationSummary `json:"evaluation"`
-}
-
-type benchmarkEvaluationSummary struct {
-	Scored     int     `json:"scored"`
-	Correct    int     `json:"correct"`
-	Incorrect  int     `json:"incorrect"`
-	Abstained  int     `json:"abstained"`
-	Unscorable int     `json:"unscorable"`
-	Errors     int     `json:"errors"`
-	Accuracy   float64 `json:"accuracy"`
+	CaseCount  *int                              `json:"caseCount"`
+	Evaluation runner.BenchmarkEvaluationSummary `json:"evaluation"`
 }
 
 type benchmarkCase struct {
+	ID         string               `json:"id"`
 	Expected   benchmarkExpected    `json:"expected"`
 	Evaluation *benchmarkEvaluation `json:"evaluation"`
 }
@@ -59,7 +53,6 @@ type benchmarkExpected struct {
 
 type benchmarkEvaluation struct {
 	PredictedVerdict string `json:"predictedVerdict"`
-	Status           string `json:"status"`
 }
 
 type baseline struct {
@@ -187,21 +180,8 @@ func buildBaseline(opts baselineOptions) (baseline, error) {
 	if err := json.Unmarshal(raw, &artifact); err != nil {
 		return baseline{}, fmt.Errorf("parse benchmark artifact %s: %w", opts.ArtifactPath, err)
 	}
-	if artifact.Benchmark.ID == "" {
-		return baseline{}, fmt.Errorf("benchmark artifact %s missing benchmark.id", opts.ArtifactPath)
-	}
-	if artifact.Benchmark.IDsSource == "" || artifact.Benchmark.IDsSHA256 == "" || artifact.Benchmark.IDsCount == 0 {
-		return baseline{}, fmt.Errorf("benchmark artifact %s missing --ids reproducibility metadata", opts.ArtifactPath)
-	}
-	if artifact.Benchmark.IDsSHA256 != opts.SubsetSHA256 {
-		return baseline{}, fmt.Errorf("benchmark artifact %s has idsSha256 %s, expected %s", opts.ArtifactPath, artifact.Benchmark.IDsSHA256, opts.SubsetSHA256)
-	}
-	caseCount := artifact.Summary.CaseCount
-	if caseCount == 0 {
-		caseCount = len(artifact.Cases)
-	}
-	if caseCount == 0 {
-		caseCount = artifact.Benchmark.Rows
+	if err := artifact.validateSelection(opts.SubsetSHA256); err != nil {
+		return baseline{}, fmt.Errorf("benchmark artifact %s: %w", opts.ArtifactPath, err)
 	}
 	sum := sha256.Sum256(raw)
 	return baseline{
@@ -209,13 +189,49 @@ func buildBaseline(opts baselineOptions) (baseline, error) {
 		Subset:              opts.Subset,
 		SubsetSource:        opts.SubsetSource,
 		SubsetCaseIDsSHA256: artifact.Benchmark.IDsSHA256,
-		NumCases:            caseCount,
+		NumCases:            len(artifact.Cases),
 		Profile:             opts.Profile,
 		ProfileSource:       opts.ProfileSource,
 		WorkflowRun:         opts.WorkflowURL,
 		ArtifactSHA256:      fmt.Sprintf("%x", sum[:]),
 		Metrics:             baselineMetricsFromArtifact(artifact),
 	}, nil
+}
+
+func (a benchmarkArtifact) validateSelection(expectedSHA string) error {
+	if a.Benchmark.ID != "cuhk-zhuque/SkillTrustBench" {
+		return fmt.Errorf("expected SkillTrustBench artifact, got benchmark.id %q", a.Benchmark.ID)
+	}
+	// Artifacts written before lifecycle tracking have neither field.
+	if a.Status != "" || a.Complete != nil {
+		if a.Status != "completed" || a.Complete == nil || !*a.Complete {
+			return fmt.Errorf("benchmark incomplete (status %q)", a.Status)
+		}
+	}
+	if a.Benchmark.IDsSource == "" || a.Benchmark.IDsSHA256 == "" || a.Benchmark.IDsCount <= 0 {
+		return errors.New("missing --ids reproducibility metadata")
+	}
+	if a.Benchmark.IDsSHA256 != expectedSHA {
+		return fmt.Errorf("has idsSha256 %s, expected %s", a.Benchmark.IDsSHA256, expectedSHA)
+	}
+	count := len(a.Cases)
+	if count != a.Benchmark.IDsCount {
+		return fmt.Errorf("found %d cases for %d selected IDs", count, a.Benchmark.IDsCount)
+	}
+	if a.Summary.CaseCount != nil && *a.Summary.CaseCount != count {
+		return fmt.Errorf("summary reports %d cases, found %d", *a.Summary.CaseCount, count)
+	}
+	if a.Benchmark.Rows != nil && *a.Benchmark.Rows != count {
+		return fmt.Errorf("benchmark reports %d rows, found %d cases", *a.Benchmark.Rows, count)
+	}
+	ids := make([]string, 0, count)
+	for _, c := range a.Cases {
+		ids = append(ids, c.ID)
+	}
+	if runner.BenchmarkIDsSHA256(ids) != expectedSHA {
+		return errors.New("case IDs do not match the selected subset")
+	}
+	return nil
 }
 
 func baselineMetricsFromArtifact(artifact benchmarkArtifact) baselineMetrics {
