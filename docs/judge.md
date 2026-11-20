@@ -360,10 +360,9 @@ owns any input limit.
 
 Maintainers can manually run the **CI** workflow with **judge-inspection** enabled,
 or dispatch **Live Judge Smoke** directly. The check uses the repository's
-`OPENAI_API_KEY`, the Decisions judge, and a pinned Codex CLI for the overview
-to judge a harmless local package through the `clawhub` profile, verifies that
-the judge completed with a verdict and the overview with a summary, and retains
-the redacted report for seven days.
+`OPENAI_API_KEY`, a pinned Codex CLI, and the `clawhub` profile to judge scanner
+evidence for a harmless local package. It checks the verdict and overview summary
+and retains the redacted report for seven days.
 
 This check uses GitHub-hosted Ubuntu 22.04 after a paired GitHub-hosted test found
 a nested bubblewrap setup failure on Ubuntu 24.04. That result does not establish
