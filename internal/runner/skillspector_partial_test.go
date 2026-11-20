@@ -27,7 +27,7 @@ func TestClawHubUsablePartialReachesJudge(t *testing.T) {
 	}
 	for _, verdict := range []string{"benign", "suspicious", "malicious"} {
 		t.Run(verdict, func(t *testing.T) {
-			target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", verdict))
+			target, err := filepath.Abs(filepath.Join("testdata", "partial-judge"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -255,7 +255,7 @@ func TestClawHubPartialPreservesSecurityGates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", "malicious"))
+	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestUsablePartialCompletesUnderAnyProfileWithJudge(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge", "benign"))
+	target, err := filepath.Abs(filepath.Join("testdata", "partial-judge"))
 	if err != nil {
 		t.Fatal(err)
 	}

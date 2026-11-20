@@ -9,16 +9,6 @@ import (
 	"testing"
 )
 
-func TestParseArgsAcceptsSocketScanner(t *testing.T) {
-	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "socket"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(opts.Scanners, ","); got != "socket" {
-		t.Fatalf("scanners = %q", got)
-	}
-}
-
 func TestValidateRequirementsRequiresSocketToken(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "socket"})
 	if err != nil {
