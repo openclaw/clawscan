@@ -340,9 +340,6 @@ func skillSpectorEvidenceUsable(record map[string]any) bool {
 func findingsFromRules(rules []runner.FiredGateRule) []Finding {
 	findings := make([]Finding, 0, len(rules))
 	for _, rule := range rules {
-		if len(findings) == maxFindings {
-			break
-		}
 		severity := "warn"
 		if rule.Action == "block" {
 			severity = "critical"
