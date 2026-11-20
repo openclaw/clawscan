@@ -10,15 +10,9 @@ import (
 )
 
 type BenchmarkAdapter interface {
-	ID() string
-	Aliases() []string
 	Info() DatasetInfo
-	Source() string
 	Config() string
-	DefaultSplit() string
-	Splits() []string
 	RunCases(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient) ([]BenchmarkCase, error)
-	SupportsPredictionsOutput() bool
 }
 
 type DatasetInfo struct {
@@ -48,11 +42,12 @@ func NewBenchmarkRegistry(adapters ...BenchmarkAdapter) (BenchmarkRegistry, erro
 		if adapter == nil {
 			return BenchmarkRegistry{}, fmt.Errorf("Benchmark adapter cannot be nil")
 		}
-		id := strings.TrimSpace(adapter.ID())
+		info := adapter.Info()
+		id := strings.TrimSpace(info.ID)
 		if id == "" {
 			return BenchmarkRegistry{}, fmt.Errorf("Benchmark adapter id cannot be empty")
 		}
-		names := append([]string{id}, adapter.Aliases()...)
+		names := append([]string{id}, info.Aliases...)
 		for _, name := range names {
 			trimmed := strings.TrimSpace(name)
 			if trimmed == "" {
@@ -107,20 +102,14 @@ func (registry BenchmarkRegistry) IDs() []string {
 
 func datasetInfo(adapter BenchmarkAdapter) DatasetInfo {
 	info := adapter.Info()
-	if info.ID == "" {
-		info.ID = adapter.ID()
-	}
 	if info.DisplayName == "" {
 		info.DisplayName = info.ID
 	}
-	info.Aliases = append([]string(nil), adapter.Aliases()...)
-	info.Source = adapter.Source()
-	info.Splits = append([]string(nil), adapter.Splits()...)
-	info.DefaultSplit = adapter.DefaultSplit()
+	info.Aliases = append([]string(nil), info.Aliases...)
+	info.Splits = append([]string(nil), info.Splits...)
 	if info.RequiredEnv == "" {
 		info.RequiredEnv = "none"
 	}
-	info.SupportsPredictionsOutput = adapter.SupportsPredictionsOutput()
 	return info
 }
 
@@ -143,41 +132,23 @@ func mustBenchmarkRegistry(adapters ...BenchmarkAdapter) BenchmarkRegistry {
 
 type openClawBenchmarkAdapter struct{}
 
-func (openClawBenchmarkAdapter) ID() string {
-	return openClawBenchmarkID
-}
-
-func (openClawBenchmarkAdapter) Aliases() []string {
-	return []string{openClawBenchmarkDataset}
-}
-
 func (openClawBenchmarkAdapter) Info() DatasetInfo {
 	return DatasetInfo{
-		DisplayName: "ClawHub Security Signals",
-		SourceURL:   "https://huggingface.co/datasets/OpenClaw/clawhub-security-signals",
-		Description: "Weekly refreshed ClawHub production security signals for reproducing current behavior and checking regressions; not a human-validated ground-truth benchmark.",
-		RequiredEnv: "none",
+		ID:                        openClawBenchmarkID,
+		Aliases:                   []string{openClawBenchmarkDataset},
+		Source:                    openClawBenchmarkSource,
+		DefaultSplit:              defaultOpenClawBenchmarkSplit,
+		Splits:                    sortedKeys(openClawBenchmarkSplits),
+		SupportsPredictionsOutput: true,
+		DisplayName:               "ClawHub Security Signals",
+		SourceURL:                 "https://huggingface.co/datasets/OpenClaw/clawhub-security-signals",
+		Description:               "Weekly refreshed ClawHub production security signals for reproducing current behavior and checking regressions; not a human-validated ground-truth benchmark.",
+		RequiredEnv:               "none",
 	}
-}
-
-func (openClawBenchmarkAdapter) Source() string {
-	return openClawBenchmarkSource
 }
 
 func (openClawBenchmarkAdapter) Config() string {
 	return openClawBenchmarkConfig
-}
-
-func (openClawBenchmarkAdapter) DefaultSplit() string {
-	return defaultOpenClawBenchmarkSplit
-}
-
-func (openClawBenchmarkAdapter) Splits() []string {
-	return sortedKeys(openClawBenchmarkSplits)
-}
-
-func (openClawBenchmarkAdapter) SupportsPredictionsOutput() bool {
-	return true
 }
 
 func (openClawBenchmarkAdapter) RunCases(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient) ([]BenchmarkCase, error) {
@@ -263,41 +234,22 @@ func scannerRequested(opts Options, scanner string) bool {
 
 type skillTrustBenchBenchmarkAdapter struct{}
 
-func (skillTrustBenchBenchmarkAdapter) ID() string {
-	return skillTrustBenchID
-}
-
-func (skillTrustBenchBenchmarkAdapter) Aliases() []string {
-	return []string{skillTrustBenchAlias}
-}
-
 func (skillTrustBenchBenchmarkAdapter) Info() DatasetInfo {
 	return DatasetInfo{
-		DisplayName: "SkillTrustBench",
-		SourceURL:   "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench",
-		Description: "Hugging Face benchmark of agent skills with canonical clean and malicious judgments, materialized from the versioned skill archive.",
-		RequiredEnv: "none",
+		ID:           skillTrustBenchID,
+		Aliases:      []string{skillTrustBenchAlias},
+		Source:       skillTrustBenchSource,
+		DefaultSplit: defaultSkillTrustBenchSplit,
+		Splits:       sortedKeys(skillTrustBenchSplits),
+		DisplayName:  "SkillTrustBench",
+		SourceURL:    "https://huggingface.co/datasets/cuhk-zhuque/SkillTrustBench",
+		Description:  "Hugging Face benchmark of agent skills with canonical clean and malicious judgments, materialized from the versioned skill archive.",
+		RequiredEnv:  "none",
 	}
-}
-
-func (skillTrustBenchBenchmarkAdapter) Source() string {
-	return skillTrustBenchSource
 }
 
 func (skillTrustBenchBenchmarkAdapter) Config() string {
 	return skillTrustBenchConfig
-}
-
-func (skillTrustBenchBenchmarkAdapter) DefaultSplit() string {
-	return defaultSkillTrustBenchSplit
-}
-
-func (skillTrustBenchBenchmarkAdapter) Splits() []string {
-	return sortedKeys(skillTrustBenchSplits)
-}
-
-func (skillTrustBenchBenchmarkAdapter) SupportsPredictionsOutput() bool {
-	return false
 }
 
 func (adapter skillTrustBenchBenchmarkAdapter) RunCases(opts Options, ctx RunContext, env map[string]string, now func() time.Time, client BenchmarkClient) ([]BenchmarkCase, error) {
