@@ -878,7 +878,7 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 		if mainErr != nil {
 			return outputErr
 		}
-		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Single))
+		return errors.Join(outputErr, WriteJSONFile(spec.ArtifactPath, result.Single))
 	case result.Batch != nil:
 		runs := make([]*Artifact, 0, len(result.Batch.Runs))
 		for i := range result.Batch.Runs {
@@ -894,7 +894,7 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 		if mainErr != nil {
 			return outputErr
 		}
-		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Batch))
+		return errors.Join(outputErr, WriteJSONFile(spec.ArtifactPath, result.Batch))
 	default:
 		return errors.New("run targets result is empty")
 	}
@@ -1124,7 +1124,8 @@ func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
 	return targets, nil
 }
 
-func writeJSONFile(path string, value interface{}) error {
+// WriteJSONFile writes indented JSON using the same private file permissions as scan artifacts.
+func WriteJSONFile(path string, value interface{}) error {
 	var buffer bytes.Buffer
 	if err := WriteJSON(&buffer, value); err != nil {
 		return err
