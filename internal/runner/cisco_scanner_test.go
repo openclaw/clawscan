@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
@@ -17,7 +16,7 @@ func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	const ciscoJSON = `{"scanner":"cisco","findings":[]}`
-	runner := &ciscoRecordingCommandRunner{output: ciscoJSON}
+	runner := &reportFileCommandRunner{outputFlag: "--output", output: ciscoJSON}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +58,7 @@ func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
 }
 
 func TestCiscoScannerUsesResultDirAsDockerSandboxCWD(t *testing.T) {
-	commandRunner := &ciscoRecordingCommandRunner{output: `{"scanner":"cisco","findings":[]}`}
+	commandRunner := &reportFileCommandRunner{outputFlag: "--output", output: `{"scanner":"cisco","findings":[]}`}
 	result, err := (ExternalScannerRunner{
 		CommandRunner: commandRunner,
 		Env:           map[string]string{},
@@ -87,7 +86,7 @@ func TestCiscoScannerEnablesUpstreamAnalyzersFromEnv(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runner := &ciscoRecordingCommandRunner{output: `{"scanner":"cisco","findings":[]}`}
+	runner := &reportFileCommandRunner{outputFlag: "--output", output: `{"scanner":"cisco","findings":[]}`}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +129,7 @@ func TestCiscoScannerOutputFileIsPreservedInArtifactBundle(t *testing.T) {
 	}
 	out := filepath.Join(dir, "clawscan-results", "artifact.json")
 	const ciscoJSON = `{"scanner":"cisco","findings":[{"id":"network"}]}`
-	runner := &ciscoRecordingCommandRunner{output: ciscoJSON}
+	runner := &reportFileCommandRunner{outputFlag: "--output", output: ciscoJSON}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco", "--output", out})
 	if err != nil {
 		t.Fatal(err)
@@ -164,11 +163,12 @@ func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
 	}
 	const ciscoJSON = `{"scanner":"cisco","findings":[{"id":"pipeline-risk"}]}`
 	exitCode := 1
-	runner := &ciscoRecordingCommandRunner{
-		output:   ciscoJSON,
-		stderr:   "high severity findings",
-		err:      errors.New("exit status 1"),
-		exitCode: &exitCode,
+	runner := &reportFileCommandRunner{
+		outputFlag: "--output",
+		output:     ciscoJSON,
+		stderr:     "high severity findings",
+		err:        errors.New("exit status 1"),
+		exitCode:   &exitCode,
 	}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
@@ -202,7 +202,7 @@ func TestCiscoScannerFailsMissingOutputFile(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runner := &ciscoRecordingCommandRunner{}
+	runner := &reportFileCommandRunner{outputFlag: "--output"}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +232,7 @@ func TestCiscoScannerFailsInvalidJSONOutputFile(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runner := &ciscoRecordingCommandRunner{output: "not json"}
+	runner := &reportFileCommandRunner{outputFlag: "--output", output: "not json"}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestRunDispatchesCiscoScannerInsteadOfGenericSkipped(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runner := &ciscoRecordingCommandRunner{output: `{"ok":true}`}
+	runner := &reportFileCommandRunner{outputFlag: "--output", output: `{"ok":true}`}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
 		t.Fatal(err)
@@ -281,27 +281,6 @@ func TestRunDispatchesCiscoScannerInsteadOfGenericSkipped(t *testing.T) {
 	if strings.Contains(result.Error, "foundation slice") {
 		t.Fatalf("generic foundation skip leaked through: %q", result.Error)
 	}
-}
-
-type ciscoRecordingCommandRunner struct {
-	calls    []commandCall
-	output   string
-	stderr   string
-	err      error
-	exitCode *int
-}
-
-func (r *ciscoRecordingCommandRunner) Run(command string, args []string, cwd string, timeout time.Duration) (CommandOutput, error) {
-	r.calls = append(r.calls, commandCall{command: command, args: append([]string(nil), args...), cwd: cwd})
-	if r.output != "" {
-		outputPath := argValue(args, "--output")
-		if outputPath != "" {
-			if err := os.WriteFile(outputPath, []byte(r.output), 0o644); err != nil {
-				return CommandOutput{Stderr: r.stderr}, err
-			}
-		}
-	}
-	return CommandOutput{Stderr: r.stderr, ExitCode: r.exitCode}, r.err
 }
 
 func argValue(args []string, name string) string {

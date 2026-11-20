@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -138,10 +137,10 @@ func TestTemplateTargetCanonicalSelectorAndPrecedence(t *testing.T) {
 
 func TestTemplateTargetRejectsUnsafeOrRetiredSelectors(t *testing.T) {
 	for _, selector := range []any{"../CLAW.md", "/CLAW.md", "x/../CLAW.md", "x//CLAW.md", "manifest.json", true, "missing/CLAW.md", "x\\CLAW.md", "././CLAW.md"} {
-		t.Run(strings.ReplaceAll(strings.TrimSpace(string(mustTemplateJSON(t, selector))), "/", "_"), func(t *testing.T) {
+		t.Run(strings.ReplaceAll(strings.TrimSpace(string(mustMarshalJSON(t, selector))), "/", "_"), func(t *testing.T) {
 			root := t.TempDir()
 			pkg := map[string]any{"openclaw": map[string]any{"template": selector}}
-			if err := os.WriteFile(filepath.Join(root, "package.json"), mustTemplateJSON(t, pkg), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "package.json"), mustMarshalJSON(t, pkg), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := resolveTarget(root); err == nil {
@@ -156,15 +155,6 @@ func TestTemplateTargetRejectsUnsafeOrRetiredSelectors(t *testing.T) {
 	if _, err := resolveTarget(root); err == nil {
 		t.Fatal("retired selector accepted")
 	}
-}
-
-func mustTemplateJSON(t *testing.T, value any) []byte {
-	t.Helper()
-	data, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
 }
 
 func TestTemplateStagingRejectsEscapingLinksAndOversizedVendoredFiles(t *testing.T) {

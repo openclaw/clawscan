@@ -1876,18 +1876,16 @@ func RenderClawHubPrompt(systemPromptSource string, artifact Artifact) (string, 
 		return "", err
 	}
 	var supplemental []clawhubprompt.ScannerEvidence
-	if aigAnalysis := clawHubAIGAnalysis(artifact); aigAnalysis != nil {
-		supplemental = append(supplemental, clawhubprompt.ScannerEvidence{
-			Label: "A.I.G SARIF evidence supplied to Codex",
-			Value: aigAnalysis,
-		})
+	addSARIF := func(scanner, label string) {
+		if raw := artifact.Scanners[scanner].Raw; len(raw) != 0 {
+			supplemental = append(supplemental, clawhubprompt.ScannerEvidence{
+				Label: label,
+				Value: clawhubprompt.RawJSON(raw),
+			})
+		}
 	}
-	if pluginAnalysis := clawHubAIGMCPAnalysis(artifact); pluginAnalysis != nil {
-		supplemental = append(supplemental, clawhubprompt.ScannerEvidence{
-			Label: "A.I.G MCP plugin code audit SARIF supplied to Codex",
-			Value: pluginAnalysis,
-		})
-	}
+	addSARIF("aig", "A.I.G SARIF evidence supplied to Codex")
+	addSARIF(aigMCPScannerID, "A.I.G MCP plugin code audit SARIF supplied to Codex")
 	return clawhubprompt.Build(
 		systemPrompt,
 		clawHubPromptJob(artifact, context),
@@ -1941,25 +1939,6 @@ func clawHubPromptJob(artifact Artifact, context clawHubContext) clawhubprompt.J
 		job.Target.Version = evidence
 	}
 	return job
-}
-
-func clawHubAIGAnalysis(artifact Artifact) any {
-	result, ok := artifact.Scanners["aig"]
-	if !ok || len(result.Raw) == 0 {
-		return nil
-	}
-	return clawhubprompt.RawJSON(result.Raw)
-}
-
-// clawHubAIGMCPAnalysis gives the judge the plugin-code audit as one raw
-// SARIF document. Skill targets do not run aig-mcp, so their prompts are
-// unchanged.
-func clawHubAIGMCPAnalysis(artifact Artifact) any {
-	result, ok := artifact.Scanners[aigMCPScannerID]
-	if !ok || len(result.Raw) == 0 {
-		return nil
-	}
-	return clawhubprompt.RawJSON(result.Raw)
 }
 
 // clawHubHasMaliciousSignal derives the pre-scan malicious signal from A.I.G

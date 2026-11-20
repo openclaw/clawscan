@@ -371,17 +371,10 @@ class DecisionsJudgeTest(unittest.TestCase):
         code, result, stderr = self.run_judge(workspace, "--max-findings", "2000")
         self.assertEqual(code, 0, stderr)
         evidence = self.evidence()
-        size = len(json.dumps(evidence, separators=(",", ":"), ensure_ascii=False).encode())
-        values, depth = judge.json_stats(evidence)
-        self.assertLessEqual(size, judge.EVIDENCE_JSON_BUDGET_BYTES)
-        self.assertLessEqual(values, judge.API_JSON_PART_VALUES)
-        self.assertLessEqual(depth, judge.API_JSON_PART_DEPTH)
-        recorded = result["decision"]["input"]["evidenceJson"]
-        self.assertEqual(recorded, {"bytes": size, "values": values, "depth": depth})
+        self.assert_final_limits(result)
         counts = evidence["findingCounts"]
         self.assertEqual(counts["total"], 2000)
         self.assertEqual(counts["included"], len(evidence["findings"]))
-        self.assertEqual(counts["included"] + counts["omitted"], 2000)
         self.assertEqual(len(evidence["artifactManifest"]) + evidence["artifactCounts"]["manifestOmitted"], 451)
         self.assertEqual([finding["index"] for finding in evidence["findings"]], list(range(counts["included"])))
 

@@ -114,14 +114,9 @@ func skillSpectorUsableBundledPartial(raw json.RawMessage) bool {
 // Bundled children must contain typed findings and cannot conceal errors, fatal
 // exceptions or case-conflicting control fields behind a display summary.
 func skillSpectorBundledChildIntegrity(child map[string]any) bool {
-	issues, ok := readMapValue(child, "filtered_findings", "filteredFindings", "findings", "issues", "vulnerabilities").([]any)
-	if !ok {
+	issues := readMapValue(child, "filtered_findings", "filteredFindings", "findings", "issues", "vulnerabilities")
+	if !skillSpectorValidIssues(issues) {
 		return false
-	}
-	for _, value := range issues {
-		if issue, ok := value.(map[string]any); !ok || len(issue) == 0 {
-			return false
-		}
 	}
 	if value, exists := child["metadata"]; exists {
 		if _, ok := value.(map[string]any); !ok {
@@ -130,19 +125,8 @@ func skillSpectorBundledChildIntegrity(child map[string]any) bool {
 	}
 	if value, exists := child["components"]; exists {
 		components, ok := value.([]any)
-		if !ok {
+		if !ok || !skillSpectorValidComponents(components) {
 			return false
-		}
-		for _, value := range components {
-			component, ok := value.(map[string]any)
-			if !ok {
-				return false
-			}
-			name, _ := component["path"].(string)
-			kind, _ := component["type"].(string)
-			if !skillSpectorComponentPath(name) || kind == "" {
-				return false
-			}
 		}
 	}
 	records := []map[string]any{child}

@@ -94,6 +94,7 @@ func TestClawHubBundledPartialCompleteChildEvidence(t *testing.T) {
 		{"missing-accounting", `{"issues":[],"execution_successful":true}`, "failed"},
 		{"missing-accounting-execution", `{"issues":[],"execution_successful":true,"analysis_completeness":{"is_complete":true}}`, "failed"},
 		{"missing-completion", `{"issues":[],"execution_successful":true,"analysis_completeness":{"execution_successful":true}}`, "failed"},
+		{"empty-optional-components", `{"components":[],"issues":[],"execution_successful":true,"analysis_completeness":{"execution_successful":true,"is_complete":true}}`, "partial"},
 		{"explicit-completion", `{"issues":[],"execution_successful":true,"analysis_completeness":{"execution_successful":true,"is_complete":true}}`, "partial"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -103,7 +104,7 @@ func TestClawHubBundledPartialCompleteChildEvidence(t *testing.T) {
 			}
 			rows := report["bundled_reports"].([]any)
 			rows[1].(map[string]any)["report"] = json.RawMessage(test.child)
-			assertBundledScannerStatus(t, mustMarshalBundleValue(t, report), test.want)
+			assertBundledScannerStatus(t, mustMarshalJSON(t, report), test.want)
 		})
 	}
 	// Legacy complete reports remain accepted outside the new partial wrapper.
@@ -188,7 +189,7 @@ func TestClawHubBundledPartialRejectsAmbiguousEvidence(t *testing.T) {
 	}
 	for _, root := range []string{"", ".", "..", "../skills", "/skills/alpha", "skills/../alpha", "skills//alpha", "skills/alpha/", "skills\\alpha", "skills/\x00alpha"} {
 		t.Run("path/"+root, func(t *testing.T) {
-			raw := bytes.Replace(fixture, []byte(`"rootPath": "skills/alpha"`), []byte(`"rootPath": `+string(mustMarshalBundleValue(t, root))), 1)
+			raw := bytes.Replace(fixture, []byte(`"rootPath": "skills/alpha"`), []byte(`"rootPath": `+string(mustMarshalJSON(t, root))), 1)
 			assertBundledScannerStatus(t, raw, "failed")
 		})
 	}
@@ -196,7 +197,7 @@ func TestClawHubBundledPartialRejectsAmbiguousEvidence(t *testing.T) {
 	assertBundledScannerStatus(t, duplicate, "failed")
 }
 
-func mustMarshalBundleValue(t *testing.T, value any) []byte {
+func mustMarshalJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	raw, err := json.Marshal(value)
 	if err != nil {
