@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -133,35 +134,39 @@ func TestRunJudgeDoesNotRetryValidSecurityVerdict(t *testing.T) {
 }
 
 func TestRunJudgeOutputRetriesShareDeadline(t *testing.T) {
-	var budgets []time.Duration
-	command := judgeRetryCommand(func(_ string, timeout time.Duration) (CommandOutput, error) {
-		budgets = append(budgets, timeout)
-		if len(budgets) == 1 {
-			time.Sleep(20 * time.Millisecond)
-			return CommandOutput{}, nil
+	synctest.Test(t, func(t *testing.T) {
+		var budgets []time.Duration
+		command := judgeRetryCommand(func(_ string, timeout time.Duration) (CommandOutput, error) {
+			budgets = append(budgets, timeout)
+			if len(budgets) == 1 {
+				time.Sleep(20 * time.Millisecond)
+				return CommandOutput{}, nil
+			}
+			return judgeRetryOutput(t, map[string]any{"verdict": "benign"}), nil
+		})
+		result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
+		if err != nil || result.Status != "completed" || len(budgets) != 2 {
+			t.Fatalf("result = %+v, err = %v, budgets = %v", result, err, budgets)
 		}
-		return judgeRetryOutput(t, map[string]any{"verdict": "benign"}), nil
+		if budgets[0] != time.Second || budgets[1] != time.Second-20*time.Millisecond {
+			t.Fatalf("retry reset timeout budget: %v", budgets)
+		}
 	})
-	result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, time.Second, nil, SandboxModeOff)
-	if err != nil || result.Status != "completed" || len(budgets) != 2 {
-		t.Fatalf("result = %+v, err = %v, budgets = %v", result, err, budgets)
-	}
-	if budgets[0] > time.Second || budgets[1] >= budgets[0]-10*time.Millisecond || budgets[1] <= 0 {
-		t.Fatalf("retry reset timeout budget: %v", budgets)
-	}
 }
 
 func TestRunJudgeDoesNotRetryAfterDeadline(t *testing.T) {
-	attempts := 0
-	command := judgeRetryCommand(func(_ string, timeout time.Duration) (CommandOutput, error) {
-		attempts++
-		time.Sleep(timeout + time.Millisecond)
-		return CommandOutput{}, nil
+	synctest.Test(t, func(t *testing.T) {
+		attempts := 0
+		command := judgeRetryCommand(func(_ string, timeout time.Duration) (CommandOutput, error) {
+			attempts++
+			time.Sleep(timeout + time.Millisecond)
+			return CommandOutput{}, nil
+		})
+		result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, 100*time.Millisecond, nil, SandboxModeOff)
+		if err != nil || result.Status != "failed" || attempts != 1 {
+			t.Fatalf("result = %+v, err = %v, attempts = %d", result, err, attempts)
+		}
 	})
-	result, err := RunJudge(JudgeOptions{Command: "judge"}, judgeRetryArtifact(t), command, 100*time.Millisecond, nil, SandboxModeOff)
-	if err != nil || result.Status != "failed" || attempts != 1 {
-		t.Fatalf("result = %+v, err = %v, attempts = %d", result, err, attempts)
-	}
 }
 
 func TestRunJudgeOutputRetriesPreserveRedaction(t *testing.T) {
