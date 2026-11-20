@@ -20,6 +20,7 @@
 - **Breaking:** remove the `virustotal` and `clawscan-static` scanners. The `clawhub` profile now runs `skillspector` and `aig` (for skills; see `aig-mcp` above for plugins), and `openclaw-install-policy` runs `skillspector`. The install policy validates npm metadata preflights without scanning and returns a visible `warn` on native Windows instead of a static-only scan. Consumers that read `scanners["clawscan-static"]` must switch to another eligibility signal.
 
 - Security Signals submission validation accepts the Hugging Face dataset name used in the submission guide and seeded leaderboard entries.
+- Security Signals reports malformed prediction files before downloading benchmark rows, including the line number for invalid JSON.
 
 ## 0.3.1 - 2026-11-02
 

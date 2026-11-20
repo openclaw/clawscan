@@ -77,14 +77,14 @@ func ValidateSecuritySignalsSubmission(dir string, client BenchmarkClient) (Secu
 	if len(validationErrors) > 0 {
 		return SecuritySignalsSubmissionResult{}, errors.New(strings.Join(validationErrors, "\n"))
 	}
+	predictions, err := readSecuritySignalsPredictions(filepath.Join(dir, "predictions.jsonl"))
+	if err != nil {
+		return SecuritySignalsSubmissionResult{}, err
+	}
 	if client == nil {
 		client = HuggingFaceBenchmarkClient{}
 	}
 	rows, err := client.FetchOpenClawRows(openClawBenchmarkDataset, metadata.Benchmark.Split, 0, 0)
-	if err != nil {
-		return SecuritySignalsSubmissionResult{}, err
-	}
-	predictions, err := readSecuritySignalsPredictions(filepath.Join(dir, "predictions.jsonl"))
 	if err != nil {
 		return SecuritySignalsSubmissionResult{}, err
 	}

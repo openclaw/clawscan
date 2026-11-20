@@ -156,6 +156,29 @@ func TestValidateSecuritySignalsSubmissionRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestValidateSecuritySignalsSubmissionParsesPredictionsBeforeFetchingRows(t *testing.T) {
+	dir := writeSecuritySignalsSubmission(t, SecuritySignalsSubmissionMetadata{
+		SchemaVersion: securitySignalsSubmissionSchema,
+		Benchmark: SecuritySignalsSubmissionBenchmark{
+			Dataset: openClawBenchmarkDataset, Split: "eval_holdout", Revision: "fixture",
+		},
+	}, nil)
+	predictions := `{"id":"one","prediction":"clean"}` + "\n{\n"
+	if err := os.WriteFile(filepath.Join(dir, "predictions.jsonl"), []byte(predictions), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("fetched benchmark rows for malformed predictions")
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	_, err := ValidateSecuritySignalsSubmission(dir, HuggingFaceBenchmarkClient{Endpoint: server.URL})
+	if err == nil || !strings.Contains(err.Error(), "read predictions.jsonl line 2") {
+		t.Fatalf("got %v, want the local line 2 parse error", err)
+	}
+}
+
 func TestHuggingFaceBenchmarkClientReportsNonJSONHTTPError(t *testing.T) {
 	withHuggingFaceRowsRetryDelay(t, 0)
 
