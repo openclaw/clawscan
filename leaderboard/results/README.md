@@ -16,14 +16,14 @@ Manual provisioning checklist:
 1. Create a private Hugging Face dataset named
    `OpenClaw/clawhub-security-signals-results`.
 2. Add a repository secret named `HF_TOKEN` with write access to that dataset.
-3. Run the `Publish Security Signals results` workflow manually once, or merge a
-   PR that changes `leaderboard/submissions/**`.
+3. Run the `Publish Security Signals results` workflow manually.
 4. Confirm the dataset contains `results.jsonl`.
 
 The publish path is intentionally separate from PR validation:
 
 - PRs run `scripts/validate-security-signals-submissions.sh` without secrets.
-- Post-merge publishing runs `scripts/publish-security-signals-results.sh`.
+- The manual workflow runs `scripts/publish-security-signals-results.sh --publish`.
+  Publishing requires at least one submission.
 - Dry-run mode writes `dist/security-signals-results/results.jsonl` locally.
 
 Publishing requires the `hf` CLI from `huggingface_hub` and reads credentials

@@ -69,6 +69,11 @@ if [ -d "$submission_root" ]; then
   done < <(find "$submission_root" -mindepth 2 -maxdepth 2 -name metadata.json -print0 | sort -z)
 fi
 
+if [ "$mode" = "publish" ] && [ "${#submission_dirs[@]}" -eq 0 ]; then
+  echo "No Security Signals submissions found under $submission_root; refusing to publish empty results." >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "$output_path")"
 : >"$output_path"
 
