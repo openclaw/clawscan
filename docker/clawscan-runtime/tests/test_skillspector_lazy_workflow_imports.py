@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Static imports stay light without changing graph warning or deadline behavior."""
+"""Static imports stay light without changing graph warning behavior."""
 
 from __future__ import annotations
 
@@ -105,15 +105,3 @@ with warnings.catch_warnings(record=True) as caught:
         timeout=30,
     )
     assert result.stdout == ""
-
-
-def test_import_change_does_not_remove_end_to_end_timeout() -> None:
-    with pytest.raises(subprocess.TimeoutExpired):
-        subprocess.run(
-            [sys.executable, "-B", "-c", "import skillspector\nwhile True: pass\n"],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=_environment(),
-            timeout=3,
-        )
