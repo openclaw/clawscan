@@ -16,13 +16,21 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer) error {
-	var submissionDir string
+	var submissionDir, scorePath string
 	jsonOutput := false
-	for _, arg := range args {
+	for len(args) > 0 {
+		arg := args[0]
+		args = args[1:]
 		switch arg {
 		case "--help", "-h":
 			fmt.Fprint(stdout, helpText())
 			return nil
+		case "--score-file":
+			if len(args) == 0 || args[0] == "" {
+				return fmt.Errorf("--score-file requires a path")
+			}
+			scorePath = args[0]
+			args = args[1:]
 		case "--json":
 			jsonOutput = true
 		default:
@@ -45,6 +53,11 @@ func run(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if scorePath != "" {
+		if err := runner.WriteJSONFile(scorePath, result); err != nil {
+			return err
+		}
+	}
 	if jsonOutput {
 		return runner.WriteJSON(stdout, result)
 	}
@@ -61,7 +74,7 @@ func printSubmissionSummary(w io.Writer, result runner.SecuritySignalsSubmission
 }
 
 func helpText() string {
-	return `Usage: go run ./scripts/validate-security-signals-submission.go <submission-dir> [--json]
+	return `Usage: go run ./scripts/validate-security-signals-submission.go <submission-dir> [--json] [--score-file <path>]
 
 Validates one Security Signals leaderboard submission directory for CI and
 repository maintenance. The directory must contain metadata.json and

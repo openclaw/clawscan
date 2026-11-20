@@ -13,9 +13,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/openclaw/clawscan/internal/runner"
+	"github.com/openclaw/clawscan/internal/testutil"
 )
 
 type inertBenchmarkTransport func(*http.Request) (*http.Response, error)
@@ -69,17 +69,16 @@ func TestBenchmarkCLIEmitsCanceledPriorCaseEvidence(t *testing.T) {
 			t.Setenv("XDG_CACHE_HOME", root)
 			installGeneratedBenchmarkHTTP(t)
 			config := filepath.Join(root, "config.yml")
-			content := "version: 1\nprofiles:\n  inert:\n    sandbox:\n      mode: off\n    scanners:\n      - id: generated\n        targets: [skill]\n        command: >-\n          if grep -q second {{target}}/SKILL.md; then printf '{\"verdict\":\"clean\"}'; exec sleep 2; fi; printf '{\"verdict\":\"clean\"}'\n"
+			content := "version: 1\nprofiles:\n  inert:\n    sandbox:\n      mode: off\n    scanners:\n      - id: generated\n        targets: [skill]\n        env: [READY_FILE]\n        command: >-\n          if grep -q second {{target}}/SKILL.md; then printf '{\"verdict\":\"clean\"}'; : > \"$READY_FILE\"; exec sleep 20; fi; printf '{\"verdict\":\"clean\"}'\n"
 			writeFile(t, config, content)
 			output := filepath.Join(root, "result.json")
-			caller, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-			defer cancel()
+			caller, ready := testutil.CancelOnReady(t)
 			var runErr error
 			stdout := captureStdout(t, func() {
-				runErr = runContext(caller, []string{"benchmark", dataset, "--config", config, "--profile", "inert", "--json", "--output", output}, []string{"PATH=" + os.Getenv("PATH")})
+				runErr = runContext(caller, []string{"benchmark", dataset, "--config", config, "--profile", "inert", "--json", "--output", output}, []string{"PATH=" + os.Getenv("PATH"), "READY_FILE=" + ready})
 			})
-			if !errors.Is(runErr, context.DeadlineExceeded) {
-				t.Fatalf("CLI lost operational deadline: %v", runErr)
+			if !errors.Is(runErr, context.Canceled) {
+				t.Fatalf("CLI lost caller cancellation: %v", runErr)
 			}
 			var artifact runner.BenchmarkArtifact
 			if err := json.Unmarshal([]byte(stdout), &artifact); err != nil || len(artifact.Cases) != 3 {

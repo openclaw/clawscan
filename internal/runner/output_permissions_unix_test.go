@@ -20,7 +20,7 @@ func TestAtomicOutputDoesNotAddOwnerPermissions(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{}"), 0o400); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSONFile(path, map[string]string{"status": "retained"}); err != nil {
+	if err := WriteJSONFile(path, map[string]string{"status": "retained"}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(path)

@@ -878,7 +878,7 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 		if mainErr != nil {
 			return outputErr
 		}
-		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Single))
+		return errors.Join(outputErr, WriteJSONFile(spec.ArtifactPath, result.Single))
 	case result.Batch != nil:
 		runs := make([]*Artifact, 0, len(result.Batch.Runs))
 		for i := range result.Batch.Runs {
@@ -894,7 +894,7 @@ func WriteRunTargetsResultBundle(outputPath string, result RunTargetsResult) err
 		if mainErr != nil {
 			return outputErr
 		}
-		return errors.Join(outputErr, writeJSONFile(spec.ArtifactPath, result.Batch))
+		return errors.Join(outputErr, WriteJSONFile(spec.ArtifactPath, result.Batch))
 	default:
 		return errors.New("run targets result is empty")
 	}
@@ -1124,7 +1124,8 @@ func ResolveTargetInputs(opts Options, cwd string) ([]string, error) {
 	return targets, nil
 }
 
-func writeJSONFile(path string, value interface{}) error {
+// WriteJSONFile writes indented JSON using the same private file permissions as scan artifacts.
+func WriteJSONFile(path string, value interface{}) error {
 	var buffer bytes.Buffer
 	if err := WriteJSON(&buffer, value); err != nil {
 		return err
@@ -2427,90 +2428,48 @@ func (runner ExternalScannerRunner) runSkillSpector(target string, startedAt str
 	// SkillSpector scans the target itself for every profile. A filtered copy
 	// would hide paths (such as .git/ or clawscan-results/) from scanners that
 	// gate installs without a judge.
-	scanTarget := target
 	cwd := ""
 	if runner.SandboxMode == SandboxModeDocker {
 		cwd = resultDir
 	}
 	resultPath := filepath.Join(resultDir, "skillspector-report.json")
-	args = append(args, "scan", scanTarget, "--format", "json", "--output", resultPath)
+	args = append(args, "scan", target, "--format", "json", "--output", resultPath)
 	if !skillSpectorLLMEnabled(runner.Env) {
 		args = append(args, "--no-llm")
 	}
 	fullCommand := append([]string{command}, args...)
 	timeout := runner.Timeout
 	if timeout == 0 {
-		timeout = 20 * time.Minute
+		timeout = defaultScannerTimeout
 	}
 	output, runErr := runner.CommandRunner.Run(command, args, cwd, timeout)
-	exitCode := gateEligibleExitCode(output.ExitCode)
 	raw, readErr := os.ReadFile(resultPath)
-	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	result := ScannerResult{
+		Status:      "failed",
+		StartedAt:   startedAt,
+		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Command:     fullCommand,
+		ExitCode:    gateEligibleExitCode(output.ExitCode),
+	}
 	if runErr != nil {
-		message := commandError(runErr, output.Stderr, runner.Env)
-		if readErr == nil {
-			if !json.Valid(raw) {
-				return ScannerResult{
-					Status:      "failed",
-					StartedAt:   startedAt,
-					CompletedAt: completedAt,
-					Command:     fullCommand,
-					Error:       message + ": SkillSpector scanner returned invalid JSON",
-					ExitCode:    exitCode,
-					Raw:         nil,
-				}, nil
-			}
-			return validateSkillSpectorReportEvidence(ScannerResult{
-				Status:      commandScannerResultStatus(output, runErr),
-				StartedAt:   startedAt,
-				CompletedAt: completedAt,
-				Command:     fullCommand,
-				Error:       message,
-				ExitCode:    exitCode,
-				Raw:         json.RawMessage(raw),
-			}, runner.JudgeConfigured), nil
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       message,
-			ExitCode:    exitCode,
-			Raw:         nil,
-		}, nil
+		result.Error = commandError(runErr, output.Stderr, runner.Env)
 	}
 	if readErr != nil {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "SkillSpector scanner did not write JSON output.",
-			ExitCode:    exitCode,
-			Raw:         nil,
-		}, nil
+		if runErr == nil {
+			result.Error = "SkillSpector scanner did not write JSON output."
+		}
+		return result, nil
 	}
 	if !json.Valid(raw) {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "SkillSpector scanner returned invalid JSON",
-			ExitCode:    exitCode,
-			Raw:         nil,
-		}, nil
+		if runErr != nil {
+			result.Error += ": "
+		}
+		result.Error += "SkillSpector scanner returned invalid JSON"
+		return result, nil
 	}
-	return validateSkillSpectorReportEvidence(ScannerResult{
-		Status:      "completed",
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Command:     fullCommand,
-		Error:       "",
-		ExitCode:    exitCode,
-		Raw:         json.RawMessage(raw),
-	}, runner.JudgeConfigured), nil
+	result.Status = commandScannerResultStatus(output, runErr)
+	result.Raw = raw
+	return validateSkillSpectorReportEvidence(result, runner.JudgeConfigured), nil
 }
 
 func defaultSkillSpectorOpenAIProvider(env map[string]string) {
