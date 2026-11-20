@@ -201,7 +201,7 @@ func scoreLooseNonClean(expected map[string]string, predictions []BenchmarkPredi
 	}
 	metrics.Precision = safeDivide(metrics.TruePositive, metrics.TruePositive+metrics.FalsePositive)
 	metrics.Recall = safeDivide(metrics.TruePositive, metrics.TruePositive+metrics.FalseNegative)
-	metrics.F1 = safeDivideFloat(2*metrics.Precision*metrics.Recall, metrics.Precision+metrics.Recall)
+	metrics.F1 = safeDivide(2*metrics.Precision*metrics.Recall, metrics.Precision+metrics.Recall)
 	metrics.FalsePositiveRate = safeDivide(metrics.FalsePositive, metrics.FalsePositive+metrics.TrueNegative)
 	return metrics
 }
@@ -210,18 +210,11 @@ func isLooseNonCleanPositive(verdict string) bool {
 	return verdict == "suspicious" || verdict == "malicious"
 }
 
-func safeDivide(numerator int, denominator int) float64 {
+func safeDivide[T int | float64](numerator, denominator T) float64 {
 	if denominator == 0 {
 		return 0
 	}
 	return roundMetric(float64(numerator) / float64(denominator))
-}
-
-func safeDivideFloat(numerator float64, denominator float64) float64 {
-	if denominator == 0 {
-		return 0
-	}
-	return roundMetric(numerator / denominator)
 }
 
 func roundMetric(value float64) float64 {
