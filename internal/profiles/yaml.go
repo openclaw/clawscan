@@ -310,6 +310,8 @@ func (gate *ProfileScannerGate) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+type scannerYAML ProfileScanner
+
 func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
@@ -334,24 +336,11 @@ func (scanner *ProfileScanner) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("field %s not found in type profiles.ProfileScanner", node.Content[index].Value)
 			}
 		}
-		var value struct {
-			ID        string              `yaml:"id"`
-			Command   string              `yaml:"command"`
-			Env       []string            `yaml:"env,omitempty"`
-			SecretEnv []string            `yaml:"secretEnv,omitempty"`
-			Targets   []string            `yaml:"targets,omitempty"`
-			Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
-		}
+		value := scannerYAML{custom: scanner.custom, mapping: true}
 		if err := node.Decode(&value); err != nil {
 			return err
 		}
-		scanner.ID = value.ID
-		scanner.Command = value.Command
-		scanner.Env = value.Env
-		scanner.SecretEnv = value.SecretEnv
-		scanner.Targets = value.Targets
-		scanner.Gate = value.Gate
-		scanner.mapping = true
+		*scanner = ProfileScanner(value)
 		return nil
 	default:
 		return fmt.Errorf("scanner entry must be a string or object")
@@ -362,15 +351,10 @@ func (scanner ProfileScanner) MarshalYAML() (interface{}, error) {
 	if !scanner.mapping && !scanner.custom {
 		return scanner.ID, nil
 	}
-	return struct {
-		ID        string              `yaml:"id"`
-		Command   string              `yaml:"command,omitempty"`
-		Env       []string            `yaml:"env,omitempty"`
-		SecretEnv []string            `yaml:"secretEnv,omitempty"`
-		Targets   []string            `yaml:"targets,omitempty"`
-		Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
-	}{scanner.ID, scanner.Command, scanner.Env, scanner.SecretEnv, scanner.Targets, scanner.Gate}, nil
+	return scannerYAML(scanner), nil
 }
+
+type mountYAML SandboxMount
 
 func (m *SandboxMount) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
@@ -384,14 +368,11 @@ func (m *SandboxMount) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("field %s not found in type profiles.SandboxMount", node.Content[index].Value)
 			}
 		}
-		var value struct {
-			Path  string `yaml:"path"`
-			Write bool   `yaml:"write"`
-		}
+		var value mountYAML
 		if err := node.Decode(&value); err != nil {
 			return err
 		}
-		m.Path, m.Write = value.Path, value.Write
+		*m = SandboxMount(value)
 		return nil
 	default:
 		return fmt.Errorf("sandbox mount must be a string or object")
@@ -402,10 +383,7 @@ func (m SandboxMount) MarshalYAML() (interface{}, error) {
 	if !m.Write {
 		return m.Path, nil
 	}
-	return struct {
-		Path  string `yaml:"path"`
-		Write bool   `yaml:"write"`
-	}{Path: m.Path, Write: m.Write}, nil
+	return mountYAML(m), nil
 }
 
 func resolvedYAMLNode(node *yaml.Node) *yaml.Node {

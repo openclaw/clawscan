@@ -52,12 +52,12 @@ func (profile Profile) ScannerIDs() []string {
 }
 
 type ProfileScanner struct {
-	ID        string
-	Command   string
-	Env       []string
-	SecretEnv []string
-	Targets   []string
-	Gate      *ProfileScannerGate
+	ID        string              `yaml:"id"`
+	Command   string              `yaml:"command,omitempty"`
+	Env       []string            `yaml:"env,omitempty"`
+	SecretEnv []string            `yaml:"secretEnv,omitempty"`
+	Targets   []string            `yaml:"targets,omitempty"`
+	Gate      *ProfileScannerGate `yaml:"gate,omitempty"`
 	custom    bool
 	mapping   bool
 }
