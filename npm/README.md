@@ -23,7 +23,7 @@ to that platform. Each package keeps the `clawscan` command and the
 
 Use a distinct `--out` directory to retain multiple builds; each build replaces
 its output directory. Add `--smoke` when building for the current host to install
-the tarball in a temporary prefix and run `--version` and a static scan.
+the tarball in a temporary prefix and run `--version` and import a SkillSpector result fixture.
 
 The platform-specific tarballs are local build artifacts. Registry publication
 still uses the universal package; publishing the additional names requires their
