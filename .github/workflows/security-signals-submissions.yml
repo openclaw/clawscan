@@ -18,19 +18,19 @@ jobs:
   validate:
     name: Validate submissions
     runs-on: ubuntu-latest
+    env:
+      CLAWSCAN_SUBMISSION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       # Checkout uses the PR merge commit. An unavailable base falls through to validation.
       - name: Check for submission changes
         id: submissions
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if git diff --quiet "$BASE_SHA" HEAD -- leaderboard/submissions; then
+          if git diff --quiet "$CLAWSCAN_SUBMISSION_BASE_SHA" HEAD -- leaderboard/submissions; then
             echo "unchanged=true" >> "$GITHUB_OUTPUT"
             echo "No Security Signals submissions changed." >> "$GITHUB_STEP_SUMMARY"
           fi
