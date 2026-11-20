@@ -72,19 +72,22 @@ jobs:
                   CLAWSCAN_PROGRESS="1", CLAWSCAN_CHILD_PROGRESS="1",
                   TMPDIR=temp, TMP=temp, TEMP=temp,
               )
-              subprocess.run([
+              scan = subprocess.run([
                   str(binary), str(package), "--profile", "clawhub", "--sandbox", "off",
                   "--scanner-result", f"skillspector={skillspector}",
                   "--scanner-result", f"aig={aig}", "--output", str(report),
-              ], cwd=root, env=env, check=True, timeout=240)
+              ], cwd=root, env=env, timeout=240)
+              if not report.exists():
+                  scan.check_returncode()
           artifact = json.loads(report.read_text())
           judge = artifact.get("judge", {})
           overview = artifact.get("overview") or {}
           print(json.dumps({
-              "judge": judge.get("status"), "error": judge.get("error"),
+              "judge": judge.get("status"),
               "verdict": (judge.get("result") or {}).get("verdict"),
-              "overview": overview.get("status"), "overviewError": overview.get("error"),
+              "overview": overview.get("status"),
           }))
+          scan.check_returncode()
           assert judge.get("status") == "completed", "Judge did not complete"
           assert judge["result"]["verdict"] in ("benign", "suspicious", "malicious")
           assert overview.get("status") == "completed", "Overview did not complete"
