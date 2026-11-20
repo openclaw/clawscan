@@ -3047,13 +3047,7 @@ func envMapToEnviron(env map[string]string) []string {
 }
 
 func commandError(runErr error, stderr string, env map[string]string) string {
-	names := make([]string, 0)
-	for key := range env {
-		if isSecretEnvKey(key) {
-			names = append(names, key)
-		}
-	}
-	return commandErrorForEnvNames(runErr, stderr, env, names)
+	return commandErrorForEnvNames(runErr, stderr, env, secretEnvNames(env))
 }
 
 func commandErrorForEnvNames(runErr error, stderr string, env map[string]string, names []string) string {
@@ -3066,13 +3060,7 @@ func commandErrorForEnvNames(runErr error, stderr string, env map[string]string,
 }
 
 func redactEnvValues(value string, env map[string]string) string {
-	names := make([]string, 0)
-	for key := range env {
-		if isSecretEnvKey(key) {
-			names = append(names, key)
-		}
-	}
-	return redactEnvValuesForNames(value, env, names)
+	return redactEnvValuesForNames(value, env, secretEnvNames(env))
 }
 
 func redactEnvValuesForNames(value string, env map[string]string, names []string) string {
@@ -3122,6 +3110,16 @@ func redactJudgeResult(value any, env map[string]string) any {
 	default:
 		return value
 	}
+}
+
+func secretEnvNames(env map[string]string) []string {
+	names := make([]string, 0)
+	for key := range env {
+		if isSecretEnvKey(key) {
+			names = append(names, key)
+		}
+	}
+	return names
 }
 
 func isSecretEnvKey(key string) bool {
