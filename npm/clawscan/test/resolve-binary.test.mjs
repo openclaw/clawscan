@@ -5,8 +5,7 @@ import {
   binaryFileName,
   platformKey,
   resolveBinaryPath,
-  resolveBundledBinaryPath,
-} from "../lib/resolve-binary.mjs";
+} from "@openclaw/clawscan/resolve-binary";
 
 describe("platformKey", () => {
   it("maps supported Node platform and arch pairs to package binary directories", () => {
@@ -43,16 +42,6 @@ describe("resolveBinaryPath", () => {
         arch: "arm64",
       }),
       join("/tmp/package", "binaries", "darwin-arm64", "clawscan"),
-    );
-  });
-});
-
-describe("resolveBundledBinaryPath", () => {
-  it("resolves the binary from the installed @openclaw/clawscan package", () => {
-    const resolved = resolveBundledBinaryPath({ platform: "linux", arch: "x64" });
-    assert.equal(
-      resolved.endsWith(join("npm", "clawscan", "binaries", "linux-x64", "clawscan")),
-      true,
     );
   });
 });

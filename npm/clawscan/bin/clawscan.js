@@ -1,14 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { resolveBinaryPath } from "../lib/resolve-binary.mjs";
-
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+import { resolveBundledBinaryPath } from "../lib/resolve-binary.mjs";
 
 let binaryPath;
 try {
-  binaryPath = resolveBinaryPath({ packageRoot });
+  binaryPath = resolveBundledBinaryPath();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);

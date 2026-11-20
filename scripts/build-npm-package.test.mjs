@@ -84,15 +84,17 @@ describe("normalizeBuildDate", () => {
 });
 
 describe("package target mapping", () => {
-  it("selects one Go target for each supported npm platform", () => {
-    for (const [platform, target] of [
+  it("maps each supported npm platform to and from its Go build target", () => {
+    const expected = [
       ["darwin-x64", { goos: "darwin", goarch: "amd64" }],
       ["darwin-arm64", { goos: "darwin", goarch: "arm64" }],
       ["linux-x64", { goos: "linux", goarch: "amd64" }],
       ["linux-arm64", { goos: "linux", goarch: "arm64" }],
       ["win32-x64", { goos: "windows", goarch: "amd64" }],
       ["win32-arm64", { goos: "windows", goarch: "arm64" }],
-    ]) {
+    ];
+    assert.deepEqual(packageTargets.map(platformKeyForTarget).sort(), expected.map(([key]) => key).sort());
+    for (const [platform, target] of expected) {
       assert.deepEqual(packageTargetForPlatform(platform), target);
     }
   });
@@ -104,20 +106,6 @@ describe("package target mapping", () => {
         /Unsupported npm package platform/,
       );
     }
-  });
-
-  it("maps Go release targets to npm binary directories", () => {
-    assert.deepEqual(
-      packageTargets.map((target) => [target.goos, target.goarch, platformKeyForTarget(target)]),
-      [
-        ["darwin", "amd64", "darwin-x64"],
-        ["darwin", "arm64", "darwin-arm64"],
-        ["linux", "amd64", "linux-x64"],
-        ["linux", "arm64", "linux-arm64"],
-        ["windows", "amd64", "win32-x64"],
-        ["windows", "arm64", "win32-arm64"],
-      ],
-    );
   });
 
   it("uses clawscan.exe only for the Windows target", () => {
