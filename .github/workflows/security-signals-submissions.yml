@@ -24,7 +24,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Checkout uses the PR merge commit. An unavailable base falls through to validation.
+      - name: Check for submission changes
+        id: submissions
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --quiet "$BASE_SHA" HEAD -- leaderboard/submissions; then
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+            echo "No Security Signals submissions changed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Set up Go
+        if: steps.submissions.outputs.unchanged != 'true'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.3"
@@ -32,10 +44,11 @@ jobs:
           cache: true
 
       - name: Validate changed submissions
+        if: steps.submissions.outputs.unchanged != 'true'
         run: scripts/validate-security-signals-submissions.sh
 
       - name: Upload score previews
-        if: always()
+        if: always() && steps.submissions.outputs.unchanged != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: security-signals-submission-scores
