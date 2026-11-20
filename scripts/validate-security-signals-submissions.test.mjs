@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('./validate-security-signals-submissions.sh', import.meta.url));
 
-test('selects submissions at the event base in a depth-two PR checkout', (t) => {
+test('selects only the PR changes when the checked-out merge has a newer base', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'clawscan-submission-base-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, 'source');
@@ -35,6 +35,7 @@ test('selects submissions at the event base in a depth-two PR checkout', (t) => 
   }
   git(source, 'add', '.');
   git(source, 'commit', '-qm', 'initial submissions');
+  const eventBase = git(source, 'rev-parse', 'HEAD');
   git(source, 'checkout', '-qb', 'pr');
   writeFileSync(join(source, changed, 'predictions.jsonl'), '{"pr":true}\n');
   git(source, 'commit', '-qam', 'change submission');
@@ -48,18 +49,20 @@ test('selects submissions at the event base in a depth-two PR checkout', (t) => 
   git(checkout, 'fetch', '-q', '--depth=2', source, 'main');
   git(checkout, 'checkout', '-q', '--detach', 'FETCH_HEAD');
   assert.equal(git(checkout, 'rev-parse', '--is-shallow-repository'), 'true');
-  function validate(sha) {
+  assert.equal(git(checkout, 'rev-parse', 'HEAD^1'), base);
+  assert.notEqual(spawnSync('git', ['cat-file', '-e', eventBase], { cwd: checkout, env }).status, 0);
+  function validate(baseRef) {
     return spawnSync('bash', [script], {
       cwd: checkout, encoding: 'utf8',
-      env: { ...env, GITHUB_BASE_REF: 'main', CLAWSCAN_SUBMISSION_BASE_SHA: sha, CLAWSCAN_VALIDATE_SUBMISSION_CMD: 'true' },
+      env: { ...env, GITHUB_BASE_REF: 'main', CLAWSCAN_SUBMISSION_BASE: baseRef, CLAWSCAN_VALIDATE_SUBMISSION_CMD: 'true' },
     });
   }
-  const result = validate(base);
+  const result = validate('HEAD^1');
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.stdout.split('\n').filter((line) => line.startsWith('Validating ')), [`Validating ${changed}`]);
   assert.equal(result.stderr, '');
 
-  const missing = validate('0000000000000000000000000000000000000000');
+  const missing = validate(eventBase);
   assert.notEqual(missing.status, 0);
   assert.doesNotMatch(missing.stdout, /No Security Signals submissions changed/);
 });

@@ -82,9 +82,8 @@ find_all_submission_dirs() {
 find_changed_submission_dirs() {
   local base_ref="${GITHUB_BASE_REF:-}"
   local comparison
-  if [ -n "${CLAWSCAN_SUBMISSION_BASE_SHA:-}" ]; then
-    # The event base and the checked-out PR merge commit are both present at depth two.
-    comparison="$CLAWSCAN_SUBMISSION_BASE_SHA..HEAD"
+  if [ -n "${CLAWSCAN_SUBMISSION_BASE:-}" ]; then
+    comparison="$CLAWSCAN_SUBMISSION_BASE..HEAD"
   elif [ -n "$base_ref" ] && git fetch --no-tags --depth=1 origin "$base_ref"; then
     comparison="FETCH_HEAD...HEAD"
   else
