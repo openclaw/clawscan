@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -12,9 +12,10 @@ const workflowPath = fileURLToPath(
 );
 const gitPath = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 const branch = 'automation/runtime-tool-updates';
+const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_NOSYSTEM: '1' };
 
 function git(cwd, ...args) {
-  return execFileSync(gitPath, args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync(gitPath, args, { cwd, env: gitEnv, encoding: 'utf8' }).trim();
 }
 
 function commitFile(repo, name, content, message) {
@@ -31,12 +32,11 @@ function createFixture({ existingBranch }) {
   const worker = join(root, 'worker');
 
   mkdirSync(seed);
-  git(root, 'init', '--bare', remote);
-  git(seed, 'init');
+  git(root, 'init', '-b', 'main', '--bare', remote);
+  git(seed, 'init', '-b', 'main');
   git(seed, 'config', 'user.name', 'Test Seed');
   git(seed, 'config', 'user.email', 'seed@example.com');
   commitFile(seed, 'README.md', 'main\n', 'initial main');
-  git(seed, 'branch', '-M', 'main');
   git(seed, 'remote', 'add', 'origin', remote);
   git(seed, 'push', '-u', 'origin', 'main');
 
@@ -55,7 +55,7 @@ function createFixture({ existingBranch }) {
   return { root, remote, worker, workerHead };
 }
 
-function runPush(worker, env = process.env) {
+function runPush(worker, env = gitEnv) {
   return spawnSync('bash', [scriptPath, 'origin', branch], {
     cwd: worker,
     env,
@@ -101,6 +101,7 @@ function installFetchRaceWrapper(fixture) {
     wrapper,
     `#!/bin/sh
 set -eu
+export PATH="$FIXTURE_ORIGINAL_PATH"
 if [ "\${1:-}" = "fetch" ] && [ ! -e "${marker}" ]; then
   : > "${marker}"
   "${gitPath}" -C "${racer}" push origin HEAD:refs/heads/${branch} >/dev/null
@@ -110,7 +111,7 @@ exec "${gitPath}" "$@"
   );
   chmodSync(wrapper, 0o755);
   return {
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    env: { ...gitEnv, PATH: `${bin}:${gitEnv.PATH}`, FIXTURE_ORIGINAL_PATH: gitEnv.PATH },
     racerHead,
   };
 }
