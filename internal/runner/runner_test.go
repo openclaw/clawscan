@@ -4249,7 +4249,7 @@ func TestPrepareJudgeWorkspaceCopiesCompleteArtifact(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4313,7 +4313,7 @@ func TestPrepareJudgeWorkspaceLayoutIsProfileIndependent(t *testing.T) {
 				"skillspector": {Raw: skillSpectorRaw},
 				"aig":          {Raw: aigRaw},
 			}
-			if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+			if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
@@ -4367,7 +4367,7 @@ func TestPrepareJudgeWorkspaceExcludesHostVCSAndPriorResults(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
@@ -4399,7 +4399,7 @@ func TestPrepareJudgeWorkspacePreservesNestedArtifactDirectoriesNamedLikeHostMet
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	for rel, want := range files {
@@ -4428,7 +4428,7 @@ func TestPrepareJudgeWorkspaceExcludesWorktreeGitPointer(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", ".git")); !errors.Is(err, os.ErrNotExist) {
@@ -4453,7 +4453,7 @@ func TestPrepareJudgeWorkspaceCopiesPreviouslyFilteredTargetFiles(t *testing.T) 
 	}
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "node_modules", "pkg", "payload.js")); err != nil {
@@ -4491,7 +4491,7 @@ func TestPrepareJudgeWorkspacePrioritizesSkillFileWithinBudget(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", "SKILL.md")); err != nil {
@@ -4513,7 +4513,7 @@ func TestPrepareJudgeWorkspacePrioritizesPluginManifestWithinBudget(t *testing.T
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
 	artifact.Target.Kind = targetKindPlugin
 	artifact.Target.ID = "probe-plugin"
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "artifact", pluginManifestName)); err != nil {
@@ -4543,7 +4543,7 @@ func TestPrepareJudgeWorkspaceFailsOnUnreadableFile(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err == nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err == nil {
 		t.Fatal("expected incomplete judge workspace to fail")
 	}
 }
@@ -4567,7 +4567,7 @@ func TestPrepareJudgeWorkspaceFailsOnUnreadableDirectory(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err == nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err == nil {
 		t.Fatal("expected incomplete judge workspace to fail")
 	}
 }
@@ -4590,7 +4590,7 @@ func TestPrepareJudgeWorkspacePreservesInternalSymlinks(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(workspace, "artifact", "node_modules", ".bin", "pkg")
@@ -4626,7 +4626,7 @@ func TestPrepareJudgeWorkspaceRejectsExternalSymlinks(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	err := prepareJudgeWorkspace(workspace, artifact)
+	err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false)
 	if err == nil || !strings.Contains(err.Error(), "symlink outside target") {
 		t.Fatalf("err = %v", err)
 	}
@@ -4641,7 +4641,7 @@ func TestPrepareJudgeWorkspaceCreatesArtifactDirForEmptyTarget(t *testing.T) {
 
 	workspace := filepath.Join(dir, "workspace")
 	artifact := NewArtifact(Options{Target: target}, target, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", map[string]string{})
-	if err := prepareJudgeWorkspace(workspace, artifact); err != nil {
+	if err := prepareHarnessWorkspaceContext(t.Context(), workspace, artifact, false); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(filepath.Join(workspace, "artifact"))
