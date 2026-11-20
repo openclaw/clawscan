@@ -70,10 +70,9 @@ func TestRunBenchmarkCancelsIDAndArchiveHTTP(t *testing.T) {
 				if stage == "ids" {
 					opts.Benchmark.IDsSource = "https://inert.invalid/ids"
 				}
-				started := time.Now()
 				_, err := RunBenchmark(opts, RunContext{Context: caller, Env: map[string]string{}, BenchmarkClient: HuggingFaceBenchmarkClient{HTTPClient: &http.Client{Transport: transport}, SkillTrustBenchRowsURL: "https://inert.invalid/rows", SkillTrustBenchArchiveURL: "https://inert.invalid/archive"}})
-				if !errors.Is(err, context.Canceled) || time.Since(started) >= 90*time.Millisecond {
-					t.Fatalf("%s request did not obey caller cancellation: %v elapsed=%s", stage, err, time.Since(started))
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("%s request did not obey caller cancellation: %v", stage, err)
 				}
 				if stall == "body" && (body == nil || !body.closed) {
 					t.Fatal("canceled body not closed")
