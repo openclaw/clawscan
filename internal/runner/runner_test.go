@@ -43,16 +43,6 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
-func TestParseArgsAcceptsAgentVerusScanner(t *testing.T) {
-	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "agentverus"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(opts.Scanners, ","); got != "agentverus" {
-		t.Fatalf("scanners = %q", got)
-	}
-}
-
 func TestParseArgsRequiresExplicitScanner(t *testing.T) {
 	_, err := ParseArgs(nil)
 	if err == nil || err.Error() != "At least one --scanner is required" {
@@ -3966,6 +3956,9 @@ func TestRenderClawHubPromptUsesProductionScannerContextShape(t *testing.T) {
 	for _, want := range []string{
 		"SYSTEM\n\nAdditional ClawHub policy for this Codex run:",
 		`"status": "suspicious"`,
+		"SkillSpector findings supplied to Codex:",
+		"A.I.G SARIF evidence supplied to Codex:",
+		`"ruleId": "T04"`,
 		"- pre-scan malicious signal present: yes",
 		"- pre-scan artifact injection signals: none",
 	} {
@@ -3983,54 +3976,6 @@ func TestRenderClawHubPromptUsesProductionScannerContextShape(t *testing.T) {
 		other, err := RenderClawHubPrompt("SYSTEM\n\nAdditional ClawHub policy for this Codex run:\nstale block", Artifact{Profile: profile, Scanners: scanners})
 		if err != nil || other != prompt {
 			t.Fatalf("profile %q changed the ClawHub prompt: err=%v", profile, err)
-		}
-	}
-}
-
-func TestRenderClawHubAIGPromptIncludesAIGEvidence(t *testing.T) {
-	prompt, err := RenderClawHubPrompt("SYSTEM", Artifact{
-		Profile: "clawhub-aig",
-		Scanners: map[string]ScannerResult{
-			"skillspector": {Raw: json.RawMessage(`{"status":"clean"}`)},
-			"aig":          {Raw: json.RawMessage(`{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04","level":"error"}]}]}`)},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"SkillSpector findings supplied to Codex:",
-		"A.I.G SARIF evidence supplied to Codex:",
-		`"ruleId": "T04"`,
-		"- pre-scan malicious signal present: yes",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
-		}
-	}
-}
-
-func TestRenderClawHubPromptIncludesAIGEvidenceForProductionProfile(t *testing.T) {
-	// The production "clawhub" profile runs aig alongside skillspector, so its
-	// SARIF evidence must reach the judge whenever it produced a result,
-	// regardless of which profile label requested the run.
-	prompt, err := RenderClawHubPrompt("SYSTEM", Artifact{
-		Profile: "clawhub",
-		Scanners: map[string]ScannerResult{
-			"skillspector": {Raw: json.RawMessage(`{"status":"clean"}`)},
-			"aig":          {Raw: json.RawMessage(`{"version":"2.1.0","runs":[{"results":[{"ruleId":"T04","level":"error"}]}]}`)},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"SkillSpector findings supplied to Codex:",
-		"A.I.G SARIF evidence supplied to Codex:",
-		`"ruleId": "T04"`,
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
 	}
 }

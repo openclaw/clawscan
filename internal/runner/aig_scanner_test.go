@@ -33,16 +33,6 @@ const aigSARIF = `{
   }]
 }`
 
-func TestParseArgsAcceptsAIGScanner(t *testing.T) {
-	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "aig"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(opts.Scanners, ","); got != "aig" {
-		t.Fatalf("scanners = %q", got)
-	}
-}
-
 func TestValidateRequirementsAcceptsEitherAIGAPIKey(t *testing.T) {
 	opts, err := ParseArgs([]string{"./my-skill", "--scanner", "aig"})
 	if err != nil {

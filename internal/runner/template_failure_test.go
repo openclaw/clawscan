@@ -17,13 +17,13 @@ func TestTemplateScannerKeepsExistingFailureProtections(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			commands := &aigMCPCommandRunner{output: test.raw, stderr: test.stderr}
-			artifact := runAIGMCPTest(t, templateFixture(t, "benign-mixed"), map[string]string{"LLM_API_KEY": "fixture-only"}, commands)
+			artifact := runAIGMCPTest(t, templateFixture(t), map[string]string{"LLM_API_KEY": "fixture-only"}, commands)
 			if artifact.Scanners[aigMCPScannerID].Status != "failed" {
 				t.Fatalf("incomplete audit accepted: %#v", artifact.Scanners)
 			}
 		})
 	}
-	root := templateFixture(t, "benign-mixed")
+	root := templateFixture(t)
 	commands := &aigMCPCommandRunner{output: aigMCPSARIF}
 	r := ExternalScannerRunner{CommandRunner: commands, Env: map[string]string{"LLM_API_KEY": "fixture-only"}, TargetKind: targetKindTemplate}
 	result, err := r.runAIGMCP(root, "now")

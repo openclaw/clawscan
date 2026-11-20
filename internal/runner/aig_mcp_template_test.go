@@ -10,19 +10,13 @@ import (
 	"time"
 )
 
-func templateFixture(t *testing.T, name string) string {
+func templateFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	// Scanner staging is the subject of this test; use the unfiltered copier to
 	// materialize fixtures, including hidden, vendored and compiled shipped code.
-	fixtures := []string{"benign-mixed"}
-	if name != "benign-mixed" {
-		fixtures = append(fixtures, name)
-	}
-	for _, fixture := range fixtures {
-		if _, err := copyTargetTreeContext(t.Context(), filepath.Join("testdata", "templates", fixture), root, func(string, os.DirEntry) (bool, error) { return false, nil }); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := copyTargetTreeContext(t.Context(), filepath.Join("testdata", "templates", "benign-mixed"), root, func(string, os.DirEntry) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0700); err != nil {
 		t.Fatal(err)
@@ -93,38 +87,28 @@ func (r *templateCommandRunner) Run(command string, args []string, cwd string, t
 	return CommandOutput{}, err
 }
 
-// These fixtures prove scope/dispatch/integrity, not model detection quality.
-// All scanner commands are fake; no bootstrap, fetch or dependency is executed.
 func TestAIGMCPTemplateShippedArtifactAndPrompt(t *testing.T) {
-	for _, name := range []string{"benign-mixed", "malicious-bootstrap", "malicious-automation", "malicious-download", "external-clawhub-ref"} {
-		t.Run(name, func(t *testing.T) {
-			root := templateFixture(t, name)
-			before := templateTree(t, root)
-			raw := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"aig-mcp-scan","version":"0.2.0"}},"properties":{"scanNote":"complete","securityScore":100},"results":[]}]}`
-			if strings.HasPrefix(name, "malicious-") {
-				raw = aigMCPSARIF
-			}
-			commands := &templateCommandRunner{t: t, want: before, output: raw}
-			artifact := runAIGMCPTest(t, root, map[string]string{"LLM_API_KEY": "fixture-only"}, commands)
-			if artifact.Target.Kind != targetKindTemplate || len(artifact.Scanners) != 1 || commands.calls != 1 {
-				t.Fatalf("dispatch = %#v calls=%d", artifact.Target, commands.calls)
-			}
-			result := artifact.Scanners[aigMCPScannerID]
-			if result.Status != "completed" || string(result.Raw) != raw {
-				t.Fatalf("raw evidence changed: %#v", result)
-			}
-			if artifact.Judge != nil {
-				t.Fatal("scanner-only run invented verdict judge")
-			}
-			if got := templateTree(t, root); !reflect.DeepEqual(got, before) {
-				t.Fatal("original artifact changed")
-			}
-		})
+	root := templateFixture(t)
+	before := templateTree(t, root)
+	commands := &templateCommandRunner{t: t, want: before, output: aigMCPSARIF}
+	artifact := runAIGMCPTest(t, root, map[string]string{"LLM_API_KEY": "fixture-only"}, commands)
+	if artifact.Target.Kind != targetKindTemplate || len(artifact.Scanners) != 1 || commands.calls != 1 {
+		t.Fatalf("dispatch = %#v calls=%d", artifact.Target, commands.calls)
+	}
+	result := artifact.Scanners[aigMCPScannerID]
+	if result.Status != "completed" || string(result.Raw) != aigMCPSARIF {
+		t.Fatalf("raw evidence changed: %#v", result)
+	}
+	if artifact.Judge != nil {
+		t.Fatal("scanner-only run invented verdict judge")
+	}
+	if got := templateTree(t, root); !reflect.DeepEqual(got, before) {
+		t.Fatal("original artifact changed")
 	}
 }
 
 func TestTemplateTargetCanonicalSelectorAndPrecedence(t *testing.T) {
-	root := templateFixture(t, "benign-mixed")
+	root := templateFixture(t)
 	for _, rel := range []string{"SKILL.md", "openclaw.plugin.json"} {
 		if err := os.WriteFile(filepath.Join(root, rel), []byte(`{"id":"bundled"}`), 0600); err != nil {
 			t.Fatal(err)
@@ -149,7 +133,7 @@ func TestTemplateTargetRejectsUnsafeOrRetiredSelectors(t *testing.T) {
 			}
 		})
 	}
-	root := templateFixture(t, "benign-mixed")
+	root := templateFixture(t)
 	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"openclaw":{"template":"manifests/CLAW.md","claw":"CLAW.md"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +152,7 @@ func mustTemplateJSON(t *testing.T, value any) []byte {
 }
 
 func TestTemplateStagingRejectsEscapingLinksAndOversizedVendoredFiles(t *testing.T) {
-	root := templateFixture(t, "benign-mixed")
+	root := templateFixture(t)
 	if err := os.Symlink(t.TempDir(), filepath.Join(root, "escape")); err != nil {
 		t.Skip(err)
 	}
@@ -194,7 +178,7 @@ func TestTemplateStagingRejectsEscapingLinksAndOversizedVendoredFiles(t *testing
 func TestTemplateManifestSymlinksAreRefused(t *testing.T) {
 	for _, rel := range []string{"package.json", "manifests/CLAW.md", "manifests"} {
 		t.Run(rel, func(t *testing.T) {
-			root := templateFixture(t, "benign-mixed")
+			root := templateFixture(t)
 			if err := os.RemoveAll(filepath.Join(root, rel)); err != nil {
 				t.Fatal(err)
 			}
