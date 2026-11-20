@@ -387,13 +387,17 @@ func LoadBenchmarkIDSelectionContext(ctx context.Context, source string) (Benchm
 	if err := ctx.Err(); err != nil {
 		return BenchmarkIDSelection{}, err
 	}
-	hashInput := strings.Join(ids, "\n") + "\n"
-	sum := sha256.Sum256([]byte(hashInput))
 	return BenchmarkIDSelection{
 		Source: source,
 		IDs:    ids,
-		SHA256: fmt.Sprintf("%x", sum[:]),
+		SHA256: BenchmarkIDsSHA256(ids),
 	}, nil
+}
+
+// BenchmarkIDsSHA256 identifies the ordered subset recorded in a benchmark artifact.
+func BenchmarkIDsSHA256(ids []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(ids, "\n") + "\n"))
+	return fmt.Sprintf("%x", sum)
 }
 
 func normalizeBenchmarkIDSource(source string) string {
