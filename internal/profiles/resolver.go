@@ -163,40 +163,31 @@ type resolvedProfile struct {
 }
 
 type cliIntent struct {
-	target               string
-	profile              string
-	profileSet           bool
-	configPath           string
-	discoverConfig       bool
-	contextPath          string
-	scanners             []string
-	scannerResultPaths   map[string]string
-	outputPath           string
-	outputSet            bool
-	json                 bool
-	judge                string
-	judgeSet             bool
-	overview             string
-	overviewSet          bool
-	noOverview           bool
-	sandbox              string
-	sandboxSet           bool
-	sandboxImage         string
-	sandboxImageSet      bool
-	sandboxEnv           []string
-	sandboxMounts        []SandboxMount
-	benchmark            string
-	benchmarkSet         bool
-	split                string
-	splitSet             bool
-	limit                int
-	limitSet             bool
-	offset               int
-	offsetSet            bool
-	predictionsOutput    string
-	predictionsOutputSet bool
-	idsSource            string
-	idsSourceSet         bool
+	target             string
+	profile            string
+	configPath         string
+	discoverConfig     bool
+	contextPath        string
+	scanners           []string
+	scannerResultPaths map[string]string
+	outputPath         string
+	json               bool
+	judge              string
+	overview           string
+	noOverview         bool
+	sandbox            string
+	sandboxImage       string
+	sandboxEnv         []string
+	sandboxMounts      []SandboxMount
+	benchmark          string
+	benchmarkSet       bool
+	split              string
+	limit              int
+	limitSet           bool
+	offset             int
+	offsetSet          bool
+	predictionsOutput  string
+	idsSource          string
 }
 
 var judgePathPlaceholderPattern = regexp.MustCompile(`\{\{\s*(prompt|output_schema):([^}]+)\}\}`)
@@ -266,13 +257,13 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	if !hasExplicitRunSelection(intent) {
 		return ResolvedRunSet{}, explicitRunSelectionError()
 	}
-	if intent.configPath != "" && !intent.profileSet {
+	if intent.configPath != "" && intent.profile == "" {
 		return resolveAllConfigProfiles(intent, cwd)
 	}
 	// Discovery without a profile would record the discovered file as the
 	// run's ConfigSource while applying none of its settings — a provenance
 	// claim the run does not honor. Reject instead of misleading.
-	if intent.discoverConfig && !intent.profileSet {
+	if intent.discoverConfig && intent.profile == "" {
 		return ResolvedRunSet{}, errors.New("--discover-config requires --profile; use --config <path> to run every profile in a config")
 	}
 
@@ -280,7 +271,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 	configSource := ""
 	loadedConfigPath := ""
 	selected := resolvedProfile{profile: Profile{}}
-	if intent.profileSet || intent.configPath != "" || intent.discoverConfig {
+	if intent.profile != "" || intent.configPath != "" || intent.discoverConfig {
 		registry, loadedConfig, err := loadConfigs(cwd, intent.configPath, intent.discoverConfig)
 		if err != nil {
 			return ResolvedRunSet{}, err
@@ -289,7 +280,7 @@ func resolveRunSetIntent(intent cliIntent, cwd string) (ResolvedRunSet, error) {
 			configSource = loadedConfig
 			loadedConfigPath = loadedConfig
 		}
-		if intent.profileSet {
+		if intent.profile != "" {
 			profileName = intent.profile
 			var ok bool
 			selected, ok = registry.Profile(profileName)
@@ -356,7 +347,7 @@ func resolveProfileOptions(intent cliIntent, selected resolvedProfile, profileNa
 }
 
 func hasExplicitRunSelection(intent cliIntent) bool {
-	return len(intent.scanners) > 0 || intent.profileSet || intent.configPath != "" || intent.benchmarkSet
+	return len(intent.scanners) > 0 || intent.profile != "" || intent.configPath != "" || intent.benchmarkSet
 }
 
 func explicitRunSelectionError() error {
@@ -596,33 +587,33 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 		intent.target = args[0]
 		start = 1
 	}
+	stringOptions := map[string]*string{
+		"--profile":            &intent.profile,
+		"--config":             &intent.configPath,
+		"--context":            &intent.contextPath,
+		"--output":             &intent.outputPath,
+		"--judge":              &intent.judge,
+		"--overview":           &intent.overview,
+		"--sandbox":            &intent.sandbox,
+		"--sandbox-image":      &intent.sandboxImage,
+		"--split":              &intent.split,
+		"--predictions-output": &intent.predictionsOutput,
+		"--ids":                &intent.idsSource,
+	}
 	for i := start; i < len(args); i++ {
 		arg := args[i]
+		if option := stringOptions[arg]; option != nil {
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return cliIntent{}, err
+			}
+			*option = value
+			i = next
+			continue
+		}
 		switch arg {
-		case "--profile":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.profile = value
-			intent.profileSet = true
-			i = next
-		case "--config":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.configPath = value
-			i = next
 		case "--discover-config":
 			intent.discoverConfig = true
-		case "--context":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.contextPath = value
-			i = next
 		case "--scanner":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -641,50 +632,10 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			}
 			intent.scannerResultPaths[scanner] = path
 			i = next
-		case "--output":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.outputPath = value
-			intent.outputSet = true
-			i = next
 		case "--json":
 			intent.json = true
-		case "--judge":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.judge = value
-			intent.judgeSet = true
-			i = next
-		case "--overview":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.overview = value
-			intent.overviewSet = true
-			i = next
 		case "--no-overview":
 			intent.noOverview = true
-		case "--sandbox":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.sandbox = value
-			intent.sandboxSet = true
-			i = next
-		case "--sandbox-image":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.sandboxImage = value
-			intent.sandboxImageSet = true
-			i = next
 		case "--sandbox-env":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -702,14 +653,6 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 				return cliIntent{}, err
 			}
 			intent.sandboxMounts = append(intent.sandboxMounts, mount)
-			i = next
-		case "--split":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.split = value
-			intent.splitSet = true
 			i = next
 		case "--limit":
 			value, next, err := readValue(args, i, arg)
@@ -735,22 +678,6 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			intent.offset = parsed
 			intent.offsetSet = true
 			i = next
-		case "--predictions-output":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.predictionsOutput = value
-			intent.predictionsOutputSet = true
-			i = next
-		case "--ids":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return cliIntent{}, err
-			}
-			intent.idsSource = value
-			intent.idsSourceSet = true
-			i = next
 		default:
 			return cliIntent{}, fmt.Errorf("Unknown argument: %s", arg)
 		}
@@ -758,7 +685,7 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 	if intent.configPath != "" && intent.discoverConfig {
 		return cliIntent{}, errors.New("--config and --discover-config are mutually exclusive")
 	}
-	if intent.overviewSet && intent.noOverview {
+	if intent.overview != "" && intent.noOverview {
 		return cliIntent{}, errors.New("--overview and --no-overview are mutually exclusive")
 	}
 	return intent, nil
@@ -766,7 +693,7 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 
 func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName string) ([]string, map[string][]byte, error) {
 	if !intent.benchmarkSet {
-		if intent.splitSet {
+		if intent.split != "" {
 			return nil, nil, errors.New("--split requires clawscan benchmark <benchmark-id>")
 		}
 		if intent.limitSet {
@@ -775,14 +702,14 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 		if intent.offsetSet {
 			return nil, nil, errors.New("--offset requires clawscan benchmark <benchmark-id>")
 		}
-		if intent.predictionsOutputSet {
+		if intent.predictionsOutput != "" {
 			return nil, nil, errors.New("--predictions-output requires clawscan benchmark <benchmark-id>")
 		}
-		if intent.idsSourceSet {
+		if intent.idsSource != "" {
 			return nil, nil, errors.New("--ids requires clawscan benchmark <benchmark-id>")
 		}
 	}
-	if intent.idsSourceSet && (intent.limitSet || intent.offsetSet) {
+	if intent.idsSource != "" && (intent.limitSet || intent.offsetSet) {
 		return nil, nil, errors.New("--ids is mutually exclusive with --limit and --offset")
 	}
 
@@ -827,7 +754,7 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 		args = append(args, "--scanner-result", scanner+"="+scannerResults[scanner])
 	}
 	output := resolveConfigPath(profile.Output, selected.configDir)
-	if intent.outputSet {
+	if intent.outputPath != "" {
 		output = intent.outputPath
 	}
 	if output != "" {
@@ -841,7 +768,7 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	if profile.Judge != nil && shouldUseProfileJudge(intent) {
 		judgeCommand = resolveJudgePaths(profile.Judge.Command, selected.configDir)
 	}
-	if intent.judgeSet {
+	if intent.judge != "" {
 		judgeCommand = intent.judge
 	}
 	if judgeCommand != "" {
@@ -853,7 +780,7 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	if profile.Overview != nil && shouldUseProfileJudge(intent) && !intent.benchmarkSet {
 		overviewCommand = resolveJudgePaths(profile.Overview.Command, selected.configDir)
 	}
-	if intent.overviewSet {
+	if intent.overview != "" {
 		overviewCommand = intent.overview
 	}
 	if intent.noOverview {
@@ -875,10 +802,10 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 	if err != nil {
 		return nil, nil, err
 	}
-	if intent.sandboxSet {
+	if intent.sandbox != "" {
 		args = append(args, "--sandbox", intent.sandbox)
 	}
-	if intent.sandboxImageSet {
+	if intent.sandboxImage != "" {
 		args = append(args, "--sandbox-image", intent.sandboxImage)
 	}
 	for _, envVar := range intent.sandboxEnv {
@@ -926,10 +853,10 @@ func appendSandboxMountArgs(args []string, mounts []SandboxMount) ([]string, err
 // overview it actually runs. Commands supplied with --judge or --overview keep
 // the general workspace.
 func applyEvidenceOnly(opts *runner.Options, intent cliIntent, profile Profile) {
-	if opts.Judge != nil && profile.Judge != nil && profile.Judge.EvidenceOnly && shouldUseProfileJudge(intent) && !intent.judgeSet {
+	if opts.Judge != nil && profile.Judge != nil && profile.Judge.EvidenceOnly && shouldUseProfileJudge(intent) && intent.judge == "" {
 		opts.Judge.EvidenceOnly = true
 	}
-	if opts.Overview != nil && profile.Overview != nil && profile.Overview.EvidenceOnly && shouldUseProfileJudge(intent) && !intent.overviewSet {
+	if opts.Overview != nil && profile.Overview != nil && profile.Overview.EvidenceOnly && shouldUseProfileJudge(intent) && intent.overview == "" {
 		opts.Overview.EvidenceOnly = true
 	}
 }
@@ -938,7 +865,7 @@ func shouldUseProfileJudge(intent cliIntent) bool {
 	if len(intent.scanners) == 0 {
 		return true
 	}
-	return intent.profileSet || intent.configPath != ""
+	return intent.profile != "" || intent.configPath != ""
 }
 
 func resolveConfigPath(path string, configDir string) string {
