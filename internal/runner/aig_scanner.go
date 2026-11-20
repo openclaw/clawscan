@@ -75,7 +75,7 @@ func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (Sca
 	if readErr != nil {
 		message := "aig-skill-scan did not write SARIF output."
 		if runErr != nil {
-			message = scannerCommandError(runErr, output.Stderr, runner.Env) + ": " + message
+			message = commandError(runErr, output.Stderr, runner.Env) + ": " + message
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -89,7 +89,7 @@ func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (Sca
 	if _, err := parseAIGSARIF(raw); err != nil {
 		message := err.Error()
 		if runErr != nil {
-			message = scannerCommandError(runErr, output.Stderr, runner.Env) + ": " + message
+			message = commandError(runErr, output.Stderr, runner.Env) + ": " + message
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -111,7 +111,7 @@ func (runner ExternalScannerRunner) runAIG(target string, startedAt string) (Sca
 		Raw:         json.RawMessage(raw),
 	}
 	if runErr != nil {
-		result.Error = scannerCommandError(runErr, output.Stderr, runner.Env)
+		result.Error = commandError(runErr, output.Stderr, runner.Env)
 		result.Status = commandScannerResultStatus(output, runErr)
 	}
 	return result, nil

@@ -1,10 +1,6 @@
 package runner
 
-import (
-	"encoding/json"
-	"strings"
-	"time"
-)
+import "strings"
 
 // runRelyable invokes relyable-scan, the functional re-derivation scanner.
 // Relyable emits graded functional-conformance evidence (relyable-scan-v1):
@@ -27,67 +23,9 @@ func (runner ExternalScannerRunner) runRelyable(target string, startedAt string)
 	if runner.SandboxMode == SandboxModeDocker {
 		args = append(args, "--allow-host-exec")
 	}
-	fullCommand := append([]string{command}, args...)
-	timeout := runner.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
+	result := runner.runJSONStdout(command, args, startedAt, "Relyable", "Relyable scanner returned invalid JSON.")
+	if strings.Contains(result.Error, "executable file not found") {
+		result.Error += " (relyable-scan is not preinstalled in the default clawscan-runtime image: pass --sandbox-image with a derived image that installs it, or install it on the host with `clawscan install relyable`)"
 	}
-	output, runErr := runner.CommandRunner.Run(command, args, "", timeout)
-	exitCode := gateEligibleExitCode(output.ExitCode)
-	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	raw := strings.TrimSpace(output.Stdout)
-	if runErr != nil {
-		message := commandError(runErr, output.Stderr, runner.Env)
-		if strings.Contains(message, "executable file not found") {
-			message += " (relyable-scan is not preinstalled in the default clawscan-runtime image: pass --sandbox-image with a derived image that installs it, or install it on the host with `clawscan install relyable`)"
-		}
-		if json.Valid([]byte(raw)) {
-			return ScannerResult{
-				Status:      commandScannerResultStatus(output, runErr),
-				StartedAt:   startedAt,
-				CompletedAt: completedAt,
-				Command:     fullCommand,
-				Error:       message,
-				ExitCode:    exitCode,
-				Raw:         json.RawMessage(raw),
-			}, nil
-		}
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       message,
-			Raw:         nil,
-		}, nil
-	}
-	if raw == "" {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "Relyable scanner did not return JSON on stdout.",
-			Raw:         nil,
-		}, nil
-	}
-	if !json.Valid([]byte(raw)) {
-		return ScannerResult{
-			Status:      "failed",
-			StartedAt:   startedAt,
-			CompletedAt: completedAt,
-			Command:     fullCommand,
-			Error:       "Relyable scanner returned invalid JSON.",
-			Raw:         nil,
-		}, nil
-	}
-	return ScannerResult{
-		Status:      "completed",
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Command:     fullCommand,
-		Error:       "",
-		ExitCode:    exitCode,
-		Raw:         json.RawMessage(raw),
-	}, nil
+	return result, nil
 }
