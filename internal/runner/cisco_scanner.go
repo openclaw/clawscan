@@ -39,7 +39,7 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 	if readErr != nil {
 		message := "Cisco skill-scanner did not write JSON output."
 		if runErr != nil {
-			message = scannerCommandError(runErr, output.Stderr, runner.Env) + ": " + message
+			message = commandError(runErr, output.Stderr, runner.Env) + ": " + message
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -53,7 +53,7 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 	if !json.Valid(raw) {
 		message := errInvalidCiscoJSON.Error()
 		if runErr != nil {
-			message = scannerCommandError(runErr, output.Stderr, runner.Env) + ": " + message
+			message = commandError(runErr, output.Stderr, runner.Env) + ": " + message
 		}
 		return ScannerResult{
 			Status:      "failed",
@@ -74,7 +74,7 @@ func (runner ExternalScannerRunner) runCisco(target string, startedAt string) (S
 		Raw:         json.RawMessage(raw),
 	}
 	if runErr != nil {
-		result.Error = scannerCommandError(runErr, output.Stderr, runner.Env)
+		result.Error = commandError(runErr, output.Stderr, runner.Env)
 		result.Status = commandScannerResultStatus(output, runErr)
 	}
 	return result, nil

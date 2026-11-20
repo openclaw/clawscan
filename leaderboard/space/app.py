@@ -59,7 +59,7 @@ def leaderboard_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "role": system.get("role", ""),
                 "verification": result.get("verificationStatus", ""),
                 "split": benchmark.get("split", ""),
-                "revision": short_revision(benchmark.get("revision", "")),
+                "revision": benchmark.get("revision", "")[:12],
                 "f1": metrics.get("f1", 0),
                 "precision": metrics.get("precision", 0),
                 "recall": metrics.get("recall", 0),
@@ -76,12 +76,6 @@ def leaderboard_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: (row["f1"], row["recall"], -row["fpr"]), reverse=True)
 
 
-def short_revision(revision: str) -> str:
-    if len(revision) <= 12:
-        return revision
-    return revision[:12]
-
-
 def filter_rows(role: str, verification: str, results_path: str = "") -> list[dict[str, Any]]:
     rows = leaderboard_rows(load_results(results_path or None))
     if role and role != "all":
@@ -93,15 +87,7 @@ def filter_rows(role: str, verification: str, results_path: str = "") -> list[di
 
 def load_expected_labels(path: str | None = None) -> dict[str, str]:
     expected_path = Path(path or os.environ.get("SECURITY_SIGNALS_EXPECTED_PATH", DEFAULT_EXPECTED))
-    labels: dict[str, str] = {}
-    with expected_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            text = line.strip()
-            if not text:
-                continue
-            row = json.loads(text)
-            labels[row["id"]] = row["prediction"]
-    return labels
+    return {row["id"]: row["prediction"] for row in read_jsonl(expected_path)}
 
 
 def read_predictions(path: str | Path) -> list[dict[str, str]]:
@@ -179,7 +165,7 @@ def score_loose_non_clean(expected: dict[str, str], predicted: dict[str, str]) -
             fn += 1
     precision = divide(tp, tp + fp)
     recall = divide(tp, tp + fn)
-    f1 = divide_float(2 * precision * recall, precision + recall)
+    f1 = divide(2 * precision * recall, precision + recall)
     fpr = divide(fp, fp + tn)
     return {
         "caseCount": len(expected),
@@ -194,13 +180,7 @@ def score_loose_non_clean(expected: dict[str, str], predicted: dict[str, str]) -
     }
 
 
-def divide(numerator: int, denominator: int) -> float:
-    if denominator == 0:
-        return 0
-    return round(numerator / denominator, 4)
-
-
-def divide_float(numerator: float, denominator: float) -> float:
+def divide(numerator: float, denominator: float) -> float:
     if denominator == 0:
         return 0
     return round(numerator / denominator, 4)

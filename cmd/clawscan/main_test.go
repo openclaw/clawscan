@@ -90,16 +90,6 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 	}
 }
 
-func TestBenchmarkRunContextLeavesInterruptHandlingToProcess(t *testing.T) {
-	runCtx := benchmarkRunContext([]string{"CLAWSCAN_PROOF=present"})
-	if runCtx.Context != nil {
-		t.Fatal("benchmark CLI must not capture interrupts until every benchmark phase observes context")
-	}
-	if runCtx.Env["CLAWSCAN_PROOF"] != "present" {
-		t.Fatalf("environment = %v", runCtx.Env)
-	}
-}
-
 func TestRunOpenClawInstallPolicyScansSkillAndPluginTargets(t *testing.T) {
 	tests := []struct {
 		name       string

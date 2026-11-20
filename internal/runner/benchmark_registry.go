@@ -92,14 +92,6 @@ func (registry BenchmarkRegistry) Info(id string) (DatasetInfo, bool) {
 	return datasetInfo(adapter), true
 }
 
-func (registry BenchmarkRegistry) ResolveInfo(id string) (DatasetInfo, error) {
-	adapter, err := registry.Resolve(id)
-	if err != nil {
-		return DatasetInfo{}, err
-	}
-	return datasetInfo(adapter), nil
-}
-
 func (registry BenchmarkRegistry) Infos() []DatasetInfo {
 	infos := make([]DatasetInfo, 0, len(registry.adapters))
 	for _, id := range registry.IDs() {

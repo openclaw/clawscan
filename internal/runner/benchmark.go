@@ -396,10 +396,6 @@ func LoadBenchmarkIDSelectionContext(ctx context.Context, source string) (Benchm
 	}, nil
 }
 
-func openBenchmarkIDSource(source string) (io.ReadCloser, error) {
-	return openBenchmarkIDSourceContext(context.Background(), source)
-}
-
 func normalizeBenchmarkIDSource(source string) string {
 	return strings.TrimSpace(source)
 }
@@ -718,10 +714,6 @@ func runBenchmarkTarget(opts Options, ctx RunContext, env map[string]string, now
 	ctx.Env = env
 	ctx.Now = now
 	return Run(caseOpts, ctx)
-}
-
-func materializeOpenClawBenchmarkRow(root string, row OpenClawBenchmarkRow) (string, error) {
-	return materializeOpenClawBenchmarkRowContext(context.Background(), root, row)
 }
 
 func materializeOpenClawBenchmarkRowContext(ctx context.Context, root string, row OpenClawBenchmarkRow) (string, error) {
@@ -1209,10 +1201,6 @@ func skillTrustBenchArchiveSkillPath(row SkillTrustBenchRow) (string, error) {
 		return "", fmt.Errorf("unexpected SkillTrustBench skill path for %s: %s", row.ID, row.SkillPath)
 	}
 	return slash, nil
-}
-
-func extractSkillTrustBenchFile(file *zip.File, target string) error {
-	return extractSkillTrustBenchFileContext(context.Background(), file, target)
 }
 
 func extractSkillTrustBenchFileContext(ctx context.Context, file *zip.File, target string) error {

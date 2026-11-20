@@ -2,8 +2,7 @@
 
 ## Unreleased
 
-- ClawSweeper skips ineligible issue and comment events before allocating a runner and handles eligible events on a single CPU.
-
+- Update the Go text-processing dependency to `golang.org/x/text` v0.44.0.
 - **Breaking:** the `clawhub` and `clawhub-aig` profiles judge skills and plugins with an evidence-only Codex run (`gpt-6.1-sol`) that sees scanner results only. The new profile setting `judge.evidenceOnly` / `overview.evidenceOnly` removes the artifact copy from the command's workspace and refuses `{{ target.files }}`; the profile disables Codex's file, shell, image, web-search and code-execution tools (verified against codex-cli 0.164.0; its sub-agent tools stay offered but inherit the same restrictions). New prompt placeholders `{{ scanner_results }}` and `{{ run_context }}`. `judge.result` keeps the typed fields but no longer carries the Decisions `decision` record. The Decisions API judge remains available through `--judge`.
 - Give scanner commands run against OpenClaw plugin targets a 30-minute budget (was 20 minutes); skill, file and URL targets keep 20 minutes. The judge and overview budgets are unchanged.
 - Refresh Node setup to 7.1.0, use Node 24.22.2 for CI and docs, and Node 26.13.0 for release packaging.
@@ -16,6 +15,8 @@
 - **Breaking:** make the runner judge-agnostic. Remove the artifact-inspection receipt (challenge file, receipt validation, the `{{ artifact_inspection.required_file }}` placeholder, the `artifact_inspection` field in the bundled clawhub prompt and output schema, and the `challenge`, `requiredFile`, and `requiredFileSha256` fields on `judge.attempts`), the runner-level judge prompt budget (`judge prompt too large`), and every profile-name special case. A judge with an input limit enforces it itself; a failed judge command keeps its own error and is never retried. A judge command that exits successfully without a JSON object, including one that never writes `{{ output }}`, is retried once. `judge.attempts` is now recorded for every judge command run, not only for ClawHub profiles.
 - **Breaking:** every profile uses one judge workspace layout (`artifact/`, `scanners/<id>.json`, and `metadata.json` with the run `context`), and SkillSpector scans the target itself for every profile (the ClawHub-only `artifact/` scan copy is gone). Usable partial SkillSpector evidence reaches any configured judge; without a judge it still fails the scanner. With a judge, SkillSpector reports must be nonempty JSON objects.
 - **Breaking:** remove the `virustotal` and `clawscan-static` scanners. The `clawhub` profile now runs `skillspector` and `aig` (for skills; see `aig-mcp` above for plugins), and `openclaw-install-policy` runs `skillspector`. The install policy validates npm metadata preflights without scanning and returns a visible `warn` on native Windows instead of a static-only scan. Consumers that read `scanners["clawscan-static"]` must switch to another eligibility signal.
+
+- ClawSweeper skips ineligible issue and comment events before allocating a runner and handles eligible events on a single CPU.
 
 ## 0.3.1 - 2026-11-02
 
