@@ -721,18 +721,6 @@ func TestResolveArgsRejectsUnsupportedVersionAndUnknownFields(t *testing.T) {
 	}
 }
 
-func TestResolveArgsUnknownProfileListsAvailableProfiles(t *testing.T) {
-	dir := t.TempDir()
-
-	_, err := ResolveArgs([]string{"./skill", "--profile", "missing"}, dir)
-	if err == nil || !strings.Contains(err.Error(), "Unknown profile: missing") {
-		t.Fatalf("err = %v", err)
-	}
-	if !strings.Contains(err.Error(), "available: clawhub") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestResolveArgsAppliesCLIOverrides(t *testing.T) {
 	dir := t.TempDir()
 	fixture := filepath.Join(dir, "socket.json")
@@ -2052,17 +2040,6 @@ type profileCommandRunner struct {
 type profileCommandCall struct {
 	command string
 	args    []string
-}
-
-type profileScannerResultRunner struct {
-	results map[string]runner.ScannerResult
-}
-
-func (scannerRunner profileScannerResultRunner) RunScanner(name string, _ string, startedAt string) (runner.ScannerResult, error) {
-	result := scannerRunner.results[name]
-	result.StartedAt = startedAt
-	result.CompletedAt = startedAt
-	return result, nil
 }
 
 func (commandRunner *profileCommandRunner) Run(command string, args []string, _ string, _ time.Duration) (runner.CommandOutput, error) {

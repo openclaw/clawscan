@@ -31,11 +31,9 @@ jobs:
         with:
           node-version: 24.22.2
 
-      - name: Build ClawScan and install the judge and pinned overview harness
+      - name: Build ClawScan and install Codex for the judge and overview
         run: |
           go build -o ./dist/clawscan ./cmd/clawscan
-          ln -sf "$PWD/docker/clawscan-runtime/judges/clawscan_decisions_judge.py" ./dist/clawscan-decisions-judge
-          echo "$PWD/dist" >> "$GITHUB_PATH"
           npm install -g @openai/codex@0.164.0
           codex --version
 
@@ -82,11 +80,9 @@ jobs:
           artifact = json.loads(report.read_text())
           judge = artifact.get("judge", {})
           overview = artifact.get("overview") or {}
-          decision = (judge.get("result") or {}).get("decision") or {}
           print(json.dumps({
               "judge": judge.get("status"), "error": judge.get("error"),
               "verdict": (judge.get("result") or {}).get("verdict"),
-              "model": decision.get("model"), "latencyMs": decision.get("latencyMs"),
               "overview": overview.get("status"), "overviewError": overview.get("error"),
           }))
           assert judge.get("status") == "completed", "Judge did not complete"
