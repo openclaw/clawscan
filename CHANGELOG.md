@@ -5,6 +5,7 @@
 - Refuse to upload an empty Security Signals results dataset when the submissions directory is empty or missing.
 - Update the Go text-processing dependency to `golang.org/x/text` v0.44.0.
 - **Breaking:** the `clawhub` and `clawhub-aig` profiles judge skills and plugins with an evidence-only Codex run (`gpt-6.1-sol`) that sees scanner results only. The new profile setting `judge.evidenceOnly` / `overview.evidenceOnly` removes the artifact copy from the command's workspace and refuses `{{ target.files }}`; the profile disables Codex's file, shell, image, web-search and code-execution tools (verified against codex-cli 0.164.0; its sub-agent tools stay offered but inherit the same restrictions). New prompt placeholders `{{ scanner_results }}` and `{{ run_context }}`. `judge.result` keeps the typed fields but no longer carries the Decisions `decision` record. The Decisions API judge remains available through `--judge`.
+- Preserve matching text in the ClawHub system prompt when exporting the SkillSpector evidence template.
 - Give scanner commands run against OpenClaw plugin targets a 30-minute budget (was 20 minutes); skill, file and URL targets keep 20 minutes. The judge and overview budgets are unchanged.
 - CI builds the full npm bundle on Linux and checks both Darwin architectures on macOS, avoiding four repeated cross-platform builds per run.
 - Refresh Node setup to 7.1.0, use Node 24.22.2 for CI and docs, and Node 26.13.0 for release packaging.
