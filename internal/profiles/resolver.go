@@ -406,7 +406,7 @@ func resolveAllConfigProfiles(intent cliIntent, cwd string) (ResolvedRunSet, err
 	if err != nil {
 		return ResolvedRunSet{}, err
 	}
-	profileNames := sortedProfileNames(projectProfiles)
+	profileNames := sortedKeys(projectProfiles)
 	if len(profileNames) == 0 {
 		return ResolvedRunSet{}, fmt.Errorf("ClawScan config %s defines no profiles", projectPath)
 	}
@@ -1182,16 +1182,7 @@ func unknownScannerInProfileError(profile string, scanner string) error {
 	return fmt.Errorf("Profile %s references unknown scanner: %s", profile, scanner)
 }
 
-func sortedProfileNames(profiles map[string]resolvedProfile) []string {
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func sortedKeys(values map[string]string) []string {
+func sortedKeys[V any](values map[string]V) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

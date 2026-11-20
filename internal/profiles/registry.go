@@ -1,8 +1,6 @@
 package profiles
 
 import (
-	"sort"
-
 	"github.com/openclaw/clawscan/internal/runner"
 	"gopkg.in/yaml.v3"
 )
@@ -73,12 +71,7 @@ func InspectProfiles() (ProfileCatalog, error) {
 }
 
 func (catalog ProfileCatalog) IDs() []string {
-	ids := make([]string, 0, len(catalog.profiles))
-	for id := range catalog.profiles {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return sortedKeys(catalog.profiles)
 }
 
 func (catalog ProfileCatalog) Profile(id string) (ProfileInfo, bool) {
@@ -115,12 +108,7 @@ func (registry ProfileRegistry) Merge(profiles map[string]resolvedProfile) (Prof
 }
 
 func (registry ProfileRegistry) IDs() []string {
-	ids := make([]string, 0, len(registry.profiles))
-	for id := range registry.profiles {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return sortedKeys(registry.profiles)
 }
 
 func sandboxIsZero(sandbox Sandbox) bool {

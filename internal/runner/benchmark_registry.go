@@ -102,12 +102,7 @@ func (registry BenchmarkRegistry) Infos() []DatasetInfo {
 }
 
 func (registry BenchmarkRegistry) IDs() []string {
-	ids := make([]string, 0, len(registry.adapters))
-	for id := range registry.adapters {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return sortedKeys(registry.adapters)
 }
 
 func datasetInfo(adapter BenchmarkAdapter) DatasetInfo {
@@ -178,7 +173,7 @@ func (openClawBenchmarkAdapter) DefaultSplit() string {
 }
 
 func (openClawBenchmarkAdapter) Splits() []string {
-	return sortedBenchmarkSplits(openClawBenchmarkSplits)
+	return sortedKeys(openClawBenchmarkSplits)
 }
 
 func (openClawBenchmarkAdapter) SupportsPredictionsOutput() bool {
@@ -294,7 +289,7 @@ func (skillTrustBenchBenchmarkAdapter) DefaultSplit() string {
 }
 
 func (skillTrustBenchBenchmarkAdapter) Splits() []string {
-	return sortedBenchmarkSplits(skillTrustBenchSplits)
+	return sortedKeys(skillTrustBenchSplits)
 }
 
 func (skillTrustBenchBenchmarkAdapter) SupportsPredictionsOutput() bool {
@@ -414,11 +409,11 @@ func (skillTrustBenchBenchmarkAdapter) summary(row SkillTrustBenchRow) string {
 	return strings.Join(parts, "; ")
 }
 
-func sortedBenchmarkSplits(splits map[string]bool) []string {
-	names := make([]string, 0, len(splits))
-	for split := range splits {
-		names = append(names, split)
+func sortedKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
 	}
-	sort.Strings(names)
-	return names
+	sort.Strings(keys)
+	return keys
 }
