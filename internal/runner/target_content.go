@@ -26,7 +26,6 @@ type nulContentInspection struct {
 	content      []byte
 	alternate    []byte
 	reviewable   bool
-	obfuscated   bool
 	textEncoding string
 }
 
@@ -39,15 +38,13 @@ func inspectNULContent(path string, content []byte) (nulContentInspection, bool)
 	normalized := bytes.ReplaceAll(content, []byte{0}, nil)
 	normalized = []byte(strings.ToValidUTF8(string(normalized), "\uFFFD"))
 	if decoded, encoding, ok := decodeBOMText(content); ok {
-		decodedContainsNUL := bytes.IndexByte(decoded, 0) >= 0
-		if decodedContainsNUL {
+		if bytes.IndexByte(decoded, 0) >= 0 {
 			decoded = bytes.ReplaceAll(decoded, []byte{0}, nil)
 		}
 		return nulContentInspection{
 			content:      decoded,
 			alternate:    normalized,
 			reviewable:   true,
-			obfuscated:   decodedContainsNUL,
 			textEncoding: encoding,
 		}, true
 	}
@@ -56,7 +53,6 @@ func inspectNULContent(path string, content []byte) (nulContentInspection, bool)
 	return nulContentInspection{
 		content:    normalized,
 		reviewable: scriptLike || !passiveBinary,
-		obfuscated: scriptLike || !passiveBinary,
 	}, true
 }
 
