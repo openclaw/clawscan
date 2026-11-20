@@ -339,8 +339,25 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 	}
 	var judge string
 	var overview string
+	stringFlags := map[string]*string{
+		"--profile":       &opts.Profile,
+		"--context":       &opts.ContextPath,
+		"--output":        &opts.OutputPath,
+		"--judge":         &judge,
+		"--overview":      &overview,
+		"--sandbox-image": &opts.Sandbox.Image,
+	}
 	for i := start; i < len(args); i++ {
 		arg := args[i]
+		if dest := stringFlags[arg]; dest != nil {
+			value, next, err := readValue(args, i, arg)
+			if err != nil {
+				return Options{}, err
+			}
+			*dest = value
+			i = next
+			continue
+		}
 		switch arg {
 		case "--scanner":
 			value, next, err := readValue(args, i, arg)
@@ -351,20 +368,6 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 				return Options{}, fmt.Errorf("Unknown scanner: %s", value)
 			}
 			opts.Scanners = append(opts.Scanners, value)
-			i = next
-		case "--profile":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			opts.Profile = value
-			i = next
-		case "--context":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			opts.ContextPath = value
 			i = next
 		case "--scanner-result":
 			value, next, err := readValue(args, i, arg)
@@ -380,29 +383,8 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 			}
 			opts.ScannerResultPaths[scanner] = path
 			i = next
-		case "--output":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			opts.OutputPath = value
-			i = next
 		case "--json":
 			opts.JSON = true
-		case "--judge":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			judge = value
-			i = next
-		case "--overview":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			overview = value
-			i = next
 		case "--sandbox":
 			value, next, err := readValue(args, i, arg)
 			if err != nil {
@@ -413,13 +395,6 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 				return Options{}, err
 			}
 			opts.Sandbox.Mode = value
-			i = next
-		case "--sandbox-image":
-			value, next, err := readValue(args, i, arg)
-			if err != nil {
-				return Options{}, err
-			}
-			opts.Sandbox.Image = value
 			i = next
 		case "--sandbox-env":
 			value, next, err := readValue(args, i, arg)
