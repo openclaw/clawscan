@@ -1429,8 +1429,7 @@ func renderTargetFilesContext(ctx context.Context, target string) (string, error
 		}
 		contentForPrompt := content
 		nulWarning := ""
-		if bytes.IndexByte(content, 0) >= 0 {
-			inspection, _ := inspectNULContent(path, content)
+		if inspection, hasNUL := inspectNULContent(path, content); hasNUL {
 			if !inspection.reviewable {
 				addOmission(path, "binary file")
 				continue

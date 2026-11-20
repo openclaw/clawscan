@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Security Signals PR validation checks changed submissions against the event's base commit and reports a failed Git comparison.
+- Match the official submission validator's four-decimal rounding in leaderboard score previews.
 - Refuse to upload an empty Security Signals results dataset when the submissions directory is empty or missing.
 - Update the Go text-processing dependency to `golang.org/x/text` v0.44.0.
 - **Breaking:** the `clawhub` and `clawhub-aig` profiles judge skills and plugins with an evidence-only Codex run (`gpt-6.1-sol`) that sees scanner results only. The new profile setting `judge.evidenceOnly` / `overview.evidenceOnly` removes the artifact copy from the command's workspace and refuses `{{ target.files }}`; the profile disables Codex's file, shell, image, web-search and code-execution tools (verified against codex-cli 0.164.0; its sub-agent tools stay offered but inherit the same restrictions). New prompt placeholders `{{ scanner_results }}` and `{{ run_context }}`. `judge.result` keeps the typed fields but no longer carries the Decisions `decision` record. The Decisions API judge remains available through `--judge`.
@@ -10,6 +10,7 @@
 - CI builds the full npm bundle on Linux and checks both Darwin architectures on macOS, avoiding four repeated cross-platform builds per run.
 - Refresh Node setup to 7.1.0, use Node 24.22.2 for CI and docs, and Node 26.13.0 for release packaging.
 - ClawSweeper skips ineligible issue and comment events before allocating a runner and handles eligible events on a single CPU.
+- Security Signals PR validation checks changed submissions against the event's base commit and reports a failed Git comparison.
 
 - **Breaking for plugin targets:** add the plugin-only `aig-mcp` scanner (Tencent A.I.G `aig-mcp-scan` 0.2.0, patched in the runtime image to allow only confined read-only tools, refuse model-chosen MCP destinations and fail unusable reports) and the profile field `pluginScanners`. The `clawhub` profile now runs only `aig-mcp` for OpenClaw plugins, over a bounded copy without `node_modules`; skills keep `skillspector` and `aig`. Consumers that read `scanners.skillspector` or `scanners.aig` for plugin runs must read `scanners["aig-mcp"]` instead. Host runs need `AIG_MCP_SCAN_ALLOW_HOST_EXEC=1` ([#149](https://github.com/openclaw/clawscan/pull/149)).
 - **Breaking:** the `clawhub` and `clawhub-aig` profiles take their verdict from the OpenAI Decisions API (`gpt-6-luna`) through the new `clawscan-decisions-judge` command in the runtime image, and add a Codex `gpt-6-luna` low-effort overview step for readable prose. `judge.result` now holds typed fields only: `verdict`, `confidence`, `dimensions.<name>.status`/`.confidence`, `scan_findings_in_context[]` (`ruleId`, `scanner`, `expected_for_purpose`, `probability`), and a new `decision` object with the model, usage, latency, verdict probabilities, and risk-signal probabilities. `summary`, dimension `detail`, finding `note`, and `user_guidance` move to the new top-level `overview.result`. Refusals, HTTP errors, and oversized input fail the judge with the real error.
