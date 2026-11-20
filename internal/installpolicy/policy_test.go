@@ -305,26 +305,36 @@ func TestResponseFromArtifactBoundsUntrustedFindingOutput(t *testing.T) {
 	rules := make([]runner.FiredGateRule, maxFindings)
 	for index := range rules {
 		rules[index] = runner.FiredGateRule{
-			Scanner: "static",
+			Scanner: "custom",
 			Rule:    strings.Repeat("r", maxTextRunes+20),
 			Path:    strings.Repeat("p", maxTextRunes+20),
 			Action:  "warn",
 		}
 	}
-	response := ResponseFromArtifact(runner.Artifact{
+	artifact := runner.Artifact{
 		Gate:      "warn",
 		GateRules: rules,
-		Scanners: map[string]runner.ScannerResult{"static": {
+		Scanners: map[string]runner.ScannerResult{"custom": {
 			Status: "completed",
 			Raw:    json.RawMessage(`{"findings":[]}`),
 		}},
-	})
+	}
+	response := ResponseFromArtifact(artifact)
+	if response.Decision != "warn" {
+		t.Fatalf("at limit: %s", response.Reason)
+	}
 	if len(response.Findings) != maxFindings {
 		t.Fatalf("findings = %d, want %d", len(response.Findings), maxFindings)
 	}
 	if len([]rune(response.Findings[0].RuleID)) > maxTextRunes+3 ||
 		len([]rune(response.Findings[0].Evidence)) > maxTextRunes+3 {
 		t.Fatalf("finding was not bounded: %#v", response.Findings[0])
+	}
+
+	artifact.GateRules = append(artifact.GateRules, rules[0])
+	response = ResponseFromArtifact(artifact)
+	if response.Decision != "block" || !strings.Contains(response.Reason, "too many fired gate rules") {
+		t.Fatalf("over limit: %+v", response)
 	}
 }
 
