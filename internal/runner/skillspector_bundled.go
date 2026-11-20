@@ -45,6 +45,14 @@ func skillSpectorHasBundle(record map[string]any) bool {
 // Bundles retain original reports, not synthetic coverage. Validation is one
 // level only: every child must stand on its own and at least one is partial.
 func skillSpectorUsableBundledPartial(raw json.RawMessage) bool {
+	return skillSpectorUsableBundle(raw, false)
+}
+
+func skillSpectorUsableBundledComplete(raw json.RawMessage) bool {
+	return skillSpectorUsableBundle(raw, true)
+}
+
+func skillSpectorUsableBundle(raw json.RawMessage, complete bool) bool {
 	if !skillSpectorUnambiguousJSON(raw) {
 		return false
 	}
@@ -59,7 +67,11 @@ func skillSpectorUsableBundledPartial(raw json.RawMessage) bool {
 	var bundle skillSpectorBundledReport
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&bundle) != nil || !bundle.Successful || !bundle.Accounting.Successful || bundle.Accounting.Complete == nil || *bundle.Accounting.Complete || bundle.Accounting.Status != "partial" || len(bundle.Reports) == 0 || bundle.FilteredFindings == nil {
+	expectedStatus := "partial"
+	if complete {
+		expectedStatus = "complete_with_caveats"
+	}
+	if decoder.Decode(&bundle) != nil || !bundle.Successful || !bundle.Accounting.Successful || bundle.Accounting.Complete == nil || *bundle.Accounting.Complete != complete || bundle.Accounting.Status != expectedStatus || len(bundle.Reports) == 0 || bundle.FilteredFindings == nil {
 		return false
 	}
 	switch bundle.Status {
@@ -82,6 +94,7 @@ func skillSpectorUsableBundledPartial(raw json.RawMessage) bool {
 	}
 	roots := make(map[string]bool, len(bundle.Reports))
 	partial := false
+	caveat := false
 	entries := record["bundled_reports"].([]any)
 	for index, entry := range bundle.Reports {
 		fields, ok := entries[index].(map[string]any)
@@ -91,12 +104,25 @@ func skillSpectorUsableBundledPartial(raw json.RawMessage) bool {
 		if !skillSpectorComponentPath(entry.Root) || roots[entry.Root] {
 			return false
 		}
+		if complete && len(entry.Root) >= 2 && entry.Root[1] == ':' && ((entry.Root[0] >= 'a' && entry.Root[0] <= 'z') || (entry.Root[0] >= 'A' && entry.Root[0] <= 'Z')) {
+			return false
+		}
+		if complete {
+			for root := range roots {
+				if strings.HasPrefix(root, entry.Root+"/") || strings.HasPrefix(entry.Root, root+"/") {
+					return false
+				}
+			}
+		}
 		roots[entry.Root] = true
 		var child map[string]any
 		if json.Unmarshal(entry.Report, &child) != nil || len(child) == 0 || skillSpectorHasBundle(child) || !skillSpectorBundledChildIntegrity(child) {
 			return false
 		}
 		if skillSpectorUsablePartial(entry.Report) {
+			if complete {
+				return false
+			}
 			partial = true
 		} else {
 			accounting, ok := child["analysis_completeness"].(map[string]any)
@@ -106,7 +132,18 @@ func skillSpectorUsableBundledPartial(raw json.RawMessage) bool {
 			if skillSpectorReportError(child) != "" || validateSkillSpectorReport(ScannerResult{Status: "completed", Raw: entry.Report}).Status != "completed" {
 				return false
 			}
+			if complete {
+				if !skillSpectorCompleteInspection(child) {
+					return false
+				}
+				if accounting["status"] == "complete_with_caveats" {
+					caveat = true
+				}
+			}
 		}
+	}
+	if complete {
+		return caveat && !partial && bundle.Status != "partial"
 	}
 	return partial
 }
