@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openclaw/clawscan/internal/clawhubprompt"
 )
 
 func TestResolveClawHubDirReturnsAbsolutePath(t *testing.T) {
@@ -25,50 +27,20 @@ func TestResolveClawHubDirReturnsAbsolutePath(t *testing.T) {
 	}
 }
 
-func TestBuildPromptTemplateReplacesSkillSpectorFixture(t *testing.T) {
-	skillSpectorFixture := `{
-  "status": "suspicious",
-  "score": 55
-}`
-	prompt := strings.Join([]string{
-		"SkillSpector findings supplied to Codex:",
-		"```json",
-		skillSpectorFixture,
-		"```",
-	}, "\n")
-
-	template, err := buildPromptTemplate(prompt, skillSpectorFixture)
+func TestBuildPromptTemplatePreservesTextOutsideScannerEvidence(t *testing.T) {
+	const system = "An optional value may be null.\nSkillSpector findings supplied to Codex:\n```json\nnull\n```"
+	prompt, err := clawhubprompt.Build(system, clawhubprompt.Job{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if !strings.Contains(template, "{{ scanners.skillspector }}") {
-		t.Fatalf("template missing SkillSpector placeholder:\n%s", template)
-	}
-	if strings.Contains(template, skillSpectorFixture) {
-		t.Fatalf("template still contains raw fixture:\n%s", template)
-	}
-}
-
-func TestBuildPromptTemplateFromRenderedReplacesSkillSpectorBlock(t *testing.T) {
-	prompt := strings.Join([]string{
-		"Before",
-		"SkillSpector findings supplied to Codex:",
-		"```json",
-		`{"status":"suspicious"}`,
-		"```",
-		"After",
-	}, "\n")
-
-	template, err := buildPromptTemplateFromRendered(prompt)
+	template, err := buildPromptTemplate(prompt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(template, "{{ scanners.skillspector }}") {
-		t.Fatalf("template missing SkillSpector placeholder:\n%s", template)
-	}
-	if strings.Contains(template, `{"status":"suspicious"}`) {
-		t.Fatalf("template still contains raw fixture:\n%s", template)
+	const evidence = "SkillSpector findings supplied to Codex:\n```json\n"
+	want := system + strings.Replace(strings.TrimPrefix(prompt, system), evidence+"null", evidence+"{{ scanners.skillspector }}", 1)
+	if want == prompt || template != want {
+		t.Fatalf("exported template differs outside the expected substitution:\n%s", template)
 	}
 }
 

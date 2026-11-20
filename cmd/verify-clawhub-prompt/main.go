@@ -89,12 +89,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	promptTemplate, err := buildPromptTemplate(actual, skillSpectorFixture)
+	promptTemplate, err := buildPromptTemplate(actual)
 	if err != nil {
-		promptTemplate, err = buildPromptTemplateFromRendered(actual)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	schema := rendered.OutputSchema
 	proof := map[string]any{
@@ -350,22 +347,13 @@ func writeOptionalFile(path string, content []byte) error {
 	return os.WriteFile(path, content, 0o644)
 }
 
-func buildPromptTemplate(prompt string, skillSpectorFixture string) (string, error) {
-	const placeholder = "{{ scanners.skillspector }}"
-	prompt = strings.Replace(prompt, skillSpectorFixture, placeholder, 1)
-	if !strings.Contains(prompt, placeholder) {
-		return "", fmt.Errorf("failed to build exported prompt template with scanner placeholder %s", placeholder)
-	}
-	return prompt, nil
-}
-
-func buildPromptTemplateFromRendered(prompt string) (string, error) {
+func buildPromptTemplate(prompt string) (string, error) {
 	const (
 		label       = "SkillSpector findings supplied to Codex:"
 		placeholder = "{{ scanners.skillspector }}"
 	)
 	prefix := label + "\n```json\n"
-	start := strings.Index(prompt, prefix)
+	start := strings.LastIndex(prompt, prefix)
 	if start == -1 {
 		return "", fmt.Errorf("rendered prompt missing %s block", label)
 	}
