@@ -75,10 +75,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.2
+          node-version: 24.22.3
 
       - name: Set up npm
-        run: npm install -g npm@^12.0.2
+        run: npm install -g npm@12.2.2
 
       - name: Check formatting
         if: runner.os == 'Linux'
