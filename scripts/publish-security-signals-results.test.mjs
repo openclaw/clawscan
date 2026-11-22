@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +30,9 @@ printf '%s\\n' '${JSON.stringify(score)}'
 `, { mode: 0o755 });
   return {
     argsFile,
+    bin,
     output,
+    submissions,
     run(mode, token = '') {
       return spawnSync('bash', [scriptPath, mode, '--root', submissions, '--output', output], {
         encoding: 'utf8',
@@ -76,4 +78,54 @@ test('refuses to replace results when the submission root has no rows', (t) => {
   assert.match(result.stderr, /No Security Signals submissions/);
   assert.equal(existsSync(f.argsFile), false);
   assert.equal(readFileSync(f.output, 'utf8'), 'previous results\n');
+});
+
+test('a later scoring failure leaves only the last complete payload available', (t) => {
+  const f = fixture(t);
+  const second = join(f.submissions, 'z-second');
+  mkdirSync(second);
+  writeFileSync(join(second, 'metadata.json'), '{}');
+  writeFileSync(join(second, 'predictions.jsonl'), '{"id":"two","prediction":"clean"}\n');
+  writeFileSync(join(f.bin, 'score'), `#!/bin/sh
+case "$1" in */z-second) echo 'benchmark rows unavailable' >&2; exit 1 ;; esac
+echo '{"metrics":{"caseCount":1}}'
+`, { mode: 0o755 });
+
+  const failed = () => {
+    const result = f.run('--publish', 'fixture');
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /benchmark rows unavailable/);
+    assert.equal(existsSync(f.argsFile), false);
+  };
+  failed();
+  assert.equal(existsSync(f.output), false);
+
+  writeFileSync(f.output, 'previous results\n');
+  failed();
+  assert.equal(readFileSync(f.output, 'utf8'), 'previous results\n');
+});
+
+test('a failed directory listing cannot publish the rows found so far', (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.bin, 'find'), '#!/bin/sh\nprintf "%s\\0" "$1/example/metadata.json"\nexit 1\n', { mode: 0o755 });
+  const result = f.run('--publish', 'fixture');
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(f.argsFile), false);
+  assert.equal(existsSync(f.output), false);
+});
+
+test('successful replacement preserves a linked output and its file permissions', (t) => {
+  const f = fixture(t);
+  const target = join(f.submissions, 'last-complete.jsonl');
+  writeFileSync(target, 'previous results\n', { mode: 0o640 });
+  symlinkSync(target, f.output);
+  const group = process.getgroups().find((gid) => gid !== statSync(target).gid);
+  if (group !== undefined) chownSync(target, process.getuid(), group);
+  const before = statSync(target);
+  const result = f.run('--dry-run');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readlinkSync(f.output), target);
+  const after = statSync(target);
+  assert.deepEqual([after.uid, after.gid, after.mode], [before.uid, before.gid, before.mode]);
+  assert.equal(JSON.parse(readFileSync(target, 'utf8')).submissionId, 'example');
 });
