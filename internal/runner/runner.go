@@ -135,6 +135,17 @@ type RunContext struct {
 	BenchmarkClient     BenchmarkClient
 }
 
+func (ctx RunContext) withDefaults() RunContext {
+	ctx.Context = workContext(ctx.Context)
+	if ctx.Env == nil {
+		ctx.Env = EnvMap(os.Environ())
+	}
+	if ctx.Now == nil {
+		ctx.Now = time.Now
+	}
+	return ctx
+}
+
 type ScannerRunner interface {
 	RunScanner(name string, target string, startedAt string) (ScannerResult, error)
 }
@@ -485,23 +496,14 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 	if err != nil {
 		return artifact, err
 	}
-	ctx.Context = workContext(ctx.Context)
-	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
-	env := ctx.Env
-	if env == nil {
-		env = EnvMap(os.Environ())
-	}
-	baseEnv := env
-	env = maps.Clone(baseEnv)
+	ctx = ctx.withDefaults()
+	env := maps.Clone(ctx.Env)
 	applyRuntimeEnvDefaults(opts, env)
-	startedAt := now().UTC().Format(time.RFC3339Nano)
+	startedAt := ctx.Now().UTC().Format(time.RFC3339Nano)
 	artifact = pendingArtifact(opts, startedAt, env)
 	artifact.outputSafety = safety
 	// A closure, so the final gate sees the plugin scanner list when it applies.
-	defer func() { finishArtifact(&artifact, opts, ctx.Context, now, &runErr) }()
+	defer func() { finishArtifact(&artifact, opts, ctx.Context, ctx.Now, &runErr) }()
 	if err := ctx.Context.Err(); err != nil {
 		return artifact, err
 	}
@@ -530,7 +532,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		// The profile's plugin scanner list replaces its skill list entirely, so
 		// skill scanners are neither run nor recorded for plugin targets.
 		opts = pluginScannerOptions(opts)
-		env = maps.Clone(baseEnv)
+		env = maps.Clone(ctx.Env)
 		applyRuntimeEnvDefaults(opts, env)
 		pending := pendingArtifact(opts, startedAt, env)
 		artifact.Env = pending.Env
@@ -609,7 +611,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 			continue
 		}
 		scanned[scanner] = true
-		scannerStartedAt := now().UTC().Format(time.RFC3339Nano)
+		scannerStartedAt := ctx.Now().UTC().Format(time.RFC3339Nano)
 		scannerTimerStarted := time.Now()
 		progress.startPhase(scannerProgressPhase(scanner))
 		artifact.Scanners[scanner] = ScannerResult{Status: "running", StartedAt: scannerStartedAt}
@@ -623,7 +625,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		if err != nil {
 			result.Status = "failed"
 			result.StartedAt = scannerStartedAt
-			result.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+			result.CompletedAt = ctx.Now().UTC().Format(time.RFC3339Nano)
 			result.Error = commandError(err, result.Error, env)
 		}
 		result.DurationMs = time.Since(scannerTimerStarted).Milliseconds()
@@ -676,20 +678,12 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 	if err != nil {
 		return RunTargetsResult{}, err
 	}
-	ctx.Context = workContext(ctx.Context)
+	ctx = ctx.withDefaults()
 	targetInputs, err := ResolveTargetInputs(opts, cwd)
 	if err != nil {
-		now := ctx.Now
-		if now == nil {
-			now = time.Now
-		}
-		env := ctx.Env
-		if env == nil {
-			env = EnvMap(os.Environ())
-		}
-		artifact := pendingArtifact(opts, now().UTC().Format(time.RFC3339Nano), env)
+		artifact := pendingArtifact(opts, ctx.Now().UTC().Format(time.RFC3339Nano), ctx.Env)
 		artifact.outputSafety = safety
-		finishArtifact(&artifact, opts, ctx.Context, now, &err)
+		finishArtifact(&artifact, opts, ctx.Context, ctx.Now, &err)
 		return RunTargetsResult{Single: &artifact}, err
 	}
 	if len(targetInputs) == 1 {
@@ -699,25 +693,13 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		return RunTargetsResult{Single: &artifact}, err
 	}
 
-	env := ctx.Env
-	if env == nil {
-		env = EnvMap(os.Environ())
-	}
-	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
-	startedAt := now().UTC().Format(time.RFC3339Nano)
-	runCtx := ctx
-	runCtx.Env = env
-	runCtx.Now = now
 	batch := BatchArtifact{
 		outputSafety:  safety,
 		SchemaVersion: "clawscan-batch-v1",
 		Profile:       opts.Profile,
-		StartedAt:     startedAt,
-		Env:           envPresence(opts, env),
-		Sandbox:       mustSandboxMetadata(opts, env),
+		StartedAt:     ctx.Now().UTC().Format(time.RFC3339Nano),
+		Env:           envPresence(opts, ctx.Env),
+		Sandbox:       mustSandboxMetadata(opts, ctx.Env),
 		Runs:          []Artifact{},
 		Summary: BatchSummary{
 			TargetCount:     len(targetInputs),
@@ -732,15 +714,15 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		runOpts.OutputPath = ""
 		var artifact Artifact
 		if stopErr != nil {
-			pendingEnv := maps.Clone(env)
+			pendingEnv := maps.Clone(ctx.Env)
 			applyRuntimeEnvDefaults(runOpts, pendingEnv)
-			artifact = pendingArtifact(runOpts, now().UTC().Format(time.RFC3339Nano), pendingEnv)
+			artifact = pendingArtifact(runOpts, ctx.Now().UTC().Format(time.RFC3339Nano), pendingEnv)
 			artifact.outputSafety = safety
 			pendingErr := fmt.Errorf("not started after prior target error: %w", stopErr)
-			finishArtifact(&artifact, runOpts, ctx.Context, now, &pendingErr)
+			finishArtifact(&artifact, runOpts, ctx.Context, ctx.Now, &pendingErr)
 		} else {
 			var err error
-			artifact, err = Run(runOpts, runCtx)
+			artifact, err = Run(runOpts, ctx)
 			runErrors = errors.Join(runErrors, err)
 			if err != nil && ctx.Context.Err() == nil {
 				stopErr = err
@@ -755,7 +737,7 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		}
 	}
 	runErrors = errors.Join(runErrors, ctx.Context.Err())
-	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+	batch.CompletedAt = ctx.Now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
 		if err := WriteRunTargetsResultBundle(opts.OutputPath, RunTargetsResult{Batch: &batch}); err != nil {
 			runErrors = errors.Join(runErrors, err)
@@ -769,24 +751,13 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 	if err != nil {
 		return BatchArtifact{}, err
 	}
-	env := ctx.Env
-	if env == nil {
-		env = EnvMap(os.Environ())
-	}
-	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
-	startedAt := now().UTC().Format(time.RFC3339Nano)
-	runCtx := ctx
-	runCtx.Env = env
-	runCtx.Now = now
+	ctx = ctx.withDefaults()
 	batch := BatchArtifact{
 		outputSafety:  safety,
 		SchemaVersion: "clawscan-batch-v1",
-		StartedAt:     startedAt,
+		StartedAt:     ctx.Now().UTC().Format(time.RFC3339Nano),
 		Env:           map[string]string{},
-		Sandbox:       sandboxMetadataForOptionList(optsList, env),
+		Sandbox:       sandboxMetadataForOptionList(optsList, ctx.Env),
 		Runs:          []Artifact{},
 		Summary: BatchSummary{
 			ProfileCount:    len(optsList),
@@ -797,10 +768,10 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 	for _, opts := range optsList {
 		runOpts := opts
 		runOpts.OutputPath = ""
-		for key, value := range envPresence(runOpts, env) {
+		for key, value := range envPresence(runOpts, ctx.Env) {
 			batch.Env[key] = value
 		}
-		result, err := RunTargets(runOpts, runCtx, cwd)
+		result, err := RunTargets(runOpts, ctx, cwd)
 		if err != nil {
 			batch.Errors = append(batch.Errors, BatchError{Profile: runOpts.Profile, Error: err.Error()})
 		}
@@ -814,8 +785,8 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 		}
 	}
 	batch.Summary.TargetCount = len(targets)
-	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
-	return batch, workContext(ctx.Context).Err()
+	batch.CompletedAt = ctx.Now().UTC().Format(time.RFC3339Nano)
+	return batch, ctx.Context.Err()
 }
 
 func addBatchRun(batch *BatchArtifact, artifact Artifact, targets map[string]bool) {
