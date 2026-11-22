@@ -1,6 +1,21 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from app import score_loose_non_clean
+from app import DEFAULT_EXPECTED, score_loose_non_clean, validate_predictions_file
+
+
+class UploadPreviewTests(unittest.TestCase):
+    def test_non_object_prediction_reports_line_and_clears_score(self):
+        with TemporaryDirectory() as directory:
+            upload = Path(directory) / "predictions.jsonl"
+            for row in ('[{"id": "case-1", "prediction": "clean"}]', '"clean"', "null", "1", "false"):
+                with self.subTest(row=row):
+                    upload.write_text(f"\n{row}\n", encoding="utf-8")
+                    message, scores = validate_predictions_file(upload, str(DEFAULT_EXPECTED))
+
+                    self.assertEqual(message, "Invalid predictions.jsonl: line 2: expected a JSON object")
+                    self.assertEqual(scores, [])
 
 
 class ScorePreviewTests(unittest.TestCase):

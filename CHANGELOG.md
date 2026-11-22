@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show the offending line when a leaderboard preview upload contains a JSON array or scalar instead of a prediction object.
 - Match the official submission validator's four-decimal rounding in leaderboard score previews.
 - Refuse to upload an empty Security Signals results dataset when the submissions directory is empty or missing.
 - Preserve the previous SkillTrustBench baseline when a benchmark fails or its cases do not match the selected subset.

@@ -101,6 +101,8 @@ def read_predictions(path: str | Path) -> list[dict[str, str]]:
                 row = json.loads(text)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"line {line_number}: invalid JSON: {exc.msg}") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"line {line_number}: expected a JSON object")
             predictions.append(
                 {
                     "id": str(row.get("id", "")),
