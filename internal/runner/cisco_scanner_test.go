@@ -10,11 +10,7 @@ import (
 )
 
 func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, t.TempDir())
 	const ciscoJSON = `{"scanner":"cisco","findings":[]}`
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: ciscoJSON}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
@@ -81,11 +77,7 @@ func TestCiscoScannerUsesResultDirAsDockerSandboxCWD(t *testing.T) {
 }
 
 func TestCiscoScannerEnablesUpstreamAnalyzersFromEnv(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: `{"scanner":"cisco","findings":[]}`}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
@@ -123,10 +115,7 @@ func TestCiscoScannerEnablesUpstreamAnalyzersFromEnv(t *testing.T) {
 
 func TestCiscoScannerOutputFileIsPreservedInArtifactBundle(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, dir)
 	out := filepath.Join(dir, "clawscan-results", "artifact.json")
 	const ciscoJSON = `{"scanner":"cisco","findings":[{"id":"network"}]}`
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: ciscoJSON}
@@ -156,11 +145,7 @@ func TestCiscoScannerOutputFileIsPreservedInArtifactBundle(t *testing.T) {
 }
 
 func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, t.TempDir())
 	const ciscoJSON = `{"scanner":"cisco","findings":[{"id":"pipeline-risk"}]}`
 	exitCode := 1
 	runner := &reportFileCommandRunner{
@@ -197,11 +182,7 @@ func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
 }
 
 func TestCiscoScannerFailsMissingOutputFile(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output"}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
@@ -227,11 +208,7 @@ func TestCiscoScannerFailsMissingOutputFile(t *testing.T) {
 }
 
 func TestCiscoScannerFailsInvalidJSONOutputFile(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: "not json"}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
@@ -257,11 +234,7 @@ func TestCiscoScannerFailsInvalidJSONOutputFile(t *testing.T) {
 }
 
 func TestRunDispatchesCiscoScannerInsteadOfGenericSkipped(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: `{"ok":true}`}
 	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
 	if err != nil {
