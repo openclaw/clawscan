@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -242,7 +243,7 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 	if opts.Benchmark.PredictionsOutputPath != "" && !info.SupportsPredictionsOutput {
 		return BenchmarkArtifact{}, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
 	}
-	env := ctx.Env
+	env := maps.Clone(ctx.Env)
 	if env == nil {
 		env = EnvMap(os.Environ())
 	}

@@ -102,3 +102,21 @@ func TestRunDoesNotLeakProfileDefaultsToNextRun(t *testing.T) {
 		t.Fatalf("caller environment mutated: %v", env)
 	}
 }
+
+func TestBenchmarkKeepsScannerDefaultsInItsOwnEnvironment(t *testing.T) {
+	opts := benchmarkTestOptions(t, openClawBenchmarkID, "", 0, 0, "")
+	opts.Scanners = []string{"aig"}
+	opts.ScannerEnvDefaults = productionModelDefaults()
+	env := map[string]string{"CODEX_API_KEY": "fixture"}
+	before := maps.Clone(env)
+	artifact, err := RunBenchmark(opts, RunContext{Env: env, BenchmarkClient: staticBenchmarkClient{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Env["LLM_API_KEY"] != "present" {
+		t.Fatal("benchmark did not apply the AIG credential fallback")
+	}
+	if !maps.Equal(env, before) {
+		t.Fatal("benchmark defaults mutated the caller's environment")
+	}
+}
