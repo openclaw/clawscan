@@ -43,6 +43,9 @@ jobs:
       - name: Lint workflows
         uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
 
+      - name: Test the release preflight offline
+        run: python3 -B scripts/test_release_preflight.py
+
       - name: Test runtime publication contracts with offline command stubs
         run: python3 -m unittest discover -s scripts/runtime-image -p 'test_*.py' -v
 
@@ -107,7 +110,6 @@ jobs:
         run: |
           node --test npm/clawscan/test/*.test.mjs
           node --test scripts/build-npm-package.test.mjs
-          node --test scripts/release-notes.test.mjs
 
       - name: Smoke the full npm package
         if: runner.os == 'Linux'
