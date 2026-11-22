@@ -29,8 +29,7 @@ func TestProductionScannerModelDefaults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := maps.Clone(tt.env)
-			applyRuntimeEnvDefaults(Options{Scanners: []string{"skillspector", "aig"}, ScannerEnvDefaults: productionModelDefaults()}, env)
+			env := runtimeEnv(Options{Scanners: []string{"skillspector", "aig"}, ScannerEnvDefaults: productionModelDefaults()}, tt.env)
 			for name, want := range tt.want {
 				if got := env[name]; got != want {
 					t.Errorf("%s = %q, want %q", name, got, want)
@@ -53,8 +52,7 @@ func TestSkillSpectorModelDefaultsWithInferredProvider(t *testing.T) {
 		{"no OpenAI credential", map[string]string{"NVIDIA_INFERENCE_KEY": "fixture"}, "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env := maps.Clone(tc.env)
-			applyRuntimeEnvDefaults(Options{Scanners: []string{"skillspector"}, ScannerEnvDefaults: map[string]string{"SKILLSPECTOR_MODEL": "gpt-6.1-sol", "SKILLSPECTOR_REASONING_EFFORT": "medium"}}, env)
+			env := runtimeEnv(Options{Scanners: []string{"skillspector"}, ScannerEnvDefaults: map[string]string{"SKILLSPECTOR_MODEL": "gpt-6.1-sol", "SKILLSPECTOR_REASONING_EFFORT": "medium"}}, tc.env)
 			if env["SKILLSPECTOR_PROVIDER"] != tc.provider || env["SKILLSPECTOR_MODEL"] != tc.model || env["SKILLSPECTOR_REASONING_EFFORT"] != tc.effort {
 				t.Fatalf("effective controls = provider %q, model %q, effort %q; want %q, %q, %q", env["SKILLSPECTOR_PROVIDER"], env["SKILLSPECTOR_MODEL"], env["SKILLSPECTOR_REASONING_EFFORT"], tc.provider, tc.model, tc.effort)
 			}
@@ -63,21 +61,18 @@ func TestSkillSpectorModelDefaultsWithInferredProvider(t *testing.T) {
 }
 
 func TestSkillSpectorExplicitProfileProviderPrecedesInference(t *testing.T) {
-	env := map[string]string{"OPENAI_API_KEY": "fixture"}
-	applyRuntimeEnvDefaults(Options{Scanners: []string{"skillspector"}, ScannerEnvDefaults: map[string]string{"SKILLSPECTOR_PROVIDER": "anthropic", "SKILLSPECTOR_MODEL": "gpt-6.1-sol", "SKILLSPECTOR_REASONING_EFFORT": "medium"}}, env)
+	env := runtimeEnv(Options{Scanners: []string{"skillspector"}, ScannerEnvDefaults: map[string]string{"SKILLSPECTOR_PROVIDER": "anthropic", "SKILLSPECTOR_MODEL": "gpt-6.1-sol", "SKILLSPECTOR_REASONING_EFFORT": "medium"}}, map[string]string{"OPENAI_API_KEY": "fixture"})
 	if env["SKILLSPECTOR_PROVIDER"] != "anthropic" || env["SKILLSPECTOR_MODEL"] != "" || env["SKILLSPECTOR_REASONING_EFFORT"] != "" {
 		t.Fatal("OpenAI inference overrode the explicit profile provider")
 	}
 }
 
 func TestGenericScannersKeepProviderDefaults(t *testing.T) {
-	env := map[string]string{"OPENAI_API_KEY": "fixture"}
-	applyRuntimeEnvDefaults(Options{Scanners: []string{"skillspector", "aig"}}, env)
+	env := runtimeEnv(Options{Scanners: []string{"skillspector", "aig"}}, map[string]string{"OPENAI_API_KEY": "fixture"})
 	if env["SKILLSPECTOR_MODEL"] != "" || env["SKILLSPECTOR_REASONING_EFFORT"] != "" || env["REASONING_EFFORT"] != "" || env["DEFAULT_MODEL"] != defaultAIGOpenAIModel {
 		t.Fatalf("generic defaults changed: %#v", env)
 	}
-	env = map[string]string{"OPENAI_API_KEY": "fixture"}
-	applyRuntimeEnvDefaults(Options{Scanners: []string{fixtureScannerID}, ScannerEnvDefaults: productionModelDefaults()}, env)
+	env = runtimeEnv(Options{Scanners: []string{fixtureScannerID}, ScannerEnvDefaults: productionModelDefaults()}, map[string]string{"OPENAI_API_KEY": "fixture"})
 	if !reflect.DeepEqual(env, map[string]string{"OPENAI_API_KEY": "fixture"}) {
 		t.Fatal("unselected scanner defaults applied")
 	}
@@ -100,5 +95,34 @@ func TestRunDoesNotLeakProfileDefaultsToNextRun(t *testing.T) {
 	}
 	if !reflect.DeepEqual(env, before) {
 		t.Fatalf("caller environment mutated: %v", env)
+	}
+}
+
+func TestBenchmarkKeepsProviderDefaultsLocalToEachProfile(t *testing.T) {
+	opts := benchmarkTestOptions(t, "clawhub-security-signals", "eval_holdout", 0, 0, "")
+	opts.Scanners = []string{"skillspector"}
+	opts.Sandbox.Mode = SandboxModeOff
+	ctx := RunContext{
+		Env:                 map[string]string{"OPENAI_API_KEY": "fixture"},
+		SkillSpectorCommand: []string{"skillspector"},
+		CommandRunner:       &recordingCommandRunner{writeOutput: `{"status":"clean","findings":[]}`},
+		BenchmarkClient:     staticBenchmarkClient{rows: []OpenClawBenchmarkRow{{ID: "one", SkillMDContent: "# Fixture"}}},
+	}
+	for _, provider := range []string{"openai", "anthropic"} {
+		opts.ScannerEnvDefaults = map[string]string{"SKILLSPECTOR_PROVIDER": provider}
+		artifact, err := RunBenchmark(opts, ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(artifact.Cases) != 1 || len(artifact.Cases[0].Run.Scanners["skillspector"].Command) == 0 {
+			t.Fatalf("provider %s: expected one case with a SkillSpector command", provider)
+		}
+		command := artifact.Cases[0].Run.Scanners["skillspector"].Command
+		if got, want := containsArg(command, "--no-llm"), provider == "anthropic"; got != want {
+			t.Errorf("provider %s: --no-llm = %t, want %t", provider, got, want)
+		}
+	}
+	if _, ok := ctx.Env["SKILLSPECTOR_PROVIDER"]; ok {
+		t.Error("benchmark added a provider to the caller's environment")
 	}
 }

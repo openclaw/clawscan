@@ -135,6 +135,16 @@ type RunContext struct {
 	BenchmarkClient     BenchmarkClient
 }
 
+func (ctx RunContext) withEnvAndClock() RunContext {
+	if ctx.Env == nil {
+		ctx.Env = EnvMap(os.Environ())
+	}
+	if ctx.Now == nil {
+		ctx.Now = time.Now
+	}
+	return ctx
+}
+
 type ScannerRunner interface {
 	RunScanner(name string, target string, startedAt string) (ScannerResult, error)
 }
@@ -486,17 +496,9 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		return artifact, err
 	}
 	ctx.Context = workContext(ctx.Context)
+	ctx = ctx.withEnvAndClock()
 	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
-	env := ctx.Env
-	if env == nil {
-		env = EnvMap(os.Environ())
-	}
-	baseEnv := env
-	env = maps.Clone(baseEnv)
-	applyRuntimeEnvDefaults(opts, env)
+	env := runtimeEnv(opts, ctx.Env)
 	startedAt := now().UTC().Format(time.RFC3339Nano)
 	artifact = pendingArtifact(opts, startedAt, env)
 	artifact.outputSafety = safety
@@ -530,8 +532,7 @@ func Run(opts Options, ctx RunContext) (artifact Artifact, runErr error) {
 		// The profile's plugin scanner list replaces its skill list entirely, so
 		// skill scanners are neither run nor recorded for plugin targets.
 		opts = pluginScannerOptions(opts)
-		env = maps.Clone(baseEnv)
-		applyRuntimeEnvDefaults(opts, env)
+		env = runtimeEnv(opts, ctx.Env)
 		pending := pendingArtifact(opts, startedAt, env)
 		artifact.Env = pending.Env
 		artifact.Sandbox = pending.Sandbox
@@ -679,17 +680,10 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 	ctx.Context = workContext(ctx.Context)
 	targetInputs, err := ResolveTargetInputs(opts, cwd)
 	if err != nil {
-		now := ctx.Now
-		if now == nil {
-			now = time.Now
-		}
-		env := ctx.Env
-		if env == nil {
-			env = EnvMap(os.Environ())
-		}
-		artifact := pendingArtifact(opts, now().UTC().Format(time.RFC3339Nano), env)
+		ctx = ctx.withEnvAndClock()
+		artifact := pendingArtifact(opts, ctx.Now().UTC().Format(time.RFC3339Nano), ctx.Env)
 		artifact.outputSafety = safety
-		finishArtifact(&artifact, opts, ctx.Context, now, &err)
+		finishArtifact(&artifact, opts, ctx.Context, ctx.Now, &err)
 		return RunTargetsResult{Single: &artifact}, err
 	}
 	if len(targetInputs) == 1 {
@@ -699,25 +693,15 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		return RunTargetsResult{Single: &artifact}, err
 	}
 
-	env := ctx.Env
-	if env == nil {
-		env = EnvMap(os.Environ())
-	}
-	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
-	startedAt := now().UTC().Format(time.RFC3339Nano)
-	runCtx := ctx
-	runCtx.Env = env
-	runCtx.Now = now
+	ctx = ctx.withEnvAndClock()
+	startedAt := ctx.Now().UTC().Format(time.RFC3339Nano)
 	batch := BatchArtifact{
 		outputSafety:  safety,
 		SchemaVersion: "clawscan-batch-v1",
 		Profile:       opts.Profile,
 		StartedAt:     startedAt,
-		Env:           envPresence(opts, env),
-		Sandbox:       mustSandboxMetadata(opts, env),
+		Env:           envPresence(opts, ctx.Env),
+		Sandbox:       mustSandboxMetadata(opts, ctx.Env),
 		Runs:          []Artifact{},
 		Summary: BatchSummary{
 			TargetCount:     len(targetInputs),
@@ -732,15 +716,14 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		runOpts.OutputPath = ""
 		var artifact Artifact
 		if stopErr != nil {
-			pendingEnv := maps.Clone(env)
-			applyRuntimeEnvDefaults(runOpts, pendingEnv)
-			artifact = pendingArtifact(runOpts, now().UTC().Format(time.RFC3339Nano), pendingEnv)
+			pendingEnv := runtimeEnv(runOpts, ctx.Env)
+			artifact = pendingArtifact(runOpts, ctx.Now().UTC().Format(time.RFC3339Nano), pendingEnv)
 			artifact.outputSafety = safety
 			pendingErr := fmt.Errorf("not started after prior target error: %w", stopErr)
-			finishArtifact(&artifact, runOpts, ctx.Context, now, &pendingErr)
+			finishArtifact(&artifact, runOpts, ctx.Context, ctx.Now, &pendingErr)
 		} else {
 			var err error
-			artifact, err = Run(runOpts, runCtx)
+			artifact, err = Run(runOpts, ctx)
 			runErrors = errors.Join(runErrors, err)
 			if err != nil && ctx.Context.Err() == nil {
 				stopErr = err
@@ -755,7 +738,7 @@ func RunTargets(opts Options, ctx RunContext, cwd string) (RunTargetsResult, err
 		}
 	}
 	runErrors = errors.Join(runErrors, ctx.Context.Err())
-	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+	batch.CompletedAt = ctx.Now().UTC().Format(time.RFC3339Nano)
 	if opts.OutputPath != "" {
 		if err := WriteRunTargetsResultBundle(opts.OutputPath, RunTargetsResult{Batch: &batch}); err != nil {
 			runErrors = errors.Join(runErrors, err)
@@ -769,24 +752,14 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 	if err != nil {
 		return BatchArtifact{}, err
 	}
-	env := ctx.Env
-	if env == nil {
-		env = EnvMap(os.Environ())
-	}
-	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
-	startedAt := now().UTC().Format(time.RFC3339Nano)
-	runCtx := ctx
-	runCtx.Env = env
-	runCtx.Now = now
+	ctx = ctx.withEnvAndClock()
+	startedAt := ctx.Now().UTC().Format(time.RFC3339Nano)
 	batch := BatchArtifact{
 		outputSafety:  safety,
 		SchemaVersion: "clawscan-batch-v1",
 		StartedAt:     startedAt,
 		Env:           map[string]string{},
-		Sandbox:       sandboxMetadataForOptionList(optsList, env),
+		Sandbox:       sandboxMetadataForOptionList(optsList, ctx.Env),
 		Runs:          []Artifact{},
 		Summary: BatchSummary{
 			ProfileCount:    len(optsList),
@@ -797,10 +770,10 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 	for _, opts := range optsList {
 		runOpts := opts
 		runOpts.OutputPath = ""
-		for key, value := range envPresence(runOpts, env) {
+		for key, value := range envPresence(runOpts, ctx.Env) {
 			batch.Env[key] = value
 		}
-		result, err := RunTargets(runOpts, runCtx, cwd)
+		result, err := RunTargets(runOpts, ctx, cwd)
 		if err != nil {
 			batch.Errors = append(batch.Errors, BatchError{Profile: runOpts.Profile, Error: err.Error()})
 		}
@@ -814,7 +787,7 @@ func RunProfileBatch(optsList []Options, ctx RunContext, cwd string) (BatchArtif
 		}
 	}
 	batch.Summary.TargetCount = len(targets)
-	batch.CompletedAt = now().UTC().Format(time.RFC3339Nano)
+	batch.CompletedAt = ctx.Now().UTC().Format(time.RFC3339Nano)
 	return batch, workContext(ctx.Context).Err()
 }
 
@@ -2465,7 +2438,9 @@ func defaultAIGRuntimeEnv(env map[string]string) {
 	}
 }
 
-func applyRuntimeEnvDefaults(opts Options, env map[string]string) {
+// Scanner defaults belong to this run. Profiles can share the same input environment.
+func runtimeEnv(opts Options, baseEnv map[string]string) map[string]string {
+	env := maps.Clone(baseEnv)
 	applyScannerModelDefaults(opts, env)
 	if scannerRequested(opts, "skillspector") {
 		defaultSkillSpectorOpenAIProvider(env)
@@ -2473,6 +2448,7 @@ func applyRuntimeEnvDefaults(opts Options, env map[string]string) {
 	if scannerRequested(opts, "aig") || scannerRequested(opts, aigMCPScannerID) {
 		defaultAIGRuntimeEnv(env)
 	}
+	return env
 }
 
 func discoverSkillSpectorCommand() []string {
