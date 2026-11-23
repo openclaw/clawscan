@@ -3011,8 +3011,7 @@ func TestApplyRuntimeEnvDefaultsBackfillsAIGKeyOnlyWhenAIGRequested(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"CODEX_API_KEY": "fake"}
-	applyRuntimeEnvDefaults(requested, env)
+	env := runtimeEnv(requested, map[string]string{"CODEX_API_KEY": "fake"})
 	if err := ValidateRequirements(requested, env); err != nil {
 		t.Fatalf("unexpected requirement error after backfill: %v", err)
 	}
@@ -3030,8 +3029,7 @@ func TestApplyRuntimeEnvDefaultsBackfillsAIGKeyOnlyWhenAIGRequested(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	unaffected := map[string]string{"CODEX_API_KEY": "fake"}
-	applyRuntimeEnvDefaults(notRequested, unaffected)
+	unaffected := runtimeEnv(notRequested, map[string]string{"CODEX_API_KEY": "fake"})
 	if _, ok := unaffected["LLM_API_KEY"]; ok {
 		t.Fatalf("LLM_API_KEY backfilled without aig in the scanner list: %#v", unaffected)
 	}
