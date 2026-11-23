@@ -85,7 +85,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	skillSpectorFixture, err := prettyJSON(skillSpectorInput)
+	skillSpectorFixture, err := json.MarshalIndent(skillSpectorInput, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -116,13 +116,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if *out != "" {
-		if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(*out, append(encoded, '\n'), 0o644); err != nil {
-			return err
-		}
+	if err := writeOptionalFile(*out, append(encoded, '\n')); err != nil {
+		return err
 	}
 	if err := writeOptionalFile(*outSystemPrompt, []byte(systemPrompt)); err != nil {
 		return err
@@ -130,7 +125,7 @@ func run() error {
 	if err := writeOptionalFile(*outPrompt, []byte(promptTemplate)); err != nil {
 		return err
 	}
-	if err := writeOptionalFile(*outSkillSpectorResult, []byte(skillSpectorFixture)); err != nil {
+	if err := writeOptionalFile(*outSkillSpectorResult, skillSpectorFixture); err != nil {
 		return err
 	}
 	if err := writeOptionalFile(*outOutputSchema, schema); err != nil {
@@ -258,12 +253,7 @@ func parityFixtureContext(fixture parityFixture) (json.RawMessage, error) {
 }
 
 func embeddedClawHubProfileFiles() (string, []byte, error) {
-	dir, err := os.MkdirTemp("", "clawscan-profile-parity-*")
-	if err != nil {
-		return "", nil, err
-	}
-	defer os.RemoveAll(dir)
-	opts, err := profiles.ResolveArgs([]string{"./skill", "--profile", "clawhub"}, dir)
+	opts, err := profiles.ResolveArgs([]string{"./skill", "--profile", "clawhub"}, ".")
 	if err != nil {
 		return "", nil, err
 	}
@@ -364,14 +354,6 @@ func buildPromptTemplate(prompt string) (string, error) {
 	}
 	contentEnd := contentStart + contentEndOffset
 	return prompt[:contentStart] + placeholder + prompt[contentEnd:], nil
-}
-
-func prettyJSON(value any) (string, error) {
-	raw, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
 }
 
 func resolveClawHubDir(path string) (string, error) {
