@@ -5,6 +5,7 @@
 - Keep scanner provider and model defaults local to each benchmark when runs share an environment.
 
 - Match the official submission validator's four-decimal rounding in leaderboard score previews.
+- Show the offending line when a leaderboard preview upload contains a JSON array or scalar instead of a prediction object.
 - Refuse to upload an empty Security Signals results dataset when the submissions directory is empty or missing.
 - Preserve the previous SkillTrustBench baseline when a benchmark fails or its cases do not match the selected subset.
 - Update the Go text-processing dependency to `golang.org/x/text` v0.44.0.
