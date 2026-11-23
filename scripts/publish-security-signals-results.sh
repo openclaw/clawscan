@@ -62,11 +62,24 @@ if [ -n "${CLAWSCAN_VALIDATE_SUBMISSION_CMD:-}" ]; then
   read -r -a validator_cmd <<<"${CLAWSCAN_VALIDATE_SUBMISSION_CMD}"
 fi
 
+mkdir -p "$(dirname "$output_path")"
+# Stage on the destination filesystem, including when --output is a symlink.
+staging="$(python3 - "$output_path" <<'PY'
+import sys
+import tempfile
+from pathlib import Path
+
+print(tempfile.mkdtemp(prefix=".clawscan-results.", dir=Path(sys.argv[1]).resolve().parent))
+PY
+)"
+trap 'rm -rf -- "$staging"' EXIT
+
 submission_dirs=()
 if [ -d "$submission_root" ]; then
+  find "$submission_root" -mindepth 2 -maxdepth 2 -name metadata.json -print0 | sort -z >"$staging/metadata"
   while IFS= read -r -d '' file; do
     submission_dirs+=("$(dirname "$file")")
-  done < <(find "$submission_root" -mindepth 2 -maxdepth 2 -name metadata.json -print0 | sort -z)
+  done <"$staging/metadata"
 fi
 
 if [ "$mode" = "publish" ] && [ "${#submission_dirs[@]}" -eq 0 ]; then
@@ -74,8 +87,15 @@ if [ "$mode" = "publish" ] && [ "${#submission_dirs[@]}" -eq 0 ]; then
   exit 1
 fi
 
-mkdir -p "$(dirname "$output_path")"
-: >"$output_path"
+if [ -e "$output_path" ]; then
+  if [ ! -f "$output_path" ] || [ ! -w "$output_path" ]; then
+    echo "Expected a writable regular results file: $output_path" >&2
+    exit 1
+  fi
+  # Carry the existing file's access controls into the private staging directory.
+  cp -pL -- "$output_path" "$staging/results.jsonl"
+fi
+: >"$staging/results.jsonl"
 
 if [ "${#submission_dirs[@]}" -eq 0 ]; then
   echo "No Security Signals submissions found under $submission_root."
@@ -86,7 +106,7 @@ else
       exit 1
     fi
     score_json="$("${validator_cmd[@]}" "$dir" --json)"
-    SCORE_JSON="$score_json" SUBMISSION_DIR="$dir" python3 - <<'PY' >>"$output_path"
+    SCORE_JSON="$score_json" SUBMISSION_DIR="$dir" python3 - <<'PY' >>"$staging/results.jsonl"
 import json
 import os
 from pathlib import Path
@@ -109,6 +129,29 @@ print(json.dumps(row, separators=(",", ":"), sort_keys=True))
 PY
   done
 fi
+
+python3 - "$staging/results.jsonl" "$output_path" <<'PY'
+import os
+import stat
+import sys
+
+staged, output = sys.argv[1:]
+destination = os.path.realpath(output)
+try:
+    previous = os.stat(destination)
+except FileNotFoundError:
+    pass
+else:
+    if not stat.S_ISREG(previous.st_mode):
+        sys.exit(f"Expected a regular results file: {destination}")
+    if not os.access(destination, os.W_OK):
+        sys.exit(f"Results file is not writable: {destination}")
+    current = os.stat(staged)
+    if (current.st_uid, current.st_gid) != (previous.st_uid, previous.st_gid):
+        os.chown(staged, previous.st_uid, previous.st_gid)
+    os.chmod(staged, previous.st_mode & 0o777)
+os.replace(staged, destination)
+PY
 
 echo "Wrote $output_path"
 
