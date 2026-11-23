@@ -60,10 +60,7 @@ func TestRunJudgeSubprocessRecordsConfiguredModelNotModelAuthoredClaim(t *testin
 		t.Skip("POSIX subprocess fixture")
 	}
 	dir := t.TempDir()
-	target := filepath.Join(dir, "skill")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := makeTestSkillDir(t, dir)
 	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# Harmless fixture"), 0o644); err != nil {
 		t.Fatal(err)
 	}
