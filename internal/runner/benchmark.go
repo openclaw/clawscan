@@ -242,20 +242,14 @@ func RunBenchmark(opts Options, ctx RunContext) (artifact BenchmarkArtifact, run
 	if opts.Benchmark.PredictionsOutputPath != "" && !info.SupportsPredictionsOutput {
 		return BenchmarkArtifact{}, fmt.Errorf("predictions output is only supported for %s", openClawBenchmarkID)
 	}
-	env := ctx.Env
-	if env == nil {
-		env = EnvMap(os.Environ())
-	}
-	applyRuntimeEnvDefaults(opts, env)
+	runCtx := ctx.withEnvAndClock()
+	env := runtimeEnv(opts, runCtx.Env)
 	requirementOpts := opts
 	requirementOpts.Scanners = runnableBenchmarkScanners(opts, "skill")
 	if err := ValidateRequirements(requirementOpts, env); err != nil {
 		return BenchmarkArtifact{}, err
 	}
-	now := ctx.Now
-	if now == nil {
-		now = time.Now
-	}
+	now := runCtx.Now
 	startedAt := now().UTC().Format(time.RFC3339Nano)
 	client := ctx.BenchmarkClient
 	if client == nil {
