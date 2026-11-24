@@ -16,13 +16,9 @@ import (
 )
 
 func TestRunCommandPrintsHelp(t *testing.T) {
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"--help"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, "--help")
 
-	for _, want := range []string{
+	assertOutputContains(t, stdout,
 		"Usage:",
 		"clawscan install <scanner-id> [scanner-id ...]",
 		"clawscan scanners [list|<scanner-id>]",
@@ -76,11 +72,7 @@ func TestRunCommandPrintsHelp(t *testing.T) {
 		"{{ prompt[:path] }}",
 		"{{ output_schema[:path] }}",
 		"{{ output }}",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("help missing %q:\n%s", want, stdout)
-		}
-	}
+	)
 
 	if strings.Contains(stdout, "validate-submission") {
 		t.Fatalf("help should not expose repository-only submission validation:\n%s", stdout)
@@ -435,21 +427,13 @@ func hasInstallPolicyFinding(
 }
 
 func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"scanners"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	aliasStdout := captureStdout(t, func() {
-		if err := run([]string{"scanners", "list"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, "scanners")
+	aliasStdout := commandStdout(t, "scanners", "list")
 
 	if stdout != aliasStdout {
 		t.Fatalf("scanners and scanners list differ:\n--- scanners ---\n%s\n--- scanners list ---\n%s", stdout, aliasStdout)
 	}
-	for _, want := range []string{
+	assertOutputContains(t, stdout,
 		"ID",
 		"Name",
 		"Required env",
@@ -457,21 +441,13 @@ func TestRunCommandScannersPrintsCatalogTable(t *testing.T) {
 		"none",
 		"socket",
 		"SOCKET_CLI_API_TOKEN",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("scanner catalog missing %q:\n%s", want, stdout)
-		}
-	}
+	)
 }
 
 func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"scanners", "aig"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, "scanners", "aig")
 
-	for _, want := range []string{
+	assertOutputContains(t, stdout,
 		"Tencent AI-Infra-Guard",
 		"ID: aig",
 		"Repository: https://github.com/Tencent/AI-Infra-Guard/tree/main/skill-scan",
@@ -480,11 +456,7 @@ func TestRunCommandScannerDetailPrintsHumanReadableInfo(t *testing.T) {
 		"Optional env vars: OPENAI_API_KEY, DEFAULT_MODEL, REASONING_EFFORT, AIG_SERVICE_TIER, DEFAULT_BASE_URL, DEFAULT_MODEL_CONTEXT_WINDOW, LOG_LEVEL",
 		"Install:",
 		"pip install aig-skill-scan",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("scanner detail missing %q:\n%s", want, stdout)
-		}
-	}
+	)
 }
 
 func TestRunCommandProfilesPrintsBuiltInProfilesOnly(t *testing.T) {
@@ -503,13 +475,9 @@ profiles:
 `)
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"profiles"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, "profiles")
 
-	for _, want := range []string{
+	assertOutputContains(t, stdout,
 		"Profile",
 		"Source",
 		"Scanners",
@@ -518,11 +486,7 @@ profiles:
 		"skillspector, aig; plugins: aig-mcp",
 		"clawhub-aig",
 		"skillspector, aig",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("profiles output missing %q:\n%s", want, stdout)
-		}
-	}
+	)
 	if strings.Contains(stdout, removedProfile) {
 		t.Fatalf("profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
 	}
@@ -543,13 +507,9 @@ profiles:
 `)
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"profiles", "-v"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, "profiles", "-v")
 
-	for _, want := range []string{
+	assertOutputContains(t, stdout,
 		"version: 1",
 		"profiles:",
 		"clawhub:",
@@ -560,11 +520,7 @@ profiles:
 		"pluginScanners:",
 		"- aig-mcp",
 		"gate:",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("verbose profiles output missing %q:\n%s", want, stdout)
-		}
-	}
+	)
 	if strings.Contains(stdout, removedProfile+":") {
 		t.Fatalf("verbose profiles output should not include removed profile %q:\n%s", removedProfile, stdout)
 	}
@@ -574,13 +530,9 @@ profiles:
 }
 
 func TestRunCommandBenchmarkListPrintsCatalogTable(t *testing.T) {
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"benchmark", "list"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, "benchmark", "list")
 
-	for _, want := range []string{
+	assertOutputContains(t, stdout,
 		"ID",
 		"Name",
 		"Default split",
@@ -591,11 +543,7 @@ func TestRunCommandBenchmarkListPrintsCatalogTable(t *testing.T) {
 		"cuhk-zhuque/SkillTrustBench",
 		"benchmark",
 		"none",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("benchmark catalog missing %q:\n%s", want, stdout)
-		}
-	}
+	)
 }
 
 func TestRunCommandRejectsUnknownCommand(t *testing.T) {
@@ -607,16 +555,8 @@ func TestRunCommandRejectsUnknownCommand(t *testing.T) {
 }
 
 func TestRunCommandShortHelpMatchesLongHelp(t *testing.T) {
-	longHelp := captureStdout(t, func() {
-		if err := run([]string{"--help"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	shortHelp := captureStdout(t, func() {
-		if err := run([]string{"-h"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	longHelp := commandStdout(t, "--help")
+	shortHelp := commandStdout(t, "-h")
 
 	if shortHelp != longHelp {
 		t.Fatalf("-h help did not match --help:\n--- -h ---\n%s\n--- --help ---\n%s", shortHelp, longHelp)
@@ -655,18 +595,14 @@ func TestRunCommandPrintsBatchJSONForDiscoveredSkills(t *testing.T) {
 	writeFile(t, socketFixture, `{"ok":true,"data":[]}`)
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{
-			"--scanner", "skillspector",
-			"--scanner", "socket",
-			"--scanner-result", "skillspector=" + skillSpectorFixture,
-			"--scanner-result", "socket=" + socketFixture,
-			"--sandbox", "off",
-			"--json",
-		}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t,
+		"--scanner", "skillspector",
+		"--scanner", "socket",
+		"--scanner-result", "skillspector="+skillSpectorFixture,
+		"--scanner-result", "socket="+socketFixture,
+		"--sandbox", "off",
+		"--json",
+	)
 
 	assertDiscoveredSkillBatch(t, stdout, "", "skillspector", "socket")
 }
@@ -747,17 +683,13 @@ func TestRunCommandScansPluginTargetWithClawHubScanners(t *testing.T) {
 	socketFixture := filepath.Join(dir, "socket.json")
 	writeFile(t, socketFixture, `{"ok":true,"data":[]}`)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{
-			target,
-			"--scanner", "skillspector", "--scanner-result", "skillspector=" + skillSpectorFixture,
-			"--scanner", "socket", "--scanner-result", "socket=" + socketFixture,
-			"--sandbox", "off",
-			"--output", out,
-		}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t,
+		target,
+		"--scanner", "skillspector", "--scanner-result", "skillspector="+skillSpectorFixture,
+		"--scanner", "socket", "--scanner-result", "socket="+socketFixture,
+		"--sandbox", "off",
+		"--output", out,
+	)
 	if !strings.Contains(stdout, "scanner_completed: 2") {
 		t.Fatalf("summary missing completed scanner:\n%s", stdout)
 	}
@@ -815,24 +747,16 @@ func TestRunCommandWritesDefaultOutputAndPrintsKeyValueSummary(t *testing.T) {
 	writeSkill(t, target, "# Summary\n")
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--scanner", "skillspector", "--sandbox", "off"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, target, "--scanner", "skillspector", "--sandbox", "off")
 
-	for _, want := range []string{
+	assertOutputContains(t, stdout,
 		"targets: 1",
 		"scanner_completed: 1",
 		"scanner_failed: 0",
 		"scanner_skipped: 0",
 		"issues_found: 0",
 		"full_results: ./clawscan-results/artifact.json",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout)
-		}
-	}
+	)
 	data, err := os.ReadFile(filepath.Join(dir, "clawscan-results", "artifact.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -867,16 +791,8 @@ func TestRunCommandSummarizesSnykRiskIndexes(t *testing.T) {
 	target := filepath.Join(dir, "skill")
 	writeSkill(t, target, "# Summary\n")
 	output := filepath.Join(dir, "artifact.json")
-	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--scanner", "snyk", "--scanner-result", "snyk=" + fixture, "--output", output}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	for _, want := range []string{"scanner_completed: 1", "scanner_failed: 0", "issues_found: 3", "errors: 0"} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout)
-		}
-	}
+	stdout := commandStdout(t, target, "--scanner", "snyk", "--scanner-result", "snyk="+fixture, "--output", output)
+	assertOutputContains(t, stdout, "scanner_completed: 1", "scanner_failed: 0", "issues_found: 3", "errors: 0")
 }
 
 func TestPrintRunSummaryIncludesGateVerdictAndFiredRule(t *testing.T) {
@@ -949,14 +865,10 @@ profiles:
 `, exitCode, exitCode))
 			artifactPath := filepath.Join(dir, "artifact.json")
 
-			stdout := captureStdout(t, func() {
-				if err := run([]string{
-					target, "--config", config, "--profile", "review",
-					"--sandbox", "off", "--output", artifactPath,
-				}, []string{}); err != nil {
-					t.Fatal(err)
-				}
-			})
+			stdout := commandStdout(t,
+				target, "--config", config, "--profile", "review",
+				"--sandbox", "off", "--output", artifactPath,
+			)
 
 			raw, err := os.ReadFile(artifactPath)
 			if err != nil {
@@ -987,11 +899,7 @@ func TestRunCommandJSONDoesNotWriteDefaultOutput(t *testing.T) {
 	writeSkill(t, target, "# JSON\n")
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--scanner", "skillspector", "--sandbox", "off", "--json"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, target, "--scanner", "skillspector", "--sandbox", "off", "--json")
 
 	if !strings.Contains(stdout, `"schemaVersion": "clawscan-run-v1"`) {
 		t.Fatalf("stdout was not artifact JSON:\n%s", stdout)
@@ -1007,11 +915,7 @@ func TestRunCommandJSONWithExplicitOutputWritesArtifactBundle(t *testing.T) {
 	writeSkill(t, target, "# JSON output bundle\n")
 	out := filepath.Join(dir, "run.json")
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--scanner", "skillspector", "--sandbox", "off", "--json", "--output", out}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, target, "--scanner", "skillspector", "--sandbox", "off", "--json", "--output", out)
 
 	if !strings.Contains(stdout, `"schemaVersion": "clawscan-run-v1"`) {
 		t.Fatalf("stdout was not artifact JSON:\n%s", stdout)
@@ -1153,18 +1057,14 @@ func TestRunCommandDiscoversSkillsWithExplicitProfile(t *testing.T) {
 	writeFile(t, aigFixture, `{"version":"2.1.0","runs":[{"results":[]}]}`)
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{
-			"--profile", "clawhub",
-			"--scanner-result", "skillspector=" + skillSpectorFixture,
-			"--scanner-result", "aig=" + aigFixture,
-			"--judge", stubJudgeCommand(),
-			"--sandbox", "off",
-			"--json",
-		}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t,
+		"--profile", "clawhub",
+		"--scanner-result", "skillspector="+skillSpectorFixture,
+		"--scanner-result", "aig="+aigFixture,
+		"--judge", stubJudgeCommand(),
+		"--sandbox", "off",
+		"--json",
+	)
 
 	assertDiscoveredSkillBatch(t, stdout, "clawhub", "skillspector", "aig")
 }
@@ -1190,11 +1090,7 @@ profiles:
 `)
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{target, "--profile", "local", "--discover-config"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, target, "--profile", "local", "--discover-config")
 
 	var artifact struct {
 		Profile  string                 `json:"profile"`
@@ -1328,11 +1224,7 @@ profiles:
 `)
 	t.Chdir(dir)
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{"--config", config, "--json"}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t, "--config", config, "--json")
 
 	var artifact struct {
 		SchemaVersion string `json:"schemaVersion"`
@@ -1372,14 +1264,10 @@ func TestRunCommandProfilePlusOverride(t *testing.T) {
 	target := filepath.Join(dir, "skill")
 	writeSkill(t, target, "# Override\n")
 
-	stdout := captureStdout(t, func() {
-		if err := run([]string{
-			target, "--profile", "clawhub", "--scanner", "skillspector",
-			"--judge", stubJudgeCommand(), "--sandbox", "off", "--json",
-		}, []string{}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	stdout := commandStdout(t,
+		target, "--profile", "clawhub", "--scanner", "skillspector",
+		"--judge", stubJudgeCommand(), "--sandbox", "off", "--json",
+	)
 
 	var artifact struct {
 		Profile  string                 `json:"profile"`
@@ -1451,6 +1339,25 @@ func writeFile(t *testing.T, path string, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func commandStdout(t *testing.T, args ...string) string {
+	t.Helper()
+	var err error
+	stdout := captureStdout(t, func() { err = run(args, []string{}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stdout
+}
+
+func assertOutputContains(t *testing.T, stdout string, fragments ...string) {
+	t.Helper()
+	for _, fragment := range fragments {
+		if !strings.Contains(stdout, fragment) {
+			t.Fatalf("stdout missing %q:\n%s", fragment, stdout)
+		}
 	}
 }
 
