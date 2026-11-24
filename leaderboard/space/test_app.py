@@ -1,8 +1,12 @@
+import json
+import os
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app import DEFAULT_EXPECTED, score_loose_non_clean, validate_predictions_file
+from app import DEFAULT_EXPECTED, DEFAULT_FIXTURE, score_loose_non_clean, validate_predictions_file
 
 
 class UploadPreviewTests(unittest.TestCase):
@@ -29,3 +33,27 @@ class ScorePreviewTests(unittest.TestCase):
         self.assertEqual(metrics["precision"], 0.0313)
         self.assertEqual(metrics["recall"], 1)
         self.assertEqual(metrics["f1"], 0.0607)
+
+
+class SmokeCommandTests(unittest.TestCase):
+    def test_upload_exit_status_distinguishes_scored_and_rejected_predictions(self):
+        def preview(upload):
+            return subprocess.run(
+                [sys.executable, Path(__file__).with_name("app.py"), "--smoke",
+                 "--results", DEFAULT_FIXTURE, "--validate-upload", upload],
+                env={**os.environ, "SECURITY_SIGNALS_EXPECTED_PATH": str(DEFAULT_EXPECTED)},
+                capture_output=True, text=True,
+            )
+
+        scored = preview(DEFAULT_EXPECTED)
+        self.assertEqual(scored.returncode, 0, scored.stderr)
+        self.assertEqual(json.loads(scored.stdout.splitlines()[-1])["f1"], 1.0)
+
+        with TemporaryDirectory() as directory:
+            upload = Path(directory) / "predictions.jsonl"
+            rows = DEFAULT_EXPECTED.read_text(encoding="utf-8").splitlines()
+            upload.write_text("\n".join(rows[:-1]) + "\n", encoding="utf-8")
+            rejected = preview(upload)
+
+        self.assertEqual(rejected.returncode, 1, rejected.stdout)
+        self.assertIn("missing prediction id: " + json.loads(rows[-1])["id"], rejected.stdout)

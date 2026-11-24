@@ -5,6 +5,7 @@
 - Keep scanner provider and model defaults local to each benchmark when runs share an environment.
 
 - Match the official submission validator's four-decimal rounding in leaderboard score previews.
+- Return exit status 1 when the Security Signals Space smoke command rejects an upload.
 - Show the offending line when a leaderboard preview upload contains a JSON array or scalar instead of a prediction object.
 - Refuse to upload an empty Security Signals results dataset when the submissions directory is empty or missing.
 - Preserve the last complete Security Signals results payload if submission discovery or scoring fails.

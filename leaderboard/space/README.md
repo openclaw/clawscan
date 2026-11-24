@@ -23,6 +23,10 @@ Local smoke:
 python3 leaderboard/space/app.py --smoke
 ```
 
+Add `--validate-upload <predictions.jsonl>` to the smoke command to check an
+upload. It prints the score and exits 0 on success, or prints the validation
+errors and exits 1 if the upload is rejected.
+
 Run locally with Gradio installed:
 
 ```bash
