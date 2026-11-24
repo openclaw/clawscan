@@ -251,7 +251,7 @@ def build_app():
     return app
 
 
-def smoke(path: str | None = None, upload_path: str | None = None) -> None:
+def smoke(path: str | None = None, upload_path: str | None = None) -> int:
     rows = leaderboard_rows(load_results(path))
     print(f"loaded_rows={len(rows)}")
     if rows:
@@ -259,8 +259,10 @@ def smoke(path: str | None = None, upload_path: str | None = None) -> None:
     if upload_path:
         message, preview = validate_predictions_file(upload_path)
         print(message)
-        if preview:
-            print(json.dumps(preview[0], sort_keys=True))
+        if not preview:
+            return 1
+        print(json.dumps(preview[0], sort_keys=True))
+    return 0
 
 
 if __name__ == "__main__":
@@ -270,6 +272,6 @@ if __name__ == "__main__":
     parser.add_argument("--validate-upload", default="")
     args = parser.parse_args()
     if args.smoke:
-        smoke(args.results or None, args.validate_upload or None)
+        raise SystemExit(smoke(args.results or None, args.validate_upload or None))
     else:
         build_app().launch(css=APP_CSS)
