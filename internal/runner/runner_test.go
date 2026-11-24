@@ -148,7 +148,7 @@ func TestParseSandboxMountFlag(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.value, func(t *testing.T) {
-			got, err := parseSandboxMountFlag(test.value)
+			got, err := ParseSandboxMountFlag(test.value)
 			if err != nil {
 				t.Fatal(err)
 			}

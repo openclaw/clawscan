@@ -648,11 +648,11 @@ func parseCLIIntent(args []string) (cliIntent, error) {
 			if err != nil {
 				return cliIntent{}, err
 			}
-			mount, err := parseSandboxMountFlag(value)
+			mount, err := runner.ParseSandboxMountFlag(value)
 			if err != nil {
 				return cliIntent{}, err
 			}
-			intent.sandboxMounts = append(intent.sandboxMounts, mount)
+			intent.sandboxMounts = append(intent.sandboxMounts, SandboxMount(mount))
 			i = next
 		case "--limit":
 			value, next, err := readValue(args, i, arg)
@@ -816,20 +816,6 @@ func buildRunnerArgs(intent cliIntent, selected resolvedProfile, profileName str
 		return nil, nil, err
 	}
 	return args, selected.files, nil
-}
-
-func parseSandboxMountFlag(value string) (SandboxMount, error) {
-	if i := strings.LastIndexByte(value, ':'); i >= 0 {
-		suffix := value[i+1:]
-		if suffix == "rw" || suffix == "write" {
-			path := value[:i]
-			if strings.TrimSpace(path) == "" {
-				return SandboxMount{}, fmt.Errorf("--sandbox-mount requires a path before %q", ":"+suffix)
-			}
-			return SandboxMount{Path: path, Write: true}, nil
-		}
-	}
-	return SandboxMount{Path: value, Write: false}, nil
 }
 
 func appendSandboxMountArgs(args []string, mounts []SandboxMount) ([]string, error) {

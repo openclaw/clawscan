@@ -418,7 +418,7 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 			if err != nil {
 				return Options{}, err
 			}
-			mount, err := parseSandboxMountFlag(value)
+			mount, err := ParseSandboxMountFlag(value)
 			if err != nil {
 				return Options{}, err
 			}
@@ -449,9 +449,9 @@ func ParseArgsWithRegistry(args []string, registry ScannerRegistry) (Options, er
 	return opts, nil
 }
 
-// parseSandboxMountFlag parses a --sandbox-mount value: "<path>" is read-only,
+// ParseSandboxMountFlag parses a --sandbox-mount value: "<path>" is read-only,
 // "<path>:rw" or "<path>:write" is writable.
-func parseSandboxMountFlag(value string) (SandboxMount, error) {
+func ParseSandboxMountFlag(value string) (SandboxMount, error) {
 	if i := strings.LastIndexByte(value, ':'); i >= 0 {
 		suffix := value[i+1:]
 		if suffix == "rw" || suffix == "write" {
