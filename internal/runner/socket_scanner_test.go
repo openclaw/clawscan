@@ -32,17 +32,10 @@ func TestRunExecutesSocketScannerWithPreciseSkillTarget(t *testing.T) {
 	}
 	const socketJSON = `{"id":"scan_123","status":"completed"}`
 	runner := &stdoutCommandRunner{stdout: socketJSON}
-	opts, err := ParseArgs([]string{target, "--scanner", "socket"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "socket"}, RunContext{
 		Env:           map[string]string{"SOCKET_CLI_API_TOKEN": "test-socket-secret"},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["socket"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)

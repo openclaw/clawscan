@@ -13,17 +13,10 @@ func TestCiscoScannerCompletesWithJSONOutputFile(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	const ciscoJSON = `{"scanner":"cisco","findings":[]}`
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: ciscoJSON}
-	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "cisco"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["cisco"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -79,11 +72,7 @@ func TestCiscoScannerUsesResultDirAsDockerSandboxCWD(t *testing.T) {
 func TestCiscoScannerEnablesUpstreamAnalyzersFromEnv(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: `{"scanner":"cisco","findings":[]}`}
-	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "cisco"}, RunContext{
 		Env: map[string]string{
 			"SKILL_SCANNER_LLM_API_KEY":           "present",
 			"SKILL_SCANNER_META_LLM_MODEL":        "present",
@@ -96,9 +85,6 @@ func TestCiscoScannerEnablesUpstreamAnalyzersFromEnv(t *testing.T) {
 		},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if artifact.Scanners["cisco"].Status != "completed" {
 		t.Fatalf("scanner = %#v", artifact.Scanners["cisco"])
 	}
@@ -119,17 +105,10 @@ func TestCiscoScannerOutputFileIsPreservedInArtifactBundle(t *testing.T) {
 	out := filepath.Join(dir, "clawscan-results", "artifact.json")
 	const ciscoJSON = `{"scanner":"cisco","findings":[{"id":"network"}]}`
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: ciscoJSON}
-	opts, err := ParseArgs([]string{target, "--scanner", "cisco", "--output", out})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "cisco", "--output", out}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	outputPath := artifact.Scanners["cisco"].OutputPath
 	if outputPath != "skill/cisco.json" {
@@ -155,17 +134,10 @@ func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
 		err:        errors.New("exit status 1"),
 		exitCode:   &exitCode,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "cisco"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["cisco"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -184,17 +156,10 @@ func TestCiscoScannerCompletesNonZeroExitWithJSONOutputFile(t *testing.T) {
 func TestCiscoScannerFailsMissingOutputFile(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output"}
-	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "cisco"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["cisco"]
 	if result.Status != "failed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -210,17 +175,10 @@ func TestCiscoScannerFailsMissingOutputFile(t *testing.T) {
 func TestCiscoScannerFailsInvalidJSONOutputFile(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: "not json"}
-	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "cisco"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["cisco"]
 	if result.Status != "failed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -236,17 +194,10 @@ func TestCiscoScannerFailsInvalidJSONOutputFile(t *testing.T) {
 func TestRunDispatchesCiscoScannerInsteadOfGenericSkipped(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	runner := &reportFileCommandRunner{outputFlag: "--output", output: `{"ok":true}`}
-	opts, err := ParseArgs([]string{target, "--scanner", "cisco"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "cisco"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["cisco"]
 	if result.Status == "skipped" {
 		t.Fatalf("generic skipped result leaked through: %#v", result)

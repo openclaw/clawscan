@@ -65,17 +65,10 @@ func TestValidateRequirementsRejectsAIGWithoutAPIKey(t *testing.T) {
 func TestAIGScannerRunsLocalCLIAndPreservesSARIF(t *testing.T) {
 	target := createAIGTestSkill(t)
 	commandRunner := &reportFileCommandRunner{outputFlag: "-o", output: aigSARIF}
-	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "aig", "--sandbox", "off"}, RunContext{
 		Env:           map[string]string{"LLM_API_KEY": "secret-aig-key"},
 		CommandRunner: commandRunner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	result := artifact.Scanners["aig"]
 	if result.Status != "completed" {
@@ -112,17 +105,10 @@ func TestAIGScannerRunsLocalCLIAndPreservesSARIF(t *testing.T) {
 
 func TestAIGScannerRecordsOpenAIKeyFallback(t *testing.T) {
 	target := createAIGTestSkill(t)
-	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "aig", "--sandbox", "off"}, RunContext{
 		Env:           map[string]string{"OPENAI_API_KEY": "secret-openai-key"},
 		CommandRunner: &reportFileCommandRunner{outputFlag: "-o", output: aigSARIF},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if got := artifact.Env["OPENAI_API_KEY"]; got != "present" {
 		t.Fatalf("OPENAI_API_KEY presence = %q", got)
 	}
@@ -134,11 +120,7 @@ func TestAIGScannerRecordsOpenAIKeyFallback(t *testing.T) {
 func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 	target := createAIGTestSkill(t)
 	hostRunner := &aigDockerRecordingCommandRunner{output: aigSARIF}
-	opts, err := ParseArgs([]string{target, "--scanner", "aig"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "aig"}, RunContext{
 		Env: map[string]string{
 			"LLM_API_KEY":      "present",
 			"DEFAULT_MODEL":    "gpt-6.1-sol",
@@ -148,9 +130,6 @@ func TestAIGScannerDockerRunMountsTargetAndOutputDirectory(t *testing.T) {
 		HostCommandRunner:  hostRunner,
 		DockerAvailability: func() error { return nil },
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if artifact.Scanners["aig"].Status != "completed" {
 		t.Fatalf("scanner = %#v", artifact.Scanners["aig"])
 	}
@@ -189,17 +168,10 @@ func TestAIGScannerCompletesNonZeroExitWithValidSARIF(t *testing.T) {
 		err:        errors.New("exit status 1"),
 		exitCode:   &exitCode,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "aig", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "aig", "--sandbox", "off"}, RunContext{
 		Env:           map[string]string{"LLM_API_KEY": "secret-aig-key"},
 		CommandRunner: commandRunner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["aig"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)

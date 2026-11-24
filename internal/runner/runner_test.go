@@ -1611,14 +1611,7 @@ func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 	dir := t.TempDir()
 	target := makeTestSkillDir(t, dir)
 	out := filepath.Join(dir, "run.json")
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off", "--output", out})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{Env: map[string]string{"OPENAI_API_KEY": "present"}, ScannerRunner: skippedScannerRunner{}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector", "--sandbox", "off", "--output", out}, RunContext{Env: map[string]string{"OPENAI_API_KEY": "present"}, ScannerRunner: skippedScannerRunner{}})
 	if artifact.SchemaVersion != "clawscan-run-v1" {
 		t.Fatalf("schema = %q", artifact.SchemaVersion)
 	}
@@ -1646,14 +1639,7 @@ func TestRunWritesScannerOnlyArtifact(t *testing.T) {
 
 func TestRunIncludesDurationMsForScannerResults(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{Env: map[string]string{}, ScannerRunner: skippedScannerRunner{}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector", "--sandbox", "off"}, RunContext{Env: map[string]string{}, ScannerRunner: skippedScannerRunner{}})
 
 	assertScannerDurationJSON(t, artifact, "skillspector")
 }
@@ -2375,18 +2361,11 @@ func TestRunExecutesSkillSpectorScanner(t *testing.T) {
 	runner := &recordingCommandRunner{
 		writeOutput: `{"status":"clean","findings":[]}`,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector", "--sandbox", "off"}, RunContext{
 		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["skillspector"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
@@ -2494,11 +2473,7 @@ func TestRunUsesDockerSandboxForCommandBackedScannersByDefault(t *testing.T) {
 	host := &recordingCommandRunner{
 		writeOutput: `{"status":"clean","findings":[]}`,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector"}, RunContext{
 		Env: map[string]string{
 			"OPENAI_API_KEY":            "secret-openai",
 			"SKILLSPECTOR_PROVIDER":     "openai",
@@ -2507,9 +2482,6 @@ func TestRunUsesDockerSandboxForCommandBackedScannersByDefault(t *testing.T) {
 		HostCommandRunner:  host,
 		DockerAvailability: func() error { return nil },
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if artifact.Sandbox.Mode != "docker" {
 		t.Fatalf("sandbox = %#v", artifact.Sandbox)
 	}
@@ -2550,14 +2522,7 @@ func TestRunWritesScannerOutputFilesBesideExplicitArtifact(t *testing.T) {
 	dir := t.TempDir()
 	target := makeTestSkillDir(t, dir)
 	out := filepath.Join(dir, "run.json")
-	opts, err := ParseArgs([]string{target, "--scanner", fixtureScannerID, "--output", out})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{Env: map[string]string{}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	artifact := runTestScan(t, []string{target, "--scanner", fixtureScannerID, "--output", out}, RunContext{Env: map[string]string{}})
 	result := artifact.Scanners[fixtureScannerID]
 	if result.OutputPath != "run/skill/fixture.json" {
 		t.Fatalf("output path = %q", result.OutputPath)
@@ -2653,18 +2618,11 @@ func TestRunUsesSkillSpectorNoLLMWhenProviderKeyMissing(t *testing.T) {
 	runner := &recordingCommandRunner{
 		writeOutput: `{"status":"clean","findings":[]}`,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector"}, RunContext{
 		Env:                 map[string]string{},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if artifact.Scanners["skillspector"].Status != "completed" {
 		t.Fatalf("scanner = %#v", artifact.Scanners["skillspector"])
 	}
@@ -2682,18 +2640,11 @@ func TestRunUsesSkillSpectorForPluginDirectory(t *testing.T) {
 	commandRunner := &recordingCommandRunner{
 		writeOutput: `{"status":"clean","findings":[]}`,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector", "--sandbox", "off"}, RunContext{
 		Env:                 map[string]string{},
 		CommandRunner:       commandRunner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result := artifact.Scanners["skillspector"]; result.Status != "completed" {
 		t.Fatalf("scanner = %#v", result)
 	}
@@ -2769,11 +2720,7 @@ printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
 	}
 	t.Setenv("CLAWSCAN_ENV_PROBE", "process")
 	t.Setenv("CLAWSCAN_UNRELATED_SECRET", "process-secret")
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector", "--sandbox", "off"}, RunContext{
 		Env: map[string]string{
 			"CLAWSCAN_ENV_PROBE":         "context",
 			"CLAWSCAN_ENV_PROBE_FILE":    probePath,
@@ -2783,9 +2730,6 @@ printf '%s' "$CLAWSCAN_UNRELATED_SECRET" > "$CLAWSCAN_LEAK_FILE"
 		},
 		SkillSpectorCommand: []string{script},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if artifact.Scanners["skillspector"].Status != "completed" {
 		t.Fatalf("scanner = %#v", artifact.Scanners["skillspector"])
 	}
@@ -2817,18 +2761,11 @@ func TestRunMarksInvalidSkillSpectorJSONAsFailed(t *testing.T) {
 	runner := &recordingCommandRunner{
 		writeOutput: `{"status":`,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector"}, RunContext{
 		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["skillspector"]
 	if result.Status != "failed" {
 		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
@@ -2844,18 +2781,11 @@ func TestRunMarksInvalidSkillSpectorJSONAsFailed(t *testing.T) {
 func TestRunMarksMissingSkillSpectorOutputAsFailed(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	runner := &noOutputCommandRunner{}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector"}, RunContext{
 		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["skillspector"]
 	if result.Status != "failed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -2871,18 +2801,11 @@ func TestRunMarksMissingSkillSpectorOutputAsFailed(t *testing.T) {
 func TestRunRecordsDefaultSkillSpectorProviderEnv(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	runner := &recordingCommandRunner{writeOutput: `{"status":"clean","findings":[]}`}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector"}, RunContext{
 		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, ok := artifact.Env["OPENAI_API_KEY"]; ok {
 		t.Fatalf("env = %#v", artifact.Env)
 	}
@@ -2999,17 +2922,10 @@ func TestRunExecutesAgentVerusScanner(t *testing.T) {
 	runner := &recordingCommandRunner{
 		stdout: `{"overall":91,"badge":"certified","findings":[]}`,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "agentverus"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "agentverus"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["agentverus"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
@@ -3128,17 +3044,10 @@ func TestAgentVerusReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 		stdout: `{"overall":42,"badge":"warning","findings":[{"id":"ASST-09"}]}`,
 		err:    errCommandFailed, exitCode: &exitCode,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "agentverus"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "agentverus"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["agentverus"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -3157,17 +3066,10 @@ func TestAgentVerusReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 func TestAgentVerusInvalidJSONIsFailedScannerResult(t *testing.T) {
 	target := makeTestSkillDir(t, t.TempDir())
 	runner := &recordingCommandRunner{stdout: "not json"}
-	opts, err := ParseArgs([]string{target, "--scanner", "agentverus"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "agentverus"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["agentverus"]
 	if result.Status != "failed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -3209,18 +3111,11 @@ func TestSkillSpectorReportWithNonZeroExitIsCompletedEvidence(t *testing.T) {
 		writeOutput: `{"risk_assessment":{"severity":"HIGH"},"issues":[{"id":"x"}]}`,
 		err:         errCommandFailed, exitCode: &exitCode,
 	}
-	opts, err := ParseArgs([]string{target, "--scanner", "skillspector"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "skillspector"}, RunContext{
 		Env:                 map[string]string{"OPENAI_API_KEY": "present"},
 		CommandRunner:       runner,
 		SkillSpectorCommand: []string{"skillspector"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["skillspector"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
@@ -4858,6 +4753,19 @@ func assertScannerDurationJSON(t *testing.T, artifact Artifact, scanner string) 
 	if number < 0 || number != float64(int64(number)) {
 		t.Fatalf("scanner %s durationMs = %v, want non-negative integer", scanner, duration)
 	}
+}
+
+func runTestScan(t *testing.T, args []string, ctx RunContext) Artifact {
+	t.Helper()
+	opts, err := ParseArgs(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Run(opts, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
 }
 
 func makeTestSkillDir(t *testing.T, parent string) string {
