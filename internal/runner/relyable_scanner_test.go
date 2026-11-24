@@ -17,17 +17,10 @@ func TestRunExecutesRelyableScannerWithoutHostExecOutsideSandbox(t *testing.T) {
 	}
 	const relyableJSON = `{"schemaVersion":"relyable-scan-v1","axis":"functional-rederivation","skills":[]}`
 	runner := &stdoutCommandRunner{stdout: relyableJSON}
-	opts, err := ParseArgs([]string{target, "--scanner", "relyable", "--sandbox", "off"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "relyable", "--sandbox", "off"}, RunContext{
 		Env:           map[string]string{},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["relyable"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)

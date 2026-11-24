@@ -17,17 +17,10 @@ func TestRunExecutesSnykScannerWithPreciseSkillTarget(t *testing.T) {
 	}
 	const snykJSON = `{"ok":true,"issues":[]}`
 	runner := &stdoutCommandRunner{stdout: snykJSON}
-	opts, err := ParseArgs([]string{target, "--scanner", "snyk"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Run(opts, RunContext{
+	artifact := runTestScan(t, []string{target, "--scanner", "snyk"}, RunContext{
 		Env:           map[string]string{"SNYK_TOKEN": "test-snyk-secret"},
 		CommandRunner: runner,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	result := artifact.Scanners["snyk"]
 	if result.Status != "completed" {
 		t.Fatalf("status = %q error = %q", result.Status, result.Error)
