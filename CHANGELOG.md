@@ -6,6 +6,8 @@
 
 **Highlights:** Update plugin scanning and evidence-only judging. Preserve scanner evidence and benchmark state. Include runtime fixes prepared for the unpublished 0.3.1 milestone.
 
+- Fix runtime image publication on Docker's containerd image store while binding smoke-tested image identities to matching platform manifests.
+
 - Keep scanner provider and model defaults local to each benchmark when runs share an environment.
 
 - Match the official submission validator's four-decimal rounding in leaderboard score previews.
