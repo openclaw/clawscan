@@ -197,7 +197,16 @@ def qualify(candidate, current, output, manifest):
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     for name in ["runtime", "home", "outputs", "tmp", "work"]:
         (output / name).mkdir()
-    (output / "inputs.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    constraints = {}
+    test_tools = {}
+    for scanner in ["skillspector", "aig"]:
+        path = current / "scripts/runtime-image" / f"{scanner}-test-requirements.txt"
+        data = path.read_bytes()
+        constraints[scanner] = path
+        test_tools[scanner] = {"sha256": digest(data), "requirements": data.decode()}
+    (output / "inputs.json").write_text(
+        json.dumps({**manifest, "test_tool_constraints": test_tools}, indent=2) + "\n"
+    )
     receipts = []
 
     def run(name, command, env, timeout=None):
@@ -253,7 +262,13 @@ def qualify(candidate, current, output, manifest):
     env["CLAWSCAN_SOURCE_DIR"] = str(candidate)
     installer = str(worker / "scripts/security/install-clawscan-scanners.sh")
     for scanner in ["skillspector", "aig"]:
-        run("install-" + scanner, ["/bin/sh", installer, scanner], env)
+        # Keep the historical installer exact while replaying its observed test
+        # dependencies, including the distinct scanner-owned packaging versions.
+        run(
+            "install-" + scanner,
+            ["/bin/sh", installer, scanner],
+            {**env, "UV_CONSTRAINT": str(constraints[scanner])},
+        )
     interpreters = {
         "skillspector": (output / "runtime/clawscan-scanner-bin/skillspector")
         .resolve()

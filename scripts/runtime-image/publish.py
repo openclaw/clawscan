@@ -125,8 +125,12 @@ def registry_proof(proof):
     reference = image_name() + "@" + digest(proof["published_digest"])
     index = inspect_raw(reference, proof["published_digest"])
     image = platform_descriptors(index, [proof["arch"]])[0]
+    require(image["digest"] == proof["build_digest"], "published manifest differs from tested build")
     manifest = inspect_raw(image_name() + "@" + image["digest"], image["digest"])
-    require(manifest["config"]["digest"] == proof["loaded_image_id"], "published config differs from tested config")
+    # Docker's classic store reports the config ID; its containerd store reports
+    # the target manifest ID. Both must identify this exact smoke-tested build.
+    config_digest = digest(manifest["config"]["digest"])
+    require(proof["loaded_image_id"] in {image["digest"], config_digest}, "published image differs from tested image")
     config = json.loads(command("docker", "buildx", "imagetools", "inspect", reference, "--format", "{{json .Image}}"))
     require(config["architecture"] == proof["arch"] and config["os"] == "linux", "wrong registry architecture")
     require(config["config"]["Labels"].get(REVISION) == proof["source"], "wrong registry revision")

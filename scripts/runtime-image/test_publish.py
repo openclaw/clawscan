@@ -57,7 +57,7 @@ class RegistryStub:
             self.proofs.append({"source": SOURCE, "tree": "b" * 40, "runtime_tree": "c" * 40,
                                 "run_id": "123", "run_attempt": "1", "arch": arch,
                                 "hardware": {"amd64": "x86_64", "arm64": "aarch64"}[arch],
-                                "build_digest": "sha256:" + "d" * 64, "loaded_image_id": config_id,
+                                "build_digest": manifest_id, "loaded_image_id": config_id,
                                 "smoke": "passed", "published_digest": index_id})
         self.loaded = {"Id": self.proofs[0]["loaded_image_id"], "Architecture": "amd64", "Os": "linux",
                        "Config": {"Labels": {publish.REVISION: SOURCE}}}
@@ -122,7 +122,8 @@ class PublicationTests(unittest.TestCase):
         environment = {"GITHUB_SHA": SOURCE, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
                        "GITHUB_EVENT_NAME": "push", "GITHUB_REPOSITORY_OWNER": "fixture", "GITHUB_REPOSITORY": "fixture/repo",
                        "GITHUB_REF": "refs/heads/main", "GITHUB_STEP_SUMMARY": str(Path.cwd() / "summary"),
-                       "BUILD_RESULT": "success", "EXPECTED_ARCH": "amd64", "BUILD_DIGEST": "sha256:" + "d" * 64,
+                       "BUILD_RESULT": "success", "EXPECTED_ARCH": "amd64",
+                       "BUILD_DIGEST": self.registry.proofs[0]["build_digest"],
                        "IMAGE_TAGS": IMAGE + ":main\n" + IMAGE + ":latest"}
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, environment, clear=True).start()
@@ -141,15 +142,55 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.registry.tag_writes(), [])
 
     def test_success_merges_exact_digests_and_retains_all_provenance(self):
-        publish.merge()
-        self.assertEqual(len(self.registry.tag_writes()), 1)
-        call = self.registry.tag_writes()[0]
-        references = [value for value in call if value.startswith(IMAGE + "@")]
-        self.assertEqual(references, [IMAGE + "@" + proof["published_digest"] for proof in self.registry.proofs])
-        self.assertEqual([call[index + 1] for index, value in enumerate(call) if value == "--tag"], [IMAGE + ":main", IMAGE + ":latest"])
-        result = json.loads((publish.ROOT / "manifest.json").read_text())
-        self.assertEqual(len(result["manifest"]["manifests"]), 4)
-        self.assertEqual(result["source"], SOURCE)
+        original = copy.deepcopy(self.registry.proofs)
+        for manifest_ids in ((), (0,), (1,), (0, 1)):
+            with self.subTest(manifest_ids=manifest_ids):
+                self.registry.proofs = copy.deepcopy(original)
+                for index in manifest_ids:
+                    self.registry.proofs[index]["loaded_image_id"] = self.registry.proofs[index]["build_digest"]
+                self.write_proofs()
+                self.registry.calls.clear()
+                publish.merge()
+                self.assertEqual(len(self.registry.tag_writes()), 1)
+                call = self.registry.tag_writes()[0]
+                references = [value for value in call if value.startswith(IMAGE + "@")]
+                self.assertEqual(references, [IMAGE + "@" + proof["published_digest"] for proof in self.registry.proofs])
+                self.assertEqual([call[index + 1] for index, value in enumerate(call) if value == "--tag"], [IMAGE + ":main", IMAGE + ":latest"])
+                result = json.loads((publish.ROOT / "manifest.json").read_text())
+                self.assertEqual(len(result["manifest"]["manifests"]), 4)
+                self.assertEqual(result["source"], SOURCE)
+
+    def test_different_build_manifest_blocks_tags_for_both_image_stores(self):
+        proof = self.registry.proofs[0]
+        for loaded_id in (proof["loaded_image_id"], proof["build_digest"]):
+            with self.subTest(loaded_id=loaded_id):
+                proof["loaded_image_id"] = loaded_id
+                proof["build_digest"] = "sha256:" + "f" * 64
+                self.write_proofs()
+                self.registry.calls.clear()
+                self.assert_no_publication()
+
+    def test_changed_published_manifest_with_same_config_blocks_tags(self):
+        proof = self.registry.proofs[0]
+        reference = IMAGE + "@" + proof["published_digest"]
+        index = copy.deepcopy(self.registry.blobs[reference])
+        manifest = copy.deepcopy(self.registry.blobs[IMAGE + "@" + proof["build_digest"]])
+        manifest["layers"] = [{"digest": "sha256:" + "f" * 64}]
+        manifest_id = self.registry.blob(manifest)
+        index["manifests"][0]["digest"] = manifest_id
+        index["manifests"][1]["annotations"]["vnd.docker.reference.digest"] = manifest_id
+        proof["published_digest"] = self.registry.blob(index)
+        self.registry.configs[IMAGE + "@" + proof["published_digest"]] = self.registry.configs[reference]
+        self.write_proofs()
+        self.assert_no_publication()
+
+    def test_index_and_other_platform_identities_block_tags(self):
+        proof, other = self.registry.proofs
+        for loaded_id in (proof["published_digest"], other["build_digest"], other["loaded_image_id"]):
+            with self.subTest(loaded_id=loaded_id):
+                proof["loaded_image_id"] = loaded_id
+                self.write_proofs()
+                self.assert_no_publication()
 
     def test_failed_cancelled_skipped_or_unknown_platform_blocks_tags(self):
         for result in ("failure", "cancelled", "skipped", "", "unknown"):
@@ -243,12 +284,21 @@ class PublicationTests(unittest.TestCase):
             publish.merge()
         self.assertFalse((publish.ROOT / "manifest.json").exists())
 
-    def test_network_denied_smoke_uses_actual_installed_commands_and_config_id(self):
-        publish.verify()
-        call = next(call for call in self.registry.calls if call[:2] == ["docker", "run"])
-        self.assertEqual(call, ["docker", "run", "--rm", "--network", "none", self.registry.loaded["Id"],
-                                "/bin/sh", "-ec", "skillspector --help\naig-skill-scan --help\naig-mcp-scan --help\ncodex --version\nclawscan-decisions-judge --help\n"])
-        self.assertEqual(json.loads(publish.proof_path().read_text())["smoke"], "passed")
+    def test_network_denied_smoke_and_export_use_the_exact_loaded_identity(self):
+        proof = self.registry.proofs[0]
+        for loaded_id in (proof["loaded_image_id"], proof["build_digest"]):
+            with self.subTest(loaded_id=loaded_id), patch.dict(os.environ, {"PUBLISHED_DIGEST": proof["published_digest"]}):
+                self.registry.loaded["Id"] = loaded_id
+                self.registry.calls.clear()
+                publish.verify()
+                call = next(call for call in self.registry.calls if call[:2] == ["docker", "run"])
+                self.assertEqual(call, ["docker", "run", "--rm", "--network", "none", loaded_id,
+                                        "/bin/sh", "-ec", "skillspector --help\naig-skill-scan --help\naig-mcp-scan --help\ncodex --version\nclawscan-decisions-judge --help\n"])
+                publish.published()
+                saved = json.loads(publish.proof_path().read_text())
+                self.assertEqual(saved["smoke"], "passed")
+                self.assertEqual(saved["loaded_image_id"], loaded_id)
+                self.assertEqual(saved["published_digest"], proof["published_digest"])
 
     def test_failed_smoke_or_wrong_loaded_identity_never_emits_proof(self):
         for change in ("smoke", "arch", "source", "digest"):
