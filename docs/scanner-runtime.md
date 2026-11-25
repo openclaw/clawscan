@@ -377,6 +377,22 @@ pinned, patched scanner sources into its host environment and execute the SDK
 contract tests there. In that mode it does not depend on a runtime-image rollout;
 it must not silently fall back to stock pip/uvx scanner packages.
 
+## Runtime image contracts
+
+`scripts/runtime-image/publication-contract.json` selects the image's consumer
+contract. `legacy` preserves the existing publication tags. A producer introducing
+complete bundled reports must select `complete-bundles-v1` in the same reviewed
+change. That mode publishes only the `:complete-bundles-v1` channel, leaving
+`:latest`, `:main` and existing version aliases on their compatible images.
+The public CLI default remains `:latest`.
+
+After publication, a reader that supports complete bundles can select the new
+channel with `--sandbox-image`, `CLAWSCAN_SANDBOX_IMAGE` or a profile's
+`sandbox.image`. Deployments should pin the complete index's immutable
+`image@sha256:...` reference from the verified `manifest.json` receipt rather
+than follow the mutable channel. Both contracts retain the same native-platform,
+SDK, smoke, provenance and complete-manifest checks; reports are not rewritten.
+
 The Markdown shell fallback can use the existing bounded canonical code-span
 proof for container prose. It masks only proven delimiter bytes from a complete
 document, retains all command contents and expansions, and preserves the existing

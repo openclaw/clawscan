@@ -119,6 +119,8 @@ class PublicationTests(unittest.TestCase):
         os.chdir(self.directory.name)
         self.addCleanup(os.chdir, self.previous)
         self.registry = RegistryStub()
+        self.contract_path = Path.cwd() / "publication-contract.json"
+        self.contract_path.write_text('{"contract": "legacy"}\n')
         environment = {"GITHUB_SHA": SOURCE, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
                        "GITHUB_EVENT_NAME": "push", "GITHUB_REPOSITORY_OWNER": "fixture", "GITHUB_REPOSITORY": "fixture/repo",
                        "GITHUB_REF": "refs/heads/main", "GITHUB_STEP_SUMMARY": str(Path.cwd() / "summary"),
@@ -127,6 +129,7 @@ class PublicationTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, environment, clear=True).start()
         patch.object(publish, "command", side_effect=self.registry.command).start()
+        patch.object(publish, "CONTRACT_PATH", self.contract_path, create=True).start()
         patch.object(publish.platform, "system", return_value="Linux").start()
         patch.object(publish.platform, "machine", return_value="x86_64").start()
         self.write_proofs()
@@ -150,6 +153,49 @@ class PublicationTests(unittest.TestCase):
         result = json.loads((publish.ROOT / "manifest.json").read_text())
         self.assertEqual(len(result["manifest"]["manifests"]), 4)
         self.assertEqual(result["source"], SOURCE)
+
+    def test_complete_bundle_contract_preserves_legacy_aliases(self):
+        self.contract_path.write_text('{"contract": "complete-bundles-v1"}\n')
+        aliases = [IMAGE + tag for tag in (":latest", ":main", ":0.3.1", ":0.3")]
+        for alias in aliases:
+            self.registry.blobs[alias] = {"legacy": alias}
+        before = {alias: copy.deepcopy(self.registry.blobs[alias]) for alias in aliases}
+        with patch.dict(os.environ, {"IMAGE_TAGS": "\n".join(aliases)}):
+            publish.merge()
+        writes = self.registry.tag_writes()
+        self.assertEqual(len(writes), 1)
+        call = writes[0]
+        self.assertEqual([call[index + 1] for index, value in enumerate(call) if value == "--tag"],
+                         [IMAGE + ":complete-bundles-v1"])
+        self.assertEqual({alias: self.registry.blobs[alias] for alias in aliases}, before)
+        result = json.loads((publish.ROOT / "manifest.json").read_text())
+        self.assertEqual(result["tags"], [IMAGE + ":complete-bundles-v1"])
+        self.assertEqual(len(result["manifest"]["manifests"]), 4)
+
+    def test_unsupported_or_missing_publication_contract_never_writes_tags(self):
+        for content in (None, "not-json", "{}", '{"contract":"unknown"}',
+                        '{"contract":"legacy","tag":"latest"}'):
+            with self.subTest(content=content):
+                if content is None:
+                    self.contract_path.unlink()
+                else:
+                    self.contract_path.write_text(content)
+                self.assert_no_publication((ValueError, FileNotFoundError))
+
+    def test_complete_bundle_channel_still_requires_both_platform_proofs(self):
+        self.contract_path.write_text('{"contract": "complete-bundles-v1"}\n')
+        (publish.ROOT / "runtime-image-proof-linux-arm64" / "identity.json").unlink()
+        self.assert_no_publication()
+
+    def test_manual_and_release_contract_publication_does_not_promote_legacy_tags(self):
+        self.contract_path.write_text('{"contract": "complete-bundles-v1"}\n')
+        for environment in ({"GITHUB_EVENT_NAME": "workflow_dispatch"},
+                            {"GITHUB_REF": "refs/tags/v0.3.2", "IMAGE_TAGS": IMAGE + ":0.3.2\n" + IMAGE + ":0.3\n" + IMAGE + ":latest"}):
+            with self.subTest(environment=environment), patch.dict(os.environ, environment):
+                publish.merge()
+                result = json.loads((publish.ROOT / "manifest.json").read_text())
+                self.assertEqual(result["publication_contract"], "complete-bundles-v1")
+                self.assertEqual(result["tags"], [IMAGE + ":complete-bundles-v1"])
 
     def test_failed_cancelled_skipped_or_unknown_platform_blocks_tags(self):
         for result in ("failure", "cancelled", "skipped", "", "unknown"):
