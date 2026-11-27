@@ -55,6 +55,9 @@ jobs:
       - name: Test the Decisions judge against an offline API stub
         run: python3 -m unittest discover -s docker/clawscan-runtime/tests -p 'test_decisions_judge.py' -v
 
+      - name: Test leaderboard upload and score previews
+        run: python3 -B -m unittest discover -s leaderboard/space -p 'test_*.py' -v
+
   test:
     name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}
